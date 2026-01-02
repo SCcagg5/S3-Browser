@@ -417,6 +417,8 @@ body {
 .viewer .bb-menu-constrain { max-width: var(--wrap-max); margin: 0 auto; }
 .markdown-body img, .markdown-body video { display: block; max-width: 100%; height: auto; margin: 1rem auto; }
 .markdown-body iframe, .markdown-body embed { display: block; width: 100%; height: calc(100vh - 6rem); border: 0; background: #fff; border-radius: 8px; }
+.markdown-body > pre > code {background-color: white;}
+
 pre { border-radius: 10px; overflow: auto; padding: 1rem; background: #f6f8fa; }
 code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono","Courier New", monospace; }
 .toolbar {

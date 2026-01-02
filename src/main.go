@@ -3,10 +3,16 @@ package main
 import (
         "context"
         "crypto/tls"
+        "embed"
+        "bytes"
+        "mime"
+        "path"
+	"encoding/base64"
         "encoding/json"
         "encoding/xml"
         "fmt"
         "io"
+        "io/fs"
         "log"
         "net/http"
         "net/url"
@@ -15,10 +21,12 @@ import (
         "strconv"
         "strings"
         "time"
-		"encoding/base64"
         "github.com/aws/aws-sdk-go-v2/aws"
         v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 )
+
+//go:embed public
+var embeddedPublic embed.FS
 
 
 type listBucketResultV2 struct {
@@ -985,26 +993,64 @@ func withCORS(h http.Handler) http.Handler {
         })
 }
 
-func spaFileServer(root string) http.Handler {
-	fs := http.FileServer(http.Dir(root))
+func cloneURL(u *url.URL) *url.URL { u2 := *u; return &u2 }
 
+func serveFSFile(w http.ResponseWriter, r *http.Request, root fs.FS, p string) {
+	name := strings.TrimPrefix(p, "/")
+	f, err := root.Open(name)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	if info.IsDir() {
+		serveFSFile(w, r, root, strings.TrimSuffix(p, "/")+"/index.html")
+		return
+	}
+
+	if ct := mime.TypeByExtension(path.Ext(p)); ct != "" {
+		w.Header().Set("Content-Type", ct)
+	}
+
+	if rs, ok := f.(io.ReadSeeker); ok {
+		http.ServeContent(w, r, info.Name(), time.Time{}, rs)
+		return
+	}
+
+	b, err := io.ReadAll(f)
+	if err != nil {
+		http.Error(w, "read file", http.StatusInternalServerError)
+		return
+	}
+	http.ServeContent(w, r, info.Name(), time.Time{}, bytes.NewReader(b))
+}
+
+func spaFileServerFS(root fs.FS) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Path
+		p := path.Clean("/" + r.URL.Path)
 
-		if path == "/" {
-			http.ServeFile(w, r, root+"/index.html")
+		if p == "/" {
+			serveFSFile(w, r, root, "/index.html")
 			return
 		}
 
-		if !strings.Contains(path[strings.LastIndex(path, "/")+1:], ".") {
-			htmlPath := root + path + ".html"
-			if _, err := os.Stat(htmlPath); err == nil {
-				http.ServeFile(w, r, htmlPath)
+		last := p[strings.LastIndex(p, "/")+1:]
+		if !strings.Contains(last, ".") {
+			candidate := p + ".html"
+			if _, err := fs.Stat(root, strings.TrimPrefix(candidate, "/")); err == nil {
+				serveFSFile(w, r, root, candidate)
 				return
 			}
 		}
 
-		fs.ServeHTTP(w, r)
+		serveFSFile(w, r, root, p)
 	})
 }
 
@@ -1016,7 +1062,11 @@ func (p *proxy) routes() http.Handler {
         mux.HandleFunc("/api/rename", p.handleRename)
         mux.HandleFunc("/api/delete-prefix", p.handleDeletePrefix)
 
-        mux.Handle("/", spaFileServer("/public"))
+        publicFS, err := fs.Sub(embeddedPublic, "public")
+	if err != nil {
+		log.Fatalf("embed public: %v", err)
+	}
+	mux.Handle("/", spaFileServerFS(publicFS))
 
         mux.HandleFunc("/s3", func(w http.ResponseWriter, r *http.Request) {
                 switch r.Method {
