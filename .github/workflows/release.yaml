@@ -23,7 +23,7 @@ jobs:
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
-          version: latest
-          args: release --clean --config src/.goreleaser.yaml
+          args: release --clean --workdir src
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
