@@ -245,7 +245,7 @@
           <div class="bb-details-titles"> 
             <div class="bb-details-name" title="${escapeHTML(name)}">
                 <div class="bb-details-prefix" title="${escapeHTML(name_prefix)}">${name_prefix ? escapeHTML(name_prefix) : ''}
-                </div><span>${escapeHTML(name) + '/'}</span>
+                </div><span>${name ? escapeHTML(name) + '/': ''}</span>
               </div>
           </div> 
           <a class="icon-btn-disc" title="Download" rel="noopener" href="${escapeHTML(browseHref)}" download="${escapeHTML(name)}"> 
