@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Preview</title>
+
+  <link rel="stylesheet" href="assets/vendor/mdi/7.4.47/css/materialdesignicons.min.css" />
+  <link rel="stylesheet" href="assets/vendor/github-markdown-css/5/github-markdown-light.min.css" />
+  <link rel="stylesheet" href="assets/vendor/highlightjs/11/styles/github.min.css" />
+  <link rel="stylesheet" href="assets/vendor/buefy/1.0.1/buefy.min.css" />
+  <link rel="stylesheet" href="assets/css/style.css" />
+  <link rel="stylesheet" href="assets/css/ui.css" />
+</head>
+<body>
+  <div class="bar">
+    <div class="wrap bb-menu-constrain">
+      <div class="bar-left">
+        <span class="doc-name" id="docName"></span>
+        <span class="doc-prefix" id="docPrefix"></span>
+        <span class="doc-size" id="docSize"></span>
+      </div>
+
+      <div class="bar-right">
+        <a class="icon-btn-disc" id="openRawBtn" title="Open original" rel="noopener">
+          <i class="mdi mdi-open-in-new"></i>
+        </a>
+        <div class="bb-menu">
+          <span class="bb-kebab" id="previewKebabBtn" aria-haspopup="menu" aria-expanded="false" title="Options">
+            <i class="mdi mdi-dots-vertical"></i>
+          </span>
+          <div class="bb-menu-popover">
+            <div class="bb-menu-list">
+              <div class="bb-menu-item" id="pv-download"><i class="mdi mdi-download"></i> Download</div>
+              <div class="bb-menu-item" id="pv-copy"><i class="mdi mdi-content-copy"></i> Copy</div>
+              <div class="bb-menu-item" id="pv-rename"><i class="mdi mdi-rename-outline"></i> Rename</div>
+              <div class="bb-menu-item" id="pv-details"><i class="mdi mdi-information-outline"></i> Details</div>
+              <div class="bb-menu-item danger" id="pv-delete"><i class="mdi mdi-delete-outline"></i> Delete</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <main class="viewer">
+    <div class="bb-menu-constrain">
+      <div id="viewer" class="markdown-body"></div>
+    </div>
+  </main>
+
+  <script src="assets/vendor/highlightjs/11/highlight.min.js"></script>
+  <script src="assets/vendor/marked/12.0.2/marked.min.js"></script>
+  <script src="assets/vendor/moment/2.30.1/moment.min.js"></script>
+
+  <script src="assets/js/common/detect.js"></script>
+  <script src="assets/js/common/api.js"></script>
+  <script src="assets/js/common/ui.js"></script>
+  <script src="assets/js/common/actions.js"></script>
+  <script src="assets/js/common/menu.js"></script>
+  <script src="assets/js/common/render.js"></script>
+
+  <script src="assets/js/preview.js"></script>
+</body>
+</html>

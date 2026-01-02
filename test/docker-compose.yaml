@@ -1,0 +1,57 @@
+services:
+  s3-browse:
+    build:
+        context: ../
+        dockerfile: ./test/Dockerfile
+    container_name: s3-browse
+    restart: unless-stopped
+    environment:
+        S3_ENDPOINT: "http://garage:3900"
+        S3_REGION: "garage"
+        S3_ACCESS_KEY_ID: "${KEY_ID}"
+        S3_SECRET_ACCESS_KEY: "${KEY_SECRET}"
+        S3_BUCKET: "default"
+        PORT: "${PORT:-8080}"
+    ports:
+        - 8080:${PORT:-8080}
+    depends_on:
+        garage:
+          condition: service_healthy
+    healthcheck:
+        test: ["CMD", "wget", "-qO-", "http://127.0.0.1:${PORT:-8080}/healthz"]
+        interval: 10s
+        timeout: 3s
+        retries: 10
+    # logging:
+    #     options:
+    #       max-size: "10m"
+    #       max-file: "3"
+
+  garage:
+    build:
+      context: ./garage
+      dockerfile: ./Dockerfile
+    container_name: garage
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    environment:
+      KEY_ID: "${KEY_ID}"
+      KEY_SECRET: "${KEY_SECRET}"
+      RPC_SECRET: "${RPC_SECRET}"
+      ADMIN_TOKEN: "${ADMIN_TOKEN}"
+      METRICS_TOKEN: "${METRICS_TOKEN}"
+      S3_REGION: garage
+      ROOT_DOMAIN: .garage
+      USE_LOCAL_TZ: "false"
+      REPLICATION_FACTOR: "1"
+      COMPRESSION_LEVEL: "0"
+    # volumes:
+    #   - ./garage/volume/meta:/var/lib/garage/meta:rw
+    #   - ./garage/volume/data:/var/lib/garage/data:rw
+    # logging:
+    #   options:
+    #     max-size: "10m"
+    #     max-file: "3"

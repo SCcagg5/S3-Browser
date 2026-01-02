@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link id="favicon" rel="shortcut icon" />
+  <title>S3 Browser</title>
+
+  <link rel="stylesheet" href="assets/vendor/mdi/7.4.47/css/materialdesignicons.min.css" />
+  <link rel="stylesheet" href="assets/vendor/github-markdown-css/5/github-markdown-light.min.css" />
+  <link rel="stylesheet" href="assets/vendor/highlightjs/11/styles/github.min.css" />
+  <link rel="stylesheet" href="assets/vendor/buefy/1.0.1/buefy.min.css" />
+  <link rel="stylesheet" href="assets/css/style.css" />
+  <link rel="stylesheet" href="assets/css/ui.css" />
+</head>
+<body>
+  <div id="root">
+    <div id="app">
+      <div :style="cssVars">
+        <div class="top">
+          <div class="container">
+            <div class="head">
+              <div class="title breadcrumbs">
+                <i class="mdi mdi-database-outline root-link" class="clickable" @click="goToPrefix('')"></i>
+                <h1 style="margin:0;font-size:1.15rem;font-weight:600;">
+                  <span >/</span>
+                  <template v-for="(c, idx) in breadcrumbs" :key="c.prefix">
+                    <span class="clickable" :title="c.prefix" @click="goToPrefix(c.prefix)">{{ c.name }}</span>
+                    <span v-if="idx < breadcrumbs.length - 1">/</span>
+                  </template>  
+                </h1>
+              </div>
+              <div class="right"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="toolbar">
+          <div class="container" style="display:flex;align-items:center;gap:1rem;">
+            <div class="toolbar-left" style="flex:1 1 auto;min-width:280px;">
+              <b-field>
+                <b-input
+                  expanded
+                  v-model="searchPrefix"
+                  placeholder="Search current folder (prefix)..."
+                  @keyup.native.enter="searchByPrefix">
+                </b-input>
+                <p class="control">
+                  <b-button
+                    type="is-primary"
+                    icon-pack="mdi"
+                    icon-left="magnify"
+                    @click="searchByPrefix">
+                    Search
+                  </b-button>
+                </p>
+              </b-field>
+            </div>
+
+            <div class="toolbar-spacer" style="flex:0 0 12px;"></div>
+
+            <div class="toolbar-right" style="display:flex;align-items:center;gap:.5rem;">
+              <b-button type="is-light" class="icon-btn-disc" icon-pack="mdi" icon-left="refresh" @click="manualRefresh">
+              </b-button>
+
+              <b-dropdown position="is-bottom-left" :mobile-modal="false" append-to-body aria-role="menu">
+                <template #trigger="{ active }">
+                  <b-button type="is-light" icon-pack="mdi" icon-left="cogs">
+                    Actions
+                    <i class="mdi mdi-chevron-down" style="margin-left:.35rem;"></i>
+                  </b-button>
+                </template>
+                <b-dropdown-item
+                  :disabled="!canDownloadAll"
+                  @click="canDownloadAll && downloadAllFiles()">
+                  <i class="mdi mdi-archive-arrow-down-outline"></i>
+                  <span style="margin-left:.5rem;">Download all files</span>
+                </b-dropdown-item>
+                <b-dropdown-item @click="onCurrentFolderDetails">
+                  <i class="mdi mdi-information-outline"></i>
+                  <span style="margin-left:.5rem;">Folder's details</span>
+                  </b-dropdown-item>
+              </b-dropdown>
+
+              <b-dropdown position="is-bottom-left" :mobile-modal="false" append-to-body aria-role="menu">
+                <template #trigger="{ active }">
+                  <b-button type="is-primary" icon-pack="mdi" icon-left="plus">
+                    New
+                    <i class="mdi mdi-chevron-down" style="margin-left:.35rem;"></i>
+                  </b-button>
+                </template>
+                <b-dropdown-item @click="triggerUpload">
+                  <i class="mdi mdi-file-upload-outline"></i>
+                  <span style="margin-left:.5rem;">Upload file</span>
+                </b-dropdown-item>
+                <b-dropdown-item @click="triggerUploadDir">
+                  <i class="mdi mdi-folder-upload"></i>
+                  <span style="margin-left:.5rem;">Upload folder</span>
+                </b-dropdown-item>
+              </b-dropdown>
+            </div>
+          </div>
+        </div>
+
+        <input type="file" ref="fileInput" style="display:none" @change="onFileInput">
+        <input type="file" ref="dirInput" style="display:none" webkitdirectory @change="onDirInput">
+
+        <div class="container">
+          <div class="card">
+            <div class="card-content" style="padding-bottom:0;">
+              <nav class="level is-mobile" style="margin-bottom:.5rem;">
+                <div class="level-left" style="flex-wrap:wrap;">
+                  <div class="level-item">
+                    <b-select v-model="pageSize" size="is-small" :disabled="isRefreshing">
+                      <option :value="50">50</option>
+                      <option :value="100">100</option>
+                      <option :value="500">500</option>
+                    </b-select>
+                    <span>&nbsp;</span>
+                    <span class="has-text-grey">per page</span>
+                  </div>
+                </div>
+
+                <div class="level-right" style="flex-wrap:wrap;gap:.5rem;">
+                  
+                  <div class="level-item">
+                    
+                    <b-button type="is-light" icon-pack="mdi" icon-left="chevron-left"
+                              :disabled="previousContinuationTokens.length === 0"
+                              title="Previous Page"
+                              class="icon-btn-disc"
+                              @click="previousPage">
+                    </b-button>
+                    <span>&nbsp;</span>
+                    <span class="has-text-grey">Item {{ (currentPage - 1) * pageSize}} to {{ currentPage * pageSize}} </span>
+                    <span>&nbsp;</span>
+                    <b-button type="is-light" icon-pack="mdi" icon-right="chevron-right"
+                              :disabled="!nextContinuationToken"
+                              title="Next page"
+                              class="icon-btn-disc"
+                              @click="nextPage">
+                    </b-button>
+                  </div>
+                </div>
+              </nav>
+            </div>
+
+            <div class="card-content">
+              <div class="table-wrap">
+                <b-table
+                  :data="pathContentTableData"
+                  :hoverable="true"
+                  :striped="false"
+                  :loading="isRefreshing"
+                  :mobile-cards="true"
+                  :sortable="false">
+
+                  <b-table-column v-slot="props" field="name" label="Name" cell-class="name-column">
+                    <div v-if="props.row.type === 'content'" style="display:flex;align-items:center;gap:.5rem;">
+                      <b-icon pack="mdi" :icon="fileRowIcon(props.row)" class="name-column-icon is-smmd"></b-icon>
+                      <span class="clickable" :title="props.row.name" @click="openPreview(props.row)">{{ props.row.name }}</span>
+                    </div>
+                    <div v-else style="display:flex;align-items:center;gap:.5rem;">
+                      <b-icon pack="mdi" :icon="'folder'" class="name-column-icon is-smmd"></b-icon>
+                      <span class="clickable" :title="props.row.name" @click="goToPrefix(props.row.prefix)">{{ props.row.name }}</span>
+                    </div>
+                  </b-table-column>
+
+                  <b-table-column v-slot="props" field="size" label="Size" width="130">
+                    <span v-if="props.row.type === 'content'">{{ formatBytes(props.row.size) }}</span>
+                    <span v-else>—</span>
+                  </b-table-column>
+
+                  <b-table-column v-slot="props" field="dateModified" label="Last Modified" width="130">
+                    <span v-if="props.row.dateModified"
+                          :title="formatDateTime_utc(props.row.dateModified)">
+                      {{ formatDateTime_relative(props.row.dateModified) }}
+                    </span>
+                    <span v-else>—</span>
+                  </b-table-column>
+
+                <b-table-column v-slot="props" field="__actions" label="" width="40" cell-class="is-right" header-class="is-right">
+                  <div style="display:flex;justify-content:flex-end;">
+                      <div v-if="props.row.type === 'content'" class="bb-menu" :data-key="props.row.key">
+                        <span class="bb-kebab" aria-haspopup="menu" aria-expanded="false" title="Options">
+                          <i class="mdi mdi-dots-vertical"></i>
+                        </span>
+                        <div class="bb-menu-popover">
+                          <div class="bb-menu-list">
+                            <div class="bb-menu-item" @click="onRowMetadata(props.row)"><i class="mdi mdi-information-outline"></i> Details</div>
+                            <div class="bb-menu-item" @click="onRowDownload(props.row)"><i class="mdi mdi-download"></i> Download</div>
+                            <div class="bb-menu-item" @click="onRowCopy(props.row)"><i class="mdi mdi-content-copy"></i> Copy</div>
+                            <div class="bb-menu-item" @click="onRowRename(props.row)"><i class="mdi mdi-rename-outline"></i> Rename</div>
+                            <div class="bb-menu-item danger" @click="onRowDelete(props.row)"><i class="mdi mdi-delete-outline"></i> Delete</div>
+                          </div>
+                        </div>
+                      </div>
+                      <div v-else class="bb-menu" :data-prefix="props.row.prefix">
+                        <span class="bb-kebab" aria-haspopup="menu" aria-expanded="false" title="Options">
+                          <i class="mdi mdi-dots-vertical"></i>
+                        </span>
+                        <div class="bb-menu-popover">
+                          <div class="bb-menu-list">
+                            <div class="bb-menu-item" @click="onPrefixDetails(props.row)"><i class="mdi mdi-information-outline"></i> Details</div>
+                            <div class="bb-menu-item" @click="onPrefixCopy(props.row)"><i class="mdi mdi-content-copy"></i> Copy</div>
+                            <div class="bb-menu-item" @click="onPrefixRename(props.row)"><i class="mdi mdi-rename-outline"></i> Rename</div>
+                            <div class="bb-menu-item danger" @click="onPrefixDelete(props.row)"><i class="mdi mdi-delete-outline"></i> Delete</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </b-table-column>
+
+                </b-table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <script src="assets/vendor/vue/3.5.18/vue.global.prod.js"></script>
+  <script>window.process = {env: {NODE_ENV: 'production'}};</script>
+  <script src="assets/vendor/buefy/1.0.1/buefy.min.js"></script>
+  <script src="assets/vendor/moment/2.30.1/moment.min.js"></script>
+  <script src="assets/vendor/fflate/0.8.2/index.min.js"></script>
+
+  <script src="assets/vendor/highlightjs/11/highlight.min.js"></script>
+  <script src="assets/vendor/marked/12.0.2/marked.min.js"></script>
+
+  <script src="assets/js/common/detect.js"></script>
+  <script src="assets/js/common/api.js"></script>
+  <script src="assets/js/common/ui.js"></script>
+  <script src="assets/js/common/actions.js"></script>
+  <script src="assets/js/common/menu.js"></script>
+  <script src="assets/js/common/render.js"></script>
+
+  <script src="assets/js/app.js"></script>
+</body>
+</html>
