@@ -1,8 +1,8 @@
 const config = {
   primaryColor: '#167df0',
   allowDownloadAll: true,
-  bucketUrl: '/s3',
-  bucketMaskUrl: '/s3',
+  bucketUrl: 's3',
+  bucketMaskUrl: 's3',
   rootPrefix: '',
   trashPrefix: '_trash/',
   keyExcludePatterns: [/^index\.html$/],
@@ -38,8 +38,8 @@ function langFromExt(e){ return BB.detect.langFromExt(e); }
   const htmlPrefix = 'HTML>';
   if (config.title) config.titleHTML = config.title.startsWith(htmlPrefix) ? config.title.substring(htmlPrefix.length) : config.title.escapeHTML();
   if (config.subtitle) config.subtitleHTML = config.subtitle.startsWith(htmlPrefix) ? config.subtitle.substring(htmlPrefix.length) : config.subtitle.escapeHTML();
-  config.bucketUrl = config.bucketUrl || '/s3';
-  config.bucketMaskUrl = config.bucketMaskUrl || '/s3';
+  config.bucketUrl = config.bucketUrl || 's3';
+  config.bucketMaskUrl = config.bucketMaskUrl || 's3';
   config.rootPrefix = (config.rootPrefix || '');
   if (config.rootPrefix) config.rootPrefix = config.rootPrefix.replace(/\/?$/, '/');
   document.title = config.title || 'Bucket Browser';
@@ -243,7 +243,7 @@ function langFromExt(e){ return BB.detect.langFromExt(e); }
         this.isRefreshing = true;
         try {
           const prefix = this.bucketPrefix || '';
-          let url = `/api/list?prefix=${encodeURIComponent(prefix)}&delimiter=/&max=${this.pageSize || 50}`;
+          let url = `api/list?prefix=${encodeURIComponent(prefix)}&delimiter=/&max=${this.pageSize || 50}`;
 
           if (BB.cfg.trashPrefix) {
             url += `&exclude=${encodeURIComponent(BB.cfg.trashPrefix)}`;
@@ -271,7 +271,7 @@ function langFromExt(e){ return BB.detect.langFromExt(e); }
               };
             } else {
               const key = it.key || '';
-              const url = `${(BB.cfg.bucketUrl || '/s3').replace(/\/*$/, '')}/${BB.detect.encodePath(key)}`;
+              const url = `${(BB.cfg.bucketUrl || 's3').replace(/\/*$/, '')}/${BB.detect.encodePath(key)}`;
               let installUrl;
               if (url.endsWith('/manifest.plist') && (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) {
                 installUrl = `itms-services://?action=download-manifest&url=${BB.detect.encodePath(url)}`;
@@ -336,7 +336,7 @@ function langFromExt(e){ return BB.detect.langFromExt(e); }
         await this.refresh();
       },
       async uploadFiles(files, keyResolver) {
-        const base = (config.bucketUrl || '/s3').replace(/\/*$/, '');
+        const base = (config.bucketUrl || 's3').replace(/\/*$/, '');
         const concurrency = 5;
         const queue = files.slice();
         const runOne = async () => {
