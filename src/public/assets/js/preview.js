@@ -1,4 +1,4 @@
-const CONFIG = { bucketUrl: '/s3', bucketMaskUrl: '/s3', rootPrefix: '', trashPrefix: '_trash/' };
+const CONFIG = { bucketUrl: 's3', bucketMaskUrl: 's3', rootPrefix: '', trashPrefix: '_trash/' };
 window.BB = window.BB || {};
 BB.cfg = CONFIG;
 
