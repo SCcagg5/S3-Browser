@@ -3,26 +3,25 @@ version: 2
 project_name: s3-browser
 
 builds:
-  - id: s3-browser
+  - id: s3-browser-linux-amd64
     main: .
     binary: s3-browser
     env:
       - CGO_ENABLED=0
     goos:
       - linux
-      - darwin
-      - windows
     goarch:
       - amd64
-      - arm64
     ldflags:
       - -s -w
 
 archives:
-  - name_template: >-
-      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
-    files:
-      - public/**/*
+  - id: s3-browser-linux-amd64
+    ids:
+      - s3-browser-linux-amd64
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 
 checksum:
   name_template: checksums.txt
