@@ -8,7 +8,7 @@
 
   const api = {
     urlForKey(key, { mask = false } = {}) {
-      const base = (mask ? (BB.cfg.bucketMaskUrl || BB.cfg.bucketUrl) : BB.cfg.bucketUrl || '/s3').replace(/\/*$/, '');
+      const base = (mask ? (BB.cfg.bucketMaskUrl || BB.cfg.bucketUrl) : BB.cfg.bucketUrl || 's3').replace(/\/*$/, '');
       key = (key || '').replace(/^\//, '');
       return `${base}/${BB.detect.encodePath(key)}`;
     },
@@ -64,7 +64,7 @@
       return out;
     },
     async rename({ src, dst, isPrefix }) {
-      const res = await fetch('/api/rename', {
+      const res = await fetch('api/rename', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ src, dst, isPrefix: !!isPrefix })
@@ -73,7 +73,7 @@
       return await res.json();
     },
     async deletePrefix(prefixAbs) {
-      const res = await fetch('/api/delete-prefix', {
+      const res = await fetch('api/delete-prefix', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prefix: prefixAbs })
@@ -83,7 +83,7 @@
     },
     async stats(prefixAbs = '') {
       const p = String(prefixAbs || '').replace(/^\/+/, '');
-      const res = await fetch(`/api/stats?prefix=${encodeURIComponent(p)}`);
+      const res = await fetch(`api/stats?prefix=${encodeURIComponent(p)}`);
       if (!res.ok) throw new Error(`STATS ${res.status}`);
       return await res.json();
     }
