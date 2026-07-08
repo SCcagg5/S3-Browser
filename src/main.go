@@ -1105,7 +1105,46 @@ func (p *proxy) routes() http.Handler {
         return withCORS(mux)
 }
 
+func runHealthcheck() {
+        port := os.Getenv("PORT")
+        if port == "" {
+                port = "8080"
+        }
+
+        ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+        defer cancel()
+
+        req, err := http.NewRequestWithContext(
+                ctx,
+                http.MethodGet,
+                "http://127.0.0.1:"+port+"/healthz",
+                nil,
+        )
+        if err != nil {
+                fmt.Fprintf(os.Stderr, "healthcheck request build failed: %v\n", err)
+                os.Exit(1)
+        }
+
+        resp, err := http.DefaultClient.Do(req)
+        if err != nil {
+                fmt.Fprintf(os.Stderr, "healthcheck request failed: %v\n", err)
+                os.Exit(1)
+        }
+        defer resp.Body.Close()
+
+        if resp.StatusCode != http.StatusOK {
+                fmt.Fprintf(os.Stderr, "healthcheck failed: status=%d\n", resp.StatusCode)
+                os.Exit(1)
+        }
+
+        os.Exit(0)
+}
+
 func main() {
+        if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
+                runHealthcheck()
+        }
+
         c := loadCfg()
         p := newProxy(c)
         addr := ":" + c.Port
