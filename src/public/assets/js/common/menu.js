@@ -7,6 +7,7 @@
  * - Closes on outside interaction (pointerdown/mousedown/touchstart capture), on item click, ESC, resize, scroll
  */
 (function () {
+  const BB = (window.BB = window.BB || {});
   function hidePopover(menu) {
     const pop = menu.querySelector('.bb-menu-popover');
     if (!pop) return;
@@ -28,7 +29,7 @@
     return document.querySelector('.bb-menu.is-open');
   }
 
-  function positionPopover(menu) {
+  function positionPopover(menu, anchorPoint = null) {
     const icon = menu.querySelector('.bb-kebab');
     const pop = menu.querySelector('.bb-menu-popover');
     if (!icon || !pop) return;
@@ -39,14 +40,18 @@
     const r = icon.getBoundingClientRect();
     const pw = pop.offsetWidth || 220;
     const ph = pop.offsetHeight || 280;
+    const point = anchorPoint && Number.isFinite(anchorPoint.x) && Number.isFinite(anchorPoint.y)
+      ? anchorPoint
+      : null;
 
-    let left = Math.max(8, r.right - pw);
-    let top = r.bottom + 8;
+    let left = point ? point.x : r.right - pw;
+    let top = point ? point.y : r.bottom + 8;
 
-    const maxLeft = window.innerWidth - pw - 8;
-    if (left > maxLeft) left = maxLeft;
-    const maxTop = window.innerHeight - ph - 8;
-    if (top > maxTop) top = Math.max(8, r.top - ph - 8);
+    const maxLeft = Math.max(8, window.innerWidth - pw - 8);
+    left = Math.max(8, Math.min(left, maxLeft));
+    const maxTop = Math.max(8, window.innerHeight - ph - 8);
+    if (top > maxTop) top = point ? maxTop : Math.max(8, r.top - ph - 8);
+    top = Math.max(8, top);
 
     pop.style.position = 'fixed';
     pop.style.left = left + 'px';
@@ -125,4 +130,14 @@
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closeAll();
   });
+
+  function openAt(menu, x, y) {
+    if (!menu) return false;
+    closeAll();
+    menu.classList.add('is-open');
+    requestAnimationFrame(() => positionPopover(menu, { x: Number(x), y: Number(y) }));
+    return true;
+  }
+
+  BB.menu = Object.assign(BB.menu || {}, { closeAll, openAt });
 })();

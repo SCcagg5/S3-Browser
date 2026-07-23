@@ -1,6 +1,12 @@
 name: Release
 
 on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish, e.g. v1.0.10"
+        required: true
+        type: string
   push:
     tags:
       - "v*"
@@ -9,21 +15,50 @@ permissions:
   contents: write
 
 jobs:
-  goreleaser:
+  release:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: "1.22"
-          cache: false
-        
+          cache-dependency-path: src/go.sum
+
+      - name: Prepare manual tag
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ inputs.tag }}"
+          case "$tag" in
+            v*) ;;
+            *) echo "tag must start with v, for example v1.0.10" >&2; exit 1 ;;
+          esac
+
+          git fetch --force --tags
+
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            git checkout -f "$tag"
+          else
+            git tag "$tag"
+          fi
+
       - name: Download Go modules
         working-directory: src
         run: go mod download
+
+      - name: Test and vet
+        working-directory: src
+        run: |
+          test -z "$(gofmt -l *.go)"
+          go test -race ./...
+          go vet ./...
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
@@ -33,6 +68,3 @@ jobs:
           workdir: src
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-
-

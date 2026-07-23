@@ -1,176 +1,231 @@
-/*!
- * BB.detect — Shared detection utilities (ext + MIME) for rendering & syntax
- * Keep this file the single source of truth for preview + app.
- * No external deps. Exposes global: window.BB.detect
- */
+/* Shared file-type and syntax detection. No runtime dependency. */
 (function () {
+  'use strict';
+
   const BB = (window.BB = window.BB || {});
 
-  function encodePath(path) {
-    path = (path || '').replace(/\/{2,}/g, '/');
-    try { if (decodeURI(path) !== path) return path; } catch (e) {}
-    const m = {";":"%3B","?":"%3F",":":"%3A","@":"%40","&":"%26","=":"%3D","+":"%2B","$":"%24",",":"%2C","#":"%23"};
-    return encodeURI(path).split("").map(ch => m[ch] || ch).join("");
+  function fileName(value = '') {
+    return String(value || '').split('/').pop() || '';
   }
-  function extOf(s='') {
-    const m = /\.([^.]+)$/.exec((s||'').toLowerCase());
-    return m ? m[1] : '';
+
+  function extOf(value = '') {
+    const name = fileName(value).toLowerCase();
+    const dot = name.lastIndexOf('.');
+    return dot > 0 && dot < name.length - 1 ? name.slice(dot + 1) : '';
   }
 
   const EXT_TO_LANG = {
-    sh:'bash', bash:'bash', zsh:'bash', ksh:'bash', fish:'bash',
-    ps1:'powershell', psm1:'powershell', psd1:'powershell',
-    js:'javascript', mjs:'javascript', cjs:'javascript',
-    ts:'typescript', jsx:'jsx', tsx:'tsx',
-    json:'json', json5:'json', ndjson:'json', jsonl:'json', hjson:'json',
-    yaml:'yaml', yml:'yaml', toml:'toml',
-    html:'xml', htm:'xml', xhtml:'xml', vue:'xml', svelte:'xml',
-    css:'css', scss:'scss', sass:'sass', less:'less',
-    xml:'xml', rss:'xml', atom:'xml', svg:'xml',
-    ini:'ini', conf:'ini', cfg:'ini', properties:'ini', env:'ini', dotenv:'ini', editorconfig:'ini',
-    md:'markdown', markdown:'markdown', mdown:'markdown', mkd:'markdown', rmd:'markdown',
-    gitignore: 'plaintext',
-    txt:'plaintext', log:'plaintext', csv:'plaintext', tsv:'plaintext',
-    sql:'sql', gql:'graphql', graphql:'graphql',
-    dockerfile:'dockerfile', compose:'yaml',
-    makefile:'makefile', mk:'makefile', gnumakefile:'makefile',
-    nginx:'nginx', proto:'protobuf', thrift:'thrift',
-    java:'java', kt:'kotlin', kts:'kotlin', groovy:'groovy', scala:'scala',
-    c:'c', h:'c',
-    cpp:'cpp', cxx:'cpp', cc:'cpp', hpp:'cpp', hxx:'cpp', inl:'cpp',
-    m:'objectivec', mm:'objectivec',
-    cs:'csharp',
-    go:'go', rs:'rust', swift:'swift',
-    py:'python', pyw:'python',
-    rb:'ruby',
-    php:'php', phtml:'php', inc:'php',
-    pl:'perl', pm:'perl', t:'perl',
-    lua:'lua', r:'r', dart:'dart',
-    prisma:'prisma', zig:'zig', cue:'cue', bicep:'bicep',
-    tf:'terraform', tfvars:'terraform', hcl:'terraform',
-    kql:'kusto',
-    asciidoc:'asciidoc', adoc:'asciidoc',
-    bat:'dos', cmd:'dos',
-    wasm:'wasm',
-    scalahtml:'xml',
-    mustache:'xml', hbs:'xml', ejs:'xml', njk:'xml', twig:'xml', jinja:'xml',
-    handlebars:'xml',
-    hs:'haskell',
-    ml:'ocaml', mli:'ocaml',
-    pas:'pascal', pp:'pascal',
-    vb:'vbnet', vbs:'vbscript',
-    fs:'fsharp', fsx:'fsharp',
-    ipynb:'json'
+    sh: 'bash', bash: 'bash', zsh: 'bash', ksh: 'bash', fish: 'bash', envrc: 'bash',
+    ps1: 'powershell', psm1: 'powershell', psd1: 'powershell',
+    js: 'javascript', mjs: 'javascript', cjs: 'javascript', jsx: 'jsx',
+    ts: 'typescript', mts: 'typescript', cts: 'typescript', tsx: 'tsx',
+    json: 'json', json5: 'json', hjson: 'json', geojson: 'json', ipynb: 'json',
+    yaml: 'yaml', yml: 'yaml', toml: 'toml', hcl: 'terraform', tf: 'terraform', tfvars: 'terraform',
+    html: 'xml', htm: 'xml', xhtml: 'xml', vue: 'xml', svelte: 'xml', xml: 'xml', svg: 'xml',
+    css: 'css', scss: 'scss', sass: 'sass', less: 'less',
+    ini: 'ini', conf: 'ini', cfg: 'ini', properties: 'ini', cnf: 'ini',
+    md: 'markdown', markdown: 'markdown', mdown: 'markdown', mkd: 'markdown', rmd: 'markdown', adoc: 'asciidoc', asciidoc: 'asciidoc',
+    txt: 'plaintext', log: 'plaintext', out: 'plaintext', diff: 'diff', patch: 'diff',
+    sql: 'sql', gql: 'graphql', graphql: 'graphql', proto: 'protobuf', thrift: 'thrift',
+    mk: 'makefile', nginx: 'nginx',
+    java: 'java', kt: 'kotlin', kts: 'kotlin', groovy: 'groovy', scala: 'scala',
+    c: 'c', h: 'c', cpp: 'cpp', cxx: 'cpp', cc: 'cpp', hpp: 'cpp', hxx: 'cpp', inl: 'cpp',
+    m: 'objectivec', mm: 'objectivec', cs: 'csharp',
+    go: 'go', mod: 'go', sum: 'plaintext', work: 'go', rs: 'rust', swift: 'swift',
+    py: 'python', pyw: 'python', pyi: 'python', rb: 'ruby', php: 'php', phtml: 'php',
+    pl: 'perl', pm: 'perl', lua: 'lua', r: 'r', dart: 'dart', zig: 'zig', cue: 'cue', nix: 'nix',
+    bat: 'dos', cmd: 'dos', vb: 'vbnet', vbs: 'vbscript', fs: 'fsharp', fsx: 'fsharp',
+    hs: 'haskell', ml: 'ocaml', mli: 'ocaml', pas: 'pascal', pp: 'pascal',
+    mustache: 'xml', hbs: 'xml', handlebars: 'xml', ejs: 'xml', njk: 'xml', twig: 'xml', jinja: 'xml',
+    lock: 'plaintext'
   };
 
-  const MIME_TO_LANG = [
-    [/shellscript|x-sh|x-bash|x-zsh|x-shellscript/i, 'bash'],
-    [/powershell/i, 'powershell'],
-    [/typescript/i, 'typescript'],
-    [/javascript|ecmascript/i, 'javascript'],
-    [/json|ndjson|jsonl/i, 'json'],
-    [/yaml|yml/i, 'yaml'],
-    [/xml|html|xhtml|svg/i, 'xml'],
-    [/css/i, 'css'],
-    [/markdown|md/i, 'markdown'],
-    [/x-toml|toml/i, 'toml'],
-    [/x-ini|ini|config|properties/i, 'ini'],
-    [/python/i, 'python'],
-    [/ruby/i, 'ruby'],
-    [/php/i, 'php'],
-    [/java/i, 'java'],
-    [/kotlin/i, 'kotlin'],
-    [/go/i, 'go'],
-    [/rust/i, 'rust'],
-    [/c\+\+|x-c\+\+|cpp/i, 'cpp'],
-    [/csharp|c\#/i, 'csharp'],
-    [/sql|postgresql|mysql|sqlite/i, 'sql'],
-    [/graphql/i, 'graphql'],
-    [/dockerfile|x-dockerfile/i, 'dockerfile'],
-    [/makefile/i, 'makefile'],
-    [/nginx/i, 'nginx'],
-    [/protobuf/i, 'protobuf'],
-    [/thrift/i, 'thrift'],
-    [/lua/i, 'lua'],
-    [/perl/i, 'perl'],
-    [/swift/i, 'swift'],
-    [/haskell/i, 'haskell'],
-    [/clojure|edn/i, 'clojure'],
-    [/elixir/i, 'elixir'],
-    [/ocaml/i, 'ocaml'],
-    [/pascal|delphi/i, 'pascal'],
-    [/vb(net)?|vbs/i, 'vbnet'],
-    [/fsharp/i, 'fsharp'],
-    [/asciidoc/i, 'asciidoc'],
-    [/latex|x-tex/i, 'latex'],
-    [/terraform|hcl/i, 'terraform'],
-    [/kusto/i, 'kusto'],
-    [/dart/i, 'dart'],
-    [/r-language|x-r|\/r$/i, 'r'],
-    [/text\/plain/i, 'plaintext']
-  ];
+  const EXACT_CODE_NAMES = new Map([
+    ['dockerfile', 'dockerfile'], ['containerfile', 'dockerfile'], ['makefile', 'makefile'], ['gnumakefile', 'makefile'],
+    ['jenkinsfile', 'groovy'], ['vagrantfile', 'ruby'], ['procfile', 'plaintext'], ['gemfile', 'ruby'],
+    ['rakefile', 'ruby'], ['guardfile', 'ruby'], ['justfile', 'makefile'], ['caddyfile', 'plaintext'],
+    ['taskfile', 'yaml'], ['earthfile', 'dockerfile'], ['brewfile', 'ruby'], ['podfile', 'ruby'],
+    ['cartfile', 'plaintext'], ['aptfile', 'plaintext'], ['codeowners', 'plaintext'], ['owners', 'plaintext'],
+    ['maintainers', 'plaintext'], ['version', 'plaintext'], ['release', 'plaintext'], ['todo', 'plaintext'],
+    ['build', 'plaintext'], ['workspace', 'plaintext'], ['build.bazel', 'plaintext'], ['workspace.bazel', 'plaintext'],
+    ['go.mod', 'go'], ['go.sum', 'plaintext'], ['go.work', 'go'], ['cargo.lock', 'toml'], ['package-lock.json', 'json'],
+    ['pnpm-lock.yaml', 'yaml'], ['yarn.lock', 'plaintext'], ['composer.lock', 'json'], ['poetry.lock', 'toml'],
+    ['pipfile', 'toml'], ['pipfile.lock', 'json'], ['requirements.txt', 'plaintext']
+  ]);
 
-  const IMG_EXT = ['png','jpg','jpeg','gif','webp','bmp','svg','avif'];
-  const VID_EXT = ['mp4','mkv','webm','avi','mov','m4v','mpg','mpeg','flv','3gp','wmv','ogv','mts','m2ts','ts','vob'];
-  const AUD_EXT = ['mp3','flac','wav','m4a','aac','ogg','opus','aiff','aif','alac','wma','amr','midi','mid'];
-  const ARC_EXT = ['zip','rar','7z','tar','gz','tgz','bz2','tbz','xz','txz','zst'];
-  const XLS_EXT = ['xls','xlsx','xlsm','xlsb','xlt','ods','csv','tsv','numbers', 'parquet'];
-  const PPT_EXT = ['ppt','pptx','pps','ppsx','odp','key'];
+  const DOTFILE_LANG = new Map([
+    ['.env', 'ini'], ['.envrc', 'bash'], ['.gitignore', 'plaintext'], ['.gitattributes', 'plaintext'],
+    ['.gitmodules', 'ini'], ['.dockerignore', 'plaintext'], ['.npmignore', 'plaintext'], ['.npmrc', 'ini'],
+    ['.yarnrc', 'yaml'], ['.editorconfig', 'ini'], ['.eslintignore', 'plaintext'], ['.prettierignore', 'plaintext'],
+    ['.prettierrc', 'json'], ['.eslintrc', 'json'], ['.stylelintrc', 'json'], ['.babelrc', 'json'],
+    ['.browserslistrc', 'plaintext'], ['.curlrc', 'plaintext'], ['.wgetrc', 'plaintext'], ['.inputrc', 'bash'],
+    ['.profile', 'bash'], ['.bashrc', 'bash'], ['.bash_profile', 'bash'], ['.zshrc', 'bash'], ['.zprofile', 'bash'],
+    ['.tool-versions', 'plaintext'], ['.nvmrc', 'plaintext'], ['.node-version', 'plaintext'],
+    ['.python-version', 'plaintext'], ['.ruby-version', 'plaintext'], ['.go-version', 'plaintext'],
+    ['.java-version', 'plaintext'], ['.sdkmanrc', 'ini'], ['.gitkeep', 'plaintext'], ['.keep', 'plaintext'],
+    ['.nojekyll', 'plaintext']
+  ]);
 
-  function isImageExt(e){ return IMG_EXT.includes(e); }
-  function isVideoExt(e){ return VID_EXT.includes(e); }
-  function isAudioExt(e){ return AUD_EXT.includes(e); }
-  function isPdfExt(e){ return e === 'pdf'; }
-  function isArchiveExt(e){ return ARC_EXT.includes(e); }
-  function isSpreadsheetExt(e){ return XLS_EXT.includes(e); }
-  function isPresentationExt(e){ return PPT_EXT.includes(e); }
-  function isCodeExt(e){ return !!EXT_TO_LANG[e]; }
-  function isMarkdownExt(e){ return ['md','markdown','mdown','mkd','rmd', 'gitignore'].includes(e); }
+  const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'avif', 'ico']);
+  const CONVERT_IMAGE_EXT = new Set(['tif', 'tiff', 'heic', 'heif', 'jxl', 'jp2', 'j2k', 'jpf', 'jpx', 'jpc', 'psd', 'psb', 'tga', 'exr', 'hdr', 'rgbe', 'dds', 'pcx', 'pnm', 'ppm', 'pgm', 'pbm', 'pam', 'sgi', 'rgb', 'rgba', 'bw', 'qoi', 'ff', 'farbfeld', 'fits', 'fit', 'fts']);
+  const RAW_IMAGE_EXT = new Set(['raf', 'raw', 'dng', 'cr2', 'cr3', 'nef', 'nrw', 'arw', 'srf', 'sr2', 'orf', 'rw2', 'pef', 'x3f', 'erf', 'mef', 'mos', 'kdc', 'dcr', 'mrw', 'rwl', 'iiq', '3fr', 'fff']);
+  const VIDEO_EXT = new Set(['mp4', 'mkv', 'webm', 'avi', 'mov', 'm4v', 'mpg', 'mpeg', 'flv', 'f4v', '3gp', '3g2', 'wmv', 'asf', 'ogv', 'mts', 'm2ts', 'ts', 'vob', 'mxf', 'dv', 'dvr-ms', 'm2v', 'rm', 'rmvb', 'nut', 'y4m']);
+  const AUDIO_EXT = new Set(['mp3', 'flac', 'wav', 'wave', 'm4a', 'aac', 'ogg', 'oga', 'opus', 'aiff', 'aif', 'alac', 'wma', 'amr', 'midi', 'mid', 'ape', 'wv', 'tta', 'ac3', 'eac3', 'dts', 'mka', 'au', 'caf']);
+  const ARCHIVE_EXT = new Set(['zip', 'rar', '7z', 'tar', 'gz', 'tgz', 'bz2', 'tbz', 'xz', 'txz', 'zst', 'jar', 'war']);
+  const TABULAR_EXT = new Set(['csv', 'tsv', 'psv', 'jsonl', 'ndjson']);
+  const JSON_EXT = new Set(['json', 'geojson']);
+  const WORD_PREVIEW_EXT = new Set(['docx', 'dotx', 'docm', 'dotm']);
+  const WORD_UNAVAILABLE_EXT = new Set(['doc', 'dot', 'odt', 'rtf', 'pages']);
+  const SPREADSHEET_PREVIEW_EXT = new Set(['xls', 'xlsx', 'xlsm']);
+  const SHEET_EXT = new Set(['xls', 'xlsx', 'xlsm', 'xlsb', 'xlt', 'xltx', 'ods', 'numbers']);
+  const SLIDE_EXT = new Set(['ppt', 'pptx', 'pps', 'ppsx', 'odp', 'key']);
+  const MARKDOWN_EXT = new Set(['md', 'markdown', 'mdown', 'mkd', 'rmd']);
+  const VIDEO_QUALITY_PATTERN = /(^|[._\s-])((?:[1-9]\d{2,3})p|(?:[1-9]\d{2,3})x(?:[1-9]\d{2,3})|4k|uhd|qhd|fhd|hd|sd)(?=$|[._\s-])/ig;
 
-  function isImageMime(ct){ return /^image\//i.test(ct||''); }
-  function isVideoMime(ct){ return /^video\//i.test(ct||''); }
-  function isAudioMime(ct){ return /^audio\//i.test(ct||''); }
-  function isPdfMime(ct){ return /application\/pdf/i.test(ct||''); }
-  function isTextualMime(ct){ return /^text\//i.test(ct||'') || /(json|xml|yaml|toml|javascript|typescript|shellscript)/i.test(ct||''); }
-  function isMarkdownMime(ct){ return /markdown|md/i.test(ct||''); }
-  function isEmbeddableMime(ct){ return /(pdf|svg|html)/i.test(ct||''); }
-
-  function langFromExt(e){ return EXT_TO_LANG[e] || 'plaintext'; }
-  function langFromMime(ct=''){ const lo=(ct||'').toLowerCase(); for (const [rx,lang] of MIME_TO_LANG) if (rx.test(lo)) return lang; return ''; }
-  function resolveLang(key, mime){
-    const e = extOf(key);
-    if (isMarkdownExt(e)) return 'markdown';
-    if (EXT_TO_LANG[e]) return EXT_TO_LANG[e];
-    const byMime = langFromMime(mime);
-    return byMime || 'plaintext';
+  function videoQualityHeight(token) {
+    const value = String(token || '').toLowerCase();
+    const vertical = value.match(/^(\d{3,4})p$/);
+    if (vertical) return Number(vertical[1]);
+    const dimensions = value.match(/^\d{3,4}x(\d{3,4})$/);
+    if (dimensions) return Number(dimensions[1]);
+    return ({ '4k': 2160, uhd: 2160, qhd: 1440, fhd: 1080, hd: 720, sd: 480 })[value] || 0;
   }
 
-  function resolveType(key, mime) {
-    const e = extOf(key);
-    if (isImageExt(e)) return 'image';
-    if (isVideoExt(e)) return 'video';
-    if (isAudioExt(e)) return 'audio';
-    if (isPdfExt(e)) return 'pdf';
-    if (isMarkdownExt(e)) return 'markdown';
-    if (isSpreadsheetExt(e)) return 'spreadsheet';
-    if (isPresentationExt(e)) return 'presentation';
-    if (isArchiveExt(e)) return 'archive';
-    if (isCodeExt(e)) return 'code';
-    if (isImageMime(mime)) return 'image';
-    if (isVideoMime(mime)) return 'video';
-    if (isAudioMime(mime)) return 'audio';
-    if (isPdfMime(mime)) return 'pdf';
-    if (isMarkdownMime(mime)) return 'markdown';
-    if (isTextualMime(mime)) return 'code';
-    if (isEmbeddableMime(mime)) return 'embed';
-    return 'download';
+  function videoVariantDescriptor(value = '') {
+    const name = fileName(value);
+    const extension = extOf(name);
+    const stem = extension ? name.slice(0, -(extension.length + 1)) : name;
+    VIDEO_QUALITY_PATTERN.lastIndex = 0;
+    let match = null;
+    let candidate;
+    while ((candidate = VIDEO_QUALITY_PATTERN.exec(stem)) !== null) match = candidate;
+
+    let baseStem = stem;
+    let token = '';
+    let height = 0;
+    if (match) {
+      token = match[2];
+      height = videoQualityHeight(token);
+      const tokenStart = match.index + match[1].length;
+      baseStem = `${stem.slice(0, tokenStart)}${stem.slice(tokenStart + token.length)}`
+        .replace(/^[._\s-]+|[._\s-]+$/g, '')
+        .replace(/([._\s-])[._\s-]+/g, '$1');
+    }
+    if (!baseStem) baseStem = stem;
+
+    return {
+      name,
+      extension,
+      stem,
+      baseStem,
+      group: baseStem.toLowerCase().replace(/[._\s-]+/g, ' ').trim(),
+      token,
+      height,
+      label: height > 0 ? `${height}p` : (token ? token.toUpperCase() : 'Original'),
+      original: !token
+    };
+  }
+
+  function codeLanguageForName(value) {
+    const name = fileName(value);
+    const lower = name.toLowerCase();
+    if (EXACT_CODE_NAMES.has(lower)) return EXACT_CODE_NAMES.get(lower);
+    if (DOTFILE_LANG.has(lower)) return DOTFILE_LANG.get(lower);
+    if (/^(dockerfile|containerfile|jenkinsfile)(\..+)?$/i.test(name)) {
+      return /^jenkinsfile/i.test(name) ? 'groovy' : 'dockerfile';
+    }
+    if (/^\.env(?:\..+)?$/i.test(name)) return 'ini';
+    if (/^\.(?:eslintrc|prettierrc|stylelintrc|babelrc)(?:\..+)?$/i.test(name)) {
+      const extension = extOf(name);
+      return EXT_TO_LANG[extension] || 'json';
+    }
+    if (/^(?:taskfile|compose|docker-compose)(?:\..+)?\.ya?ml$/i.test(name)) return 'yaml';
+    if (/^(?:makefile|gnumakefile)(\..+)?$/i.test(name)) return 'makefile';
+    const extension = extOf(name);
+    return EXT_TO_LANG[extension] || '';
+  }
+
+  function resolveLang(key, mime = '') {
+    const fromName = codeLanguageForName(key);
+    if (fromName) return fromName;
+    const value = String(mime || '').toLowerCase();
+    if (/json/.test(value)) return 'json';
+    if (/ya?ml/.test(value)) return 'yaml';
+    if (/javascript|ecmascript/.test(value)) return 'javascript';
+    if (/typescript/.test(value)) return 'typescript';
+    if (/html|xml|svg/.test(value)) return 'xml';
+    if (/css/.test(value)) return 'css';
+    if (/shell|bash/.test(value)) return 'bash';
+    if (/markdown/.test(value)) return 'markdown';
+    return 'plaintext';
+  }
+
+  function isTextualMime(mime = '') {
+    return /^text\//i.test(mime) || /(json|xml|yaml|toml|javascript|typescript|shell|graphql|sql|protobuf)/i.test(mime);
+  }
+
+  function iconForType(type) {
+    const icons = {
+      image: 'file-image-outline',
+      'raw-image': 'file-image-outline',
+      'image-convert': 'file-image-outline',
+      video: 'file-video-outline',
+      audio: 'file-music-outline',
+      pdf: 'file-pdf-box',
+      markdown: 'file-document-outline',
+      code: 'file-code-outline',
+      archive: 'zip-box',
+      tabular: 'file-table-outline',
+      parquet: 'table-large',
+      spreadsheet: 'file-excel-outline',
+      json: 'code-json',
+      word: 'file-word-outline',
+      'sheet-unavailable': 'file-excel-outline',
+      'slide-unavailable': 'file-powerpoint-outline',
+      'word-unavailable': 'file-word-outline'
+    };
+    return icons[String(type || '')] || 'file-outline';
+  }
+
+  function resolveType(key, mime = '') {
+    const extension = extOf(key);
+    const contentType = String(mime || '').toLowerCase();
+
+    // Binary office/container formats must be classified before generic MIME
+    // fallbacks so a DOCX never reaches the text renderer as ZIP bytes.
+    if (WORD_PREVIEW_EXT.has(extension) || /wordprocessingml/i.test(contentType)) return 'word';
+    if (WORD_UNAVAILABLE_EXT.has(extension) || /(msword|opendocument\.text|rtf)/i.test(contentType)) return 'word-unavailable';
+    if (SPREADSHEET_PREVIEW_EXT.has(extension)) return 'spreadsheet';
+    if (SHEET_EXT.has(extension) || /opendocument\.spreadsheet/i.test(contentType)) return 'sheet-unavailable';
+    if (/(spreadsheetml|ms-excel)/i.test(contentType)) return 'spreadsheet';
+    if (SLIDE_EXT.has(extension) || /(presentationml|ms-powerpoint|opendocument\.presentation)/i.test(contentType)) return 'slide-unavailable';
+    if (extension === 'parquet' || /parquet/i.test(contentType)) return 'parquet';
+    if (TABULAR_EXT.has(extension) || /(?:text\/csv|tab-separated-values|ndjson|json-seq)/i.test(contentType)) return 'tabular';
+    if (JSON_EXT.has(extension) || /(?:application|text)\/(?:[a-z0-9.+-]+\+)?json(?:\s*;|$)/i.test(contentType)) return 'json';
+    if (RAW_IMAGE_EXT.has(extension)) return 'raw-image';
+    if (CONVERT_IMAGE_EXT.has(extension)) return 'image-convert';
+    if (IMAGE_EXT.has(extension) || /^image\//i.test(contentType)) return 'image';
+    if (VIDEO_EXT.has(extension) || /^video\//i.test(contentType)) return 'video';
+    if (AUDIO_EXT.has(extension) || /^audio\//i.test(contentType)) return 'audio';
+    if (extension === 'pdf' || /application\/pdf/i.test(contentType)) return 'pdf';
+    if (MARKDOWN_EXT.has(extension) || /markdown/i.test(contentType)) return 'markdown';
+    if (ARCHIVE_EXT.has(extension) || /(zip|rar|7z|tar|gzip|bzip|xz|zstd)/i.test(contentType)) return 'archive';
+    if (codeLanguageForName(key)) return 'code';
+    if (isTextualMime(contentType)) return 'code';
+    return 'unknown';
   }
 
   BB.detect = {
-    encodePath, extOf,
-    EXT_TO_LANG, MIME_TO_LANG,
-    isImageExt, isVideoExt, isAudioExt, isPdfExt, isArchiveExt, isSpreadsheetExt, isPresentationExt, isCodeExt, isMarkdownExt,
-    isImageMime, isVideoMime, isAudioMime, isPdfMime, isTextualMime, isMarkdownMime, isEmbeddableMime,
-    langFromExt, langFromMime, resolveLang, resolveType
+    fileName,
+    extOf,
+    resolveLang,
+    resolveType,
+    codeLanguageForName,
+    isTextualMime,
+    videoVariantDescriptor,
+    iconForType,
+    EXT_TO_LANG,
+    RAW_IMAGE_EXT,
+    CONVERT_IMAGE_EXT
   };
 })();

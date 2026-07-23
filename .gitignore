@@ -1,0 +1,14 @@
+.DS_Store
+*.zip
+src/s3-browser
+config.hcl
+secrets/
+*.pem
+*.key
+service-account*.json
+test/.env
+test/garage/volume/
+
+.s3-browser-data/
+
+!test/config.hcl

@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache-dependency-path: src/go.sum
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Check formatting
+        run: test -z "$(gofmt -l *.go)"
+
+      - name: Unit tests with race detector
+        run: go test -race ./...
+
+      - name: Go vet
+        run: go vet ./...
+
+      - name: JavaScript syntax
+        run: |
+          for file in public/assets/js/*.js public/assets/js/common/*.js; do
+            node --check "$file"
+          done
+
+      - name: Frontend smoke tests
+        working-directory: .
+        run: |
+          node test/frontend-smoke.js
+          node test/json-viewer.js
+          node test/transfer-controls.js
+
+      - name: Shell syntax
+        working-directory: .
+        run: |
+          for file in test/*.sh test/garage/scripts/*.sh; do
+            sh -n "$file"
+          done
+
+      - name: Build
+        run: CGO_ENABLED=0 go build -trimpath -o /tmp/s3-browser .

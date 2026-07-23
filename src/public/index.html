@@ -3,8 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link id="favicon" rel="shortcut icon" />
-  <title>S3 Browser</title>
+  <meta name="color-scheme" content="light" />
+  <link rel="icon" type="image/svg+xml" href="favicon.svg?v=2" />
+  <title>Object Storage Browser</title>
 
   <link rel="stylesheet" href="assets/vendor/mdi/7.4.47/css/materialdesignicons.min.css" />
   <link rel="stylesheet" href="assets/vendor/github-markdown-css/5/github-markdown-light.min.css" />
@@ -14,219 +15,401 @@
   <link rel="stylesheet" href="assets/css/ui.css" />
 </head>
 <body>
-  <div id="root">
-    <div id="app">
-      <div :style="cssVars">
-        <div class="top">
-          <div class="container">
-            <div class="head">
-              <div class="title breadcrumbs">
-                <i class="mdi mdi-database-outline root-link" class="clickable" @click="goToPrefix('')"></i>
-                <h1 style="margin:0;font-size:1.15rem;font-weight:600;">
-                  <span >/</span>
-                  <template v-for="(c, idx) in breadcrumbs" :key="c.prefix">
-                    <span class="clickable" :title="c.prefix" @click="goToPrefix(c.prefix)">{{ c.name }}</span>
-                    <span v-if="idx < breadcrumbs.length - 1">/</span>
-                  </template>  
-                </h1>
-              </div>
-              <div class="right"></div>
-            </div>
-          </div>
-        </div>
-
-        <div class="toolbar">
-          <div class="container" style="display:flex;align-items:center;gap:1rem;">
-            <div class="toolbar-left" style="flex:1 1 auto;min-width:280px;">
-              <b-field>
-                <b-input
-                  expanded
-                  v-model="searchPrefix"
-                  placeholder="Search current folder (prefix)..."
-                  @keyup.native.enter="searchByPrefix">
-                </b-input>
-                <p class="control">
-                  <b-button
-                    type="is-primary"
-                    icon-pack="mdi"
-                    icon-left="magnify"
-                    @click="searchByPrefix">
-                    Search
-                  </b-button>
-                </p>
-              </b-field>
-            </div>
-
-            <div class="toolbar-spacer" style="flex:0 0 12px;"></div>
-
-            <div class="toolbar-right" style="display:flex;align-items:center;gap:.5rem;">
-              <b-button type="is-light" class="icon-btn-disc" icon-pack="mdi" icon-left="refresh" @click="manualRefresh">
-              </b-button>
-
-              <b-dropdown position="is-bottom-left" :mobile-modal="false" append-to-body aria-role="menu">
-                <template #trigger="{ active }">
-                  <b-button type="is-light" icon-pack="mdi" icon-left="cogs">
-                    Actions
-                    <i class="mdi mdi-chevron-down" style="margin-left:.35rem;"></i>
-                  </b-button>
-                </template>
-                <b-dropdown-item
-                  :disabled="!canDownloadAll"
-                  @click="canDownloadAll && downloadAllFiles()">
-                  <i class="mdi mdi-archive-arrow-down-outline"></i>
-                  <span style="margin-left:.5rem;">Download all files</span>
-                </b-dropdown-item>
-                <b-dropdown-item @click="onCurrentFolderDetails">
-                  <i class="mdi mdi-information-outline"></i>
-                  <span style="margin-left:.5rem;">Folder's details</span>
-                  </b-dropdown-item>
-              </b-dropdown>
-
-              <b-dropdown position="is-bottom-left" :mobile-modal="false" append-to-body aria-role="menu">
-                <template #trigger="{ active }">
-                  <b-button type="is-primary" icon-pack="mdi" icon-left="plus">
-                    New
-                    <i class="mdi mdi-chevron-down" style="margin-left:.35rem;"></i>
-                  </b-button>
-                </template>
-                <b-dropdown-item @click="triggerUpload">
-                  <i class="mdi mdi-file-upload-outline"></i>
-                  <span style="margin-left:.5rem;">Upload file</span>
-                </b-dropdown-item>
-                <b-dropdown-item @click="triggerUploadDir">
-                  <i class="mdi mdi-folder-upload"></i>
-                  <span style="margin-left:.5rem;">Upload folder</span>
-                </b-dropdown-item>
-              </b-dropdown>
-            </div>
-          </div>
-        </div>
-
-        <input type="file" ref="fileInput" style="display:none" @change="onFileInput">
-        <input type="file" ref="dirInput" style="display:none" webkitdirectory @change="onDirInput">
-
+  <div id="root" v-cloak>
+    <div id="app" :style="cssVars">
+      <header class="top">
         <div class="container">
-          <div class="card">
-            <div class="card-content" style="padding-bottom:0;">
-              <nav class="level is-mobile" style="margin-bottom:.5rem;">
-                <div class="level-left" style="flex-wrap:wrap;">
-                  <div class="level-item">
-                    <b-select v-model="pageSize" size="is-small" :disabled="isRefreshing">
-                      <option :value="50">50</option>
-                      <option :value="100">100</option>
-                      <option :value="500">500</option>
-                    </b-select>
-                    <span>&nbsp;</span>
-                    <span class="has-text-grey">per page</span>
-                  </div>
-                </div>
+          <div class="head">
+            <div ref="breadcrumbRegion" class="title breadcrumbs browser-breadcrumbs">
+              <button v-if="breadcrumbs.length" type="button" class="root-link" title="Storage root" @click="goToPrefix('')">
+                <i class="mdi mdi-database-outline"></i>
+              </button>
+              <span v-else class="root-link breadcrumb-current" aria-current="page" title="Storage root">
+                <i class="mdi mdi-database-outline"></i>
+              </span>
+              <h1 ref="breadcrumbLine" class="breadcrumb-line">
+                <span class="breadcrumb-separator">/</span>
 
-                <div class="level-right" style="flex-wrap:wrap;gap:.5rem;">
-                  
-                  <div class="level-item">
-                    
-                    <b-button type="is-light" icon-pack="mdi" icon-left="chevron-left"
-                              :disabled="previousContinuationTokens.length === 0"
-                              title="Previous Page"
-                              class="icon-btn-disc"
-                              @click="previousPage">
-                    </b-button>
-                    <span>&nbsp;</span>
-                    <span class="has-text-grey">Item {{ (currentPage - 1) * pageSize}} to {{ currentPage * pageSize}} </span>
-                    <span>&nbsp;</span>
-                    <b-button type="is-light" icon-pack="mdi" icon-right="chevron-right"
-                              :disabled="!nextContinuationToken"
-                              title="Next page"
-                              class="icon-btn-disc"
-                              @click="nextPage">
-                    </b-button>
-                  </div>
-                </div>
-              </nav>
+                <span v-if="hiddenBreadcrumbs.length" class="breadcrumb-overflow">
+                  <button
+                    ref="breadcrumbOverflowTrigger"
+                    type="button"
+                    class="breadcrumb-overflow-trigger"
+                    :title="`Show ${hiddenBreadcrumbs.length} hidden parent folder${hiddenBreadcrumbs.length === 1 ? '' : 's'}`"
+                    aria-label="Show hidden parent folders"
+                    aria-haspopup="menu"
+                    :aria-expanded="breadcrumbOverflowOpen ? 'true' : 'false'"
+                    @click.stop="toggleBreadcrumbOverflow">
+                    <span class="breadcrumb-overflow-ellipsis" aria-hidden="true">…</span>
+                    <span class="breadcrumb-overflow-count">{{ hiddenBreadcrumbs.length }}</span>
+                  </button>
+                  <teleport to="body">
+                    <div
+                      v-if="breadcrumbOverflowOpen"
+                      ref="breadcrumbOverflowPopover"
+                      class="breadcrumb-overflow-popover"
+                      :style="breadcrumbPopoverStyle"
+                      role="menu"
+                      aria-label="Hidden parent folders"
+                      @click.stop>
+                      <button
+                        v-for="(crumb, index) in hiddenBreadcrumbs"
+                        :key="crumb.prefix"
+                        type="button"
+                        class="breadcrumb-overflow-item"
+                        :title="crumb.prefix"
+                        role="menuitem"
+                        @click="openHiddenBreadcrumb(crumb.prefix)">
+                        <span class="breadcrumb-overflow-copy" :style="{ paddingLeft: `${Math.min(index, 6) * 0.65}rem` }">
+                          <span class="breadcrumb-overflow-branch" aria-hidden="true">
+                            <i class="mdi mdi-subdirectory-arrow-right"></i>
+                          </span>
+                          <span class="breadcrumb-overflow-node">
+                            <small>{{ index === 0 ? 'Inside storage root' : `Inside ${hiddenBreadcrumbs[index - 1].name}` }}</small>
+                            <strong>{{ crumb.name }}</strong>
+                          </span>
+                        </span>
+                      </button>
+                    </div>
+                  </teleport>
+                </span>
+
+                <span v-if="hiddenBreadcrumbs.length && visibleBreadcrumbs.length" class="breadcrumb-separator">/</span>
+                <template v-for="(crumb, index) in visibleBreadcrumbs" :key="crumb.prefix">
+                  <button
+                    v-if="hiddenBreadcrumbs.length + index < breadcrumbs.length - 1"
+                    type="button"
+                    class="breadcrumb-link"
+                    :title="crumb.prefix"
+                    @click="goToPrefix(crumb.prefix)">{{ crumb.name }}</button>
+                  <span v-else class="breadcrumb-current" aria-current="page" :title="crumb.prefix">{{ crumb.name }}</span>
+                  <span v-if="index < visibleBreadcrumbs.length - 1" class="breadcrumb-separator">/</span>
+                </template>
+              </h1>
             </div>
 
-            <div class="card-content">
-              <div class="table-wrap">
-                <b-table
-                  :data="pathContentTableData"
-                  :hoverable="true"
-                  :striped="false"
-                  :loading="isRefreshing"
-                  :mobile-cards="true"
-                  :sortable="false">
-
-                  <b-table-column v-slot="props" field="name" label="Name" cell-class="name-column">
-                    <div v-if="props.row.type === 'content'" style="display:flex;align-items:center;gap:.5rem;">
-                      <b-icon pack="mdi" :icon="fileRowIcon(props.row)" class="name-column-icon is-smmd"></b-icon>
-                      <span class="clickable" :title="props.row.name" @click="openPreview(props.row)">{{ props.row.name }}</span>
-                    </div>
-                    <div v-else style="display:flex;align-items:center;gap:.5rem;">
-                      <b-icon pack="mdi" :icon="'folder'" class="name-column-icon is-smmd"></b-icon>
-                      <span class="clickable" :title="props.row.name" @click="goToPrefix(props.row.prefix)">{{ props.row.name }}</span>
-                    </div>
-                  </b-table-column>
-
-                  <b-table-column v-slot="props" field="size" label="Size" width="130">
-                    <span v-if="props.row.type === 'content'">{{ formatBytes(props.row.size) }}</span>
-                    <span v-else>—</span>
-                  </b-table-column>
-
-                  <b-table-column v-slot="props" field="dateModified" label="Last Modified" width="130">
-                    <span v-if="props.row.dateModified"
-                          :title="formatDateTime_utc(props.row.dateModified)">
-                      {{ formatDateTime_relative(props.row.dateModified) }}
+            <div v-if="currentInstance" class="header-tools">
+              <b-dropdown
+                v-if="instances.length > 1"
+                class="storage-switcher"
+                position="is-bottom-left"
+                :mobile-modal="false"
+                aria-role="list">
+                <template #trigger>
+                  <button type="button" class="storage-switcher-trigger" aria-haspopup="listbox" :title="permissionSummaryTitle">
+                    <i class="mdi mdi-database-outline storage-switcher-icon"></i>
+                    <span class="storage-switcher-copy">
+                      <span class="storage-switcher-title-row">
+                        <strong>{{ currentInstance.name }}</strong>
+                        <span class="storage-switcher-permissions" aria-label="Storage permissions">
+                          <span
+                            v-for="item in permissionStates"
+                            :key="item.key"
+                            role="button"
+                            tabindex="0"
+                            class="storage-permission-dot"
+                            :class="item.state.allowed ? 'is-allowed' : 'is-denied'"
+                            :title="`${item.label}: ${item.state.allowed ? 'allowed' : 'denied'}. Open details.`"
+                            @click.stop="showPermissionDetails(item.key)"
+                            @keydown.enter.stop.prevent="showPermissionDetails(item.key)"
+                            @keydown.space.stop.prevent="showPermissionDetails(item.key)">
+                            <i class="mdi" :class="`mdi-${item.icon}`"></i>
+                          </span>
+                        </span>
+                      </span>
+                      <small>{{ currentInstance.bucket }} · {{ currentInstance.provider.toUpperCase() }}</small>
                     </span>
-                    <span v-else>—</span>
-                  </b-table-column>
+                    <i class="mdi mdi-chevron-down storage-switcher-chevron"></i>
+                  </button>
+                </template>
 
-                <b-table-column v-slot="props" field="__actions" label="" width="40" cell-class="is-right" header-class="is-right">
-                  <div style="display:flex;justify-content:flex-end;">
-                      <div v-if="props.row.type === 'content'" class="bb-menu" :data-key="props.row.key">
-                        <span class="bb-kebab" aria-haspopup="menu" aria-expanded="false" title="Options">
-                          <i class="mdi mdi-dots-vertical"></i>
+                <b-dropdown-item
+                  v-for="instance in otherInstances"
+                  :key="instance.id"
+                  aria-role="listitem"
+                  @click="selectInstance(instance.id)">
+                  <span class="storage-option-icon">
+                    <i class="mdi mdi-database-outline"></i>
+                  </span>
+                  <span class="storage-option-copy">
+                    <span class="storage-option-title-row">
+                      <strong>{{ instance.name }}</strong>
+                      <span class="storage-option-permissions" :aria-label="`${instance.name} permissions`">
+                        <span
+                          v-for="item in permissionStatesFor(instance)"
+                          :key="item.key"
+                          class="storage-permission-dot"
+                          :class="item.state.allowed ? 'is-allowed' : 'is-denied'"
+                          :title="`${item.label}: ${item.state.allowed ? 'allowed' : 'denied'}`">
+                          <i class="mdi" :class="`mdi-${item.icon}`"></i>
                         </span>
-                        <div class="bb-menu-popover">
-                          <div class="bb-menu-list">
-                            <div class="bb-menu-item" @click="onRowMetadata(props.row)"><i class="mdi mdi-information-outline"></i> Details</div>
-                            <div class="bb-menu-item" @click="onRowDownload(props.row)"><i class="mdi mdi-download"></i> Download</div>
-                            <div class="bb-menu-item" @click="onRowCopy(props.row)"><i class="mdi mdi-content-copy"></i> Copy</div>
-                            <div class="bb-menu-item" @click="onRowRename(props.row)"><i class="mdi mdi-rename-outline"></i> Rename</div>
-                            <div class="bb-menu-item danger" @click="onRowDelete(props.row)"><i class="mdi mdi-delete-outline"></i> Delete</div>
-                          </div>
-                        </div>
-                      </div>
-                      <div v-else class="bb-menu" :data-prefix="props.row.prefix">
-                        <span class="bb-kebab" aria-haspopup="menu" aria-expanded="false" title="Options">
-                          <i class="mdi mdi-dots-vertical"></i>
-                        </span>
-                        <div class="bb-menu-popover">
-                          <div class="bb-menu-list">
-                            <div class="bb-menu-item" @click="onPrefixDetails(props.row)"><i class="mdi mdi-information-outline"></i> Details</div>
-                            <div class="bb-menu-item" @click="onPrefixCopy(props.row)"><i class="mdi mdi-content-copy"></i> Copy</div>
-                            <div class="bb-menu-item" @click="onPrefixRename(props.row)"><i class="mdi mdi-rename-outline"></i> Rename</div>
-                            <div class="bb-menu-item danger" @click="onPrefixDelete(props.row)"><i class="mdi mdi-delete-outline"></i> Delete</div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </b-table-column>
+                      </span>
+                    </span>
+                    <small>{{ instance.bucket }}<span v-if="instance.rootPrefix"> / {{ instance.rootPrefix }}</span> · {{ instance.provider.toUpperCase() }}</small>
+                  </span>
+                </b-dropdown-item>
+              </b-dropdown>
 
-                </b-table>
+              <div v-else class="storage-switcher is-static-switcher">
+                <div class="storage-switcher-trigger is-static" :title="permissionSummaryTitle">
+                  <i class="mdi mdi-database-outline storage-switcher-icon"></i>
+                  <span class="storage-switcher-copy">
+                    <span class="storage-switcher-title-row">
+                      <strong>{{ currentInstance.name }}</strong>
+                      <span class="storage-switcher-permissions" aria-label="Storage permissions">
+                        <span
+                          v-for="item in permissionStates"
+                          :key="item.key"
+                          role="button"
+                          tabindex="0"
+                          class="storage-permission-dot"
+                          :class="item.state.allowed ? 'is-allowed' : 'is-denied'"
+                          :title="`${item.label}: ${item.state.allowed ? 'allowed' : 'denied'}. Open details.`"
+                          @click.stop="showPermissionDetails(item.key)"
+                          @keydown.enter.stop.prevent="showPermissionDetails(item.key)"
+                          @keydown.space.stop.prevent="showPermissionDetails(item.key)">
+                          <i class="mdi" :class="`mdi-${item.icon}`"></i>
+                        </span>
+                      </span>
+                    </span>
+                    <small>{{ currentInstance.bucket }} · {{ currentInstance.provider.toUpperCase() }}</small>
+                  </span>
+                </div>
               </div>
             </div>
           </div>
         </div>
+      </header>
 
+      <section class="toolbar">
+        <div class="container toolbar-row">
+          <div class="toolbar-left">
+            <b-field>
+              <b-input
+                expanded
+                v-model="searchPrefix"
+                :disabled="!canRead"
+                placeholder="Open a prefix in the current folder..."
+                @keyup.native.enter="searchByPrefix">
+              </b-input>
+              <p class="control">
+                <b-button
+                  type="is-primary"
+                  icon-pack="mdi"
+                  icon-left="magnify"
+                  :disabled="!canRead"
+                  @click="searchByPrefix">
+                  Open
+                </b-button>
+              </p>
+            </b-field>
+          </div>
+
+          <div class="toolbar-spacer"></div>
+
+          <div class="toolbar-right">
+            <b-button
+              type="is-light"
+              class="icon-btn-disc"
+              icon-pack="mdi"
+              icon-left="refresh"
+              title="Refresh"
+              :disabled="!canRead || isRefreshing"
+              @click="manualRefresh">
+            </b-button>
+
+            <b-dropdown position="is-bottom-left" :mobile-modal="false" append-to-body aria-role="menu">
+              <template #trigger>
+                <b-button type="is-light" icon-pack="mdi" icon-left="cogs">
+                  Actions
+                  <i class="mdi mdi-chevron-down toolbar-chevron"></i>
+                </b-button>
+              </template>
+              <b-dropdown-item :disabled="!canDownloadAll" @click="canDownloadAll && downloadAllFiles()">
+                <i class="mdi mdi-archive-arrow-down-outline"></i>
+                <span>Download as ZIP</span>
+              </b-dropdown-item>
+              <b-dropdown-item :disabled="!canRead" @click="canRead && onCurrentFolderDetails()">
+                <i class="mdi mdi-information-outline"></i>
+                <span>Folder details</span>
+              </b-dropdown-item>
+              <b-dropdown-item @click="showJobs">
+                <i class="mdi mdi-progress-wrench"></i>
+                <span>Background jobs</span>
+              </b-dropdown-item>
+            </b-dropdown>
+
+            <b-dropdown v-if="canWrite" position="is-bottom-left" :mobile-modal="false" append-to-body aria-role="menu">
+              <template #trigger>
+                <b-button type="is-primary" icon-pack="mdi" icon-left="plus">
+                  New
+                  <i class="mdi mdi-chevron-down toolbar-chevron"></i>
+                </b-button>
+              </template>
+              <b-dropdown-item @click="triggerUpload">
+                <i class="mdi mdi-file-upload-outline"></i>
+                <span>Upload files</span>
+              </b-dropdown-item>
+              <b-dropdown-item @click="triggerUploadDir">
+                <i class="mdi mdi-folder-upload"></i>
+                <span>Upload folder</span>
+              </b-dropdown-item>
+            </b-dropdown>
+          </div>
+        </div>
+      </section>
+
+      <input type="file" ref="fileInput" class="is-hidden-input" multiple @change="onFileInput" />
+      <input type="file" ref="dirInput" class="is-hidden-input" webkitdirectory multiple @change="onDirInput" />
+
+      <div v-show="isDragActive" class="upload-drop-overlay" role="status" aria-live="polite">
+        <div class="upload-drop-card">
+          <i class="mdi mdi-cloud-upload-outline"></i>
+          <strong>Drop files or folders to upload</strong>
+          <span>
+            Uploading to
+            <span class="mono">/{{ pathPrefix }}</span>
+          </span>
+        </div>
       </div>
+
+      <main class="container main-content">
+        <div v-if="isInitializing" class="empty-state card">
+          <i class="mdi mdi-loading mdi-spin"></i>
+          <p>Loading storage instances...</p>
+        </div>
+
+        <div v-else-if="!currentInstance" class="empty-state card is-error">
+          <i class="mdi mdi-cloud-alert-outline"></i>
+          <h2>No storage instance is available</h2>
+          <p>Check the server HCL configuration.</p>
+        </div>
+
+        <div v-else-if="!canRead" class="empty-state card is-warning">
+          <i class="mdi mdi-shield-lock-outline"></i>
+          <h2>Read access is not available</h2>
+          <p>This storage instance cannot list or read objects. Other actions remain hidden or disabled.</p>
+        </div>
+
+        <div v-else class="card browser-card">
+          <div class="card-content browser-card-head">
+            <div class="page-size-control">
+              <b-select v-model="pageSize" size="is-small" :disabled="isRefreshing">
+                <option :value="50">50</option>
+                <option :value="100">100</option>
+                <option :value="500">500</option>
+              </b-select>
+              <span>per page</span>
+            </div>
+
+            <div class="pagination-control">
+              <b-button
+                type="is-light"
+                icon-pack="mdi"
+                icon-left="chevron-left"
+                class="icon-btn-disc"
+                title="Previous page"
+                :disabled="previousContinuationTokens.length === 0 || isRefreshing"
+                @click="previousPage">
+              </b-button>
+              <span>Items {{ rangeStart }}–{{ rangeEnd }}</span>
+              <b-button
+                type="is-light"
+                icon-pack="mdi"
+                icon-right="chevron-right"
+                class="icon-btn-disc"
+                title="Next page"
+                :disabled="!nextContinuationToken || isRefreshing"
+                @click="nextPage">
+              </b-button>
+            </div>
+          </div>
+
+          <div class="card-content table-card-content">
+            <div class="table-wrap">
+              <b-table
+                :data="pathContentTableData"
+                :hoverable="true"
+                :striped="false"
+                :loading="isRefreshing"
+                :mobile-cards="true"
+                :sortable="false">
+
+                <b-table-column v-slot="props" field="name" label="Name" cell-class="name-column">
+                  <div v-if="props.row.type === 'content'" class="object-name-cell">
+                    <b-icon pack="mdi" :icon="fileRowIcon(props.row)" class="name-column-icon is-smmd"></b-icon>
+                    <button type="button" class="object-link" :title="props.row.name" @click="openPreview(props.row)">{{ props.row.name }}</button>
+                  </div>
+                  <div v-else class="object-name-cell">
+                    <b-icon pack="mdi" icon="folder" class="name-column-icon is-smmd"></b-icon>
+                    <button type="button" class="object-link" :title="props.row.name" @click="goToPrefix(props.row.prefix)">{{ props.row.name }}</button>
+                  </div>
+                </b-table-column>
+
+                <b-table-column v-slot="props" field="size" label="Size" width="130">
+                  <span v-if="props.row.type === 'content'">{{ formatBytes(props.row.size) }}</span>
+                  <span v-else>—</span>
+                </b-table-column>
+
+                <b-table-column v-slot="props" field="dateModified" label="Last modified" width="170">
+                  <span v-if="props.row.dateModified" :title="formatDateTime_utc(props.row.dateModified)">
+                    {{ formatDateTime_relative(props.row.dateModified) }}
+                  </span>
+                  <span v-else>—</span>
+                </b-table-column>
+
+                <b-table-column v-slot="props" field="__actions" label="" width="46" cell-class="is-right" header-class="is-right">
+                  <div class="row-menu-wrap">
+                    <div v-if="props.row.type === 'content'" class="bb-menu" :data-key="props.row.key">
+                      <button type="button" class="bb-kebab" aria-haspopup="menu" aria-expanded="false" title="Options">
+                        <i class="mdi mdi-dots-vertical"></i>
+                      </button>
+                      <div class="bb-menu-popover">
+                        <div class="bb-menu-list">
+                          <div v-if="canRead" class="bb-menu-item" @click="onRowMetadata(props.row)"><i class="mdi mdi-information-outline"></i> Details</div>
+                          <div v-if="canRead" class="bb-menu-item" @click="onRowDownload(props.row)"><i class="mdi mdi-download"></i> Download</div>
+                          <div v-if="canCopy" class="bb-menu-item" @click="onRowCopy(props.row)"><i class="mdi mdi-content-copy"></i> Copy</div>
+                          <div v-if="canRename" class="bb-menu-item" @click="onRowRename(props.row)"><i class="mdi mdi-rename-outline"></i> Rename</div>
+                          <div v-if="canDelete" class="bb-menu-item danger" @click="onRowDelete(props.row)"><i class="mdi mdi-delete-outline"></i> Delete</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div v-else class="bb-menu" :data-prefix="props.row.prefix">
+                      <button type="button" class="bb-kebab" aria-haspopup="menu" aria-expanded="false" title="Options">
+                        <i class="mdi mdi-dots-vertical"></i>
+                      </button>
+                      <div class="bb-menu-popover">
+                        <div class="bb-menu-list">
+                          <div v-if="canRead" class="bb-menu-item" @click="onPrefixDetails(props.row)"><i class="mdi mdi-information-outline"></i> Details</div>
+                          <div v-if="canRead" class="bb-menu-item" @click="onPrefixDownload(props.row)"><i class="mdi mdi-folder-download-outline"></i> Download as ZIP</div>
+                          <div v-if="canCopy" class="bb-menu-item" @click="onPrefixCopy(props.row)"><i class="mdi mdi-content-copy"></i> Copy</div>
+                          <div v-if="canRename" class="bb-menu-item" @click="onPrefixRename(props.row)"><i class="mdi mdi-rename-outline"></i> Rename</div>
+                          <div v-if="canDelete" class="bb-menu-item danger" @click="onPrefixDelete(props.row)"><i class="mdi mdi-delete-outline"></i> Delete</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </b-table-column>
+
+                <template #empty>
+                  <div class="table-empty">
+                    <i class="mdi mdi-folder-open-outline"></i>
+                    <span>This folder is empty.</span>
+                  </div>
+                </template>
+              </b-table>
+            </div>
+          </div>
+        </div>
+      </main>
     </div>
   </div>
 
   <script src="assets/vendor/vue/3.5.18/vue.global.prod.js"></script>
-  <script>window.process = {env: {NODE_ENV: 'production'}};</script>
+  <script>window.process = { env: { NODE_ENV: 'production' } };</script>
   <script src="assets/vendor/buefy/1.0.1/buefy.min.js"></script>
-  <script src="assets/vendor/moment/2.30.1/moment.min.js"></script>
   <script src="assets/vendor/fflate/0.8.2/index.min.js"></script>
-
   <script src="assets/vendor/highlightjs/11/highlight.min.js"></script>
   <script src="assets/vendor/marked/12.0.2/marked.min.js"></script>
 
@@ -236,7 +419,6 @@
   <script src="assets/js/common/actions.js"></script>
   <script src="assets/js/common/menu.js"></script>
   <script src="assets/js/common/render.js"></script>
-
   <script src="assets/js/app.js"></script>
 </body>
 </html>

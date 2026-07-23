@@ -1,9 +1,11 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="preview-root">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Preview</title>
+  <meta name="color-scheme" content="light" />
+  <link rel="icon" type="image/svg+xml" href="favicon.svg?v=2" />
+  <title>Preview — Object Storage Browser</title>
 
   <link rel="stylesheet" href="assets/vendor/mdi/7.4.47/css/materialdesignicons.min.css" />
   <link rel="stylesheet" href="assets/vendor/github-markdown-css/5/github-markdown-light.min.css" />
@@ -12,23 +14,33 @@
   <link rel="stylesheet" href="assets/css/style.css" />
   <link rel="stylesheet" href="assets/css/ui.css" />
 </head>
-<body>
-  <div class="bar">
+<body class="preview-page">
+  <header class="bar">
     <div class="wrap bb-menu-constrain">
       <div class="bar-left">
-        <span class="doc-name" id="docName"></span>
-        <span class="doc-prefix" id="docPrefix"></span>
-        <span class="doc-size" id="docSize"></span>
+        <a class="icon-btn preview-back" id="backBtn" title="Back to browser" rel="noopener">
+          <i class="mdi mdi-arrow-left"></i>
+        </a>
+        <div class="preview-title-group">
+          <div>
+            <span class="doc-name" id="docName"></span>
+            <span class="doc-size" id="docSize"></span>
+          </div>
+          <div class="preview-context">
+            <span id="instanceMeta"></span>
+            <span class="doc-prefix" id="docPrefix"></span>
+          </div>
+        </div>
       </div>
 
       <div class="bar-right">
-        <a class="icon-btn-disc" id="openRawBtn" title="Open original" rel="noopener">
+        <a class="icon-btn-disc" id="openRawBtn" title="Open original" target="_blank" rel="noopener">
           <i class="mdi mdi-open-in-new"></i>
         </a>
-        <div class="bb-menu">
-          <span class="bb-kebab" id="previewKebabBtn" aria-haspopup="menu" aria-expanded="false" title="Options">
+        <div class="bb-menu" id="previewMenu">
+          <button type="button" class="bb-kebab" id="previewKebabBtn" aria-haspopup="menu" aria-expanded="false" title="Options">
             <i class="mdi mdi-dots-vertical"></i>
-          </span>
+          </button>
           <div class="bb-menu-popover">
             <div class="bb-menu-list">
               <div class="bb-menu-item" id="pv-download"><i class="mdi mdi-download"></i> Download</div>
@@ -41,17 +53,19 @@
         </div>
       </div>
     </div>
-  </div>
+  </header>
 
   <main class="viewer">
     <div class="bb-menu-constrain">
-      <div id="viewer" class="markdown-body"></div>
+      <div id="viewer" class="markdown-body preview-loading">
+        <i class="mdi mdi-loading mdi-spin"></i>
+        <span>Loading preview...</span>
+      </div>
     </div>
   </main>
 
   <script src="assets/vendor/highlightjs/11/highlight.min.js"></script>
   <script src="assets/vendor/marked/12.0.2/marked.min.js"></script>
-  <script src="assets/vendor/moment/2.30.1/moment.min.js"></script>
 
   <script src="assets/js/common/detect.js"></script>
   <script src="assets/js/common/api.js"></script>
@@ -59,7 +73,8 @@
   <script src="assets/js/common/actions.js"></script>
   <script src="assets/js/common/menu.js"></script>
   <script src="assets/js/common/render.js"></script>
-
+  <script src="assets/js/common/json-viewer.js"></script>
+  <script src="assets/js/common/tabular.js"></script>
   <script src="assets/js/preview.js"></script>
 </body>
 </html>
