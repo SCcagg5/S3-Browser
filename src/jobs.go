@@ -1,6 +1,7 @@
 package main
 
 import (
+	"container/heap"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,51 @@ import (
 	"sync"
 	"time"
 )
+
+const (
+	maxStatsLargestEntries = 1000
+	maxStatsFolderDepth    = 5
+	statsLayoutVersion     = 2
+)
+
+type statsEntryHeap []statsEntry
+
+func (h statsEntryHeap) Len() int { return len(h) }
+func (h statsEntryHeap) Less(i, j int) bool {
+	if h[i].Bytes != h[j].Bytes {
+		return h[i].Bytes < h[j].Bytes
+	}
+	return h[i].Path > h[j].Path
+}
+func (h statsEntryHeap) Swap(i, j int)   { h[i], h[j] = h[j], h[i] }
+func (h *statsEntryHeap) Push(value any) { *h = append(*h, value.(statsEntry)) }
+func (h *statsEntryHeap) Pop() any {
+	old := *h
+	last := len(old) - 1
+	value := old[last]
+	*h = old[:last]
+	return value
+}
+
+func addLargestStatsEntry(entries *[]statsEntry, entry statsEntry) {
+	if entries == nil || entry.Bytes < 0 || entry.Path == "" {
+		return
+	}
+	h := (*statsEntryHeap)(entries)
+	if h.Len() < maxStatsLargestEntries {
+		heap.Push(h, entry)
+		return
+	}
+	if h.Len() == 0 {
+		return
+	}
+	minimum := (*h)[0]
+	if entry.Bytes < minimum.Bytes || (entry.Bytes == minimum.Bytes && entry.Path >= minimum.Path) {
+		return
+	}
+	heap.Pop(h)
+	heap.Push(h, entry)
+}
 
 const (
 	jobTypeCopyPrefix   = "copy_prefix"
@@ -80,7 +126,7 @@ func (j persistentJob) public() publicJob {
 		Status:    j.Status,
 		Processed: j.Processed,
 		LastKey:   j.LastKey,
-		Stats:     cloneStats(j.Stats),
+		Stats:     cloneStatsForPublic(j.Stats),
 		Error:     j.Error,
 		CreatedAt: j.CreatedAt,
 		UpdatedAt: j.UpdatedAt,
@@ -96,9 +142,24 @@ func cloneStats(stats *statsResponse) *statsResponse {
 	copyStats := *stats
 	copyStats.ByType = cloneAggregateMap(stats.ByType)
 	copyStats.ByFolder = cloneAggregateMap(stats.ByFolder)
+	copyStats.Largest = append([]statsEntry(nil), stats.Largest...)
 	copyStats.Newest = cloneTimePointer(stats.Newest)
 	copyStats.Oldest = cloneTimePointer(stats.Oldest)
 	return &copyStats
+}
+
+func cloneStatsForPublic(stats *statsResponse) *statsResponse {
+	copyStats := cloneStats(stats)
+	if copyStats == nil {
+		return nil
+	}
+	sort.SliceStable(copyStats.Largest, func(i, j int) bool {
+		if copyStats.Largest[i].Bytes != copyStats.Largest[j].Bytes {
+			return copyStats.Largest[i].Bytes > copyStats.Largest[j].Bytes
+		}
+		return copyStats.Largest[i].Path < copyStats.Largest[j].Path
+	})
+	return copyStats
 }
 
 func cloneAggregateMap(source map[string]aggregate) map[string]aggregate {
@@ -120,32 +181,38 @@ func clonePersistentJob(job persistentJob) persistentJob {
 }
 
 type jobManager struct {
-	app    *application
-	dir    string
-	ctx    context.Context
-	cancel context.CancelFunc
-	queue  chan string
-	mu     sync.RWMutex
-	jobs   map[string]*persistentJob
-	lockMu sync.Mutex
-	locks  map[string]*sync.Mutex
-	wg     sync.WaitGroup
+	app          *application
+	dir          string
+	ctx          context.Context
+	cancel       context.CancelFunc
+	queue        chan string
+	mu           sync.RWMutex
+	jobs         map[string]*persistentJob
+	lockMu       sync.Mutex
+	locks        map[string]*sync.Mutex
+	wg           sync.WaitGroup
+	historyLimit int
 }
 
-func newJobManager(app *application, dataDir string) (*jobManager, error) {
+func newJobManager(app *application, dataDir string, historyLimits ...int) (*jobManager, error) {
 	dir := filepath.Join(dataDir, "jobs")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("create job state directory: %w", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	historyLimit := 100
+	if len(historyLimits) > 0 && historyLimits[0] > 0 {
+		historyLimit = historyLimits[0]
+	}
 	manager := &jobManager{
-		app:    app,
-		dir:    dir,
-		ctx:    ctx,
-		cancel: cancel,
-		queue:  make(chan string, 1024),
-		jobs:   make(map[string]*persistentJob),
-		locks:  make(map[string]*sync.Mutex),
+		app:          app,
+		historyLimit: historyLimit,
+		dir:          dir,
+		ctx:          ctx,
+		cancel:       cancel,
+		queue:        make(chan string, 1024),
+		jobs:         make(map[string]*persistentJob),
+		locks:        make(map[string]*sync.Mutex),
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -191,6 +258,10 @@ func newJobManager(app *application, dataDir string) (*jobManager, error) {
 				return nil, err
 			}
 		}
+	}
+	if err := manager.pruneHistory(); err != nil {
+		cancel()
+		return nil, err
 	}
 	for worker := 0; worker < 2; worker++ {
 		manager.wg.Add(1)
@@ -271,6 +342,54 @@ func (m *jobManager) persist(job persistentJob) error {
 	return nil
 }
 
+func terminalJobStatus(status string) bool {
+	switch status {
+	case jobStatusCompleted, jobStatusFailed, jobStatusCanceled:
+		return true
+	default:
+		return false
+	}
+}
+
+func (m *jobManager) pruneHistory() error {
+	if m == nil || m.historyLimit <= 0 {
+		return nil
+	}
+	m.mu.Lock()
+	terminal := make([]*persistentJob, 0, len(m.jobs))
+	for _, job := range m.jobs {
+		if terminalJobStatus(job.Status) {
+			terminal = append(terminal, job)
+		}
+	}
+	sort.Slice(terminal, func(i, j int) bool {
+		if !terminal[i].UpdatedAt.Equal(terminal[j].UpdatedAt) {
+			return terminal[i].UpdatedAt.After(terminal[j].UpdatedAt)
+		}
+		return terminal[i].ID > terminal[j].ID
+	})
+	if len(terminal) <= m.historyLimit {
+		m.mu.Unlock()
+		return nil
+	}
+	remove := append([]*persistentJob(nil), terminal[m.historyLimit:]...)
+	for _, job := range remove {
+		delete(m.jobs, job.ID)
+	}
+	m.mu.Unlock()
+
+	var firstErr error
+	for _, job := range remove {
+		if err := os.Remove(filepath.Join(m.dir, job.ID+".json")); err != nil && !errors.Is(err, os.ErrNotExist) && firstErr == nil {
+			firstErr = fmt.Errorf("remove expired job state %q: %w", job.ID, err)
+		}
+		m.lockMu.Lock()
+		delete(m.locks, job.ID)
+		m.lockMu.Unlock()
+	}
+	return firstErr
+}
+
 func (m *jobManager) list(instance string) []publicJob {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -296,12 +415,7 @@ func (m *jobManager) create(job persistentJob) (persistentJob, error) {
 	job.UpdatedAt = now
 	job.Error = ""
 	if job.Type == jobTypeStatsPrefix && job.Stats == nil {
-		job.Stats = &statsResponse{
-			Instance: job.Instance,
-			Prefix:   job.Prefix,
-			ByType:   make(map[string]aggregate),
-			ByFolder: make(map[string]aggregate),
-		}
+		job.Stats = newStatsResponse(job.Instance, job.Prefix)
 	}
 	if err := m.put(job); err != nil {
 		return persistentJob{}, err
@@ -385,6 +499,7 @@ func (m *jobManager) run(id string) {
 		}
 	}
 	_ = m.put(job)
+	_ = m.pruneHistory()
 }
 
 func publicJobError(err error) string {
@@ -437,6 +552,19 @@ func (m *jobManager) execute(job *persistentJob) error {
 		if err := requirePermission(instance, permissionRead); err != nil {
 			return err
 		}
+		// Older persisted statistics did not retain exact aggregates for every
+		// displayed folder level. Restart those jobs once so local "Others"
+		// rectangles can report exact byte and object totals.
+		if job.Stats == nil || job.Stats.LayoutVersion != statsLayoutVersion {
+			job.Processed = 0
+			job.LastKey = ""
+			job.Stats = newStatsResponse(job.Instance, job.Prefix)
+			if err := m.put(*job); err != nil {
+				return err
+			}
+		}
+		largest := (*statsEntryHeap)(&job.Stats.Largest)
+		heap.Init(largest)
 		return m.runObjectJob(job, instance, func(_ context.Context, object objectInfo, relative string) error {
 			if strings.HasSuffix(relative, "/") && object.Size == 0 {
 				return nil
@@ -444,21 +572,25 @@ func (m *jobManager) execute(job *persistentJob) error {
 			stats := job.Stats
 			stats.Count++
 			stats.TotalBytes += object.Size
-			kind := detectKind(relative)
+			kind := detectKind(relative, object.ContentType)
 			typeAggregate := stats.ByType[kind]
 			typeAggregate.Count++
 			typeAggregate.Bytes += object.Size
 			stats.ByType[kind] = typeAggregate
-
-			remaining := strings.TrimPrefix(relative, job.Prefix)
-			folder := "(root)"
-			if slash := strings.IndexByte(remaining, '/'); slash >= 0 {
-				folder = remaining[:slash] + "/"
+			modified := ""
+			if !object.LastModified.IsZero() {
+				modified = object.LastModified.UTC().Format(time.RFC3339)
 			}
-			folderAggregate := stats.ByFolder[folder]
-			folderAggregate.Count++
-			folderAggregate.Bytes += object.Size
-			stats.ByFolder[folder] = folderAggregate
+			addLargestStatsEntry(&stats.Largest, statsEntry{
+				Path:         relative,
+				Bytes:        object.Size,
+				Type:         kind,
+				MIME:         object.ContentType,
+				ETag:         object.ETag,
+				LastModified: modified,
+			})
+
+			addStatsFolderAggregates(stats, job.Prefix, relative, object.Size)
 
 			if !object.LastModified.IsZero() {
 				modified := object.LastModified
@@ -476,12 +608,49 @@ func (m *jobManager) execute(job *persistentJob) error {
 	}
 }
 
+func newStatsResponse(instance, prefix string) *statsResponse {
+	return &statsResponse{
+		Instance:      instance,
+		Prefix:        prefix,
+		LayoutVersion: statsLayoutVersion,
+		ByType:        make(map[string]aggregate),
+		ByFolder:      make(map[string]aggregate),
+	}
+}
+
+// addStatsFolderAggregates records exact totals for each ancestor folder that
+// may appear in the five-level treemap. Keys are relative to the selected
+// prefix, so the frontend can attach a local "Others" rectangle to every
+// folder without retaining every object as an individual node.
+func addStatsFolderAggregates(stats *statsResponse, prefix, relative string, size int64) {
+	if stats == nil {
+		return
+	}
+	remaining := strings.TrimPrefix(relative, prefix)
+	parts := strings.Split(remaining, "/")
+	folderCount := len(parts) - 1
+	if folderCount <= 0 {
+		return
+	}
+	if folderCount > maxStatsFolderDepth {
+		folderCount = maxStatsFolderDepth
+	}
+	for depth := 1; depth <= folderCount; depth++ {
+		folder := strings.Join(parts[:depth], "/") + "/"
+		value := stats.ByFolder[folder]
+		value.Count++
+		value.Bytes += size
+		stats.ByFolder[folder] = value
+	}
+}
+
 func (m *jobManager) runObjectJob(job *persistentJob, instance *storageInstance, operation func(context.Context, objectInfo, string) error) error {
 	prefix := job.Prefix
 	if prefix == "" {
 		prefix = job.Source
 	}
 	processedThisRun := int64(0)
+	lastCheckpoint := time.Now()
 	err := forEachObjectAfter(m.ctx, instance, prefix, job.LastKey, func(object objectInfo, relative string) error {
 		if err := m.controlState(job.ID); err != nil {
 			return err
@@ -504,8 +673,16 @@ func (m *jobManager) runObjectJob(job *persistentJob, instance *storageInstance,
 				job.Status = jobStatusRunning
 			}
 		}
-		if err := m.put(*job); err != nil {
-			return err
+		forceCheckpoint := job.Type != jobTypeStatsPrefix ||
+			processedThisRun%100 == 0 ||
+			time.Since(lastCheckpoint) >= time.Second ||
+			job.Status == jobStatusPaused ||
+			job.Status == jobStatusCanceled
+		if forceCheckpoint {
+			if err := m.put(*job); err != nil {
+				return err
+			}
+			lastCheckpoint = time.Now()
 		}
 		switch job.Status {
 		case jobStatusPaused:
@@ -517,6 +694,11 @@ func (m *jobManager) runObjectJob(job *persistentJob, instance *storageInstance,
 	})
 	if err != nil {
 		return err
+	}
+	if job.Type == jobTypeStatsPrefix && processedThisRun > 0 {
+		if err := m.put(*job); err != nil {
+			return err
+		}
 	}
 	if job.Processed == 0 && processedThisRun == 0 && job.Type != jobTypeStatsPrefix {
 		return apiError{Status: http.StatusNotFound, Code: "empty_prefix", Message: "source prefix contains no objects"}
@@ -605,6 +787,9 @@ func (m *jobManager) changeStatus(id, action string) (persistentJob, error) {
 	job.UpdatedAt = now
 	if err := m.put(job); err != nil {
 		return persistentJob{}, err
+	}
+	if action == "cancel" {
+		_ = m.pruneHistory()
 	}
 	if action == "resume" {
 		m.enqueue(job.ID)

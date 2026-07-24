@@ -170,4 +170,23 @@ controller.update({ status: 'preparing', detail: 'Canceling...' });
 item.nodes.secondaryAction.dispatchEvent(pointerEvent('pointerup', 18));
 assert.equal(canceled, 1, 'individual cancel should survive an in-flight progress render');
 
+const ordering = windowObject.BB.ui.transferGroup('download');
+ordering.add({ id: 'finished', name: 'finished.bin', status: 'completed', progress: 1 });
+ordering.add({ id: 'waiting', name: 'waiting.bin', status: 'queued' });
+ordering.add({ id: 'stopped', name: 'stopped.bin', status: 'paused' });
+ordering.add({ id: 'active', name: 'active.bin', status: 'running', progress: 0.4 });
+ordering.add({ id: 'failed', name: 'failed.bin', status: 'error' });
+const transferList = ordering.element.children[1];
+const orderedIds = transferList.children.map(row => {
+  for (const [id, transfer] of ordering.items.entries()) {
+    if (transfer.nodes.row === row) return id;
+  }
+  return '';
+});
+assert.deepEqual(
+  orderedIds,
+  ['active', 'waiting', 'stopped', 'failed', 'finished'],
+  'bandwidth-consuming transfers should remain above queued, paused and completed rows'
+);
+
 console.log('transfer control behavior tests passed');

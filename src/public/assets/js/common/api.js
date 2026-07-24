@@ -265,6 +265,7 @@
       filters = {},
       sortColumn = '',
       sortDirection = '',
+      search = '',
       size = 0,
       instance = null,
       signal = null
@@ -274,7 +275,8 @@
         sheet,
         page,
         pageSize,
-        filters: JSON.stringify(filters || {})
+        filters: JSON.stringify(filters || {}),
+        search
       };
       if (Number(size) > 0) parameters.size = Math.floor(Number(size));
       if (sortColumn && sortDirection) {
@@ -282,6 +284,19 @@
         parameters.sortDirection = sortDirection;
       }
       const response = await request(withInstance('/api/spreadsheet', parameters, instance), { signal });
+      return response.json();
+    },
+
+    async delimitedPage({ key, cursor = '', etag = '', pageSize = 100, instance = null, signal = null } = {}) {
+      const parameters = { key, pageSize };
+      if (cursor) parameters.cursor = cursor;
+      if (etag) parameters.etag = etag;
+      const response = await request(withInstance('/api/delimited', parameters, instance), { signal });
+      return response.json();
+    },
+
+    async documentCount({ key, instance = null, signal = null } = {}) {
+      const response = await request(withInstance('/api/document-count', { key }, instance), { signal });
       return response.json();
     },
 
@@ -298,6 +313,18 @@
       if (cursor) parameters.cursor = cursor;
       if (etag) parameters.etag = etag;
       const response = await request(withInstance('/api/json/beautify', parameters, instance), { signal });
+      return response.json();
+    },
+
+    async jsonSummary({ key, etag = '', instance = null, signal = null } = {}) {
+      const parameters = { key };
+      if (etag) parameters.etag = etag;
+      const response = await request(withInstance('/api/json/summary', parameters, instance), { signal });
+      return response.json();
+    },
+
+    async searchDocument({ key, query, instance = null, signal = null } = {}) {
+      const response = await request(withInstance('/api/search', { key, q: query }, instance), { signal });
       return response.json();
     },
 
@@ -322,6 +349,35 @@
       return response.json();
     },
 
+    async createSQLiteSession({ key, size = 0, instance = null, signal = null } = {}) {
+      const response = await request('/api/sqlite/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal,
+        body: JSON.stringify({
+          instance: String(instance || selectedInstance()),
+          key,
+          size: Math.max(0, Math.floor(Number(size) || 0))
+        })
+      });
+      return response.json();
+    },
+
+    async sqliteTable({ id, table, page = 0, pageSize = 100, query = '', signal = null } = {}) {
+      const path = `/api/sqlite/sessions/${encodeURIComponent(id)}/table`;
+      const response = await request(withInstance(path, { table, page, pageSize, q: query }, ''), { signal });
+      return response.json();
+    },
+
+    async deleteSQLiteSession(id, options = {}) {
+      if (!id) return;
+      await request(`/api/sqlite/sessions/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        keepalive: !!options.keepalive,
+        signal: options.signal || null
+      });
+    },
+
     async mediaInfo(key, options = {}) {
       const parameters = { key };
       const size = Number(options.size);
@@ -337,61 +393,6 @@
 
     imagePreviewURL(key, options = {}) {
       return withInstance('/api/image-preview', { key }, options.instance ?? null);
-    },
-
-    async mediaProbe(key, options = {}) {
-      const parameters = { key };
-      const size = Number(options.size);
-      if (Number.isFinite(size) && size >= 0) parameters.size = String(size);
-      if (options.mime) parameters.mime = String(options.mime);
-      if (options.etag) parameters.etag = String(options.etag);
-      if (options.lastModified) parameters.lastModified = String(options.lastModified);
-      const response = await request(withInstance('/api/media-probe', parameters, options.instance ?? null), {
-        signal: options.signal || null
-      });
-      return response.json();
-    },
-
-    async createMediaSession(key, options = {}) {
-      const targetInstance = String(options.instance || selectedInstance());
-      const size = Number(options.size);
-      const response = await request('/api/media-sessions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: options.signal || null,
-        body: JSON.stringify({
-          instance: targetInstance,
-          key,
-          size: Number.isFinite(size) && size >= 0 ? Math.floor(size) : 0,
-          mime: String(options.mime || ''),
-          etag: String(options.etag || ''),
-          lastModified: String(options.lastModified || '')
-        })
-      });
-      return response.json();
-    },
-
-    async mediaSession(id, options = {}) {
-      const response = await request(`/api/media-sessions/${encodeURIComponent(id)}`, {
-        signal: options.signal || null
-      });
-      return response.json();
-    },
-
-    async heartbeatMediaSession(id, options = {}) {
-      await request(`/api/media-sessions/${encodeURIComponent(id)}/heartbeat`, {
-        method: 'POST',
-        keepalive: !!options.keepalive,
-        signal: options.signal || null
-      });
-    },
-
-    async deleteMediaSession(id, options = {}) {
-      await request(`/api/media-sessions/${encodeURIComponent(id)}`, {
-        method: 'DELETE',
-        keepalive: !!options.keepalive,
-        signal: options.signal || null
-      });
     },
 
     async putBlob(key, blob, mime, options = {}) {

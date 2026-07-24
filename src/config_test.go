@@ -277,3 +277,60 @@ storage "` + id + `" {
 }
 `
 }
+
+func TestLoadConfigJobHistoryLimit(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.hcl")
+	content := `
+server {
+  data_dir         = "./state"
+  job_history_limit = 37
+}
+
+storage "primary" {
+  provider = "s3"
+  endpoint = "http://localhost:9000"
+  region   = "test"
+  bucket   = "bucket"
+  auth     = "anonymous"
+}
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.JobHistoryLimit != 37 {
+		t.Fatalf("JobHistoryLimit = %d, want 37", cfg.JobHistoryLimit)
+	}
+}
+
+func TestLoadConfigRejectsInvalidJobHistoryLimit(t *testing.T) {
+	for _, value := range []string{"0", "10001", `"100"`} {
+		t.Run(value, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.hcl")
+			content := `
+server {
+  job_history_limit = ` + value + `
+}
+
+storage "primary" {
+  provider = "s3"
+  endpoint = "http://localhost:9000"
+  region   = "test"
+  bucket   = "bucket"
+  auth     = "anonymous"
+}
+`
+			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := loadConfig(path)
+			if err == nil {
+				t.Fatal("expected invalid job history limit to fail")
+			}
+		})
+	}
+}

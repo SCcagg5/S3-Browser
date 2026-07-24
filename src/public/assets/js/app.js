@@ -392,6 +392,7 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
       return {
         config,
         instances: [],
+        build: {},
         defaultInstanceId: '',
         instanceId: '',
         pathPrefix: '',
@@ -453,6 +454,9 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
         return this.permissionStates
           .map(item => `${item.label}: ${item.state.allowed ? 'allowed' : 'denied'}`)
           .join(' · ');
+      },
+      currentInsightsLabel() {
+        return this.pathPrefix ? 'Folder insights' : 'Storage insights';
       }
     },
 
@@ -598,6 +602,7 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
         try {
           const response = await BB.api.instances();
           this.instances = response.instances || [];
+          this.build = response.build || {};
           this.defaultInstanceId = response.default || this.instances[0]?.id || '';
           const queryInstance = new URLSearchParams(location.search).get('instance');
           const storedInstance = localStorage.getItem('object-browser-instance');
@@ -644,32 +649,34 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
         await this.changeInstance();
       },
 
-      async showPermissionDetails(permissionKey) {
+      async showPermissionDetails() {
         const instance = this.currentInstance;
         if (!instance) return;
-        const item = this.permissionStates.find(candidate => candidate.key === permissionKey) || this.permissionStates[0];
-        if (!item) return;
-        const state = item.state || {};
-        const allowed = state.allowed ? 'Allowed' : 'Denied';
-        const verification = state.verified ? 'Verified by the provider' : 'Declared or not independently verified';
         const providerPermissions = (instance.capabilities?.permissions || [])
           .map(value => `<code>${escapeHTML(value)}</code>`)
           .join(', ') || 'None reported';
+        const permissionRows = this.permissionStates.map(item => {
+          const state = item.state || {};
+          const allowed = state.allowed ? 'Allowed' : 'Denied';
+          const verification = state.verified ? 'Provider verified' : 'Declared';
+          return `<div class="bb-permission-summary-row">
+            <span class="bb-permission-summary-icon ${state.allowed ? 'is-allowed' : 'is-denied'}"><i class="mdi mdi-${escapeHTML(item.icon)}"></i></span>
+            <span class="bb-permission-summary-copy"><strong>${escapeHTML(item.label)}</strong><small>${escapeHTML(verification)}${state.reason ? ` · ${escapeHTML(state.reason)}` : ''}</small></span>
+            <span class="bb-permission-result ${state.allowed ? 'is-allowed' : 'is-denied'}">${escapeHTML(allowed)}</span>
+          </div>`;
+        }).join('');
         await BB.ui.alert({
           html: `<div class="bb-details bb-permission-details">
             <div class="bb-details-head">
-              <i class="mdi mdi-${escapeHTML(item.icon)}"></i>
+              <i class="mdi mdi-shield-key-outline"></i>
               <div class="bb-details-titles">
-                <div class="bb-details-name">${escapeHTML(item.label)} access</div>
+                <div class="bb-details-name">Storage permissions</div>
                 <div class="bb-details-prefix">${escapeHTML(instance.name)} · ${escapeHTML(instance.bucket)}</div>
               </div>
-              <span class="bb-permission-result ${state.allowed ? 'is-allowed' : 'is-denied'}">${escapeHTML(allowed)}</span>
             </div>
             <div class="bb-details-body">
+              <div class="bb-permission-summary">${permissionRows}</div>
               <div class="bb-section bb-kv">
-                <div class="kv-row"><div class="kv-k">Verification</div><div class="kv-v">${escapeHTML(verification)}</div></div>
-                <div class="kv-row"><div class="kv-k">Source</div><div class="kv-v">${escapeHTML(state.source || 'configuration')}</div></div>
-                ${state.reason ? `<div class="kv-row"><div class="kv-k">Reason</div><div class="kv-v">${escapeHTML(state.reason)}</div></div>` : ''}
                 <div class="kv-row"><div class="kv-k">Provider permissions</div><div class="kv-v mono">${providerPermissions}</div></div>
                 ${instance.capabilities?.error ? `<div class="kv-row"><div class="kv-k">Discovery error</div><div class="kv-v">${escapeHTML(instance.capabilities.error)}</div></div>` : ''}
               </div>
@@ -810,11 +817,11 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
       async onRowCopy(row) { if (await BB.actions.copyObject(row.key)) await this.refresh(); },
       async onRowRename(row) { if (await BB.actions.renameObject(row.key)) await this.refresh(); },
       async onRowDelete(row) { if (await BB.actions.deleteObject(row.key)) await this.refresh(); },
-      onPrefixDetails(row) { BB.actions.showPrefixDetails(row.prefix); },
+      onPrefixInsights(row) { BB.actions.showPrefixInsights(row.prefix); },
       async onPrefixCopy(row) { if (await BB.actions.copyPrefix(row.prefix)) await this.refresh(); },
       async onPrefixRename(row) { if (await BB.actions.renamePrefix(row.prefix)) await this.refresh(); },
       async onPrefixDelete(row) { if (await BB.actions.deletePrefix(row.prefix)) await this.refresh(); },
-      onCurrentFolderDetails() { BB.actions.showPrefixDetails(this.pathPrefix); },
+      onCurrentInsights() { BB.actions.showPrefixInsights(this.pathPrefix); },
       showJobs() { BB.actions.showJobs(); },
 
       onRowContextMenu(event) {

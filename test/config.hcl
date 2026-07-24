@@ -1,6 +1,7 @@
 server {
-  listen   = ":8080"
-  data_dir = "/data"
+  listen            = ":8080"
+  data_dir          = "/data"
+  job_history_limit = 100
 }
 
 # These credentials are deterministic, local-test-only Garage credentials.

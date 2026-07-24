@@ -51,6 +51,8 @@
   }
 
   function forwardVerticalWheel(scroller) {
+    if (!scroller || scroller.dataset.bbVerticalWheelForwarded === 'true') return;
+    scroller.dataset.bbVerticalWheelForwarded = 'true';
     scroller.addEventListener('wheel', event => {
       if (event.ctrlKey || event.shiftKey || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
       const page = document.scrollingElement || document.documentElement;
@@ -117,6 +119,87 @@
     return wrapper;
   }
 
+  function appendSyntaxToken(parent, value, className = '') {
+    if (!value) return;
+    if (!className) {
+      parent.appendChild(document.createTextNode(value));
+      return;
+    }
+    const token = document.createElement('span');
+    token.className = className;
+    token.textContent = value;
+    parent.appendChild(token);
+  }
+
+  function highlightJSONLine(line, state) {
+    const fragment = document.createDocumentFragment();
+    let index = 0;
+    const text = String(line || '');
+
+    while (index < text.length) {
+      if (state.inString || text[index] === '"') {
+        const start = index;
+        if (!state.inString) {
+          state.inString = true;
+          state.escaped = false;
+          index++;
+        }
+        let closed = false;
+        while (index < text.length) {
+          const current = text[index++];
+          if (state.escaped) {
+            state.escaped = false;
+          } else if (current === '\\') {
+            state.escaped = true;
+          } else if (current === '"') {
+            state.inString = false;
+            closed = true;
+            break;
+          }
+        }
+        let lookahead = index;
+        while (lookahead < text.length && /\s/.test(text[lookahead])) lookahead++;
+        const isKey = closed && text[lookahead] === ':';
+        appendSyntaxToken(fragment, text.slice(start, index), isKey ? 'json-syntax-key' : 'json-syntax-string');
+        continue;
+      }
+
+      const current = text[index];
+      if (/\s/.test(current)) {
+        const start = index++;
+        while (index < text.length && /\s/.test(text[index])) index++;
+        appendSyntaxToken(fragment, text.slice(start, index));
+        continue;
+      }
+
+      if ('{}[],:'.includes(current)) {
+        appendSyntaxToken(fragment, current, 'json-syntax-punctuation');
+        index++;
+        continue;
+      }
+
+      const remainder = text.slice(index);
+      const literal = /^(?:true|false|null)\b/.exec(remainder);
+      if (literal) {
+        appendSyntaxToken(fragment, literal[0], literal[0] === 'null' ? 'json-syntax-null' : 'json-syntax-boolean');
+        index += literal[0].length;
+        continue;
+      }
+
+      const number = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/.exec(remainder);
+      if (number) {
+        appendSyntaxToken(fragment, number[0], 'json-syntax-number');
+        index += number[0].length;
+        continue;
+      }
+
+      const start = index++;
+      while (index < text.length && !/[\s{}[\],:"]/.test(text[index])) index++;
+      appendSyntaxToken(fragment, text.slice(start, index), 'json-syntax-unknown');
+    }
+    return fragment;
+  }
+
   function renderWrappedCode(code, language, options = {}) {
     const value = code == null ? '' : String(code);
     const startLine = Math.max(1, Number(options.startLine) || 1);
@@ -128,6 +211,10 @@
     const lines = value.split('\n');
     if (!lines.length) lines.push('');
     const fragment = document.createDocumentFragment();
+    const jsonState = {
+      inString: language === 'json' && options.startInString === true,
+      escaped: language === 'json' && options.startEscaped === true
+    };
     lines.forEach((line, index) => {
       const row = document.createElement('div');
       row.className = 'wrapped-code-row';
@@ -137,7 +224,12 @@
       number.textContent = `${startLine + index}${continued && index === 0 ? '↳' : ''}`;
       const content = document.createElement('code');
       content.className = 'wrapped-code-line';
-      content.textContent = line || '\u200b';
+      if (language === 'json') {
+        content.appendChild(highlightJSONLine(line, jsonState));
+        if (!content.childNodes.length) content.textContent = '\u200b';
+      } else {
+        content.textContent = line || '\u200b';
+      }
       row.append(number, content);
       fragment.appendChild(row);
     });
@@ -306,5 +398,5 @@
     return wrapper;
   }
 
-  BB.render = { renderCode, renderWrappedCode, renderMarkdown, renderMermaid, sanitizeMermaidSVG, sanitizeHTML };
+  BB.render = { renderCode, renderWrappedCode, renderMarkdown, renderMermaid, sanitizeMermaidSVG, sanitizeHTML, forwardVerticalWheel };
 })();

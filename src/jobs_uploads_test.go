@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -61,6 +62,44 @@ func TestRecursiveCopyRunsAsPersistentJob(t *testing.T) {
 	}
 	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("job state mode = %o", info.Mode().Perm())
+	}
+}
+
+func TestFolderStatisticsKeepDistributionsAndLargestObjects(t *testing.T) {
+	app, _, backend := testApplication(t)
+	backend.mu.Lock()
+	backend.objects["tenant/folder/photo.jpg"] = memoryObject{data: bytes.Repeat([]byte{'j'}, 80), contentType: "image/jpeg", modified: time.Now().UTC()}
+	backend.objects["tenant/folder/archive.bin"] = memoryObject{data: bytes.Repeat([]byte{'b'}, 20), contentType: "application/octet-stream", modified: time.Now().UTC()}
+	backend.objects["tenant/folder/nested/more/item.bin"] = memoryObject{data: bytes.Repeat([]byte{'m'}, 10), contentType: "application/octet-stream", modified: time.Now().UTC()}
+	backend.mu.Unlock()
+
+	created, err := app.jobs.create(persistentJob{Type: jobTypeStatsPrefix, Instance: "rw", Prefix: "folder/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed := waitForJobStatus(t, app.jobs, created.ID, jobStatusCompleted)
+	if completed.Stats == nil {
+		t.Fatal("completed statistics are missing")
+	}
+	if completed.Stats.Count != 5 || completed.Stats.TotalBytes != 120 {
+		t.Fatalf("stats = %+v", completed.Stats)
+	}
+	if completed.Stats.ByType["image"].Count != 1 || completed.Stats.ByType["image"].Bytes != 80 {
+		t.Fatalf("image distribution = %+v", completed.Stats.ByType)
+	}
+	if got := completed.Stats.ByFolder["nested/"]; got.Count != 2 || got.Bytes != 14 {
+		t.Fatalf("nested folder aggregate = %+v", got)
+	}
+	if got := completed.Stats.ByFolder["nested/more/"]; got.Count != 1 || got.Bytes != 10 {
+		t.Fatalf("nested/more folder aggregate = %+v", got)
+	}
+	public := completed.public()
+	if public.Stats == nil || len(public.Stats.Largest) != 5 || public.Stats.Largest[0].Path != "folder/photo.jpg" {
+		t.Fatalf("largest = %+v", public.Stats)
+	}
+	largest := public.Stats.Largest[0]
+	if largest.MIME != "image/jpeg" || largest.ETag == "" || largest.LastModified == "" {
+		t.Fatalf("largest object metadata = %+v", largest)
 	}
 }
 
@@ -166,4 +205,42 @@ func putUploadChunk(t *testing.T, app *application, id string, data []byte, star
 		t.Fatal(err)
 	}
 	return upload
+}
+
+func TestJobManagerPrunesOnlyOldTerminalHistory(t *testing.T) {
+	dir := t.TempDir()
+	manager := &jobManager{
+		dir:          dir,
+		jobs:         make(map[string]*persistentJob),
+		locks:        make(map[string]*sync.Mutex),
+		historyLimit: 2,
+	}
+	base := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
+	states := []persistentJob{
+		{ID: "completed-old", Type: jobTypeStatsPrefix, Instance: "rw", Status: jobStatusCompleted, CreatedAt: base, UpdatedAt: base},
+		{ID: "failed-middle", Type: jobTypeStatsPrefix, Instance: "rw", Status: jobStatusFailed, CreatedAt: base.Add(time.Minute), UpdatedAt: base.Add(time.Minute)},
+		{ID: "completed-new", Type: jobTypeStatsPrefix, Instance: "rw", Status: jobStatusCompleted, CreatedAt: base.Add(2 * time.Minute), UpdatedAt: base.Add(2 * time.Minute)},
+		{ID: "running-kept", Type: jobTypeStatsPrefix, Instance: "rw", Status: jobStatusRunning, CreatedAt: base.Add(3 * time.Minute), UpdatedAt: base.Add(3 * time.Minute)},
+	}
+	for index := range states {
+		job := states[index]
+		manager.jobs[job.ID] = &job
+		if err := manager.persist(job); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := manager.pruneHistory(); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"failed-middle", "completed-new", "running-kept"} {
+		if _, ok := manager.jobs[id]; !ok {
+			t.Fatalf("job %q should have been retained", id)
+		}
+	}
+	if _, ok := manager.jobs["completed-old"]; ok {
+		t.Fatal("old terminal job should have been pruned")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "completed-old.json")); !os.IsNotExist(err) {
+		t.Fatalf("pruned job state still exists: %v", err)
+	}
 }

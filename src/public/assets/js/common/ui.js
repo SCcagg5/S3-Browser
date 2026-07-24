@@ -110,7 +110,7 @@
     }, 120);
   }
 
-  async function alert({ title = '', message = '', html = '' }) {
+  async function alert({ title = '', message = '', html = '', onOpen = null }) {
     return new Promise((resolve) => {
       const { overlay, btnOk, btnClose } = buildModal({ title, message, html, kind: 'alert' });
 
@@ -120,6 +120,10 @@
       overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
 
       attachAndShow(overlay);
+      if (typeof onOpen === 'function') {
+        try { onOpen({ overlay, modal: overlay.querySelector('.bb-modal') }); }
+        catch (error) { console.error('modal onOpen failed', error); }
+      }
     });
   }
 
@@ -578,6 +582,34 @@
       actionIcon.className = `mdi mdi-${icon || 'circle-outline'}`;
     }
 
+    function transferStatusRank(item) {
+      const value = String(item?.state?.status || 'queued');
+      const recentlyTransferred = Date.now() - Number(item?.state?.lastActivityAt || 0) < 5000;
+      if (value === 'running' && recentlyTransferred) return 0;
+      if (value === 'running') return 1;
+      if (value === 'preparing') return 2;
+      if (value === 'queued') return 3;
+      if (value === 'paused') return 4;
+      if (value === 'error') return 5;
+      if (value === 'completed') return 6;
+      if (value === 'canceled') return 7;
+      return 5;
+    }
+
+    function reorderItems() {
+      Array.from(items.values())
+        .sort((left, right) => {
+          const statusDifference = transferStatusRank(left) - transferStatusRank(right);
+          if (statusDifference) return statusDifference;
+          if (left.state.status === 'running' && right.state.status === 'running') {
+            const activityDifference = Number(right.state.lastActivityAt || 0) - Number(left.state.lastActivityAt || 0);
+            if (activityDifference) return activityDifference;
+          }
+          return left.order - right.order;
+        })
+        .forEach(item => list.appendChild(item.nodes.row));
+    }
+
     function renderItem(item) {
       const { state, nodes, handlers } = item;
       const status = state.status || 'queued';
@@ -618,6 +650,7 @@
         : canDismiss
           ? { visible: true, icon: 'close', label: `Dismiss ${state.name || 'transfer'}`, onClick: () => removeItem(item.id) }
           : { visible: false });
+      reorderItems();
       updateHeader();
       schedulePanelRemoval();
     }
@@ -668,12 +701,15 @@
 
       const item = {
         id,
+        order: ++sequence,
         state: {
           name: options.name || 'Transfer',
           status: options.status || 'queued',
           progress: options.progress,
           indeterminate: !!options.indeterminate,
-          detail: options.detail || ''
+          detail: options.detail || '',
+          lastActivityAt: options.status === 'running' ? Date.now() : 0,
+          lastProgress: boundedProgress(options.progress)
         },
         handlers: {
           pause: options.onPause,
@@ -691,8 +727,19 @@
         update(next = {}) {
           if (!items.has(id)) return controller;
           if (Object.prototype.hasOwnProperty.call(next, 'name')) item.state.name = String(next.name || 'Transfer');
-          if (Object.prototype.hasOwnProperty.call(next, 'status')) item.state.status = String(next.status || 'queued');
-          if (Object.prototype.hasOwnProperty.call(next, 'progress')) item.state.progress = next.progress;
+          if (Object.prototype.hasOwnProperty.call(next, 'status')) {
+            const previousStatus = item.state.status;
+            item.state.status = String(next.status || 'queued');
+            if (item.state.status === 'running' && previousStatus !== 'running') item.state.lastActivityAt = Date.now();
+          }
+          if (Object.prototype.hasOwnProperty.call(next, 'progress')) {
+            const nextProgress = boundedProgress(next.progress);
+            if (nextProgress !== null && (item.state.lastProgress === null || nextProgress > item.state.lastProgress + 0.000001)) {
+              item.state.lastActivityAt = Date.now();
+            }
+            item.state.lastProgress = nextProgress;
+            item.state.progress = next.progress;
+          }
           if (Object.prototype.hasOwnProperty.call(next, 'indeterminate')) item.state.indeterminate = !!next.indeterminate;
           if (Object.prototype.hasOwnProperty.call(next, 'detail')) item.state.detail = String(next.detail || '');
           if (Object.prototype.hasOwnProperty.call(next, 'onPause')) item.handlers.pause = next.onPause;

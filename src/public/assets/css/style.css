@@ -265,7 +265,18 @@ a { color: var(--primary-color); }
 .toolbar-spacer { flex: 0 0 12px; }
 .toolbar-right { display: flex; align-items: center; gap: .5rem; }
 .toolbar-chevron { margin-left: .35rem; }
-.toolbar .dropdown-item { display: flex; align-items: center; gap: .5rem; min-width: 220px; }
+.toolbar .dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: .78rem;
+  min-width: 220px;
+}
+.toolbar .dropdown-item > .mdi {
+  flex: 0 0 1.25rem;
+  width: 1.25rem;
+  margin: 0;
+  text-align: center;
+}
 .icon-btn-disc { background-color: transparent !important; border-radius: 8px; }
 .icon-btn-disc:hover:not(:disabled),
 .icon-btn-disc:hover:not(:disabled) .mdi { color: var(--primary-color) !important; background-color: transparent !important; }
@@ -1404,15 +1415,29 @@ body.preview-page { overflow-x: auto; }
 .pdf-preview {
   display: grid;
   width: 100%;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
   justify-items: center;
   gap: .75rem;
 }
-.pdf-toolbar {
-  position: sticky;
-  top: calc(var(--preview-header-height, 62px) + .45rem);
+.pdf-toolbar-shell {
+  position: relative;
   z-index: 20;
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  pointer-events: none;
+}
+.pdf-toolbar {
+  position: fixed;
+  top: calc(var(--preview-header-height, 62px) + .45rem);
+  left: 50%;
+  z-index: 21;
   display: flex;
   max-width: calc(100vw - 1.5rem);
+  transform: translateX(-50%);
   align-items: center;
   justify-content: center;
   gap: .4rem;
@@ -1422,6 +1447,7 @@ body.preview-page { overflow-x: auto; }
   border-radius: 9px;
   box-shadow: 0 3px 12px rgba(16, 24, 40, .08);
   backdrop-filter: blur(7px);
+  pointer-events: auto;
 }
 .pdf-toolbar button,
 .pdf-toolbar select,
@@ -1437,7 +1463,9 @@ body.preview-page { overflow-x: auto; }
 .pdf-canvas-wrap {
   display: flex;
   width: 100%;
+  min-width: 0;
   justify-content: center;
+  overflow: visible;
 }
 .pdf-canvas-wrap canvas {
   display: block;
@@ -1938,6 +1966,7 @@ body.preview-page { overflow-x: auto; }
   color: var(--muted-color);
   font-size: .8rem;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .json-raw-host { min-width: 0; }
 .json-raw-host > .code-viewer { width: 100%; min-width: 0; }
@@ -2126,10 +2155,31 @@ body.preview-page { overflow-x: auto; }
 /* JSON modes intentionally reuse the worksheet control and tab component
    without introducing JSON-specific spacing or geometry. */
 .json-mode-controls {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-end;
+  gap: .55rem;
   width: 100%;
   margin-bottom: -1px;
+  border-bottom: 1px solid var(--border-color);
 }
-.json-mode-controls .spreadsheet-tabs { padding: 0 .15rem; }
+.json-mode-controls .spreadsheet-tabs {
+  flex: 1 1 auto;
+  padding: 0 .15rem;
+  border-bottom: 0;
+}
+.json-active-pager {
+  display: flex;
+  flex: 0 1 auto;
+  min-width: 0;
+  align-items: center;
+  padding: 0 .15rem .18rem 0;
+}
+.json-inline-pager {
+  margin: 0;
+  white-space: nowrap;
+}
+.json-inline-pager .json-range-label { margin-right: .2rem; }
 .json-mode-select { margin: 0 0 .4rem; }
 .json-panel,
 .json-text-host { width: 100%; min-width: 0; }
@@ -2142,7 +2192,358 @@ body.preview-page { overflow-x: auto; }
 .json-text-host.is-error,
 .json-panel.is-error { color: var(--danger-color); }
 .json-text-host > .wrapped-code-viewer { width: 100%; }
+.json-syntax-key { color: #0550ae; font-weight: 600; }
+.json-syntax-string { color: #0a7f47; }
+.json-syntax-number { color: #8a3ffc; }
+.json-syntax-boolean { color: #b54708; font-weight: 600; }
+.json-syntax-null { color: #b42318; font-weight: 600; }
+.json-syntax-punctuation { color: #667085; }
+.json-syntax-unknown { color: #7a271a; }
 @media (max-width: 640px) {
+  .json-mode-controls {
+    flex-wrap: wrap;
+    align-items: center;
+  }
   .json-mode-controls .spreadsheet-tabs { display: none; }
   .json-mode-controls .spreadsheet-sheet-select { display: flex; }
+  .json-active-pager {
+    flex: 1 1 100%;
+    justify-content: flex-end;
+    padding: 0 0 .35rem;
+    overflow-x: auto;
+  }
 }
+
+/* Final image sizing: the complete image must fit below the preview header. */
+.viewer[data-preview-type="image"],
+.viewer[data-preview-type="raw-image"],
+.viewer[data-preview-type="image-convert"] {
+  box-sizing: border-box;
+  height: calc(100dvh - var(--preview-header-height, 62px));
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+.viewer[data-preview-type="image"] > .bb-menu-constrain,
+.viewer[data-preview-type="raw-image"] > .bb-menu-constrain,
+.viewer[data-preview-type="image-convert"] > .bb-menu-constrain,
+.viewer[data-preview-type="image"] #viewer,
+.viewer[data-preview-type="raw-image"] #viewer,
+.viewer[data-preview-type="image-convert"] #viewer {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  align-items: stretch;
+  justify-content: center;
+  overflow: hidden;
+}
+.viewer[data-preview-type="image"] .preview-content,
+.viewer[data-preview-type="raw-image"] .preview-content,
+.viewer[data-preview-type="image-convert"] .preview-content {
+  box-sizing: border-box;
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  align-items: center;
+  justify-content: center;
+  padding: .5rem;
+  overflow: hidden;
+}
+.viewer[data-preview-type="image"] .preview-content > img,
+.viewer[data-preview-type="raw-image"] .preview-content > img,
+.viewer[data-preview-type="image-convert"] .preview-content > img {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  margin: 0;
+  object-fit: contain;
+}
+
+/* Give action-menu glyphs a little more breathing room. */
+.bb-menu-item {
+  column-gap: .7rem;
+}
+.bb-menu-item > .mdi {
+  flex: 0 0 1.15rem;
+  margin-right: .08rem;
+  text-align: center;
+}
+
+/* Read-only SQLite browser. */
+.viewer[data-preview-type="sqlite"] > .bb-menu-constrain {
+  width: min(100%, var(--browser-container-max));
+  max-width: var(--browser-container-max);
+}
+.sqlite-preview,
+.sqlite-preview-host { width: 100%; min-width: 0; }
+.sqlite-before-table { display: grid; gap: .55rem; }
+.sqlite-query-toolbar {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: .65rem;
+  padding: .45rem .55rem;
+  background: #fff;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+}
+.sqlite-search {
+  display: flex;
+  min-width: 220px;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: .45rem;
+  color: #667085;
+}
+.sqlite-search input {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  padding: 0 .65rem;
+  color: #344054;
+  background: #fff;
+  border: 1px solid #d7dde7;
+  border-radius: 7px;
+}
+@media (max-width: 640px) {
+  .sqlite-query-toolbar { align-items: stretch; flex-direction: column; }
+  .sqlite-search { min-width: 0; }
+}
+
+
+/* Final viewport-fit contract for every directly displayed or extracted image.
+   The flex layout subtracts the real preview navigation height automatically,
+   so the complete image remains visible without a vertical page scrollbar. */
+body.preview-page.is-viewport-image {
+  display: flex;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+html.preview-root.is-viewport-image {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+body.preview-page.is-viewport-image > .bar {
+  position: relative;
+  flex: 0 0 auto;
+}
+body.preview-page.is-viewport-image > .viewer {
+  flex: 1 1 auto;
+  box-sizing: border-box;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+body.preview-page.is-viewport-image > .viewer > .bb-menu-constrain,
+body.preview-page.is-viewport-image > .viewer #viewer,
+body.preview-page.is-viewport-image > .viewer .preview-content {
+  display: flex;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+body.preview-page.is-viewport-image > .viewer .preview-content {
+  padding: clamp(.25rem, .6vw, .6rem);
+}
+body.preview-page.is-viewport-image > .viewer .preview-content > img {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  margin: 0;
+  object-fit: contain;
+}
+
+/* Menu glyphs are intentionally separated from their labels. */
+.bb-menu-item {
+  column-gap: .85rem;
+}
+.bb-menu-item > .mdi {
+  flex: 0 0 1.25rem;
+  margin-right: .08rem;
+  text-align: center;
+}
+
+/* SQLite keeps table selectors and search controls stable while only the table reloads. */
+.sqlite-preview {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: visible;
+}
+.sqlite-table-controls,
+.sqlite-query-toolbar { flex: 0 0 auto; }
+.sqlite-table-host {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  min-height: 180px;
+}
+.sqlite-table-host > .data-preview {
+  display: block;
+  overflow: visible;
+}
+.sqlite-table-host .data-preview-toolbar {
+  position: relative;
+  overflow-x: auto;
+}
+.sqlite-table-host .data-table-scroll {
+  width: 100%;
+  min-height: 0;
+  overflow-x: auto;
+  overflow-y: visible;
+  overscroll-behavior-x: contain;
+  overscroll-behavior-y: auto;
+  scrollbar-gutter: auto;
+}
+.sqlite-table-host .data-table { margin-bottom: .75rem; }
+.sqlite-table-loader {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  display: flex;
+  min-height: 180px;
+  align-items: center;
+  justify-content: center;
+  gap: .5rem;
+  color: var(--muted-color);
+  background: rgba(255, 255, 255, .82);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  backdrop-filter: blur(2px);
+}
+.sqlite-table-host.is-loading > .data-preview {
+  opacity: .58;
+  pointer-events: none;
+}
+
+/* Keep PDF controls anchored to the viewport while the canvas changes width. */
+.pdf-toolbar-rail {
+  position: fixed;
+  top: calc(var(--preview-header-height, 62px) + .35rem);
+  right: 0;
+  left: 0;
+  z-index: 40;
+  display: flex;
+  justify-content: center;
+  padding-inline: max(.5rem, env(safe-area-inset-left));
+  pointer-events: none;
+}
+.pdf-toolbar-rail .pdf-toolbar {
+  position: static;
+  top: auto;
+  max-width: calc(100vw - 1rem);
+  transform: none;
+  pointer-events: auto;
+}
+.pdf-toolbar-spacer {
+  width: 100%;
+  height: 48px;
+  flex: 0 0 48px;
+}
+.sqlite-preview > .sqlite-table-controls,
+.sqlite-preview > .sqlite-query-toolbar {
+  width: 100%;
+  min-height: auto;
+  overflow: visible;
+}
+.sqlite-preview > .sqlite-table-host {
+  display: block;
+  width: 100%;
+  min-height: 180px;
+  flex: 0 0 auto;
+  overflow: visible;
+}
+
+/* Permission icons act as one compact control and open one complete summary. */
+.storage-switcher-permissions.is-interactive {
+  padding: .12rem .18rem;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.storage-switcher-permissions.is-interactive:hover,
+.storage-switcher-permissions.is-interactive:focus-visible {
+  background: #eef6ff;
+  border-color: #d6e9ff;
+  outline: 0;
+}
+.storage-switcher-permissions.is-interactive .storage-permission-dot { pointer-events: none; }
+.storage-switcher-trigger .storage-permission-dot[role="button"] { cursor: default; }
+.bb-permission-summary { display: grid; gap: .45rem; }
+.bb-permission-summary-row {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: .65rem;
+  padding: .58rem .65rem;
+  background: #f8fafc;
+  border: 1px solid #e4e9f0;
+  border-radius: 8px;
+}
+.bb-permission-summary-icon {
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  color: #98a2b3;
+  background: #fff;
+  border-radius: 8px;
+  font-size: 1.05rem;
+}
+.bb-permission-summary-icon.is-allowed { color: var(--primary-color); }
+.bb-permission-summary-copy { display: flex; min-width: 0; flex-direction: column; gap: .08rem; }
+.bb-permission-summary-copy strong { color: #243244; font-size: .88rem; }
+.bb-permission-summary-copy small { color: #667085; font-size: .72rem; }
+
+/* Release identity is embedded in the binary and exposed in global navigation. */
+.build-version {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: .28rem;
+  max-width: 170px;
+  padding: .22rem .42rem;
+  overflow: hidden;
+  color: #7b8799;
+  background: #f8fafc;
+  border: 1px solid #e4e9f0;
+  border-radius: 999px;
+  font-size: .68rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.build-version .mdi { flex: 0 0 auto; color: #98a2b3; font-size: .82rem; }
+.build-version span { overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 760px) {
+  .build-version { max-width: 120px; }
+}
+
+/* Count totals only after an explicit action for potentially huge JSON documents. */
+.json-count-button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: .35rem;
+  white-space: nowrap;
+}
+.json-count-button:disabled { cursor: progress; opacity: .72; }
+.preview-build-version { flex: 0 0 auto; }

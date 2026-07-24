@@ -55,22 +55,44 @@
     const panel = document.createElement('section');
     panel.className = `json-panel json-${mode}-panel`;
 
-    const toolbar = document.createElement('div');
-    toolbar.className = 'json-toolbar data-toolbar';
+    const pager = document.createElement('div');
+    pager.className = 'json-toolbar json-inline-pager';
     const range = document.createElement('span');
     range.className = 'json-range-label';
     const previous = makeButton('chevron-left', 'Previous page');
     const next = makeButton('chevron-right', 'Next page');
-    toolbar.append(range, previous, next);
+    pager.append(range, previous, next);
 
     const host = document.createElement('div');
     host.className = 'json-text-host';
-    panel.append(toolbar, host);
+    panel.append(host);
 
     const cursors = [''];
     let pageIndex = 0;
     let current = null;
     let generation = 0;
+
+    function totals() {
+      const summary = view.summary;
+      if (!summary) return null;
+      return mode === 'raw'
+        ? { lines: Number(summary.rawLines || 0), pages: Number(summary.rawPages || 0) }
+        : { lines: Number(summary.beautifyLines || 0), pages: Number(summary.beautifyPages || 0) };
+    }
+
+    function updateRangeLabel() {
+      if (!current) {
+        range.textContent = mode === 'raw' ? 'Raw JSON' : 'Beautified JSON';
+        return;
+      }
+      const lineStart = Math.max(1, Number(current.lineStart) || 1);
+      const lineEnd = Math.max(lineStart, Number(current.lineEnd) || lineStart);
+      const known = totals();
+      const lineSuffix = known?.lines > 0 ? ` of ${known.lines.toLocaleString()}` : '';
+      const pageSuffix = known?.pages > 0 ? ` of ${known.pages.toLocaleString()}` : '';
+      const counting = view.summaryState === 'loading' ? ' · counting totals…' : '';
+      range.textContent = `Lines ${lineStart.toLocaleString()}–${lineEnd.toLocaleString()}${lineSuffix} · page ${(pageIndex + 1).toLocaleString()}${pageSuffix}${counting}`;
+    }
 
     async function loadPage(index) {
       const target = Math.max(0, Math.min(cursors.length - 1, Number(index) || 0));
@@ -93,17 +115,17 @@
           : await BB.api.jsonBeautify(request);
         if (localGeneration !== generation) return;
         current = payload;
-        const lineStart = Math.max(1, Number(payload.lineStart) || 1);
-        const lineEnd = Math.max(lineStart, Number(payload.lineEnd) || lineStart);
-        range.textContent = `Lines ${lineStart.toLocaleString()}–${lineEnd.toLocaleString()} · page ${(target + 1).toLocaleString()}`;
         host.className = 'json-text-host';
         host.replaceChildren(BB.render.renderWrappedCode(payload.text || '', 'json', {
-          startLine: lineStart,
-          continued: payload.continued === true
+          startLine: Math.max(1, Number(payload.lineStart) || 1),
+          continued: payload.continued === true,
+          startInString: payload.startInString === true,
+          startEscaped: payload.startEscaped === true
         }));
         previous.disabled = target <= 0;
         next.disabled = payload.done === true || !payload.nextCursor;
         if (payload.nextCursor) cursors[target + 1] = payload.nextCursor;
+        updateRangeLabel();
       } catch (error) {
         if (error?.name === 'AbortError') return;
         host.className = 'json-text-host is-error';
@@ -123,6 +145,8 @@
       }
     });
 
+    panel.pager = pager;
+    panel.refreshSummary = updateRangeLabel;
     panel.load = () => loadPage(pageIndex);
     panel.reset = () => {
       cursors.splice(1);
@@ -157,7 +181,23 @@
     type.textContent = node.type;
     const preview = document.createElement('span');
     preview.className = 'json-tree-preview';
-    preview.textContent = node.preview || (node.type === 'object' ? '{…}' : node.type === 'array' ? '[…]' : '');
+    function containerPreview(count, known) {
+      const numeric = Math.max(0, Number(count) || 0);
+      if (node.type === 'array') {
+        if (known) return `[${numeric.toLocaleString()} element${numeric === 1 ? '' : 's'}]`;
+        if (numeric > 0) return `[${numeric.toLocaleString()}+ elements]`;
+        return '[…]';
+      }
+      if (node.type === 'object') {
+        if (known) return `{${numeric.toLocaleString()} propert${numeric === 1 ? 'y' : 'ies'}}`;
+        if (numeric > 0) return `{${numeric.toLocaleString()}+ properties}`;
+        return '{…}';
+      }
+      return node.preview || '';
+    }
+    preview.textContent = node.container
+      ? containerPreview(node.count, node.countKnown === true)
+      : (node.preview || '');
     line.append(toggle, key, type, preview);
 
     const children = document.createElement('div');
@@ -184,6 +224,9 @@
       cursor = Math.max(0, Number(payload.cursor) || 0);
       nextIndex = Math.max(0, Number(payload.nextIndex) || 0);
       done = payload.done === true;
+      const knownCount = payload.node?.countKnown === true;
+      const displayedCount = knownCount ? Number(payload.node?.count || nextIndex) : nextIndex;
+      if (node.container) preview.textContent = containerPreview(displayedCount, knownCount || done);
       initialized = true;
       if (!done && cursor > 0) {
         const more = makeButton('dots-horizontal', 'Load more', 'json-tree-more');
@@ -288,7 +331,14 @@
   function renderJSON(input, fallbackSize) {
     const options = normalizeOptions(input, fallbackSize);
     const abortController = new AbortController();
-    const view = { ...options, signal: abortController.signal };
+    const view = {
+      ...options,
+      signal: abortController.signal,
+      summary: null,
+      summaryState: 'idle',
+      summaryPromise: null,
+      ensureSummary: null
+    };
     const root = document.createElement('div');
     root.className = 'json-preview';
 
@@ -314,7 +364,10 @@
       select.appendChild(option);
     }
     mobile.append(mobileLabel, select);
-    controls.append(tabs, mobile);
+    const countButton = makeButton('counter', 'Count lines and pages', 'json-tool-button json-count-button');
+    const pagerHost = document.createElement('div');
+    pagerHost.className = 'json-active-pager';
+    controls.append(tabs, mobile, countButton, pagerHost);
 
     const rawPanel = createTextPager(view, 'raw');
     const beautifyPanel = createTextPager(view, 'beautify');
@@ -326,6 +379,43 @@
     const panels = { raw: rawPanel, beautify: beautifyPanel, tree: treePanel };
     const loaded = new Set();
 
+    view.ensureSummary = () => {
+      if (view.summaryPromise) return view.summaryPromise;
+      view.summaryState = 'loading';
+      countButton.disabled = true;
+      countButton.querySelector('i').className = 'mdi mdi-loading mdi-spin';
+      countButton.querySelector('span').textContent = 'Counting…';
+      rawPanel.refreshSummary?.();
+      beautifyPanel.refreshSummary?.();
+      view.summaryPromise = BB.api.jsonSummary({
+        key: view.key,
+        etag: view.etag,
+        instance: view.instance,
+        signal: view.signal
+      }).then(summary => {
+        view.summary = summary || null;
+        view.summaryState = 'ready';
+        countButton.querySelector('i').className = 'mdi mdi-check';
+        countButton.querySelector('span').textContent = 'Totals ready';
+        countButton.title = 'Line and page totals have been calculated';
+        rawPanel.refreshSummary?.();
+        beautifyPanel.refreshSummary?.();
+        return summary;
+      }).catch(error => {
+        if (error?.name !== 'AbortError') console.warn('Unable to count JSON lines and pages', error);
+        view.summaryState = 'error';
+        view.summaryPromise = null;
+        countButton.disabled = false;
+        countButton.querySelector('i').className = 'mdi mdi-alert-circle-outline';
+        countButton.querySelector('span').textContent = 'Count failed';
+        rawPanel.refreshSummary?.();
+        beautifyPanel.refreshSummary?.();
+        return null;
+      });
+      return view.summaryPromise;
+    };
+    countButton.addEventListener('click', () => void view.ensureSummary());
+
     function selectMode(mode) {
       const selected = panels[mode] ? mode : 'raw';
       for (const [name, button] of Object.entries(buttons)) {
@@ -335,6 +425,8 @@
         panels[name].hidden = !active;
       }
       select.value = selected;
+      pagerHost.replaceChildren();
+      if (panels[selected]?.pager) pagerHost.appendChild(panels[selected].pager);
       if (!loaded.has(selected)) {
         loaded.add(selected);
         void panels[selected].load?.();

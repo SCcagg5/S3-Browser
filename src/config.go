@@ -16,11 +16,12 @@ const (
 )
 
 type appConfig struct {
-	Listen     string
-	DataDir    string
-	Storages   []storageConfig
-	SourceDir  string
-	SourceName string
+	Listen          string
+	DataDir         string
+	JobHistoryLimit int
+	Storages        []storageConfig
+	SourceDir       string
+	SourceName      string
 }
 
 type storageConfig struct {
@@ -95,10 +96,11 @@ func decodeConfig(data, sourceName, sourceDir string) (appConfig, error) {
 	}
 
 	cfg := appConfig{
-		Listen:     ":8080",
-		DataDir:    filepath.Join(sourceDir, ".s3-browser-data"),
-		SourceDir:  sourceDir,
-		SourceName: sourceName,
+		Listen:          ":8080",
+		DataDir:         filepath.Join(sourceDir, ".s3-browser-data"),
+		JobHistoryLimit: 100,
+		SourceDir:       sourceDir,
+		SourceName:      sourceName,
 	}
 
 	var serverSeen bool
@@ -113,10 +115,10 @@ func decodeConfig(data, sourceName, sourceDir string) (appConfig, error) {
 			if len(block.Labels) != 0 {
 				return appConfig{}, block.errorf("server block does not accept labels")
 			}
-			if err := rejectUnknownAttrs(block, "listen", "data_dir"); err != nil {
+			if err := rejectUnknownAttrs(block, "listen", "data_dir", "job_history_limit"); err != nil {
 				return appConfig{}, err
 			}
-			if err := requireAttrKinds(block, map[string]hclValueKind{"listen": hclString, "data_dir": hclString}); err != nil {
+			if err := requireAttrKinds(block, map[string]hclValueKind{"listen": hclString, "data_dir": hclString, "job_history_limit": hclNumber}); err != nil {
 				return appConfig{}, err
 			}
 			if value, ok := block.stringAttr("listen"); ok {
@@ -131,6 +133,12 @@ func decodeConfig(data, sourceName, sourceDir string) (appConfig, error) {
 					value = filepath.Join(sourceDir, value)
 				}
 				cfg.DataDir = filepath.Clean(value)
+			}
+			if value, ok := block.intAttr("job_history_limit"); ok {
+				if value < 1 || value > 10000 {
+					return appConfig{}, block.errorf("server.job_history_limit must be between 1 and 10000")
+				}
+				cfg.JobHistoryLimit = int(value)
 			}
 		case "storage":
 			if len(block.Labels) != 1 {
@@ -445,7 +453,7 @@ func requireAttrKinds(block hclBlock, kinds map[string]hclValueKind) error {
 		if !ok || attr.Value.Kind == kind {
 			continue
 		}
-		want := map[hclValueKind]string{hclString: "a quoted string", hclBool: "a boolean", hclList: "a string list"}[kind]
+		want := map[hclValueKind]string{hclString: "a quoted string", hclBool: "a boolean", hclList: "a string list", hclNumber: "an integer"}[kind]
 		return fmt.Errorf("line %d:%d: attribute %q must be %s", attr.Line, attr.Column, name, want)
 	}
 	return nil
@@ -469,8 +477,8 @@ func containsString(values []string, target string) bool {
 }
 
 // The parser below intentionally supports the small, documented HCL subset used
-// by this project: blocks, quoted labels, attributes, strings, booleans and
-// string lists. Keeping it local avoids pulling a full HCL dependency into the
+// by this project: blocks, quoted labels, attributes, strings, integers,
+// booleans and string lists. Keeping it local avoids pulling a full HCL dependency into the
 // single static binary.
 
 type hclValueKind int
@@ -479,6 +487,7 @@ const (
 	hclString hclValueKind = iota
 	hclBool
 	hclList
+	hclNumber
 )
 
 type hclValue struct {
@@ -486,6 +495,7 @@ type hclValue struct {
 	String string
 	Bool   bool
 	List   []hclValue
+	Number int64
 	Line   int
 	Column int
 }
@@ -529,6 +539,14 @@ func (b hclBlock) boolAttr(name string) (bool, bool) {
 	return attr.Value.Bool, true
 }
 
+func (b hclBlock) intAttr(name string) (int64, bool) {
+	attr, ok := b.Attrs[name]
+	if !ok || attr.Value.Kind != hclNumber {
+		return 0, false
+	}
+	return attr.Value.Number, true
+}
+
 func (b hclBlock) stringListAttr(name string) ([]string, bool) {
 	attr, ok := b.Attrs[name]
 	if !ok || attr.Value.Kind != hclList {
@@ -550,6 +568,7 @@ const (
 	tokenEOF hclTokenKind = iota
 	tokenIdent
 	tokenString
+	tokenNumber
 	tokenLBrace
 	tokenRBrace
 	tokenLBracket
@@ -607,6 +626,13 @@ func (l *hclLexer) nextToken() (hclToken, error) {
 	case '"':
 		return l.scanString()
 	default:
+		if ch >= '0' && ch <= '9' {
+			start := l.pos
+			for l.pos < len(l.source) && l.source[l.pos] >= '0' && l.source[l.pos] <= '9' {
+				l.advanceByte()
+			}
+			return hclToken{Kind: tokenNumber, Text: l.source[start:l.pos], Line: line, Column: column}, nil
+		}
 		if isIdentStart(rune(ch)) {
 			start := l.pos
 			for l.pos < len(l.source) && isIdentPart(rune(l.source[l.pos])) {
@@ -798,6 +824,12 @@ func (p *hclParser) parseValue() (hclValue, error) {
 	switch tok.Kind {
 	case tokenString:
 		return hclValue{Kind: hclString, String: tok.Text, Line: tok.Line, Column: tok.Column}, nil
+	case tokenNumber:
+		value, parseErr := strconv.ParseInt(tok.Text, 10, 64)
+		if parseErr != nil {
+			return hclValue{}, fmt.Errorf("line %d:%d: invalid integer %q", tok.Line, tok.Column, tok.Text)
+		}
+		return hclValue{Kind: hclNumber, Number: value, Line: tok.Line, Column: tok.Column}, nil
 	case tokenIdent:
 		switch tok.Text {
 		case "true":

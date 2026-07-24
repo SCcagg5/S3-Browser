@@ -198,7 +198,7 @@
   }
 
   function detectDelimiter(text, extension) {
-    if (extension === 'tsv') return '\t';
+    if (extension === 'tsv' || extension === 'tab') return '\t';
     if (extension === 'psv') return '|';
     const candidates = [',', ';', '\t', '|'];
     return candidates.sort((a, b) => delimiterScore(text, b) - delimiterScore(text, a))[0];
@@ -312,7 +312,11 @@
     onPage,
     note = '',
     queryTools = null,
-    beforeTable = null
+    beforeTable = null,
+    hasNext = false,
+    rangeStart = null,
+    rangeEnd = null,
+    emptyMessage = ''
   }) {
     const wrapper = document.createElement('section');
     wrapper.className = queryTools ? 'data-preview has-query-tools' : 'data-preview';
@@ -321,14 +325,24 @@
     toolbar.className = 'data-preview-toolbar';
     const summary = document.createElement('span');
     summary.className = 'data-preview-summary';
-    const knownTotal = Number.isFinite(totalRows) ? Number(totalRows) : rows.length;
-    const sourceTotal = Number.isFinite(sourceTotalRows) ? Number(sourceTotalRows) : knownTotal;
-    const start = knownTotal === 0 ? 0 : page * pageSize + 1;
-    const end = knownTotal === 0 ? 0 : Math.min(page * pageSize + rows.length, knownTotal);
-    const rowCount = sourceTotal !== knownTotal
-      ? `${knownTotal.toLocaleString()} of ${sourceTotal.toLocaleString()} row(s)`
-      : `${knownTotal.toLocaleString()} row(s)`;
-    summary.textContent = `${rowCount} · ${headers.length.toLocaleString()} column(s) · showing ${start}–${end}`;
+    const totalKnown = Number.isFinite(totalRows);
+    const knownTotal = totalKnown ? Math.max(0, Number(totalRows)) : null;
+    const sourceTotalKnown = Number.isFinite(sourceTotalRows);
+    const sourceTotal = sourceTotalKnown ? Math.max(0, Number(sourceTotalRows)) : knownTotal;
+    const calculatedStart = rows.length ? page * pageSize + 1 : 0;
+    const calculatedEnd = rows.length ? page * pageSize + rows.length : 0;
+    const start = Number.isFinite(rangeStart) ? Math.max(0, Number(rangeStart)) : calculatedStart;
+    const end = Number.isFinite(rangeEnd) ? Math.max(0, Number(rangeEnd)) : (totalKnown ? Math.min(calculatedEnd, knownTotal) : calculatedEnd);
+    const rowWord = value => Number(value) === 1 ? 'row' : 'rows';
+    const columnWord = value => Number(value) === 1 ? 'column' : 'columns';
+    if (totalKnown) {
+      const rowCount = sourceTotalKnown && sourceTotal !== knownTotal
+        ? `${knownTotal.toLocaleString()} of ${sourceTotal.toLocaleString()} ${rowWord(sourceTotal)}`
+        : `${knownTotal.toLocaleString()} ${rowWord(knownTotal)}`;
+      summary.textContent = `${rowCount} · ${headers.length.toLocaleString()} ${columnWord(headers.length)} · showing ${start.toLocaleString()}–${end.toLocaleString()}`;
+    } else {
+      summary.textContent = `${headers.length.toLocaleString()} ${columnWord(headers.length)} · showing ${start.toLocaleString()}–${end.toLocaleString()}`;
+    }
     toolbar.appendChild(summary);
 
     const controls = document.createElement('div');
@@ -336,21 +350,28 @@
 
     if (queryTools) {
       const activeColumnFilters = (queryTools.filters || []).filter(value => String(value || '').trim()).length;
-      const filterToggle = document.createElement('button');
-      filterToggle.type = 'button';
-      filterToggle.className = `data-tool-button${queryTools.showFilters || activeColumnFilters ? ' is-active' : ''}`;
-      filterToggle.append(createIcon('filter-variant'), document.createTextNode(activeColumnFilters ? `Filters (${activeColumnFilters})` : 'Filters'));
-      filterToggle.setAttribute('aria-pressed', queryTools.showFilters ? 'true' : 'false');
-      filterToggle.addEventListener('click', queryTools.onToggleFilters);
+      const allowFilters = queryTools.allowFilters !== false;
+      if (allowFilters) {
+        const filterToggle = document.createElement('button');
+        filterToggle.type = 'button';
+        filterToggle.className = `data-tool-button${queryTools.showFilters || activeColumnFilters ? ' is-active' : ''}`;
+        filterToggle.append(createIcon('filter-variant'), document.createTextNode(activeColumnFilters ? `Filters (${activeColumnFilters})` : 'Filters'));
+        filterToggle.setAttribute('aria-pressed', queryTools.showFilters ? 'true' : 'false');
+        filterToggle.addEventListener('click', queryTools.onToggleFilters);
+        controls.appendChild(filterToggle);
+      }
 
-      const hasQuery = activeColumnFilters > 0 || !!queryTools.sortDirection;
-      const clear = document.createElement('button');
-      clear.type = 'button';
-      clear.className = 'data-tool-button';
-      clear.disabled = !hasQuery;
-      clear.title = 'Clear column filters and sorting';
-      clear.append(createIcon('filter-remove-outline'), document.createTextNode('Clear'));
-      clear.addEventListener('click', queryTools.onClear);
+      const hasQuery = activeColumnFilters > 0 || !!queryTools.sortDirection || !!String(queryTools.globalQuery || '').trim();
+      let clear = null;
+      if (queryTools.showClear !== false) {
+        clear = document.createElement('button');
+        clear.type = 'button';
+        clear.className = 'data-tool-button';
+        clear.disabled = !hasQuery;
+        clear.title = 'Clear column filters and sorting';
+        clear.append(createIcon('filter-remove-outline'), document.createTextNode('Clear'));
+        clear.addEventListener('click', queryTools.onClear);
+      }
 
       const pageSizeLabel = document.createElement('label');
       pageSizeLabel.className = 'data-page-size';
@@ -367,13 +388,23 @@
       });
       pageSizeSelect.addEventListener('change', event => queryTools.onPageSize(Number(event.target.value)));
       pageSizeLabel.append(pageSizeText, pageSizeSelect);
-      controls.append(filterToggle, clear, pageSizeLabel);
+      if (clear) controls.appendChild(clear);
+      controls.appendChild(pageSizeLabel);
+      if (typeof queryTools.onCount === 'function') {
+        const count = document.createElement('button');
+        count.type = 'button';
+        count.className = 'data-tool-button';
+        count.disabled = !!queryTools.counting;
+        count.append(createIcon(queryTools.counting ? 'loading mdi-spin' : 'counter'), document.createTextNode(queryTools.countLabel || 'Count rows'));
+        count.addEventListener('click', queryTools.onCount);
+        controls.appendChild(count);
+      }
     }
 
     if (onPage) {
       const pagination = document.createElement('div');
       pagination.className = 'data-preview-pagination';
-      const totalPages = Math.max(1, Math.ceil(knownTotal / pageSize));
+      const totalPages = totalKnown ? Math.max(1, Math.ceil(knownTotal / pageSize)) : null;
       const previous = document.createElement('button');
       previous.type = 'button';
       previous.className = 'bb-btn';
@@ -384,14 +415,16 @@
       previous.addEventListener('click', () => onPage(page - 1));
       const pageLabel = document.createElement('span');
       pageLabel.className = 'data-preview-page-label';
-      pageLabel.textContent = `${Math.min(page + 1, totalPages)} / ${totalPages}`;
+      pageLabel.textContent = totalKnown
+        ? `Page ${Math.min(page + 1, totalPages).toLocaleString()} of ${totalPages.toLocaleString()}`
+        : `Page ${(page + 1).toLocaleString()}`;
       const next = document.createElement('button');
       next.type = 'button';
       next.className = 'bb-btn';
       next.title = 'Next page';
       next.setAttribute('aria-label', 'Next page');
       next.appendChild(createIcon('chevron-right'));
-      next.disabled = end >= knownTotal;
+      next.disabled = totalKnown ? end >= knownTotal : !hasNext;
       next.addEventListener('click', () => onPage(page + 1));
       pagination.append(previous, pageLabel, next);
       controls.appendChild(pagination);
@@ -422,7 +455,7 @@
     headers.forEach((header, columnIndex) => {
       const cell = document.createElement('th');
       cell.title = header;
-      if (queryTools) {
+      if (queryTools && queryTools.allowSort !== false) {
         const heading = document.createElement('div');
         heading.className = 'data-column-heading';
         const sortButton = document.createElement('button');
@@ -487,13 +520,14 @@
       emptyRow.className = 'data-empty-row';
       const emptyCell = document.createElement('td');
       emptyCell.colSpan = headers.length + 1;
-      emptyCell.textContent = queryTools ? 'No rows match the current filters.' : 'No rows are available.';
+      emptyCell.textContent = emptyMessage || (queryTools ? 'No rows match the current filters.' : 'No rows are available.');
       emptyRow.appendChild(emptyCell);
       body.appendChild(emptyRow);
     }
     table.appendChild(body);
     scroller.appendChild(table);
     wrapper.appendChild(scroller);
+    BB.render?.forwardVerticalWheel?.(scroller);
     return wrapper;
   }
 
@@ -505,7 +539,8 @@
       filters: parsed.headers.map(() => ''),
       showFilters: false,
       sortColumn: -1,
-      sortDirection: ''
+      sortDirection: '',
+      globalQuery: ''
     };
     let redrawTimer = 0;
 
@@ -553,6 +588,7 @@
           showFilters: state.showFilters,
           sortColumn: state.sortColumn,
           sortDirection: state.sortDirection,
+          globalQuery: state.globalQuery,
           onColumnFilter(columnIndex, value) {
             state.filters[columnIndex] = String(value || '');
             scheduleDraw({ type: 'column', column: columnIndex });
@@ -588,6 +624,7 @@
             state.filters = parsed.headers.map(() => '');
             state.sortColumn = -1;
             state.sortDirection = '';
+            state.globalQuery = '';
             draw(0, null, true);
           }
         },
@@ -601,18 +638,222 @@
       }
       restoreFocus(focus);
     };
+    root.documentSearch = async query => {
+      state.globalQuery = String(query || '').trim();
+      draw(0, null, true);
+    };
     draw(0);
     return root;
   }
 
-  async function fetchTextTable(url, key, size) {
-    if (Number(size) > MAX_TEXT_BYTES) {
-      throw new Error(`Text table previews are limited to ${Math.round(MAX_TEXT_BYTES / 1024 / 1024)} MiB. Download this file for full processing.`);
+  function remoteDelimitedNote(payload, state) {
+    const notes = ['Rows are read on demand; the complete object is not loaded into browser memory.'];
+    if (payload?.truncatedColumns) notes.push(`Preview limited to the first ${MAX_COLUMNS} columns.`);
+    if (payload?.truncatedCells) notes.push('Very large cell values are shortened in the preview; the object is unchanged.');
+    if (state.totalRows == null) notes.push('Use Count rows to scan the complete document only when an exact total is needed.');
+    return notes.join(' ');
+  }
+
+  function createRemoteDelimitedTable({ key, size, etag = '', instance = null } = {}) {
+    const root = document.createElement('div');
+    const state = {
+      page: 0,
+      pageSize: DEFAULT_PAGE_SIZE,
+      pages: [],
+      headers: [],
+      totalRows: null,
+      totalColumns: null,
+      counting: false,
+      searchQuery: '',
+      searchResult: null,
+      controller: null,
+      serial: 0
+    };
+
+    function loading(label) {
+      const node = document.createElement('div');
+      node.className = 'preview-loading data-loading';
+      node.append(createIcon('loading mdi-spin'), document.createTextNode(label));
+      root.replaceChildren(node);
     }
-    const response = await fetch(url, { headers: { Range: `bytes=0-${MAX_TEXT_BYTES - 1}` } });
+
+    function resetPages() {
+      state.page = 0;
+      state.pages = [];
+      state.searchQuery = '';
+      state.searchResult = null;
+    }
+
+    async function countRows() {
+      if (state.counting) return;
+      state.counting = true;
+      drawLoadedPage();
+      try {
+        const result = await BB.api.documentCount({ key, instance, signal: state.controller?.signal || null });
+        state.totalRows = Number(result.rows || 0);
+        state.totalColumns = Number(result.columns || state.headers.length || 0);
+      } finally {
+        state.counting = false;
+        drawLoadedPage();
+      }
+    }
+
+    function normalQueryTools() {
+      return {
+        allowFilters: false,
+        allowSort: false,
+        showClear: false,
+        filters: state.headers.map(() => ''),
+        showFilters: false,
+        sortColumn: -1,
+        sortDirection: '',
+        globalQuery: '',
+        onToggleFilters() {},
+        onColumnFilter() {},
+        onSort() {},
+        onClear() {},
+        onPageSize(value) {
+          if (!PAGE_SIZE_OPTIONS.includes(value) || value === state.pageSize) return;
+          state.pageSize = value;
+          resetPages();
+          void loadPage(0).catch(error => showTableError(root, error));
+        },
+        onCount: countRows,
+        counting: state.counting,
+        countLabel: state.totalRows == null ? 'Count rows' : `${state.totalRows.toLocaleString()} rows`
+      };
+    }
+
+    function drawSearchResult() {
+      const result = state.searchResult;
+      if (!result) return false;
+      const matches = Array.from(result.matches || []);
+      const note = `Search scanned ${Number(result.bytesScanned || 0).toLocaleString()} bytes across the complete document. ${Number(result.total || 0).toLocaleString()} match${Number(result.total || 0) === 1 ? '' : 'es'} found${result.truncated ? '; only the first results are retained' : ''}.`;
+      root.replaceChildren(renderTable({
+        headers: ['Match'],
+        rows: matches.map(match => [String(match.snippet || '')]),
+        rowNumbers: matches.map(match => Number(match.line || 0) || '—'),
+        totalRows: matches.length,
+        sourceTotalRows: Number(result.total || matches.length),
+        page: 0,
+        pageSize: Math.max(1, matches.length || DEFAULT_PAGE_SIZE),
+        note,
+        queryTools: {
+          allowFilters: false,
+          allowSort: false,
+          showClear: true,
+          filters: [''],
+          showFilters: false,
+          sortColumn: -1,
+          sortDirection: '',
+          globalQuery: state.searchQuery,
+          onToggleFilters() {},
+          onColumnFilter() {},
+          onSort() {},
+          onPageSize() {},
+          onClear() {
+            state.searchQuery = '';
+            state.searchResult = null;
+            drawLoadedPage();
+          }
+        }
+      }));
+      return true;
+    }
+
+    function drawLoadedPage() {
+      if (drawSearchResult()) return;
+      const payload = state.pages[state.page];
+      if (!payload) return;
+      if (Array.isArray(payload.headers) && payload.headers.length) state.headers = payload.headers;
+      const logicalStart = payload.rows?.length ? state.page * state.pageSize + 1 : 0;
+      const logicalEnd = logicalStart ? logicalStart + payload.rows.length - 1 : 0;
+      root.replaceChildren(renderTable({
+        headers: state.headers,
+        rows: payload.rows || [],
+        rowNumbers: payload.rowNumbers || [],
+        totalRows: state.totalRows == null ? undefined : state.totalRows,
+        sourceTotalRows: state.totalRows == null ? undefined : state.totalRows,
+        page: state.page,
+        pageSize: state.pageSize,
+        rangeStart: logicalStart,
+        rangeEnd: logicalEnd,
+        hasNext: !payload.done,
+        onPage: page => void loadPage(page).catch(error => showTableError(root, error)),
+        note: remoteDelimitedNote(payload, state),
+        queryTools: normalQueryTools(),
+        emptyMessage: 'No data rows are available.'
+      }));
+    }
+
+    async function loadPage(page) {
+      const nextPage = Math.max(0, Number(page) || 0);
+      if (state.pages[nextPage]) {
+        state.page = nextPage;
+        drawLoadedPage();
+        return;
+      }
+      if (nextPage > 0 && !state.pages[nextPage - 1]?.nextCursor) return;
+      const serial = ++state.serial;
+      state.controller?.abort();
+      state.controller = new AbortController();
+      loading('Reading table rows…');
+      const payload = await BB.api.delimitedPage({
+        key,
+        cursor: nextPage > 0 ? state.pages[nextPage - 1].nextCursor : '',
+        etag,
+        pageSize: state.pageSize,
+        instance,
+        signal: state.controller.signal
+      });
+      if (serial !== state.serial) return;
+      state.pages[nextPage] = payload;
+      if (Array.isArray(payload.headers) && payload.headers.length) state.headers = payload.headers;
+      state.page = nextPage;
+      drawLoadedPage();
+    }
+
+    root.documentSearch = async query => {
+      const normalized = String(query || '').trim();
+      if (!normalized) {
+        state.searchQuery = '';
+        state.searchResult = null;
+        drawLoadedPage();
+        return;
+      }
+      const serial = ++state.serial;
+      state.controller?.abort();
+      state.controller = new AbortController();
+      loading('Searching the complete document…');
+      const result = await BB.api.searchDocument({ key, query: normalized, instance, signal: state.controller.signal });
+      if (serial !== state.serial) return;
+      state.searchQuery = normalized;
+      state.searchResult = result;
+      drawSearchResult();
+    };
+    root.cleanup = () => state.controller?.abort();
+    void loadPage(0).catch(error => showTableError(root, error));
+    return root;
+  }
+
+  async function fetchTextTable(url, key, size, options = {}) {
+    const extension = BB.detect.extOf(key);
+    const streamable = ['csv', 'tsv', 'tab', 'psv'].includes(extension);
+    if (Number(size) > MAX_TEXT_BYTES && streamable) {
+      return createRemoteDelimitedTable({
+        key,
+        size,
+        etag: options.etag || '',
+        instance: options.instance ?? null
+      });
+    }
+    if (Number(size) > MAX_TEXT_BYTES) {
+      throw new Error(`Text table previews are limited to ${Math.round(MAX_TEXT_BYTES / 1024 / 1024)} MiB for this format.`);
+    }
+    const response = await fetch(url, { headers: { Range: `bytes=0-${MAX_TEXT_BYTES - 1}` }, cache: 'no-store' });
     if (!response.ok && response.status !== 206) throw new Error(`Unable to read table: HTTP ${response.status}`);
     const text = await response.text();
-    return createQueryableTable(parseTextTable(text, BB.detect.extOf(key)));
+    return createQueryableTable(parseTextTable(text, extension));
   }
 
   function loadSheetJS() {
@@ -797,6 +1038,7 @@
     const host = document.createElement('div');
     host.className = 'spreadsheet-sheet-host';
     const panels = new Map();
+    let activePanel = null;
     const descriptors = names.map((name, index) => {
       const visibility = spreadsheetVisibility(workbook, index);
       return { index, name, hidden: visibility.hidden === 2 ? 'veryHidden' : (visibility.hidden ? 'hidden' : '') };
@@ -813,9 +1055,13 @@
         panel.dataset.sheetIndex = String(bounded);
         panels.set(bounded, panel);
       }
+      activePanel = panel;
       host.replaceChildren(panel);
     };
 
+    root.documentSearch = async query => {
+      if (typeof activePanel?.documentSearch === 'function') await activePanel.documentSearch(query);
+    };
     root.appendChild(host);
     activate(0);
     return root;
@@ -831,7 +1077,8 @@
       filters: {},
       showFilters: false,
       sortColumn: '',
-      sortDirection: ''
+      sortDirection: '',
+      search: ''
     };
     let requestSerial = 0;
     let requestController = null;
@@ -880,6 +1127,7 @@
           filters: activeFilters(),
           sortColumn: state.sortColumn,
           sortDirection: state.sortDirection,
+          search: state.search,
           size: objectSize,
           signal: requestController.signal
         });
@@ -897,6 +1145,7 @@
         if (payload.truncatedRows) notes.push('The worksheet row scan reached the server preview limit.');
         if (payload.truncatedColumns) notes.push(`Preview limited to the first ${MAX_COLUMNS} non-empty columns.`);
         if (payload.macrosIgnored) notes.push('Workbook macros are not executed.');
+        if (state.search) notes.push(`Search: \"${state.search}\" across the complete worksheet.`);
 
         const activateSheet = index => {
           if (index === state.sheet) return;
@@ -905,6 +1154,7 @@
           state.filters = {};
           state.sortColumn = '';
           state.sortDirection = '';
+          state.search = '';
           void draw(0).catch(error => showTableError(root, error));
         };
 
@@ -924,6 +1174,7 @@
             showFilters: state.showFilters,
             sortColumn: sortColumnIndex,
             sortDirection: state.sortDirection,
+            globalQuery: state.search,
             onColumnFilter(columnIndex, value) {
               const header = headers[columnIndex];
               if (!header) return;
@@ -966,6 +1217,7 @@
               state.filters = {};
               state.sortColumn = '';
               state.sortDirection = '';
+              state.search = '';
               void draw(0, null, true).catch(error => showTableError(root, error));
             }
           }
@@ -988,6 +1240,10 @@
       }
     };
 
+    root.documentSearch = async query => {
+      state.search = String(query || '').trim();
+      await draw(0, null, true);
+    };
     await draw(0);
     return root;
   }
@@ -998,14 +1254,19 @@
     return renderLegacySpreadsheet(url, key, size);
   }
 
-  function remoteAsyncBuffer(url, byteLength) {
+  function remoteAsyncBuffer(url, byteLength, signalProvider = null) {
     return {
       byteLength,
       async slice(start, end) {
         const finalEnd = end == null ? byteLength : Math.min(end, byteLength);
         if (start < 0 || finalEnd < start) throw new RangeError('Invalid Parquet byte range.');
         if (finalEnd === start) return new ArrayBuffer(0);
-        const response = await fetch(url, { headers: { Range: `bytes=${start}-${finalEnd - 1}` } });
+        const signal = typeof signalProvider === 'function' ? signalProvider() : null;
+        const response = await fetch(url, {
+          headers: { Range: `bytes=${start}-${finalEnd - 1}` },
+          signal: signal || undefined,
+          cache: 'no-store'
+        });
         if (!response.ok && response.status !== 206) throw new Error(`Parquet range request failed: HTTP ${response.status}`);
         const buffer = await response.arrayBuffer();
         if (response.status === 200 && buffer.byteLength === byteLength) return buffer.slice(start, finalEnd);
@@ -1030,40 +1291,154 @@
       compressors = undefined;
     }
 
-    const file = remoteAsyncBuffer(url, Number(size));
+    let activeController = null;
+    const file = remoteAsyncBuffer(url, Number(size), () => activeController?.signal || null);
     const metadata = await parquet.parquetMetadataAsync(file);
     const schema = parquet.parquetSchema(metadata);
     const headers = (schema.children || []).map(child => child.element?.name || child.name).filter(Boolean).slice(0, MAX_COLUMNS);
     const totalRows = Number(metadata.num_rows || 0);
     const root = document.createElement('div');
+    const state = {
+      page: 0,
+      pageSize: DEFAULT_PAGE_SIZE,
+      query: '',
+      matches: null,
+      totalMatches: 0,
+      retainedLimit: 10000
+    };
     let requestSerial = 0;
 
-    const draw = async page => {
-      const serial = ++requestSerial;
-      const loading = document.createElement('div');
-      loading.className = 'preview-loading data-loading';
-      loading.innerHTML = '<i class="mdi mdi-loading mdi-spin"></i><span>Reading Parquet rows...</span>';
-      root.replaceChildren(loading);
-      const rowStart = page * DEFAULT_PAGE_SIZE;
-      const rowEnd = Math.min(rowStart + DEFAULT_PAGE_SIZE, totalRows);
+    function loading(label, detail = '') {
+      const node = document.createElement('div');
+      node.className = 'preview-loading data-loading';
+      const icon = document.createElement('i');
+      icon.className = 'mdi mdi-loading mdi-spin';
+      const copy = document.createElement('span');
+      copy.textContent = detail ? `${label} ${detail}` : label;
+      node.append(icon, copy);
+      root.replaceChildren(node);
+      return copy;
+    }
+
+    async function readRows(rowStart, rowEnd) {
       const options = { file, rowStart, rowEnd, columns: headers };
       if (compressors) options.compressors = compressors;
-      const objects = await parquet.parquetReadObjects(options);
-      if (serial !== requestSerial) return;
-      const rows = objects.map(object => headers.map(header => displayValue(object[header])));
-      const note = headers.length >= MAX_COLUMNS ? `Preview limited to the first ${MAX_COLUMNS} top-level columns.` : '';
-      root.replaceChildren(renderTable({
-        headers,
-        rows,
-        totalRows,
-        sourceTotalRows: totalRows,
-        page,
-        pageSize: DEFAULT_PAGE_SIZE,
-        onPage: next => draw(next).catch(error => showTableError(root, error)),
-        note
-      }));
-    };
+      return parquet.parquetReadObjects(options);
+    }
 
+    async function scan(query, serial) {
+      const normalized = String(query || '').trim().toLocaleLowerCase();
+      if (!normalized) {
+        state.matches = null;
+        state.totalMatches = 0;
+        return;
+      }
+      const progress = loading('Searching the complete Parquet document…');
+      const retained = [];
+      let totalMatches = 0;
+      const batchSize = 2048;
+      for (let rowStart = 0; rowStart < totalRows; rowStart += batchSize) {
+        if (serial !== requestSerial) return;
+        const rowEnd = Math.min(totalRows, rowStart + batchSize);
+        const objects = await readRows(rowStart, rowEnd);
+        if (serial !== requestSerial) return;
+        objects.forEach((object, localIndex) => {
+          const row = headers.map(header => displayValue(object[header]));
+          if (!row.some(value => value.toLocaleLowerCase().includes(normalized))) return;
+          totalMatches++;
+          if (retained.length < state.retainedLimit) retained.push({ row, rowNumber: rowStart + localIndex + 1 });
+        });
+        progress.textContent = `Searching the complete Parquet document… ${rowEnd.toLocaleString()} / ${totalRows.toLocaleString()} rows`;
+      }
+      state.matches = retained;
+      state.totalMatches = totalMatches;
+    }
+
+    async function draw(nextPage = state.page, options = {}) {
+      const serial = ++requestSerial;
+      activeController?.abort();
+      activeController = new AbortController();
+      state.page = Math.max(0, Number(nextPage) || 0);
+      try {
+        if (Object.prototype.hasOwnProperty.call(options, 'query')) {
+          state.query = String(options.query || '').trim();
+          state.page = 0;
+          await scan(state.query, serial);
+          if (serial !== requestSerial) return;
+        }
+
+        let rows;
+        let rowNumbers;
+        let total;
+        if (state.matches) {
+          const maximumPage = Math.max(0, Math.ceil(state.matches.length / state.pageSize) - 1);
+          state.page = Math.min(state.page, maximumPage);
+          const start = state.page * state.pageSize;
+          const pageEntries = state.matches.slice(start, start + state.pageSize);
+          rows = pageEntries.map(entry => entry.row);
+          rowNumbers = pageEntries.map(entry => entry.rowNumber);
+          total = state.matches.length;
+        } else {
+          const rowStart = state.page * state.pageSize;
+          const rowEnd = Math.min(rowStart + state.pageSize, totalRows);
+          loading('Reading Parquet rows…');
+          const objects = await readRows(rowStart, rowEnd);
+          if (serial !== requestSerial) return;
+          rows = objects.map(object => headers.map(header => displayValue(object[header])));
+          rowNumbers = rows.map((_, index) => rowStart + index + 1);
+          total = totalRows;
+        }
+
+        const notes = [];
+        if (headers.length >= MAX_COLUMNS) notes.push(`Preview limited to the first ${MAX_COLUMNS} top-level columns.`);
+        if (state.query) {
+          notes.push(`Search scanned all ${totalRows.toLocaleString()} rows.`);
+          if (state.totalMatches > state.matches.length) notes.push(`Showing the first ${state.matches.length.toLocaleString()} of ${state.totalMatches.toLocaleString()} matches to keep browser memory bounded.`);
+        }
+        root.replaceChildren(renderTable({
+          headers,
+          rows,
+          rowNumbers,
+          totalRows: total,
+          sourceTotalRows: state.query ? state.totalMatches : totalRows,
+          page: state.page,
+          pageSize: state.pageSize,
+          onPage: page => void draw(page).catch(error => showTableError(root, error)),
+          note: notes.join(' '),
+          queryTools: {
+            allowFilters: false,
+            allowSort: false,
+            filters: headers.map(() => ''),
+            showFilters: false,
+            sortColumn: -1,
+            sortDirection: '',
+            globalQuery: state.query,
+            onToggleFilters() {},
+            onColumnFilter() {},
+            onSort() {},
+            onPageSize(value) {
+              if (!PAGE_SIZE_OPTIONS.includes(value)) return;
+              state.pageSize = value;
+              void draw(0).catch(error => showTableError(root, error));
+            },
+            onClear() {
+              state.query = '';
+              state.matches = null;
+              state.totalMatches = 0;
+              void draw(0).catch(error => showTableError(root, error));
+            }
+          }
+        }));
+      } catch (error) {
+        if (error?.name === 'AbortError' || serial !== requestSerial) return;
+        throw error;
+      }
+    }
+
+    root.documentSearch = async query => {
+      await draw(0, { query });
+    };
+    root.cleanup = () => activeController?.abort();
     await draw(0);
     return root;
   }
@@ -1090,6 +1465,7 @@
     compareTableValues,
     applyTableQuery,
     fetchTextTable,
+    createRemoteDelimitedTable,
     renderSpreadsheet,
     renderParquet,
     renderTable,

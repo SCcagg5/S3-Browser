@@ -16,9 +16,16 @@ import (
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.LUTC)
-	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
-		runHealthcheck(os.Args[2:])
-		return
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "healthcheck":
+			runHealthcheck(os.Args[2:])
+			return
+		case "version", "--version", "-version":
+			info := currentBuildInfo()
+			fmt.Printf("s3-browser %s\n", info.Display)
+			return
+		}
 	}
 
 	flags := flag.NewFlagSet("s3-browser", flag.ExitOnError)

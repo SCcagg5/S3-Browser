@@ -9,8 +9,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -237,18 +235,18 @@ func TestMediaInfoUsesListedMIMEHintForExtensionlessImage(t *testing.T) {
 	}
 }
 
-func TestNonMediaDetailsUsesSingleHEAD(t *testing.T) {
+func TestTextDetailsStreamsObjectOnceAndCountsLines(t *testing.T) {
 	app, _, backend := testApplication(t)
 	backend.mu.Lock()
-	backend.objects["tenant/file.txt"] = memoryObject{data: []byte("hello"), contentType: "text/plain", modified: time.Now().UTC()}
+	backend.objects["tenant/file.txt"] = memoryObject{data: []byte("hello\nworld"), contentType: "text/plain", modified: time.Now().UTC()}
 	backend.mu.Unlock()
 
 	response := requestMediaInfo(t, app, "file.txt")
-	if response.Size != 5 || response.MIME != "text/plain" {
+	if response.Size != 11 || response.MIME != "text/plain" || response.Properties["Lines"] != "2" {
 		t.Fatalf("response = %+v", response)
 	}
 	gets, heads, ranges := backendReadCounts(backend)
-	if gets != 0 || heads != 1 || len(ranges) != 0 {
+	if gets != 1 || heads != 0 || len(ranges) != 1 || ranges[0] != "" {
 		t.Fatalf("GETs = %d, HEADs = %d, ranges = %#v", gets, heads, ranges)
 	}
 }
@@ -302,14 +300,8 @@ func TestRAFUsesEmbeddedJPEGForBoundedMetadataAndPreview(t *testing.T) {
 	}
 }
 
-func TestImagePreviewUsesImageMagickFallback(t *testing.T) {
-	if _, err := imageConverterPath(); err != nil {
-		t.Skip("ImageMagick is not installed")
-	}
+func TestImagePreviewRejectsFormatsWithoutEmbeddedPreview(t *testing.T) {
 	app, _, backend := testApplication(t)
-	// A two-pixel binary PPM is deliberately not browser-native in the viewer,
-	// so it exercises the generated JPEG fallback without requiring a
-	// proprietary RAW fixture in the repository.
 	data := append([]byte("P6\n2 1\n255\n"), []byte{255, 0, 0, 0, 255, 0}...)
 	backend.mu.Lock()
 	backend.objects["tenant/two-pixels.ppm"] = memoryObject{data: data, contentType: "image/x-portable-pixmap", modified: time.Now().UTC()}
@@ -317,21 +309,11 @@ func TestImagePreviewUsesImageMagickFallback(t *testing.T) {
 
 	recorder := httptest.NewRecorder()
 	app.routes().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/image-preview?instance=rw&key=two-pixels.ppm", nil))
-	if recorder.Code != http.StatusOK {
+	if recorder.Code != http.StatusNotImplemented {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
-	if contentType := recorder.Header().Get("Content-Type"); contentType != "image/jpeg" {
-		t.Fatalf("content type = %q", contentType)
-	}
-	if body := recorder.Body.Bytes(); len(body) < 4 || body[0] != 0xff || body[1] != 0xd8 {
-		t.Fatalf("generated preview is not JPEG: %x", body)
-	}
-	entries, err := os.ReadDir(filepath.Join(app.config.DataDir, "image-preview-tmp"))
-	if err != nil && !os.IsNotExist(err) {
-		t.Fatal(err)
-	}
-	if len(entries) != 0 {
-		t.Fatalf("request-scoped image preview files were retained: %+v", entries)
+	if !strings.Contains(recorder.Body.String(), "embedded JPEG preview") {
+		t.Fatalf("body = %s", recorder.Body.String())
 	}
 }
 

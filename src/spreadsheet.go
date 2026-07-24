@@ -103,6 +103,7 @@ type spreadsheetQuery struct {
 	page          int
 	pageSize      int
 	filters       map[int]string
+	globalSearch  string
 	sortColumn    int
 	sortDirection string
 }
@@ -185,10 +186,14 @@ func (a *application) handleSpreadsheet(w http.ResponseWriter, r *http.Request) 
 
 func parseSpreadsheetQuery(r *http.Request) (spreadsheetQuery, error) {
 	query := spreadsheetQuery{
-		page:       parseBoundedInt(r.URL.Query().Get("page"), 0, 0, math.MaxInt32),
-		pageSize:   parseBoundedInt(r.URL.Query().Get("pageSize"), 100, 1, 1000),
-		filters:    make(map[int]string),
-		sortColumn: -1,
+		page:         parseBoundedInt(r.URL.Query().Get("page"), 0, 0, math.MaxInt32),
+		pageSize:     parseBoundedInt(r.URL.Query().Get("pageSize"), 100, 1, 1000),
+		filters:      make(map[int]string),
+		globalSearch: strings.TrimSpace(r.URL.Query().Get("search")),
+		sortColumn:   -1,
+	}
+	if len(query.globalSearch) > 1024 {
+		return spreadsheetQuery{}, apiError{Status: http.StatusBadRequest, Code: "search_query_too_long", Message: "spreadsheet search queries are limited to 1024 characters"}
 	}
 	if raw := strings.TrimSpace(r.URL.Query().Get("filters")); raw != "" {
 		var filters map[string]string
@@ -526,7 +531,7 @@ func readSpreadsheetSheet(file *zip.File, sheets []spreadsheetSheetInfo, sheetIn
 				activeColumns[column] = true
 			}
 		}
-		if !spreadsheetRowMatches(record, query.filters) {
+		if !spreadsheetRowMatches(record, query.filters, query.globalSearch) {
 			continue
 		}
 		matchedRows++
@@ -726,7 +731,19 @@ func formatExcelSerialDate(serial float64) string {
 	return value.Format("2006-01-02T15:04:05Z")
 }
 
-func spreadsheetRowMatches(record spreadsheetRecord, filters map[int]string) bool {
+func spreadsheetRowMatches(record spreadsheetRecord, filters map[int]string, globalSearch string) bool {
+	if query := strings.ToLower(strings.TrimSpace(globalSearch)); query != "" {
+		matched := false
+		for _, value := range record.cells {
+			if strings.Contains(strings.ToLower(value), query) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
 	for column, filter := range filters {
 		if !matchesSpreadsheetFilter(record.cells[column], filter) {
 			return false

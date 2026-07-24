@@ -1,23 +1,16 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 )
 
-const (
-	maxEmbeddedImagePreviewBytes = int64(128 << 20)
-	maxConvertedImageBytes       = int64(512 << 20)
-)
+const maxEmbeddedImagePreviewBytes = int64(128 << 20)
 
 func (a *application) handleImagePreview(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -63,21 +56,11 @@ func (a *application) handleImagePreview(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	if r.Method == http.MethodHead {
-		w.Header().Set("Content-Type", "image/jpeg")
-		w.Header().Set("Cache-Control", "no-store")
-		applyObjectSafetyHeaders(w.Header())
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-
-	previewPath, cleanup, err := a.convertImagePreview(r.Context(), instance, key, extension)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	defer cleanup()
-	serveLocalPreviewFile(w, r, previewPath, "image/jpeg")
+	writeAPIError(w, apiError{
+		Status:  http.StatusNotImplemented,
+		Code:    "embedded_image_preview_unavailable",
+		Message: "this self-contained build can preview this image only when the original is browser-readable or the file contains an embedded JPEG preview",
+	})
 }
 
 func embeddedPreviewFitsObject(offset, length, objectSize int64) bool {
@@ -163,131 +146,4 @@ func embeddedTIFFJPEGRange(data []byte) (int64, int64, bool) {
 		return 0, 0, false
 	}
 	return inspect(firstIFD, 0)
-}
-
-// convertImagePreview performs one explicit, request-bound ImageMagick
-// conversion. Temporary source and output files are removed as soon as the HTTP
-// response completes or the client disconnects; nothing is retained for reuse.
-func (a *application) convertImagePreview(ctx context.Context, instance *storageInstance, key, extension string) (string, func(), error) {
-	a.imagePreviewMu.Lock()
-	locked := true
-	unlock := func() {
-		if locked {
-			locked = false
-			a.imagePreviewMu.Unlock()
-		}
-	}
-
-	converter, err := imageConverterPath()
-	if err != nil {
-		unlock()
-		return "", func() {}, apiError{Status: http.StatusNotImplemented, Code: "image_converter_unavailable", Message: "this image format requires ImageMagick on the server"}
-	}
-	tempRoot := filepath.Join(a.config.DataDir, "image-preview-tmp")
-	if err := os.MkdirAll(tempRoot, 0o700); err != nil {
-		unlock()
-		return "", func() {}, fmt.Errorf("create image preview temporary directory: %w", err)
-	}
-	directory, err := os.MkdirTemp(tempRoot, "request-*")
-	if err != nil {
-		unlock()
-		return "", func() {}, fmt.Errorf("create image preview workspace: %w", err)
-	}
-	cleanup := func() {
-		_ = os.RemoveAll(directory)
-		unlock()
-	}
-	if extension == "" || len(extension) > 12 {
-		extension = "raw"
-	}
-	sourcePath := filepath.Join(directory, "source."+extension)
-	outputPath := filepath.Join(directory, "preview.jpg")
-
-	object, err := instance.backend.Get(ctx, instance.fullKey(key), nil)
-	if err != nil {
-		cleanup()
-		return "", func() {}, err
-	}
-	if object.Body == nil {
-		cleanup()
-		return "", func() {}, apiError{Status: http.StatusBadGateway, Code: "empty_image_source", Message: "the storage provider returned an empty image source"}
-	}
-	defer object.Body.Close()
-	if !isSuccessfulObjectReadStatus(object.StatusCode) {
-		cleanup()
-		return "", func() {}, &upstreamError{StatusCode: object.StatusCode, Code: "ImagePreviewReadFailed"}
-	}
-	source, err := os.OpenFile(sourcePath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
-	if err != nil {
-		cleanup()
-		return "", func() {}, fmt.Errorf("create image preview source: %w", err)
-	}
-	written, copyErr := io.Copy(source, io.LimitReader(object.Body, maxConvertedImageBytes+1))
-	closeErr := source.Close()
-	if copyErr != nil {
-		cleanup()
-		return "", func() {}, fmt.Errorf("read image source: %w", copyErr)
-	}
-	if closeErr != nil {
-		cleanup()
-		return "", func() {}, fmt.Errorf("close image source: %w", closeErr)
-	}
-	if written > maxConvertedImageBytes {
-		cleanup()
-		return "", func() {}, apiError{Status: http.StatusRequestEntityTooLarge, Code: "image_preview_too_large", Message: fmt.Sprintf("image previews are limited to %d MiB", maxConvertedImageBytes>>20)}
-	}
-
-	convertCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
-	args := []string{sourcePath + "[0]", "-auto-orient", "-thumbnail", "4096x4096>", "-strip", "-quality", "88", "jpeg:" + outputPath}
-	command := exec.CommandContext(convertCtx, converter, args...)
-	command.Env = append(os.Environ(), "MAGICK_TMPDIR="+directory)
-	configureProcessGroup(command)
-	if err := runCommandWithContext(convertCtx, command); err != nil {
-		cleanup()
-		if errors.Is(convertCtx.Err(), context.DeadlineExceeded) {
-			return "", func() {}, apiError{Status: http.StatusGatewayTimeout, Code: "image_preview_timeout", Message: "image preview conversion timed out"}
-		}
-		if errors.Is(convertCtx.Err(), context.Canceled) {
-			return "", func() {}, apiError{Status: 499, Code: "image_preview_canceled", Message: "image preview conversion was canceled"}
-		}
-		return "", func() {}, apiError{Status: http.StatusUnprocessableEntity, Code: "image_preview_failed", Message: "the server could not decode this image format"}
-	}
-	if info, statErr := os.Stat(outputPath); statErr != nil || info.Size() == 0 {
-		cleanup()
-		return "", func() {}, apiError{Status: http.StatusUnprocessableEntity, Code: "image_preview_empty", Message: "the image converter did not produce a preview"}
-	}
-	if err := os.Chmod(outputPath, 0o600); err != nil {
-		cleanup()
-		return "", func() {}, fmt.Errorf("secure image preview: %w", err)
-	}
-	return outputPath, cleanup, nil
-}
-
-func imageConverterPath() (string, error) {
-	if path, err := exec.LookPath("magick"); err == nil {
-		return path, nil
-	}
-	if path, err := exec.LookPath("convert"); err == nil {
-		return path, nil
-	}
-	return "", exec.ErrNotFound
-}
-
-func serveLocalPreviewFile(w http.ResponseWriter, r *http.Request, filePath, contentType string) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		writeAPIError(w, apiError{Status: http.StatusNotFound, Code: "preview_not_found", Message: "the generated preview is not available"})
-		return
-	}
-	defer file.Close()
-	info, err := file.Stat()
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Cache-Control", "no-store")
-	applyObjectSafetyHeaders(w.Header())
-	http.ServeContent(w, r, filepath.Base(filePath), info.ModTime(), file)
 }

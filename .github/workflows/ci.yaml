@@ -50,6 +50,8 @@ jobs:
           node test/frontend-smoke.js
           node test/json-viewer.js
           node test/transfer-controls.js
+          node test/stats-viewer.js
+          node test/sqlite-viewer.js
 
       - name: Shell syntax
         working-directory: .
@@ -58,5 +60,40 @@ jobs:
             sh -n "$file"
           done
 
-      - name: Build
-        run: CGO_ENABLED=0 go build -trimpath -o /tmp/s3-browser .
+      - name: Verify self-contained runtime
+        working-directory: src
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(go list -m all | wc -l | tr -d ' ')" = "1"
+          if grep -R --include='*.go' '"os/exec"' .; then
+            echo "runtime source must not invoke external commands" >&2
+            exit 1
+          fi
+
+      - name: Build static binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+            go build \
+              -tags=netgo,osusergo \
+              -trimpath \
+              -ldflags="-s -w -buildid= -X main.buildVersion=ci -X main.buildCommit=${GITHUB_SHA}" \
+              -o /tmp/s3-browser-static .
+          file /tmp/s3-browser-static
+          if readelf -l /tmp/s3-browser-static | grep -q 'Requesting program interpreter'; then
+            echo "binary unexpectedly requires a dynamic loader" >&2
+            exit 1
+          fi
+          go version -m /tmp/s3-browser-static | grep -F 'CGO_ENABLED=0'
+          short_sha=$(printf '%s' "$GITHUB_SHA" | cut -c1-9)
+          /tmp/s3-browser-static version | grep -F "ci · $short_sha"
+
+      - name: Build and run scratch image
+        working-directory: .
+        env:
+          BUILD_VERSION: ci
+          BUILD_COMMIT: ${{ github.sha }}
+          BUILD_DATE: ${{ github.event.repository.updated_at }}
+        run: ./test/scratch-runtime.sh

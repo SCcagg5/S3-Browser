@@ -36,21 +36,33 @@ type jsonTextCursor struct {
 }
 
 type jsonTextPageResponse struct {
-	Text       string `json:"text"`
-	NextCursor string `json:"nextCursor,omitempty"`
-	Done       bool   `json:"done"`
-	LineStart  int64  `json:"lineStart"`
-	LineEnd    int64  `json:"lineEnd"`
-	Continued  bool   `json:"continued,omitempty"`
+	Text          string `json:"text"`
+	NextCursor    string `json:"nextCursor,omitempty"`
+	Done          bool   `json:"done"`
+	LineStart     int64  `json:"lineStart"`
+	LineEnd       int64  `json:"lineEnd"`
+	Continued     bool   `json:"continued,omitempty"`
+	StartInString bool   `json:"startInString,omitempty"`
+	StartEscaped  bool   `json:"startEscaped,omitempty"`
+}
+
+type jsonSummaryResponse struct {
+	RawLines      int64                 `json:"rawLines"`
+	RawPages      int64                 `json:"rawPages"`
+	BeautifyLines int64                 `json:"beautifyLines"`
+	BeautifyPages int64                 `json:"beautifyPages"`
+	RawPage       *jsonTextPageResponse `json:"rawPage,omitempty"`
 }
 
 type jsonTreeNodeJSON struct {
-	Label     string `json:"label,omitempty"`
-	Type      string `json:"type"`
-	Preview   string `json:"preview,omitempty"`
-	Container bool   `json:"container"`
-	Start     int64  `json:"start"`
-	End       int64  `json:"end,omitempty"`
+	Label      string `json:"label,omitempty"`
+	Type       string `json:"type"`
+	Preview    string `json:"preview,omitempty"`
+	Container  bool   `json:"container"`
+	Start      int64  `json:"start"`
+	End        int64  `json:"end,omitempty"`
+	Count      int64  `json:"count,omitempty"`
+	CountKnown bool   `json:"countKnown,omitempty"`
 }
 
 type jsonTreeResponse struct {
@@ -212,6 +224,23 @@ func decodeJSONCursor(raw string, fallback jsonTextCursor) (jsonTextCursor, erro
 	return cursor, nil
 }
 
+func consumeRawJSONState(state *jsonTextCursor, value rune) {
+	if state.InString {
+		if state.Escaped {
+			state.Escaped = false
+		} else if value == '\\' {
+			state.Escaped = true
+		} else if value == '"' {
+			state.InString = false
+		}
+		return
+	}
+	if value == '"' {
+		state.InString = true
+		state.Escaped = false
+	}
+}
+
 func (a *application) handleJSONRaw(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		methodNotAllowed(w, http.MethodGet)
@@ -240,6 +269,8 @@ func (a *application) handleJSONRaw(w http.ResponseWriter, r *http.Request) {
 	startLine := cursor.Line
 	line := cursor.Line
 	continued := cursor.Continued
+	startInString := cursor.InString
+	startEscaped := cursor.Escaped
 	done := false
 	for output.Len() < jsonTextPageBytes && line-startLine < jsonTextPageLines {
 		value, size, readErr := reader.readRune()
@@ -259,9 +290,18 @@ func (a *application) handleJSONRaw(w http.ResponseWriter, r *http.Request) {
 		if value == '\n' {
 			line++
 		}
+		consumeRawJSONState(&cursor, value)
 	}
 	if output.Len() == 0 && !done {
 		done = true
+	}
+	if !done {
+		if _, peekErr := reader.peekByte(); peekErr == io.EOF {
+			done = true
+		} else if peekErr != nil {
+			writeAPIError(w, fmt.Errorf("read JSON source: %w", peekErr))
+			return
+		}
 	}
 	next := ""
 	if !done {
@@ -270,15 +310,19 @@ func (a *application) handleJSONRaw(w http.ResponseWriter, r *http.Request) {
 			Offset:    reader.offset,
 			Line:      line,
 			Continued: !strings.HasSuffix(text, "\n"),
+			InString:  cursor.InString,
+			Escaped:   cursor.Escaped,
 		})
 	}
 	writeJSON(w, http.StatusOK, jsonTextPageResponse{
-		Text:       output.String(),
-		NextCursor: next,
-		Done:       done,
-		LineStart:  startLine,
-		LineEnd:    line,
-		Continued:  continued,
+		Text:          output.String(),
+		NextCursor:    next,
+		Done:          done,
+		LineStart:     startLine,
+		LineEnd:       line,
+		Continued:     continued,
+		StartInString: startInString,
+		StartEscaped:  startEscaped,
 	})
 }
 
@@ -317,6 +361,236 @@ func writeBeautifyNewline(output *bytes.Buffer, line *int64, depth int) {
 	output.WriteByte('\n')
 	(*line)++
 	writeJSONIndent(output, depth)
+}
+
+type jsonPageSummaryCounter struct {
+	pageBytes     int64
+	pageStartLine int64
+	line          int64
+	pages         int64
+}
+
+func newJSONPageSummaryCounter() *jsonPageSummaryCounter {
+	return &jsonPageSummaryCounter{pageStartLine: 1, line: 1}
+}
+
+func (c *jsonPageSummaryCounter) writeRune(value rune) {
+	size := utf8.RuneLen(value)
+	if size < 0 {
+		size = utf8.RuneLen(utf8.RuneError)
+	}
+	c.pageBytes += int64(size)
+	if value == '\n' {
+		c.line++
+	}
+}
+
+func (c *jsonPageSummaryCounter) writeString(value string) {
+	c.pageBytes += int64(len(value))
+	for _, current := range value {
+		if current == '\n' {
+			c.line++
+		}
+	}
+}
+
+func (c *jsonPageSummaryCounter) writeIndent(depth int) {
+	if depth > 0 {
+		c.pageBytes += int64(depth * 2)
+	}
+}
+
+func (c *jsonPageSummaryCounter) writeNewline(depth int) {
+	c.pageBytes++
+	c.line++
+	c.writeIndent(depth)
+}
+
+func (c *jsonPageSummaryCounter) finishInputRune() {
+	if c.pageBytes < jsonTextPageBytes && c.line-c.pageStartLine < jsonTextPageLines {
+		return
+	}
+	c.pages++
+	c.pageBytes = 0
+	c.pageStartLine = c.line
+}
+
+func (c *jsonPageSummaryCounter) finishDocument() {
+	if c.pageBytes > 0 || c.pages == 0 {
+		c.pages++
+	}
+}
+
+func consumeBeautifySummaryRune(state *jsonTextCursor, counter *jsonPageSummaryCounter, value rune) error {
+processRune:
+	if state.InString {
+		counter.writeRune(value)
+		if state.Escaped {
+			state.Escaped = false
+		} else if value == '\\' {
+			state.Escaped = true
+		} else if value == '"' {
+			state.InString = false
+		}
+		return nil
+	}
+
+	if state.InScalar {
+		if value == ' ' || value == '\t' || value == '\r' || value == '\n' || value == ',' || value == ']' || value == '}' {
+			state.InScalar = false
+			goto processRune
+		}
+		counter.writeRune(value)
+		return nil
+	}
+
+	if value == ' ' || value == '\t' || value == '\r' || value == '\n' {
+		return nil
+	}
+
+	if state.Pending != 0 {
+		if state.Pending == 'o' && len(state.Stack) > 0 && matchingJSONClose(state.Stack[len(state.Stack)-1]) == byte(value) {
+			state.Pending = 0
+			stack, err := popJSONStack(state.Stack, byte(value))
+			if err != nil {
+				return err
+			}
+			state.Stack = stack
+			counter.writeRune(value)
+			return nil
+		}
+		counter.writeNewline(len(state.Stack))
+		state.Pending = 0
+	}
+
+	switch value {
+	case '"':
+		state.InString = true
+		state.Escaped = false
+		counter.writeRune(value)
+	case '{', '[':
+		counter.writeRune(value)
+		stack, err := appendJSONStack(state.Stack, byte(value))
+		if err != nil {
+			return err
+		}
+		state.Stack = stack
+		state.Pending = 'o'
+	case ',':
+		counter.writeRune(value)
+		state.Pending = 'c'
+	case ':':
+		counter.writeString(": ")
+	case '}', ']':
+		stack, err := popJSONStack(state.Stack, byte(value))
+		if err != nil {
+			return err
+		}
+		state.Stack = stack
+		counter.writeNewline(len(state.Stack))
+		counter.writeRune(value)
+	default:
+		state.InScalar = true
+		counter.writeRune(value)
+	}
+	return nil
+}
+
+func (a *application) handleJSONSummary(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, http.MethodGet)
+		return
+	}
+	instance, key, etag, err := a.jsonObjectFromRequest(r)
+	if err != nil {
+		writeAPIError(w, err)
+		return
+	}
+	body, err := openJSONObjectStream(r.Context(), instance, key, 0, etag)
+	if err != nil {
+		writeAPIError(w, err)
+		return
+	}
+	defer body.Close()
+
+	reader := bufio.NewReaderSize(body, 64*1024)
+	rawCounter := newJSONPageSummaryCounter()
+	beautifyCounter := newJSONPageSummaryCounter()
+	beautifyState := jsonTextCursor{Line: 1}
+
+	var rawPageOutput bytes.Buffer
+	rawPageOutput.Grow(jsonTextPageBytes)
+	rawPageState := jsonTextCursor{Line: 1}
+	rawPageBoundary := false
+	rawPageHasMore := false
+	var rawPageOffset int64
+	var rawPageCursorState jsonTextCursor
+
+	for {
+		value, size, readErr := reader.ReadRune()
+		if readErr != nil {
+			if readErr == io.EOF {
+				break
+			}
+			writeAPIError(w, fmt.Errorf("read JSON source: %w", readErr))
+			return
+		}
+		rawPageOffset += int64(size)
+		if value == utf8.RuneError && size == 1 {
+			value = utf8.RuneError
+		}
+
+		if !rawPageBoundary {
+			rawPageOutput.WriteRune(value)
+			if value == '\n' {
+				rawPageState.Line++
+			}
+			consumeRawJSONState(&rawPageState, value)
+			if rawPageOutput.Len() >= jsonTextPageBytes || rawPageState.Line-1 >= jsonTextPageLines {
+				rawPageBoundary = true
+				rawPageCursorState = jsonTextCursor{
+					Offset:    rawPageOffset,
+					Line:      rawPageState.Line,
+					Continued: !strings.HasSuffix(rawPageOutput.String(), "\n"),
+					InString:  rawPageState.InString,
+					Escaped:   rawPageState.Escaped,
+				}
+			}
+		} else {
+			rawPageHasMore = true
+		}
+
+		rawCounter.writeRune(value)
+		rawCounter.finishInputRune()
+		if err := consumeBeautifySummaryRune(&beautifyState, beautifyCounter, value); err != nil {
+			writeAPIError(w, err)
+			return
+		}
+		beautifyCounter.finishInputRune()
+	}
+	if beautifyState.InString || beautifyState.Escaped || len(beautifyState.Stack) != 0 {
+		writeAPIError(w, apiError{Status: http.StatusUnprocessableEntity, Code: "invalid_json", Message: "JSON ended before all strings or containers were closed"})
+		return
+	}
+	rawCounter.finishDocument()
+	beautifyCounter.finishDocument()
+
+	rawPage := &jsonTextPageResponse{
+		Text:      rawPageOutput.String(),
+		Done:      !rawPageHasMore,
+		LineStart: 1,
+		LineEnd:   rawPageState.Line,
+	}
+	if rawPageHasMore {
+		rawPage.NextCursor = encodeJSONCursor(rawPageCursorState)
+	}
+	writeJSON(w, http.StatusOK, jsonSummaryResponse{
+		RawLines:      rawCounter.line,
+		RawPages:      rawCounter.pages,
+		BeautifyLines: beautifyCounter.line,
+		BeautifyPages: beautifyCounter.pages,
+		RawPage:       rawPage,
+	})
 }
 
 func (a *application) handleJSONBeautify(w http.ResponseWriter, r *http.Request) {
@@ -435,6 +709,14 @@ func (a *application) handleJSONBeautify(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	if !done {
+		if _, peekErr := reader.peekByte(); peekErr == io.EOF {
+			done = true
+		} else if peekErr != nil {
+			writeAPIError(w, fmt.Errorf("read JSON source: %w", peekErr))
+			return
+		}
+	}
 	if done {
 		if state.InString || state.Escaped || len(state.Stack) != 0 {
 			writeAPIError(w, apiError{Status: http.StatusUnprocessableEntity, Code: "invalid_json", Message: "JSON ended before all strings or containers were closed"})
@@ -450,12 +732,14 @@ func (a *application) handleJSONBeautify(w http.ResponseWriter, r *http.Request)
 		next = encodeJSONCursor(state)
 	}
 	writeJSON(w, http.StatusOK, jsonTextPageResponse{
-		Text:       output.String(),
-		NextCursor: next,
-		Done:       done,
-		LineStart:  startLine,
-		LineEnd:    state.Line,
-		Continued:  cursor.InString || cursor.InScalar,
+		Text:          output.String(),
+		NextCursor:    next,
+		Done:          done,
+		LineStart:     startLine,
+		LineEnd:       state.Line,
+		Continued:     cursor.InString || cursor.InScalar,
+		StartInString: cursor.InString,
+		StartEscaped:  cursor.Escaped,
 	})
 }
 
@@ -519,24 +803,26 @@ func readJSONString(reader *jsonStreamReader, captureLimit int) (start, end int6
 	}
 }
 
-func skipJSONContainer(reader *jsonStreamReader) (int64, error) {
+func skipJSONContainer(reader *jsonStreamReader) (int64, int64, error) {
 	opening, err := reader.readByte()
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	if opening != '{' && opening != '[' {
-		return 0, apiError{Status: http.StatusUnprocessableEntity, Code: "invalid_json", Message: "expected a JSON object or array"}
+		return 0, 0, apiError{Status: http.StatusUnprocessableEntity, Code: "invalid_json", Message: "expected a JSON object or array"}
 	}
 	stack := []byte{opening}
 	inString := false
 	escaped := false
+	expectEntry := true
+	var directChildren int64
 	for len(stack) > 0 {
 		value, readErr := reader.readByte()
 		if readErr != nil {
 			if readErr == io.EOF {
-				return 0, apiError{Status: http.StatusUnprocessableEntity, Code: "invalid_json", Message: "JSON ended before a container was closed"}
+				return 0, 0, apiError{Status: http.StatusUnprocessableEntity, Code: "invalid_json", Message: "JSON ended before a container was closed"}
 			}
-			return 0, readErr
+			return 0, 0, readErr
 		}
 		if inString {
 			if escaped {
@@ -548,22 +834,39 @@ func skipJSONContainer(reader *jsonStreamReader) (int64, error) {
 			}
 			continue
 		}
+		if len(stack) == 1 {
+			if expectEntry {
+				switch value {
+				case ' ', '\t', '\r', '\n':
+					continue
+				case matchingJSONClose(opening):
+					stack = stack[:0]
+					continue
+				default:
+					directChildren++
+					expectEntry = false
+				}
+			} else if value == ',' {
+				expectEntry = true
+				continue
+			}
+		}
 		switch value {
 		case '"':
 			inString = true
 		case '{', '[':
 			if len(stack) >= jsonMaxNestingDepth {
-				return 0, apiError{Status: http.StatusUnprocessableEntity, Code: "json_too_deep", Message: "JSON nesting exceeds the supported limit"}
+				return 0, 0, apiError{Status: http.StatusUnprocessableEntity, Code: "json_too_deep", Message: "JSON nesting exceeds the supported limit"}
 			}
 			stack = append(stack, value)
 		case '}', ']':
 			if matchingJSONClose(stack[len(stack)-1]) != value {
-				return 0, apiError{Status: http.StatusUnprocessableEntity, Code: "invalid_json", Message: fmt.Sprintf("mismatched JSON delimiter at byte %d", reader.offset-1)}
+				return 0, 0, apiError{Status: http.StatusUnprocessableEntity, Code: "invalid_json", Message: fmt.Sprintf("mismatched JSON delimiter at byte %d", reader.offset-1)}
 			}
 			stack = stack[:len(stack)-1]
 		}
 	}
-	return reader.offset, nil
+	return reader.offset, directChildren, nil
 }
 
 func isJSONScalarDelimiter(value byte) bool {
@@ -592,11 +895,11 @@ func inspectJSONValue(reader *jsonStreamReader) (jsonTreeNodeJSON, error) {
 			kind = "array"
 			preview = "[…]"
 		}
-		end, err := skipJSONContainer(reader)
+		end, count, err := skipJSONContainer(reader)
 		if err != nil {
 			return jsonTreeNodeJSON{}, err
 		}
-		return jsonTreeNodeJSON{Type: kind, Preview: preview, Container: true, Start: start, End: end}, nil
+		return jsonTreeNodeJSON{Type: kind, Preview: preview, Container: true, Start: start, End: end, Count: count, CountKnown: true}, nil
 	case '"':
 		_, end, preview, truncated, err := readJSONString(reader, jsonTreePreviewBytes)
 		if err != nil {
@@ -821,6 +1124,10 @@ func (a *application) handleJSONTree(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeAPIError(w, err)
 		return
+	}
+	if done {
+		node.Count = nextIndex
+		node.CountKnown = true
 	}
 	writeJSON(w, http.StatusOK, jsonTreeResponse{
 		Node:      node,

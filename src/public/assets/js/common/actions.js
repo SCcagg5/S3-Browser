@@ -365,7 +365,8 @@
     const processed = Number(job.processed || 0);
     if (job.stats) {
       const count = Number(job.stats.count || processed).toLocaleString();
-      return `Folder details ready: ${count} object(s), ${formatBytes(job.stats.totalBytes || 0)}.`;
+      const subject = String(label || 'Insights').replace(/^Computing\s+/i, '').trim() || 'insights';
+      return `${subject.charAt(0).toUpperCase()}${subject.slice(1)} ready: ${count} object(s), ${formatBytes(job.stats.totalBytes || 0)}.`;
     }
     return `${label} completed: ${processed.toLocaleString()} object(s) processed.`;
   }
@@ -482,10 +483,19 @@
 
   async function showMetadata(key, options = {}) {
     if (!(await requirePermissions(['read']))) return false;
+    const name = key.split('/').pop() || key;
+    let detailsNotification = null;
+    const notificationTimer = window.setTimeout(() => {
+      detailsNotification = ui().toast(`Loading details for ${name}...`, {
+        persistent: true,
+        status: 'loading',
+        indeterminate: true,
+        detail: key
+      });
+    }, 300);
     try {
       const result = await BB.api.mediaInfo(key, options);
       const headers = result.headers || {};
-      const name = key.split('/').pop() || key;
       const type = BB.detect.resolveType(key, result.mime || '');
       const storageRows = [
         metadataRow('Size', formatBytes(result.size)),
@@ -534,6 +544,12 @@
         rows.push([`${kind.charAt(0).toUpperCase()}${kind.slice(1)} track ${streamNumber}`, parts.join(' · ') || 'Detected']);
       });
       const fileRows = rows.map(([label, value]) => metadataRow(label, value)).join('');
+      const extension = BB.detect.extOf(key);
+      const countAction = ['json', 'geojson'].includes(extension)
+        ? { label: 'Count lines', icon: 'format-list-numbered', kind: 'lines' }
+        : (['csv', 'tsv', 'tab', 'psv'].includes(extension)
+          ? { label: 'Count rows and columns', icon: 'table-row', kind: 'delimited' }
+          : null);
 
       const storageSection = `<section class="bb-details-section"><div class="bb-details-section-title"><i class="mdi mdi-database-outline"></i> Storage object</div><div class="bb-kv">${storageRows}</div></section>`;
       const customSection = customMetadata
@@ -542,48 +558,544 @@
       const fileSection = fileRows
         ? `<section class="bb-details-section"><div class="bb-details-section-title"><i class="mdi mdi-file-search-outline"></i> File metadata</div><div class="bb-kv">${fileRows}</div></section>`
         : '';
+      const countSection = countAction
+        ? `<section class="bb-details-section bb-details-count-section"><div class="bb-details-section-title"><i class="mdi mdi-${escapeHTML(countAction.icon)}"></i> Document dimensions</div><div class="bb-details-count-result" data-document-count-result><span>Not calculated. This operation reads the complete document.</span></div><button type="button" class="bb-btn bb-details-count-button" data-document-count>${escapeHTML(countAction.label)}</button></section>`
+        : '';
       const icon = BB.detect.iconForType(type);
 
+      window.clearTimeout(notificationTimer);
+      if (detailsNotification) {
+        detailsNotification.update('File details ready.', {
+          persistent: false,
+          status: 'success',
+          progress: 1,
+          indeterminate: false,
+          detail: name,
+          duration: 1400
+        });
+      }
       await ui().alert({
         html: `<div class="bb-details">
           <div class="bb-details-head"><i class="mdi mdi-${escapeHTML(icon)}"></i><div class="bb-details-titles"><div class="bb-details-name">${escapeHTML(name)}</div><div class="bb-details-prefix">${escapeHTML(key)}</div></div></div>
-          <div class="bb-details-body">${storageSection}${customSection}${fileSection}</div>
-        </div>`
+          <div class="bb-details-body">${storageSection}${customSection}${fileSection}${countSection}</div>
+        </div>`,
+        onOpen: countAction ? ({ overlay }) => {
+          const button = overlay.querySelector('[data-document-count]');
+          const resultHost = overlay.querySelector('[data-document-count-result]');
+          if (!button || !resultHost) return;
+          button.addEventListener('click', async () => {
+            if (button.disabled) return;
+            button.disabled = true;
+            button.innerHTML = '<i class="mdi mdi-loading mdi-spin"></i><span>Calculating…</span>';
+            resultHost.textContent = 'Reading the complete document…';
+            try {
+              const count = await BB.api.documentCount({ key, instance: options.instance ?? null });
+              resultHost.replaceChildren();
+              if (countAction.kind === 'lines') {
+                resultHost.insertAdjacentHTML('beforeend', `<div class="bb-kv">${metadataRow('Lines', Number(count.lines || 0).toLocaleString())}</div>`);
+              } else {
+                resultHost.insertAdjacentHTML('beforeend', `<div class="bb-kv">${metadataRow('Rows', Number(count.rows || 0).toLocaleString())}${metadataRow('Columns', Number(count.columns || 0).toLocaleString())}</div>`);
+              }
+              button.innerHTML = '<i class="mdi mdi-check"></i><span>Calculated</span>';
+            } catch (countError) {
+              resultHost.textContent = String(countError?.message || countError);
+              button.disabled = false;
+              button.innerHTML = `<i class="mdi mdi-alert-circle-outline"></i><span>${escapeHTML(countAction.label)}</span>`;
+            }
+          });
+        } : null
       });
       return true;
     } catch (error) {
+      window.clearTimeout(notificationTimer);
+      if (detailsNotification) {
+        detailsNotification.update('Could not load file details.', {
+          persistent: false,
+          status: 'error',
+          progress: null,
+          indeterminate: false,
+          detail: String(error.message || error),
+          duration: 6500
+        });
+      }
       await ui().alert({ title: 'File details', message: String(error.message || error) });
+      return false;
+    } finally {
+      window.clearTimeout(notificationTimer);
+    }
+  }
+
+  function statsTypeEntries(stats) {
+    return Object.entries(stats?.byType || {})
+      .map(([name, value]) => ({
+        name: String(name || 'other'),
+        count: Math.max(0, Number(value?.count || 0)),
+        bytes: Math.max(0, Number(value?.bytes || 0))
+      }))
+      .filter(entry => entry.count > 0 || entry.bytes > 0)
+      .sort((left, right) => right.bytes - left.bytes || right.count - left.count || left.name.localeCompare(right.name));
+  }
+
+  function statsColor(index) {
+    const hue = (210 + index * 47) % 360;
+    return `hsl(${hue} 66% 55%)`;
+  }
+
+  function distributionEntries(entries, field, maximum = 7) {
+    const source = Array.from(entries || []);
+    const ordered = source
+      .map((entry, colorIndex) => ({ ...entry, colorIndex }))
+      .filter(entry => Number(entry?.[field] || 0) > 0)
+      .sort((left, right) => Number(right[field] || 0) - Number(left[field] || 0) || left.name.localeCompare(right.name));
+    if (ordered.length <= maximum) return ordered;
+    const visible = ordered.slice(0, Math.max(1, maximum - 1));
+    const hidden = ordered.slice(visible.length);
+    visible.push({
+      name: visible.some(entry => entry.name === 'other') ? 'other types' : 'other',
+      count: hidden.reduce((sum, entry) => sum + Number(entry.count || 0), 0),
+      bytes: hidden.reduce((sum, entry) => sum + Number(entry.bytes || 0), 0),
+      colorIndex: source.length
+    });
+    return visible;
+  }
+
+  function distributionHTML(entries, field, title) {
+    const displayed = distributionEntries(entries, field);
+    const total = displayed.reduce((sum, entry) => sum + Number(entry[field] || 0), 0);
+    if (!(total > 0)) return '';
+    const segments = displayed.map((entry, index) => {
+      const percent = Number(entry[field] || 0) * 100 / total;
+      const detail = field === 'bytes' ? formatBytes(entry.bytes) : `${entry.count.toLocaleString()} object(s)`;
+      return `<span class="folder-distribution-segment" style="--segment-width:${percent}%;--segment-color:${statsColor(entry.colorIndex ?? index)}" title="${escapeHTML(`${entry.name}: ${percent.toFixed(1)}% · ${detail}`)}"></span>`;
+    }).join('');
+    const legend = displayed.map((entry, index) => {
+      const percent = Number(entry[field] || 0) * 100 / total;
+      const detail = field === 'bytes' ? formatBytes(entry.bytes) : `${entry.count.toLocaleString()} object(s)`;
+      return `<div class="folder-distribution-legend-item"><span class="folder-distribution-swatch" style="--segment-color:${statsColor(entry.colorIndex ?? index)}"></span><span class="folder-distribution-label">${escapeHTML(entry.name)}</span><span class="folder-distribution-value">${percent.toFixed(1)}% · ${escapeHTML(detail)}</span></div>`;
+    }).join('');
+    return `<section class="folder-distribution"><div class="folder-distribution-title">${escapeHTML(title)}</div><div class="folder-distribution-bar" role="img" aria-label="${escapeHTML(title)}">${segments}</div><div class="folder-distribution-legend">${legend}</div></section>`;
+  }
+
+  const treemapMinimumShare = 0.01;
+  const treemapMaximumRectangles = 1000;
+  const treemapMaximumDepth = 5;
+
+  function treemapObjectCount(value) {
+    const count = Math.max(0, Number(value || 0));
+    return `${count.toLocaleString()} ${count === 1 ? 'file' : 'files'}`;
+  }
+
+  function treemapFolderNode(name, path) {
+    return {
+      name,
+      path,
+      bytes: 0,
+      count: 0,
+      children: new Map(),
+      folder: true,
+      type: 'folder',
+      aggregateKnown: false
+    };
+  }
+
+  function normalizedStatsFolderPath(value, cleanPrefix) {
+    let relative = String(value || '').replace(/^\/+/, '');
+    if (!relative || relative === '(root)') return '';
+    if (cleanPrefix && relative.startsWith(cleanPrefix)) relative = relative.slice(cleanPrefix.length);
+    return ensurePrefix(relative);
+  }
+
+  function ensureTreemapFolder(root, parts, cleanPrefix) {
+    let parent = root;
+    let pathValue = cleanPrefix;
+    for (const part of parts) {
+      pathValue += `${part}/`;
+      const key = `folder:${part}`;
+      let child = parent.children.get(key);
+      if (!child) {
+        child = treemapFolderNode(part, pathValue);
+        parent.children.set(key, child);
+      }
+      parent = child;
+    }
+    return parent;
+  }
+
+  function finalizeTreemapNode(node) {
+    let childBytes = 0;
+    let childCount = 0;
+    for (const child of node.children?.values?.() || []) {
+      finalizeTreemapNode(child);
+      childBytes += Math.max(0, Number(child.bytes || 0));
+      childCount += Math.max(0, Number(child.count || 0));
+    }
+    if (node.folder) {
+      if (!node.aggregateKnown) {
+        node.bytes = childBytes;
+        node.count = childCount;
+      } else {
+        // A malformed or legacy response must never make a child larger than
+        // its parent. Keeping the larger value also prevents negative local
+        // "Others" totals without issuing another storage request.
+        node.bytes = Math.max(Number(node.bytes || 0), childBytes);
+        node.count = Math.max(Number(node.count || 0), childCount);
+      }
+    }
+  }
+
+  function buildTreemapTree(stats, prefix) {
+    const cleanPrefix = ensurePrefix(prefix);
+    const root = treemapFolderNode(cleanPrefix || '/', cleanPrefix);
+    root.bytes = Math.max(0, Number(stats?.totalBytes || 0));
+    root.count = Math.max(0, Number(stats?.count || 0));
+    root.aggregateKnown = true;
+
+    const folders = Object.entries(stats?.byFolder || {})
+      .map(([path, value]) => ({
+        path: normalizedStatsFolderPath(path, cleanPrefix),
+        bytes: Math.max(0, Number(value?.bytes || 0)),
+        count: Math.max(0, Number(value?.count || 0))
+      }))
+      .filter(entry => entry.path)
+      .sort((left, right) => left.path.split('/').length - right.path.split('/').length || left.path.localeCompare(right.path));
+
+    for (const entry of folders) {
+      const parts = entry.path.split('/').filter(Boolean);
+      if (!parts.length) continue;
+      const folder = ensureTreemapFolder(root, parts, cleanPrefix);
+      folder.bytes = entry.bytes;
+      folder.count = entry.count;
+      folder.aggregateKnown = true;
+    }
+
+    for (const entry of Array.from(stats?.largest || []).slice(0, treemapMaximumRectangles)) {
+      const fullPath = String(entry?.path || '').replace(/^\/+/, '');
+      if (!fullPath || (cleanPrefix && !fullPath.startsWith(cleanPrefix))) continue;
+      const relative = cleanPrefix ? fullPath.slice(cleanPrefix.length) : fullPath;
+      const parts = relative.split('/').filter(Boolean);
+      if (!parts.length) continue;
+      const fileName = parts.pop();
+      const parent = ensureTreemapFolder(root, parts, cleanPrefix);
+      const bytes = Math.max(0, Number(entry?.bytes || 0));
+      parent.children.set(`file:${fileName}`, {
+        name: fileName,
+        path: fullPath,
+        bytes,
+        count: 1,
+        children: new Map(),
+        folder: false,
+        type: String(entry?.type || 'other'),
+        mime: String(entry?.mime || ''),
+        etag: String(entry?.etag || ''),
+        lastModified: String(entry?.lastModified || '')
+      });
+    }
+
+    finalizeTreemapNode(root);
+    return root;
+  }
+
+  function groupedTreemapChildren(node) {
+    if (!node?.folder) return [];
+    const children = Array.from(node.children?.values?.() || [])
+      .filter(child => Number(child.bytes || 0) > 0)
+      .sort((left, right) => Number(right.bytes || 0) - Number(left.bytes || 0) || left.name.localeCompare(right.name));
+    if (!children.length && !(Number(node.bytes || 0) > 0)) return [];
+
+    const totalBytes = Math.max(0, Number(node.bytes || 0));
+    const totalCount = Math.max(0, Number(node.count || 0));
+    const listedBytes = children.reduce((sum, child) => sum + Math.max(0, Number(child.bytes || 0)), 0);
+    const listedCount = children.reduce((sum, child) => sum + Math.max(0, Number(child.count || 0)), 0);
+    let otherBytes = Math.max(0, totalBytes - listedBytes);
+    let otherCount = Math.max(0, totalCount - listedCount);
+    const visible = [];
+    const threshold = totalBytes * treemapMinimumShare;
+
+    for (const child of children) {
+      // The requirement is deliberately strict: an item representing exactly
+      // one percent belongs to the local "Others" rectangle.
+      if (Number(child.bytes || 0) > threshold) {
+        visible.push(child);
+      } else {
+        otherBytes += Math.max(0, Number(child.bytes || 0));
+        otherCount += Math.max(0, Number(child.count || 0));
+      }
+    }
+
+    if (otherBytes > 0 || otherCount > 0) {
+      visible.push({
+        name: 'Others',
+        path: node.path,
+        bytes: otherBytes,
+        count: otherCount,
+        children: new Map(),
+        folder: false,
+        type: 'other',
+        other: true
+      });
+    }
+    return visible.sort((left, right) => Number(right.bytes || 0) - Number(left.bytes || 0) || left.name.localeCompare(right.name));
+  }
+
+  function treemapColorIndex(node) {
+    const value = String(node?.type || node?.path || node?.name || 'other');
+    let hash = 0;
+    for (let index = 0; index < value.length; index++) hash = ((hash << 5) - hash + value.charCodeAt(index)) | 0;
+    return Math.abs(hash) % 29;
+  }
+
+  function splitTreemapNodes(nodes) {
+    if (nodes.length < 2) return [nodes, []];
+    const total = nodes.reduce((sum, node) => sum + Math.max(0, Number(node.bytes || 0)), 0) || 1;
+    const target = total / 2;
+    let sum = 0;
+    let split = 1;
+    for (let index = 0; index < nodes.length - 1; index++) {
+      const next = sum + Math.max(0, Number(nodes[index].bytes || 0));
+      if (index > 0 && Math.abs(target - sum) <= Math.abs(target - next)) {
+        split = index;
+        break;
+      }
+      sum = next;
+      split = index + 1;
+    }
+    split = Math.max(1, Math.min(nodes.length - 1, split));
+    return [nodes.slice(0, split), nodes.slice(split)];
+  }
+
+  function layoutTreemapGroup(nodes, x, y, width, height, depth, output) {
+    if (output.length >= treemapMaximumRectangles) return;
+    const visible = Array.from(nodes || []).filter(node => node.bytes > 0);
+    if (!visible.length || width < 0.15 || height < 0.15) return;
+    if (visible.length === 1) {
+      collectTreemapRectangles(visible[0], x, y, width, height, depth, output);
+      return;
+    }
+    const [first, second] = splitTreemapNodes(visible);
+    const firstBytes = first.reduce((sum, node) => sum + node.bytes, 0);
+    const total = firstBytes + second.reduce((sum, node) => sum + node.bytes, 0) || 1;
+    const ratio = Math.max(0.02, Math.min(0.98, firstBytes / total));
+    if (width >= height) {
+      const firstWidth = width * ratio;
+      layoutTreemapGroup(first, x, y, firstWidth, height, depth, output);
+      layoutTreemapGroup(second, x + firstWidth, y, width - firstWidth, height, depth, output);
+    } else {
+      const firstHeight = height * ratio;
+      layoutTreemapGroup(first, x, y, width, firstHeight, depth, output);
+      layoutTreemapGroup(second, x, y + firstHeight, width, height - firstHeight, depth, output);
+    }
+  }
+
+  function collectTreemapRectangles(node, x, y, width, height, depth, output) {
+    if (output.length >= treemapMaximumRectangles || width < 0.15 || height < 0.15 || node.bytes <= 0) return;
+    const children = groupedTreemapChildren(node);
+    const isLeaf = !children.length || depth >= treemapMaximumDepth;
+    const kind = node.other ? 'other' : (isLeaf && !node.folder ? 'file' : 'folder');
+    const color = node.folder && !isLeaf
+      ? `hsl(${(215 + depth * 19) % 360} 28% ${92 - depth * 3}%)`
+      : statsColor(treemapColorIndex(node));
+    const countLabel = treemapObjectCount(node.count);
+    const titlePath = node.other ? `${node.path || '/'} — Others` : (node.path || node.name);
+    const title = `${titlePath}\n${formatBytes(node.bytes)} · ${countLabel}`;
+    const sizeLabel = formatBytes(node.bytes);
+    const detail = countLabel;
+
+    // Reserve a real title strip for parent folders. The strip is expressed as
+    // a percentage of the node itself so its label can never cover descendants.
+    const header = !isLeaf && height > 2.2 ? Math.min(3.3, Math.max(1.25, height * 0.2)) : 0;
+    const headerRatio = height > 0 ? Math.max(0, Math.min(100, header / height * 100)) : 0;
+    const label = `<span class="folder-treemap-label"><strong><span class="folder-treemap-name">${escapeHTML(node.name)}</span><span class="folder-treemap-size">${escapeHTML(sizeLabel)}</span></strong><small>${escapeHTML(detail)}</small></span>`;
+    output.push(`<div class="folder-treemap-node is-${kind}" data-kind="${kind}" data-depth="${depth}" data-header-ratio="${headerRatio}" data-path="${escapeHTML(node.path || '')}" data-size="${Math.max(0, Number(node.bytes || 0))}" data-count="${Math.max(0, Number(node.count || 0))}" data-mime="${escapeHTML(node.mime || '')}" data-etag="${escapeHTML(node.etag || '')}" data-modified="${escapeHTML(node.lastModified || '')}" title="${escapeHTML(title)}" style="left:${x}%;top:${y}%;width:${width}%;height:${height}%;z-index:${depth};--treemap-color:${color};--treemap-header:${headerRatio}%">${label}</div>`);
+    if (isLeaf || output.length >= treemapMaximumRectangles) return;
+
+    // Children are flat siblings in the root coordinate system. Deeper nodes
+    // stay above their parent, while the parent's title remains confined to the
+    // reserved strip calculated above.
+    const insetX = Math.min(.22, width * .02);
+    const insetBottom = Math.min(.25, height * .02);
+    const innerX = x + insetX;
+    const innerY = y + header;
+    const innerWidth = Math.max(0, width - insetX * 2);
+    const innerHeight = Math.max(0, height - header - insetBottom);
+    layoutTreemapGroup(children, innerX, innerY, innerWidth, innerHeight, depth + 1, output);
+  }
+
+  function fitTreemapLabels(map) {
+    if (!map) return;
+    map.querySelectorAll('.folder-treemap-node').forEach(node => {
+      const label = node.querySelector('.folder-treemap-label');
+      if (!label) return;
+      const detail = label.querySelector('small');
+      const rect = node.getBoundingClientRect();
+      const headerRatio = Math.max(0, Math.min(100, Number(node.dataset.headerRatio || 0)));
+      const labelHeight = node.dataset.kind === 'folder' && headerRatio > 0
+        ? rect.height * headerRatio / 100
+        : rect.height;
+      label.style.maxHeight = `${Math.max(0, labelHeight)}px`;
+      label.classList.remove('is-hidden', 'is-compact', 'is-tiny', 'is-micro', 'is-vertical');
+      if (detail) detail.hidden = false;
+
+      // Keep a readable name on every rectangle that has a physically usable
+      // strip. Thin horizontal cells use a micro one-line label; tall narrow
+      // cells rotate the name. Only genuinely sub-pixel cells are hidden.
+      if (rect.width < 9 || labelHeight < 6) {
+        label.classList.add('is-hidden');
+        return;
+      }
+      if (rect.width < 24 && labelHeight >= 34) {
+        label.classList.add('is-vertical');
+        if (detail) detail.hidden = true;
+        return;
+      }
+      if (rect.width < 48 || labelHeight < 15) {
+        label.classList.add('is-micro');
+        if (detail) detail.hidden = true;
+      } else if (rect.width < 78 || labelHeight < 31) {
+        label.classList.add('is-compact');
+        if (detail) detail.hidden = true;
+      }
+      // A long filename must never flow into a neighbouring rectangle. Reduce
+      // the type once before relying on ellipsis inside the measured node.
+      if (label.scrollWidth > Math.max(1, rect.width - 4) && !label.classList.contains('is-micro')) {
+        label.classList.add('is-tiny');
+        if (detail) detail.hidden = true;
+      }
+    });
+  }
+
+  function navigateFromStats(metadata) {
+    const clean = String(metadata?.path || '').replace(/^\/+/, '');
+    const kind = String(metadata?.kind || '');
+    if (!clean) return;
+    if (kind === 'folder') {
+      location.hash = encodeURIComponent(ensurePrefix(clean)).replace(/%2F/gi, '/');
+      return;
+    }
+    const url = new URL('preview.html', location.href);
+    const instance = BB.api.getInstance();
+    if (instance) url.searchParams.set('instance', instance);
+    url.searchParams.set('listed', '1');
+    url.searchParams.set('size', String(Math.max(0, Number(metadata?.size || 0))));
+    if (metadata?.mime) url.searchParams.set('mime', String(metadata.mime));
+    if (metadata?.etag) url.searchParams.set('etag', String(metadata.etag));
+    if (metadata?.modified) url.searchParams.set('lastModified', String(metadata.modified));
+    url.hash = encodeURIComponent(clean).replace(/%2F/gi, '/');
+    location.href = url.pathname + url.search + url.hash;
+  }
+
+  async function collectPrefixStats(prefix, label) {
+    const created = await BB.api.stats(ensurePrefix(prefix));
+    const completed = await waitForJob(created, label);
+    if (completed.status !== 'completed') return null;
+    return completed.stats || {};
+  }
+
+  async function showPrefixInsights(prefix, initialTab = 'overview') {
+    if (!(await requirePermissions(['read']))) return false;
+    const cleanPrefix = ensurePrefix(prefix);
+    const isRoot = !cleanPrefix;
+    const scopeTitle = isRoot ? 'Storage insights' : 'Folder insights';
+    const scopePath = isRoot ? 'Storage root' : `/${cleanPrefix}`;
+    try {
+      const stats = await collectPrefixStats(cleanPrefix, isRoot ? 'Computing storage insights' : 'Computing folder insights');
+      if (!stats) return false;
+      const entries = statsTypeEntries(stats);
+      const tree = buildTreemapTree(stats, cleanPrefix);
+      // Apply the same local <=1% aggregation at the selected scope root as
+      // at every nested folder. Previously root children bypassed
+      // groupedTreemapChildren(), so a tiny top-level folder could still be
+      // rendered individually while equally small nested entries became
+      // local Others rectangles.
+      const nodes = groupedTreemapChildren(tree);
+      const rectangleList = [];
+      layoutTreemapGroup(nodes, 0, 0, 100, 100, 1, rectangleList);
+      const rectangles = rectangleList.join('');
+      const insightID = `folder-insights-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      const requestedTab = initialTab === 'treemap' ? 'treemap' : 'overview';
+      const dialog = ui().alert({
+        html: `<div id="${insightID}" class="bb-details bb-details--treemap bb-details--insights" data-initial-tab="${requestedTab}">
+          <div class="bb-details-head"><i class="mdi mdi-${isRoot ? 'database-outline' : 'chart-box-outline'}"></i><div class="bb-details-titles"><div class="bb-details-name">${scopeTitle}</div><div class="bb-details-prefix">${escapeHTML(scopePath)} · ${Number(stats.count || 0).toLocaleString()} objects · ${escapeHTML(formatBytes(stats.totalBytes || 0))}</div></div></div>
+          <div class="bb-details-body">
+            <div class="spreadsheet-tabs folder-insights-tabs" role="tablist" aria-label="${scopeTitle}">
+              <button type="button" class="spreadsheet-tab" role="tab" data-insights-tab="overview"><i class="mdi mdi-chart-donut"></i><span>Overview</span></button>
+              <button type="button" class="spreadsheet-tab" role="tab" data-insights-tab="treemap"><i class="mdi mdi-chart-tree"></i><span>Treemap</span></button>
+            </div>
+            <section class="folder-insights-panel" data-insights-panel="overview">
+              <div class="folder-details-summary" role="group" aria-label="Scope totals">
+                <div class="folder-details-metric"><span>Objects</span><strong>${Number(stats.count || 0).toLocaleString()}</strong></div>
+                <div class="folder-details-metric"><span>Total size</span><strong>${escapeHTML(formatBytes(stats.totalBytes))}</strong></div>
+              </div>
+              <div class="folder-distribution-grid">${distributionHTML(entries, 'bytes', 'Distribution by size')}${distributionHTML(entries, 'count', 'Distribution by object count')}</div>
+              <div class="folder-details-footer">Computed in ${Number(stats.tookMs || 0).toLocaleString()} ms</div>
+            </section>
+            <section class="folder-insights-panel" data-insights-panel="treemap" hidden>
+              <div class="folder-treemap" role="img" aria-label="${scopeTitle} size treemap">${rectangles || '<div class="folder-treemap-empty">No objects found.</div>'}</div>
+            </section>
+          </div>
+        </div>`
+      });
+
+      let resizeObserver = null;
+      let resizeHandler = null;
+      requestAnimationFrame(() => {
+        const root = document.getElementById(insightID);
+        if (!root) return;
+        const modal = root.closest('.bb-modal');
+        modal?.classList.add('bb-modal--wide');
+        const map = root.querySelector('.folder-treemap');
+        const tabs = Array.from(root.querySelectorAll('[data-insights-tab]'));
+        const panels = Array.from(root.querySelectorAll('[data-insights-panel]'));
+        const activate = tabName => {
+          const next = tabName === 'treemap' ? 'treemap' : 'overview';
+          tabs.forEach(tab => {
+            const active = tab.dataset.insightsTab === next;
+            tab.classList.toggle('is-active', active);
+            tab.setAttribute('aria-selected', active ? 'true' : 'false');
+            tab.tabIndex = active ? 0 : -1;
+          });
+          panels.forEach(panel => { panel.hidden = panel.dataset.insightsPanel !== next; });
+          if (next === 'treemap') requestAnimationFrame(() => fitTreemapLabels(map));
+        };
+        tabs.forEach(tab => tab.addEventListener('click', () => activate(tab.dataset.insightsTab)));
+        activate(requestedTab);
+        map?.addEventListener('click', event => {
+          const node = event.target.closest('.folder-treemap-node[data-path]');
+          if (!node || !node.dataset.path || node.dataset.kind === 'other') return;
+          event.stopPropagation();
+          modal?.querySelector('.bb-modal-x')?.click();
+          navigateFromStats({
+            path: node.dataset.path,
+            kind: node.dataset.kind,
+            size: node.dataset.size,
+            mime: node.dataset.mime,
+            etag: node.dataset.etag,
+            modified: node.dataset.modified
+          });
+        });
+        if (map && typeof ResizeObserver === 'function') {
+          resizeObserver = new ResizeObserver(() => fitTreemapLabels(map));
+          resizeObserver.observe(map);
+        } else if (map) {
+          resizeHandler = () => fitTreemapLabels(map);
+          window.addEventListener('resize', resizeHandler, { passive: true });
+        }
+      });
+      await dialog;
+      resizeObserver?.disconnect();
+      if (resizeHandler) window.removeEventListener('resize', resizeHandler);
+      return true;
+    } catch (error) {
+      showTaskFailure(scopeTitle, error);
       return false;
     }
   }
 
-  async function showPrefixDetails(prefix) {
-    if (!(await requirePermissions(['read']))) return false;
-    try {
-      const created = await BB.api.stats(ensurePrefix(prefix));
-      const completed = await waitForJob(created, 'Computing folder details');
-      if (completed.status !== 'completed') return false;
-      const stats = completed.stats || {};
-      const typeRows = Object.entries(stats.byType || {})
-        .sort(([, a], [, b]) => (b.bytes || 0) - (a.bytes || 0))
-        .map(([name, value]) => `<div class="kv-row"><div class="kv-k">${escapeHTML(name)}</div><div class="kv-v">${value.count} object(s), ${formatBytes(value.bytes)}</div></div>`)
-        .join('');
-      await ui().alert({
-        html: `<div class="bb-details bb-details--prefix">
-          <div class="bb-details-head"><i class="mdi mdi-folder-outline"></i><div class="bb-details-titles"><div class="bb-details-name">/${escapeHTML(prefix || '')}</div></div></div>
-          <div class="bb-details-body"><div class="bb-section bb-kv">
-            <div class="kv-row"><div class="kv-k">Objects</div><div class="kv-v">${stats.count}</div></div>
-            <div class="kv-row"><div class="kv-k">Total size</div><div class="kv-v">${formatBytes(stats.totalBytes)}</div></div>
-            <div class="kv-row"><div class="kv-k">Computed in</div><div class="kv-v">${stats.tookMs} ms</div></div>
-            ${typeRows}
-          </div></div>
-        </div>`
-      });
-      return true;
-    } catch (error) {
-      showTaskFailure('Folder details', error);
-      return false;
-    }
+  function showPrefixDetails(prefix) {
+    return showPrefixInsights(prefix, 'overview');
+  }
+
+  function showPrefixStats(prefix) {
+    return showPrefixInsights(prefix, 'treemap');
   }
 
   async function copyObject(key) {
@@ -910,7 +1422,9 @@
   BB.actions = {
     showMetadata,
     showFileDetails: showMetadata,
+    showPrefixInsights,
     showPrefixDetails,
+    showPrefixStats,
     copyObject,
     renameObject,
     deleteObject,

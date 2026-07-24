@@ -19,7 +19,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -27,14 +26,13 @@ import (
 var embeddedPublic embed.FS
 
 type application struct {
-	config         appConfig
-	instances      map[string]*storageInstance
-	order          []string
-	publicFS       fs.FS
-	jobs           *jobManager
-	uploads        *uploadManager
-	media          *mediaSessionManager
-	imagePreviewMu sync.Mutex
+	config    appConfig
+	instances map[string]*storageInstance
+	order     []string
+	publicFS  fs.FS
+	jobs      *jobManager
+	uploads   *uploadManager
+	sqlite    *sqliteSessionManager
 }
 
 func newApplication(cfg appConfig) (*application, error) {
@@ -59,7 +57,7 @@ func newApplication(cfg appConfig) (*application, error) {
 		cfg.DataDir = filepath.Join(cfg.SourceDir, ".s3-browser-data")
 		app.config.DataDir = cfg.DataDir
 	}
-	jobs, err := newJobManager(app, cfg.DataDir)
+	jobs, err := newJobManager(app, cfg.DataDir, cfg.JobHistoryLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -70,12 +68,7 @@ func newApplication(cfg appConfig) (*application, error) {
 		return nil, err
 	}
 	app.uploads = uploads
-	media, err := newMediaSessionManager(app, cfg.DataDir)
-	if err != nil {
-		jobs.close()
-		return nil, err
-	}
-	app.media = media
+	app.sqlite = newSQLiteSessionManager(app)
 	return app, nil
 }
 
@@ -83,8 +76,8 @@ func (a *application) close() {
 	if a == nil {
 		return
 	}
-	if a.media != nil {
-		a.media.close()
+	if a.sqlite != nil {
+		a.sqlite.close()
 	}
 	if a.jobs != nil {
 		a.jobs.close()
@@ -94,6 +87,7 @@ func (a *application) close() {
 func (a *application) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/instances", a.handleInstances)
+	mux.HandleFunc("/api/build", a.handleBuild)
 	mux.HandleFunc("/api/permissions/refresh", a.handlePermissionRefresh)
 	mux.HandleFunc("/api/list", a.handleList)
 	mux.HandleFunc("/api/stats", a.handleStats)
@@ -105,14 +99,16 @@ func (a *application) routes() http.Handler {
 	mux.HandleFunc("/api/uploads", a.handleUploads)
 	mux.HandleFunc("/api/uploads/", a.handleUploads)
 	mux.HandleFunc("/api/spreadsheet", a.handleSpreadsheet)
+	mux.HandleFunc("/api/delimited", a.handleDelimitedPage)
+	mux.HandleFunc("/api/document-count", a.handleDocumentCount)
+	mux.HandleFunc("/api/sqlite/sessions", a.handleSQLiteSessions)
+	mux.HandleFunc("/api/sqlite/sessions/", a.handleSQLiteSessions)
 	mux.HandleFunc("/api/json/raw", a.handleJSONRaw)
 	mux.HandleFunc("/api/json/beautify", a.handleJSONBeautify)
+	mux.HandleFunc("/api/json/summary", a.handleJSONSummary)
 	mux.HandleFunc("/api/json/tree", a.handleJSONTree)
+	mux.HandleFunc("/api/search", a.handleDocumentSearch)
 	mux.HandleFunc("/api/media-info", a.handleMediaInfo)
-	mux.HandleFunc("/api/media-probe", a.handleMediaProbe)
-	mux.HandleFunc("/api/media-sessions", a.handleMediaSessions)
-	mux.HandleFunc("/api/media-sessions/", a.handleMediaSessions)
-	mux.HandleFunc("/api/media-source/", a.handleMediaSource)
 	mux.HandleFunc("/api/image-preview", a.handleImagePreview)
 	mux.HandleFunc("/healthz", a.handleHealth)
 	mux.Handle("/", secureStaticHandler(a.publicFS))
@@ -141,7 +137,17 @@ func (a *application) handleInstances(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"default":   a.order[0],
 		"instances": instances,
+		"build":     currentBuildInfo(),
 	})
+}
+
+func (a *application) handleBuild(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		methodNotAllowed(w, http.MethodGet, http.MethodHead)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, currentBuildInfo())
 }
 
 func (a *application) handlePermissionRefresh(w http.ResponseWriter, r *http.Request) {
@@ -296,16 +302,31 @@ type aggregate struct {
 	Bytes int64 `json:"bytes"`
 }
 
+// statsEntry is one of the largest objects encountered by a recursive stats
+// job. The persisted slice is kept as a min-heap so an arbitrarily large
+// prefix can be reduced to a bounded set without retaining every object in
+// memory. publicJob cloning sorts a copy for the frontend.
+type statsEntry struct {
+	Path         string `json:"path"`
+	Bytes        int64  `json:"bytes"`
+	Type         string `json:"type"`
+	MIME         string `json:"mime,omitempty"`
+	ETag         string `json:"etag,omitempty"`
+	LastModified string `json:"lastModified,omitempty"`
+}
+
 type statsResponse struct {
-	Instance   string               `json:"instance"`
-	Prefix     string               `json:"prefix"`
-	Count      int64                `json:"count"`
-	TotalBytes int64                `json:"totalBytes"`
-	TookMS     int64                `json:"tookMs"`
-	ByType     map[string]aggregate `json:"byType"`
-	ByFolder   map[string]aggregate `json:"byFolder"`
-	Newest     *time.Time           `json:"newest,omitempty"`
-	Oldest     *time.Time           `json:"oldest,omitempty"`
+	Instance      string               `json:"instance"`
+	LayoutVersion int                  `json:"layoutVersion,omitempty"`
+	Prefix        string               `json:"prefix"`
+	Count         int64                `json:"count"`
+	TotalBytes    int64                `json:"totalBytes"`
+	TookMS        int64                `json:"tookMs"`
+	ByType        map[string]aggregate `json:"byType"`
+	ByFolder      map[string]aggregate `json:"byFolder"`
+	Largest       []statsEntry         `json:"largest,omitempty"`
+	Newest        *time.Time           `json:"newest,omitempty"`
+	Oldest        *time.Time           `json:"oldest,omitempty"`
 }
 
 func (a *application) handleStats(w http.ResponseWriter, r *http.Request) {
@@ -1027,32 +1048,58 @@ func methodNotAllowed(w http.ResponseWriter, methods ...string) {
 	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 }
 
-func detectKind(key string) string {
-	extension := strings.TrimPrefix(strings.ToLower(path.Ext(key)), ".")
-	switch extension {
-	case "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "avif":
+func detectKind(key, contentType string) string {
+	mime := strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
+	switch {
+	case strings.HasPrefix(mime, "image/"):
 		return "image"
-	case "mp4", "mkv", "webm", "avi", "mov", "m4v", "mpg", "mpeg", "flv", "3gp", "wmv", "ogv", "mts", "m2ts", "vob":
+	case strings.HasPrefix(mime, "video/"):
 		return "video"
-	case "mp3", "flac", "wav", "m4a", "aac", "ogg", "opus", "aiff", "aif", "alac", "wma", "amr", "midi", "mid":
+	case strings.HasPrefix(mime, "audio/"):
+		return "audio"
+	case mime == "application/pdf":
+		return "pdf"
+	case strings.Contains(mime, "sqlite"):
+		return "database"
+	}
+
+	name := strings.ToLower(path.Base(key))
+	extension := strings.TrimPrefix(strings.ToLower(path.Ext(name)), ".")
+	switch extension {
+	case "png", "jpg", "jpeg", "jpe", "gif", "webp", "bmp", "dib", "svg", "avif", "heif", "heic", "tif", "tiff", "qoi", "ico", "cur",
+		"raw", "raf", "dng", "cr2", "cr3", "nef", "nrw", "arw", "srf", "sr2", "orf", "rw2", "pef", "rwl", "x3f", "iiq", "3fr", "fff", "mef", "mos", "mrw":
+		return "image"
+	case "mp4", "mkv", "webm", "avi", "mov", "m4v", "mpg", "mpeg", "flv", "3gp", "wmv", "ogv", "m2ts", "vob", "mxf", "m2v", "asf", "rm", "rmvb":
+		return "video"
+	case "mp3", "flac", "wav", "wave", "m4a", "aac", "ogg", "oga", "opus", "aiff", "aif", "alac", "wma", "amr", "midi", "mid":
 		return "audio"
 	case "pdf":
 		return "pdf"
 	case "md", "markdown", "mdown", "mkd", "rmd":
 		return "markdown"
-	case "doc", "docx", "rtf", "txt", "odt":
+	case "doc", "docx", "docm", "dot", "dotx", "dotm", "rtf", "odt", "pages":
 		return "document"
-	case "xls", "xlsx", "xlsm", "xlsb", "xlt", "ods", "csv", "tsv", "numbers", "parquet":
+	case "xls", "xlsx", "xlsm", "xlsb", "xlt", "xltx", "xltm", "ods", "csv", "tsv", "tab", "psv", "numbers", "parquet", "arrow", "feather":
 		return "spreadsheet"
-	case "ppt", "pptx", "pps", "ppsx", "odp", "key":
+	case "ppt", "pptx", "pptm", "pps", "ppsx", "odp", "key":
 		return "presentation"
+	case "sqlite", "sqlite3", "db", "db3", "s3db", "sl3":
+		return "database"
 	case "zip", "rar", "7z", "tar", "gz", "tgz", "bz2", "tbz", "xz", "txz", "zst":
 		return "archive"
-	case "gitignore", "js", "ts", "jsx", "tsx", "json", "yaml", "yml", "toml", "ini", "sh", "bash", "zsh", "ps1", "py", "rb", "php", "java", "go", "rs", "c", "cpp", "h", "cs", "swift", "sql":
+	case "js", "mjs", "cjs", "jsx", "ts", "mts", "cts", "tsx", "json", "geojson", "jsonl", "ndjson", "yaml", "yml", "toml", "ini", "hcl", "tf", "tfvars", "sh", "bash", "zsh", "fish", "ps1", "py", "pyw", "pyi", "rb", "php", "java", "kt", "kts", "go", "mod", "sum", "work", "rs", "c", "cc", "cpp", "cxx", "h", "hpp", "hxx", "cs", "swift", "sql", "css", "scss", "sass", "less", "html", "htm", "xhtml", "xml", "proto", "graphql", "gql", "diff", "patch":
 		return "code"
-	default:
-		return "other"
+	case "txt", "log", "conf", "cfg", "properties":
+		return "text"
 	}
+	switch name {
+	case "dockerfile", "containerfile", "makefile", "gnumakefile", "jenkinsfile", "procfile", "gemfile", "rakefile", "vagrantfile", "caddyfile", "justfile", "taskfile", "earthfile", "brewfile", "podfile":
+		return "code"
+	}
+	if strings.HasPrefix(name, ".env") || strings.HasPrefix(name, ".git") || strings.HasPrefix(name, ".docker") {
+		return "code"
+	}
+	return "other"
 }
 
 func secureStaticHandler(root fs.FS) http.Handler {

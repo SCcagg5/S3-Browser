@@ -17,7 +17,15 @@
 <body>
   <div id="root" v-cloak>
     <div id="app" :style="cssVars">
+      
       <header class="top">
+        <span
+            v-if="build && build.display"
+            class="build-version"
+            :title="`Release ${build.version || 'dev'}${build.commit && build.commit !== 'unknown' ? ` · source ${build.commit}` : ''}${build.date ? ` · built ${build.date}` : ''}`">
+              <i class="mdi mdi-source-commit"></i>
+              <span>{{ build.display }}</span>
+        </span>
         <div class="container">
           <div class="head">
             <div ref="breadcrumbRegion" class="title breadcrumbs browser-breadcrumbs">
@@ -101,18 +109,21 @@
                     <span class="storage-switcher-copy">
                       <span class="storage-switcher-title-row">
                         <strong>{{ currentInstance.name }}</strong>
-                        <span class="storage-switcher-permissions" aria-label="Storage permissions">
+                        <span
+                          class="storage-switcher-permissions is-interactive"
+                          role="button"
+                          tabindex="0"
+                          aria-label="Open storage permission details"
+                          :title="`${permissionSummaryTitle}. Open details.`"
+                          @click.stop="showPermissionDetails"
+                          @keydown.enter.stop.prevent="showPermissionDetails"
+                          @keydown.space.stop.prevent="showPermissionDetails">
                           <span
                             v-for="item in permissionStates"
                             :key="item.key"
-                            role="button"
-                            tabindex="0"
                             class="storage-permission-dot"
                             :class="item.state.allowed ? 'is-allowed' : 'is-denied'"
-                            :title="`${item.label}: ${item.state.allowed ? 'allowed' : 'denied'}. Open details.`"
-                            @click.stop="showPermissionDetails(item.key)"
-                            @keydown.enter.stop.prevent="showPermissionDetails(item.key)"
-                            @keydown.space.stop.prevent="showPermissionDetails(item.key)">
+                            :title="`${item.label}: ${item.state.allowed ? 'allowed' : 'denied'}`">
                             <i class="mdi" :class="`mdi-${item.icon}`"></i>
                           </span>
                         </span>
@@ -156,21 +167,24 @@
                   <span class="storage-switcher-copy">
                     <span class="storage-switcher-title-row">
                       <strong>{{ currentInstance.name }}</strong>
-                      <span class="storage-switcher-permissions" aria-label="Storage permissions">
-                        <span
-                          v-for="item in permissionStates"
-                          :key="item.key"
+                      <span
+                          class="storage-switcher-permissions is-interactive"
                           role="button"
                           tabindex="0"
-                          class="storage-permission-dot"
-                          :class="item.state.allowed ? 'is-allowed' : 'is-denied'"
-                          :title="`${item.label}: ${item.state.allowed ? 'allowed' : 'denied'}. Open details.`"
-                          @click.stop="showPermissionDetails(item.key)"
-                          @keydown.enter.stop.prevent="showPermissionDetails(item.key)"
-                          @keydown.space.stop.prevent="showPermissionDetails(item.key)">
-                          <i class="mdi" :class="`mdi-${item.icon}`"></i>
+                          aria-label="Open storage permission details"
+                          :title="`${permissionSummaryTitle}. Open details.`"
+                          @click.stop="showPermissionDetails"
+                          @keydown.enter.stop.prevent="showPermissionDetails"
+                          @keydown.space.stop.prevent="showPermissionDetails">
+                          <span
+                            v-for="item in permissionStates"
+                            :key="item.key"
+                            class="storage-permission-dot"
+                            :class="item.state.allowed ? 'is-allowed' : 'is-denied'"
+                            :title="`${item.label}: ${item.state.allowed ? 'allowed' : 'denied'}`">
+                            <i class="mdi" :class="`mdi-${item.icon}`"></i>
+                          </span>
                         </span>
-                      </span>
                     </span>
                     <small>{{ currentInstance.bucket }} · {{ currentInstance.provider.toUpperCase() }}</small>
                   </span>
@@ -229,9 +243,9 @@
                 <i class="mdi mdi-archive-arrow-down-outline"></i>
                 <span>Download as ZIP</span>
               </b-dropdown-item>
-              <b-dropdown-item :disabled="!canRead" @click="canRead && onCurrentFolderDetails()">
-                <i class="mdi mdi-information-outline"></i>
-                <span>Folder details</span>
+              <b-dropdown-item :disabled="!canRead" @click="canRead && onCurrentInsights()">
+                <i class="mdi mdi-chart-box-outline"></i>
+                <span>{{ currentInsightsLabel }}</span>
               </b-dropdown-item>
               <b-dropdown-item @click="showJobs">
                 <i class="mdi mdi-progress-wrench"></i>
@@ -381,7 +395,7 @@
                       </button>
                       <div class="bb-menu-popover">
                         <div class="bb-menu-list">
-                          <div v-if="canRead" class="bb-menu-item" @click="onPrefixDetails(props.row)"><i class="mdi mdi-information-outline"></i> Details</div>
+                          <div v-if="canRead" class="bb-menu-item" @click="onPrefixInsights(props.row)"><i class="mdi mdi-chart-box-outline"></i> Insights</div>
                           <div v-if="canRead" class="bb-menu-item" @click="onPrefixDownload(props.row)"><i class="mdi mdi-folder-download-outline"></i> Download as ZIP</div>
                           <div v-if="canCopy" class="bb-menu-item" @click="onPrefixCopy(props.row)"><i class="mdi mdi-content-copy"></i> Copy</div>
                           <div v-if="canRename" class="bb-menu-item" @click="onPrefixRename(props.row)"><i class="mdi mdi-rename-outline"></i> Rename</div>

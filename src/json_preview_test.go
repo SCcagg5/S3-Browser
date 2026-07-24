@@ -191,3 +191,97 @@ func TestJSONBeautifyFormatsEmptyAndNestedContainers(t *testing.T) {
 		t.Fatalf("unexpected beautified JSON:\n%s\nwant:\n%s", response.Text, expected)
 	}
 }
+
+func TestJSONSummaryMatchesPagedRawAndBeautifiedViews(t *testing.T) {
+	app, _, backend := testApplication(t)
+	payload := `{"large":"` + strings.Repeat("x", jsonTextPageBytes+4096) + `","items":[1,2,3],"tail":true}`
+	putJSONTestObject(backend, "tenant/summary.json", payload)
+
+	recorder := httptest.NewRecorder()
+	app.routes().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/json/summary?instance=rw&key=summary.json", nil))
+	summary := decodeJSONResponse[jsonSummaryResponse](t, recorder)
+	if summary.RawLines != 1 || summary.RawPages < 2 || summary.BeautifyLines < 2 || summary.BeautifyPages < 2 {
+		t.Fatalf("unexpected JSON summary: %+v", summary)
+	}
+	if summary.RawPage == nil || summary.RawPage.Done || summary.RawPage.NextCursor == "" {
+		t.Fatalf("the summary should include the first paged Raw response: %+v", summary.RawPage)
+	}
+	if len(summary.RawPage.Text) > jsonTextPageBytes+utf8MaxRuneBytes || summary.RawPage.LineStart != 1 {
+		t.Fatalf("unexpected first Raw page in summary: %+v", summary.RawPage)
+	}
+	if backend.getCount != 1 || backend.getRanges[0] != "bytes=0-" {
+		t.Fatalf("JSON summary should use one sequential provider stream: %v", backend.getRanges)
+	}
+
+	countPages := func(endpoint string, first *jsonTextPageResponse) (int64, int64) {
+		t.Helper()
+		var pages int64
+		var finalLine int64
+		cursor := ""
+		if first != nil {
+			pages = 1
+			finalLine = first.LineEnd
+			if first.Done {
+				return pages, finalLine
+			}
+			cursor = first.NextCursor
+		}
+		for {
+			requestURL := endpoint
+			if cursor != "" {
+				requestURL += "&cursor=" + url.QueryEscape(cursor)
+			}
+			recorder := httptest.NewRecorder()
+			app.routes().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, requestURL, nil))
+			page := decodeJSONResponse[jsonTextPageResponse](t, recorder)
+			pages++
+			finalLine = page.LineEnd
+			if page.Done {
+				return pages, finalLine
+			}
+			if page.NextCursor == "" {
+				t.Fatal("paged JSON response omitted its continuation cursor")
+			}
+			cursor = page.NextCursor
+		}
+	}
+
+	rawPages, rawLines := countPages("/api/json/raw?instance=rw&key=summary.json", summary.RawPage)
+	if rawPages != summary.RawPages || rawLines != summary.RawLines {
+		t.Fatalf("raw summary/pages mismatch: summary=%+v pages=%d lines=%d", summary, rawPages, rawLines)
+	}
+	beautifyPages, beautifyLines := countPages("/api/json/beautify?instance=rw&key=summary.json", nil)
+	if beautifyPages != summary.BeautifyPages || beautifyLines != summary.BeautifyLines {
+		t.Fatalf("beautify summary/pages mismatch: summary=%+v pages=%d lines=%d", summary, beautifyPages, beautifyLines)
+	}
+}
+
+func TestJSONTreeReportsArrayElementCounts(t *testing.T) {
+	app, _, backend := testApplication(t)
+	putJSONTestObject(backend, "tenant/counts.json", `{"items":[1,2,{"nested":[3,4,5]}]}`)
+
+	recorder := httptest.NewRecorder()
+	app.routes().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/json/tree?instance=rw&key=counts.json&limit=50", nil))
+	root := decodeJSONResponse[jsonTreeResponse](t, recorder)
+	if !root.Node.CountKnown || root.Node.Count != 1 {
+		t.Fatalf("root object count = %+v", root.Node)
+	}
+	if len(root.Children) != 1 || root.Children[0].Type != "array" || !root.Children[0].CountKnown || root.Children[0].Count != 3 {
+		t.Fatalf("array child count = %+v", root.Children)
+	}
+
+	items := root.Children[0]
+	itemsURL := fmt.Sprintf("/api/json/tree?instance=rw&key=counts.json&type=array&start=%d&limit=50", items.Start)
+	recorder = httptest.NewRecorder()
+	app.routes().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, itemsURL, nil))
+	itemsPage := decodeJSONResponse[jsonTreeResponse](t, recorder)
+	if !itemsPage.Node.CountKnown || itemsPage.Node.Count != 3 {
+		t.Fatalf("expanded array count = %+v", itemsPage.Node)
+	}
+	if len(itemsPage.Children) != 3 || itemsPage.Children[2].Type != "object" {
+		t.Fatalf("unexpected array children: %+v", itemsPage.Children)
+	}
+	if backend.getCount != 2 {
+		t.Fatalf("array count should not add a provider read: count=%d ranges=%v", backend.getCount, backend.getRanges)
+	}
+}

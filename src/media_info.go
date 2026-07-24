@@ -11,6 +11,21 @@ import (
 	"strings"
 )
 
+type mediaSourceMetadata struct {
+	Size         int64
+	MIME         string
+	ETag         string
+	LastModified string
+}
+
+func parseInt64Default(value string, fallback int64) int64 {
+	parsed, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
 type mediaInfoResponse struct {
 	Instance        string            `json:"instance"`
 	Key             string            `json:"key"`
@@ -55,30 +70,14 @@ func (a *application) handleMediaInfo(w http.ResponseWriter, r *http.Request) {
 		LastModified: strings.TrimSpace(r.URL.Query().Get("lastModified")),
 	}
 	response := mediaInfoResponse{Instance: instance.cfg.ID, Key: key}
-	if mediaInfoPrefersFFprobe(extension, contentTypeHint) && a.media != nil && a.media.ffprobePath != "" {
-		probe, probeErr := a.media.probe(r.Context(), instance, key, internalMediaBaseURL(r, a.config.Listen), listedMetadata)
-		if probeErr == nil && probe.Available {
-			populateMediaStorageHints(&response, listedMetadata)
-			if response.Size <= 0 || response.MIME == "" {
-				head, headErr := instance.backend.Head(r.Context(), instance.fullKey(key))
-				if headErr != nil {
-					writeAPIError(w, headErr)
-					return
-				}
-				if head.Body != nil {
-					_ = head.Body.Close()
-				}
-				populateMediaStorageFields(&response, head.Header, 0)
-			}
-			response.Container = mediaContainer(extension, response.MIME)
-			mergeProbeIntoMediaInfo(&response, probe)
-			if len(response.Properties) == 0 {
-				response.Properties = nil
-			}
-			w.Header().Set("Cache-Control", "no-store")
-			writeJSON(w, http.StatusOK, response)
+	if documentResponse, handled, documentErr := inspectDocumentDetails(r.Context(), instance, key, extension, contentTypeHint, listedMetadata); handled {
+		if documentErr != nil {
+			writeAPIError(w, documentErr)
 			return
 		}
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, http.StatusOK, documentResponse)
+		return
 	}
 	if !extensionMayContainInspectableMetadata(extension) && !contentTypeMayContainInspectableMetadata(contentTypeHint) {
 		head, headErr := instance.backend.Head(r.Context(), instance.fullKey(key))
@@ -146,54 +145,11 @@ func (a *application) handleMediaInfo(w http.ResponseWriter, r *http.Request) {
 	response.Codecs = metadata.Codecs
 	response.Tracks = metadata.Tracks
 	response.Properties = metadata.Properties
-	if mediaInfoNeedsProbe(extension, contentTypeHint, response) && a.media != nil && a.media.available() {
-		probeMetadata := mediaSourceMetadata{
-			Size:         response.Size,
-			MIME:         response.MIME,
-			ETag:         response.Headers["etag"],
-			LastModified: response.Headers["last-modified"],
-		}
-		probe, probeErr := a.media.probe(r.Context(), instance, key, internalMediaBaseURL(r, a.config.Listen), probeMetadata)
-		// Details should remain useful when ffprobe is unavailable or the
-		// container is damaged. The format-aware reader above is authoritative;
-		// ffprobe only fills fields that the bounded header parser could not find.
-		if probeErr == nil && probe.Available {
-			mergeProbeIntoMediaInfo(&response, probe)
-		}
-	}
 	if len(response.Properties) == 0 {
 		response.Properties = nil
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, response)
-}
-
-func populateMediaStorageHints(response *mediaInfoResponse, metadata mediaSourceMetadata) {
-	if response == nil {
-		return
-	}
-	response.Size = maxInt64(0, metadata.Size)
-	response.MIME = strings.TrimSpace(strings.Split(metadata.MIME, ";")[0])
-	headers := make(map[string]string)
-	if value := strings.TrimSpace(metadata.ETag); value != "" {
-		headers["etag"] = value
-	}
-	if value := strings.TrimSpace(metadata.LastModified); value != "" {
-		headers["last-modified"] = value
-	}
-	if len(headers) > 0 {
-		response.Headers = headers
-	}
-}
-
-func mediaInfoPrefersFFprobe(extension, contentType string) bool {
-	switch strings.ToLower(strings.TrimSpace(extension)) {
-	case "mxf", "avi", "flv", "f4v", "wmv", "asf", "mts", "m2ts", "ts", "vob", "dv", "m2v", "mpg", "mpeg", "3gp", "3g2",
-		"aiff", "aif", "alac", "wma", "amr", "ape", "wv", "tta", "ac3", "eac3", "dts", "mka", "au", "caf":
-		return true
-	}
-	value := strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
-	return value == "application/mxf" || value == "video/mp2t" || value == "video/x-msvideo" || value == "video/x-ms-wmv"
 }
 
 func contentTypeMayContainInspectableMetadata(contentType string) bool {
@@ -477,83 +433,4 @@ func maxInt64(left, right int64) int64 {
 		return left
 	}
 	return right
-}
-
-func mediaInfoNeedsProbe(extension, contentType string, response mediaInfoResponse) bool {
-	value := strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
-	video := strings.HasPrefix(value, "video/") || isVideoMetadataExtension(extension)
-	audio := strings.HasPrefix(value, "audio/") || isAudioMetadataExtension(extension)
-	if !video && !audio {
-		return false
-	}
-	if response.DurationSeconds <= 0 || len(response.Tracks) == 0 {
-		return true
-	}
-	return video && (response.Width <= 0 || response.Height <= 0)
-}
-
-func isVideoMetadataExtension(extension string) bool {
-	switch strings.ToLower(extension) {
-	case "mp4", "mkv", "webm", "avi", "mov", "m4v", "mpg", "mpeg", "flv", "f4v", "3gp", "3g2", "wmv", "asf", "ogv", "mts", "m2ts", "ts", "vob", "mxf", "dv", "m2v":
-		return true
-	default:
-		return false
-	}
-}
-
-func isAudioMetadataExtension(extension string) bool {
-	switch strings.ToLower(extension) {
-	case "mp3", "flac", "wav", "wave", "m4a", "aac", "ogg", "oga", "opus", "aiff", "aif", "alac", "wma", "amr", "midi", "mid", "ape", "wv", "tta", "ac3", "eac3", "dts", "mka", "au", "caf":
-		return true
-	default:
-		return false
-	}
-}
-
-func mergeProbeIntoMediaInfo(response *mediaInfoResponse, probe mediaProbeResponse) {
-	if response == nil {
-		return
-	}
-	if response.DurationSeconds <= 0 && probe.DurationSeconds > 0 {
-		response.DurationSeconds = probe.DurationSeconds
-	}
-	if len(response.Tracks) == 0 && len(probe.Tracks) > 0 {
-		response.Tracks = append([]mediaTrackInfo(nil), probe.Tracks...)
-	}
-	codecSet := make(map[string]struct{}, len(response.Codecs)+len(probe.Tracks))
-	for _, codec := range response.Codecs {
-		codec = strings.TrimSpace(codec)
-		if codec != "" {
-			codecSet[codec] = struct{}{}
-		}
-	}
-	for _, track := range probe.Tracks {
-		codec := strings.TrimSpace(track.Codec)
-		if codec != "" {
-			codecSet[codec] = struct{}{}
-		}
-		if track.Type == "video" && response.Width <= 0 && response.Height <= 0 && track.Width > 0 && track.Height > 0 {
-			response.Width, response.Height = track.Width, track.Height
-		}
-	}
-	if len(codecSet) > 0 {
-		response.Codecs = response.Codecs[:0]
-		for codec := range codecSet {
-			response.Codecs = append(response.Codecs, codec)
-		}
-		sort.Strings(response.Codecs)
-	}
-	if response.Container == "" && probe.Container != "" {
-		response.Container = strings.ToUpper(strings.Split(probe.Container, ",")[0])
-	}
-	if len(probe.Tags) > 0 {
-		if response.Properties == nil {
-			response.Properties = make(map[string]string)
-		}
-		for key, value := range probe.Tags {
-			if _, exists := response.Properties[key]; !exists {
-				response.Properties[key] = value
-			}
-		}
-	}
 }

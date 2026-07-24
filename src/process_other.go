@@ -1,14 +1,6 @@
-//go:build windows
+//go:build legacy_media
 
+// This tombstone intentionally replaces a source file from the retired
+// FFmpeg/HLS implementation when a release is extracted over an older tree.
+// The legacy_media tag is never enabled by the current build.
 package main
-
-import (
-	"context"
-	"os/exec"
-)
-
-func configureProcessGroup(command *exec.Cmd) {}
-
-func runCommandWithContext(ctx context.Context, command *exec.Cmd) error {
-	return command.Run()
-}

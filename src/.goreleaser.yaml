@@ -3,22 +3,32 @@ version: 2
 project_name: s3-browser
 
 builds:
-  - id: s3-browser-linux-amd64
+  - id: s3-browser-linux
     main: .
     binary: s3-browser
     env:
       - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    tags:
+      - netgo
+      - osusergo
     goos:
       - linux
     goarch:
       - amd64
+      - arm64
     ldflags:
-      - -s -w
+      - >-
+        -s -w -buildid=
+        -X main.buildVersion={{ .Version }}
+        -X main.buildCommit={{ .Commit }}
+        -X main.buildDate={{ .Date }}
 
 archives:
-  - id: s3-browser-linux-amd64
+  - id: s3-browser-linux
     ids:
-      - s3-browser-linux-amd64
+      - s3-browser-linux
     formats:
       - tar.gz
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"

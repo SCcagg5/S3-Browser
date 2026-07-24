@@ -72,8 +72,9 @@
   const VIDEO_EXT = new Set(['mp4', 'mkv', 'webm', 'avi', 'mov', 'm4v', 'mpg', 'mpeg', 'flv', 'f4v', '3gp', '3g2', 'wmv', 'asf', 'ogv', 'mts', 'm2ts', 'ts', 'vob', 'mxf', 'dv', 'dvr-ms', 'm2v', 'rm', 'rmvb', 'nut', 'y4m']);
   const AUDIO_EXT = new Set(['mp3', 'flac', 'wav', 'wave', 'm4a', 'aac', 'ogg', 'oga', 'opus', 'aiff', 'aif', 'alac', 'wma', 'amr', 'midi', 'mid', 'ape', 'wv', 'tta', 'ac3', 'eac3', 'dts', 'mka', 'au', 'caf']);
   const ARCHIVE_EXT = new Set(['zip', 'rar', '7z', 'tar', 'gz', 'tgz', 'bz2', 'tbz', 'xz', 'txz', 'zst', 'jar', 'war']);
-  const TABULAR_EXT = new Set(['csv', 'tsv', 'psv', 'jsonl', 'ndjson']);
+  const TABULAR_EXT = new Set(['csv', 'tsv', 'tab', 'psv', 'jsonl', 'ndjson']);
   const JSON_EXT = new Set(['json', 'geojson']);
+  const SQLITE_EXT = new Set(['sqlite', 'sqlite3', 'db', 'db3', 's3db', 'sl3']);
   const WORD_PREVIEW_EXT = new Set(['docx', 'dotx', 'docm', 'dotm']);
   const WORD_UNAVAILABLE_EXT = new Set(['doc', 'dot', 'odt', 'rtf', 'pages']);
   const SPREADSHEET_PREVIEW_EXT = new Set(['xls', 'xlsx', 'xlsm']);
@@ -179,6 +180,7 @@
       parquet: 'table-large',
       spreadsheet: 'file-excel-outline',
       json: 'code-json',
+      sqlite: 'database-search-outline',
       word: 'file-word-outline',
       'sheet-unavailable': 'file-excel-outline',
       'slide-unavailable': 'file-powerpoint-outline',
@@ -200,8 +202,9 @@
     if (/(spreadsheetml|ms-excel)/i.test(contentType)) return 'spreadsheet';
     if (SLIDE_EXT.has(extension) || /(presentationml|ms-powerpoint|opendocument\.presentation)/i.test(contentType)) return 'slide-unavailable';
     if (extension === 'parquet' || /parquet/i.test(contentType)) return 'parquet';
-    if (TABULAR_EXT.has(extension) || /(?:text\/csv|tab-separated-values|ndjson|json-seq)/i.test(contentType)) return 'tabular';
+    if (TABULAR_EXT.has(extension) || /(?:text\/(?:csv|tsv)|tab-separated-values|ndjson|json-seq)/i.test(contentType)) return 'tabular';
     if (JSON_EXT.has(extension) || /(?:application|text)\/(?:[a-z0-9.+-]+\+)?json(?:\s*;|$)/i.test(contentType)) return 'json';
+    if (SQLITE_EXT.has(extension) || /(?:application\/(?:x-)?sqlite3?|application\/vnd\.sqlite3)/i.test(contentType)) return 'sqlite';
     if (RAW_IMAGE_EXT.has(extension)) return 'raw-image';
     if (CONVERT_IMAGE_EXT.has(extension)) return 'image-convert';
     if (IMAGE_EXT.has(extension) || /^image\//i.test(contentType)) return 'image';

@@ -3,6 +3,7 @@ services:
     build:
       context: ..
       dockerfile: test/browser/Dockerfile
+      target: runtime
     container_name: s3-browser
     restart: unless-stopped
     command: ["-c", "/config/config.hcl"]
