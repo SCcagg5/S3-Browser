@@ -1,16 +1,15 @@
-# Build only the current self-contained runtime sources.
-# These files belonged to the former FFmpeg/HLS implementation and may remain
-# when a new release is extracted over an older working directory.
-src/media_sessions.go
-src/media_sessions_test.go
-src/media_process_unix_test.go
-src/media_source_cache.go
-src/media_source_cache_test.go
-src/process_other.go
-src/process_unix.go
-
 # Local build outputs and runtime state.
 src/s3-browser
 .s3-browser-data/
 test/garage/volume/
 *.zip
+
+# Local credentials and developer overrides.
+config.hcl
+secrets/
+*.pem
+*.key
+service-account*.json
+
+# Repository metadata is not needed in image builds.
+.git/

@@ -11,6 +11,24 @@ import (
 	"time"
 )
 
+func newAnonymousS3BackendForTest(t *testing.T, endpoint, bucket string) *s3Backend {
+	t.Helper()
+	auth, err := newSharedAuthentication(authConfig{
+		ID: "test-s3", Provider: "s3", Mode: "anonymous", Endpoint: endpoint, Region: "test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(auth.close)
+	backend, err := newS3BackendWithAuthentication(bucketConfig{
+		ID: "test-bucket", AuthID: auth.cfg.ID, Provider: "s3", Region: auth.cfg.Region, Bucket: bucket,
+	}, auth)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return backend
+}
+
 func TestSignS3RequestAWSReferenceVector(t *testing.T) {
 	t.Parallel()
 	req, err := http.NewRequest(http.MethodGet, "https://examplebucket.s3.amazonaws.com/test.txt", nil)
@@ -49,7 +67,7 @@ func TestCanonicalQueryAndObjectPathEncoding(t *testing.T) {
 	}
 
 	backend := &s3Backend{
-		cfg:      storageConfig{Bucket: "my bucket"},
+		cfg:      bucketConfig{Bucket: "my bucket"},
 		endpoint: mustURL(t, "https://example.test/base"),
 	}
 	u := backend.objectURL("a//./../b +é.txt", nil)
@@ -67,13 +85,8 @@ func TestS3CopyDetectsErrorInsideSuccessfulHTTPResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	backend, err := newS3Backend(storageConfig{
-		Provider: "s3", Endpoint: server.URL, Region: "test", Bucket: "bucket", Auth: "anonymous",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = backend.Copy(context.Background(), "source", "destination")
+	backend := newAnonymousS3BackendForTest(t, server.URL, "bucket")
+	err := backend.Copy(context.Background(), "source", "destination")
 	if err == nil || !strings.Contains(err.Error(), "InternalError: copy failed") {
 		t.Fatalf("Copy() error = %v", err)
 	}
@@ -99,12 +112,7 @@ func TestS3GetPassesThroughNotModified(t *testing.T) {
 	}))
 	defer server.Close()
 
-	backend, err := newS3Backend(storageConfig{
-		Provider: "s3", Endpoint: server.URL, Region: "test", Bucket: "bucket", Auth: "anonymous",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	backend := newAnonymousS3BackendForTest(t, server.URL, "bucket")
 	headers := make(http.Header)
 	headers.Set("If-None-Match", `"etag"`)
 	response, err := backend.Get(context.Background(), "object.txt", headers)
@@ -149,10 +157,7 @@ func TestS3MultipartLifecycle(t *testing.T) {
 	}))
 	defer server.Close()
 
-	backend, err := newS3Backend(storageConfig{Provider: "s3", Endpoint: server.URL, Region: "test", Bucket: "bucket", Auth: "anonymous"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	backend := newAnonymousS3BackendForTest(t, server.URL, "bucket")
 	uploadID, err := backend.InitiateMultipart(context.Background(), "large.bin", "application/octet-stream")
 	if err != nil || uploadID != "upload-123" {
 		t.Fatalf("initiate = %q, %v", uploadID, err)
@@ -179,11 +184,8 @@ func TestS3MultipartCompletionDetectsEmbeddedError(t *testing.T) {
 		_, _ = io.WriteString(w, `<Error><Code>InternalError</Code><Message>failed</Message></Error>`)
 	}))
 	defer server.Close()
-	backend, err := newS3Backend(storageConfig{Provider: "s3", Endpoint: server.URL, Region: "test", Bucket: "bucket", Auth: "anonymous"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = backend.CompleteMultipart(context.Background(), "large.bin", "upload", []s3CompletedPart{{PartNumber: 1, ETag: "etag"}})
+	backend := newAnonymousS3BackendForTest(t, server.URL, "bucket")
+	err := backend.CompleteMultipart(context.Background(), "large.bin", "upload", []s3CompletedPart{{PartNumber: 1, ETag: "etag"}})
 	if err == nil || !strings.Contains(err.Error(), "InternalError") {
 		t.Fatalf("error = %v", err)
 	}
@@ -204,12 +206,7 @@ func TestS3GetForwardsRangeResumeHeaders(t *testing.T) {
 	}))
 	defer server.Close()
 
-	backend, err := newS3Backend(storageConfig{
-		Provider: "s3", Endpoint: server.URL, Region: "test", Bucket: "bucket", Auth: "anonymous",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	backend := newAnonymousS3BackendForTest(t, server.URL, "bucket")
 	headers := make(http.Header)
 	headers.Set("Range", "bytes=100-")
 	headers.Set("If-Range", `"etag"`)

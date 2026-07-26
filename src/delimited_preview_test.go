@@ -51,8 +51,9 @@ func TestDelimitedPreviewPagesTSVWithoutLoadingWholeObject(t *testing.T) {
 	if backend.getCount != 2 {
 		t.Fatalf("GET count = %d, want 2", backend.getCount)
 	}
-	if len(backend.getRanges) != 2 || backend.getRanges[0] != "" || !strings.HasPrefix(backend.getRanges[1], "bytes=") || backend.getRanges[1] == "bytes=0-" {
-		t.Fatalf("ranges = %#v", backend.getRanges)
+	requireExactByteRanges(t, backend.getRanges)
+	if exactRangeStart(t, backend.getRanges[0]) != 0 || exactRangeStart(t, backend.getRanges[1]) <= 0 {
+		t.Fatalf("ranges did not resume from the cursor: %#v", backend.getRanges)
 	}
 }
 
@@ -88,6 +89,7 @@ func TestDelimitedPreviewHandlesTSVLargerThanBrowserLimit(t *testing.T) {
 	if backend.getCount != 1 {
 		t.Fatalf("GET count = %d, want 1", backend.getCount)
 	}
+	requireExactByteRanges(t, backend.getRanges)
 }
 
 func TestDocumentCountIsExplicitForTSV(t *testing.T) {

@@ -189,4 +189,13 @@ assert.deepEqual(
   'bandwidth-consuming transfers should remain above queued, paused and completed rows'
 );
 
+let canceledCount = 0;
+const bulk = windowObject.BB.ui.transferGroup('upload-bulk');
+bulk.add({ id: 'bulk-running', name: 'running.bin', status: 'running', onCancel: () => { canceledCount += 1; } });
+bulk.add({ id: 'bulk-queued', name: 'queued.bin', status: 'queued', onCancel: () => { canceledCount += 1; } });
+bulk.add({ id: 'bulk-paused', name: 'paused.bin', status: 'paused', onCancel: () => { canceledCount += 1; } });
+bulk.add({ id: 'bulk-complete', name: 'complete.bin', status: 'completed', onCancel: () => { canceledCount += 100; } });
+bulk.cancel();
+assert.equal(canceledCount, 3, 'bulk cancel must cancel every pending upload or download and skip completed rows');
+
 console.log('transfer control behavior tests passed');

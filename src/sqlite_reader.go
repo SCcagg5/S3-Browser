@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net/http"
 	"os"
 	"sort"
 	"strconv"
@@ -18,10 +19,12 @@ import (
 const (
 	maxSQLiteBTreeDepth    = 128
 	maxSQLiteRecordPayload = int64(64 << 20)
+	maxSQLiteSortRows      = 150000
 )
 
 type sqliteDatabase struct {
-	file       *os.File
+	reader     io.ReaderAt
+	closer     io.Closer
 	size       int64
 	pageSize   int
 	usableSize int
@@ -60,39 +63,51 @@ func openSQLiteDatabase(path string) (*sqliteDatabase, error) {
 	if err != nil {
 		return nil, err
 	}
-	cleanup := func(openErr error) (*sqliteDatabase, error) {
-		_ = file.Close()
-		return nil, openErr
-	}
 	info, err := file.Stat()
 	if err != nil {
-		return cleanup(err)
+		_ = file.Close()
+		return nil, err
 	}
-	if info.Size() < 100 {
-		return cleanup(apiError{Status: 422, Code: "invalid_sqlite", Message: "the object is too small to be a SQLite 3 database"})
+	database, err := openSQLiteDatabaseReader(file, info.Size())
+	if err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	database.closer = file
+	return database, nil
+}
+
+func openSQLiteDatabaseReader(reader io.ReaderAt, size int64) (*sqliteDatabase, error) {
+	if reader == nil {
+		return nil, apiError{Status: 422, Code: "invalid_sqlite", Message: "the SQLite reader is unavailable"}
+	}
+	if size < 100 {
+		return nil, apiError{Status: 422, Code: "invalid_sqlite", Message: "the object is too small to be a SQLite 3 database"}
 	}
 	header := make([]byte, 100)
-	if _, err := io.ReadFull(io.NewSectionReader(file, 0, int64(len(header))), header); err != nil {
-		return cleanup(err)
+	if _, err := io.ReadFull(io.NewSectionReader(reader, 0, int64(len(header))), header); err != nil {
+		return nil, err
 	}
 	if string(header[:16]) != "SQLite format 3\x00" {
-		return cleanup(apiError{Status: 422, Code: "invalid_sqlite", Message: "the object is not a SQLite 3 database"})
+		return nil, apiError{Status: 422, Code: "invalid_sqlite", Message: "the object is not a SQLite 3 database"}
 	}
 	pageSize := int(binary.BigEndian.Uint16(header[16:18]))
 	if pageSize == 1 {
 		pageSize = 65536
 	}
 	if pageSize < 512 || pageSize > 65536 || pageSize&(pageSize-1) != 0 {
-		return cleanup(apiError{Status: 422, Code: "invalid_sqlite_page_size", Message: "the SQLite database declares an invalid page size"})
+		return nil, apiError{Status: 422, Code: "invalid_sqlite_page_size", Message: "the SQLite database declares an invalid page size"}
 	}
 	reserved := int(header[20])
 	if reserved < 0 || reserved >= pageSize-32 {
-		return cleanup(apiError{Status: 422, Code: "invalid_sqlite_reserved_space", Message: "the SQLite database declares invalid reserved page space"})
+		return nil, apiError{Status: 422, Code: "invalid_sqlite_reserved_space", Message: "the SQLite database declares invalid reserved page space"}
 	}
-	pageCount := uint32((info.Size() + int64(pageSize) - 1) / int64(pageSize))
+	pageCount64 := (size + int64(pageSize) - 1) / int64(pageSize)
+	if pageCount64 > math.MaxUint32 {
+		return nil, apiError{Status: 422, Code: "sqlite_too_large", Message: "the SQLite database declares more pages than the preview reader supports"}
+	}
+	pageCount := uint32(pageCount64)
 	if declared := binary.BigEndian.Uint32(header[28:32]); declared > 0 && declared < pageCount {
-		// A database may have trailing bytes, but pages beyond the declared count
-		// are not part of the logical database and must not be followed.
 		pageCount = declared
 	}
 	encoding := binary.BigEndian.Uint32(header[56:60])
@@ -100,27 +115,23 @@ func openSQLiteDatabase(path string) (*sqliteDatabase, error) {
 		encoding = 1
 	}
 	if encoding < 1 || encoding > 3 {
-		return cleanup(apiError{Status: 422, Code: "unsupported_sqlite_encoding", Message: "the SQLite database uses an unsupported text encoding"})
+		return nil, apiError{Status: 422, Code: "unsupported_sqlite_encoding", Message: "the SQLite database uses an unsupported text encoding"}
 	}
 	return &sqliteDatabase{
-		file:       file,
-		size:       info.Size(),
-		pageSize:   pageSize,
-		usableSize: pageSize - reserved,
-		pageCount:  pageCount,
-		encoding:   encoding,
+		reader: reader, size: size, pageSize: pageSize,
+		usableSize: pageSize - reserved, pageCount: pageCount, encoding: encoding,
 	}, nil
 }
 
 func (db *sqliteDatabase) close() error {
-	if db == nil || db.file == nil {
+	if db == nil || db.closer == nil {
 		return nil
 	}
-	return db.file.Close()
+	return db.closer.Close()
 }
 
 func (db *sqliteDatabase) readPage(pageNumber uint32) ([]byte, error) {
-	if db == nil || db.file == nil || pageNumber == 0 || pageNumber > db.pageCount {
+	if db == nil || db.reader == nil || pageNumber == 0 || pageNumber > db.pageCount {
 		return nil, apiError{Status: 422, Code: "invalid_sqlite_page", Message: "the SQLite database references a page outside the file"}
 	}
 	offset := int64(pageNumber-1) * int64(db.pageSize)
@@ -128,7 +139,7 @@ func (db *sqliteDatabase) readPage(pageNumber uint32) ([]byte, error) {
 		return nil, apiError{Status: 422, Code: "invalid_sqlite_page", Message: "the SQLite database references a page outside the file"}
 	}
 	page := make([]byte, db.pageSize)
-	read, err := db.file.ReadAt(page, offset)
+	read, err := db.reader.ReadAt(page, offset)
 	if err != nil && !errors.Is(err, io.EOF) {
 		return nil, err
 	}
@@ -973,6 +984,18 @@ func inspectSQLiteTables(ctx context.Context, databasePath string) ([]sqliteTabl
 		return nil, nil, err
 	}
 	defer database.close()
+	return inspectSQLiteTablesDatabase(ctx, database)
+}
+
+func inspectSQLiteTablesReader(ctx context.Context, reader io.ReaderAt, size int64) ([]sqliteTableInfo, map[string]sqliteTableDefinition, error) {
+	database, err := openSQLiteDatabaseReader(reader, size)
+	if err != nil {
+		return nil, nil, err
+	}
+	return inspectSQLiteTablesDatabase(ctx, database)
+}
+
+func inspectSQLiteTablesDatabase(ctx context.Context, database *sqliteDatabase) ([]sqliteTableInfo, map[string]sqliteTableDefinition, error) {
 	entries, err := database.schema(ctx)
 	if err != nil {
 		return nil, nil, err
@@ -1034,6 +1057,27 @@ func sqliteRowMatches(row map[string]any, columns []sqliteColumnInfo, query stri
 	return false
 }
 
+func sqliteRowMatchesFilters(row map[string]any, filters map[string]string) bool {
+	for column, filter := range filters {
+		value := row[column]
+		if _, blob := value.(sqliteBlob); blob {
+			if strings.TrimSpace(filter) != "" {
+				return false
+			}
+			continue
+		}
+		if !matchesSpreadsheetFilter(sqliteString(value), filter) {
+			return false
+		}
+	}
+	return true
+}
+
+type sqliteSortableRow struct {
+	rowID  int64
+	values map[string]any
+}
+
 func sqliteDisplayValue(value any) any {
 	switch typed := value.(type) {
 	case sqliteBlob:
@@ -1056,6 +1100,20 @@ func querySQLiteTable(ctx context.Context, databasePath string, definition sqlit
 		return sqlitePageResponse{}, err
 	}
 	defer database.close()
+	return querySQLiteTableDatabase(ctx, database, definition, page, pageSize, search, nil, "", "", true)
+}
+
+func querySQLiteTableReader(ctx context.Context, reader io.ReaderAt, size int64, definition sqliteTableDefinition, page, pageSize int, search string, filters map[string]string, sortColumn, sortDirection string, exactTotals bool) (sqlitePageResponse, error) {
+	database, err := openSQLiteDatabaseReader(reader, size)
+	if err != nil {
+		return sqlitePageResponse{}, err
+	}
+	return querySQLiteTableDatabase(ctx, database, definition, page, pageSize, search, filters, sortColumn, sortDirection, exactTotals)
+}
+
+var errSQLitePageComplete = errors.New("sqlite page complete")
+
+func querySQLiteTableDatabase(ctx context.Context, database *sqliteDatabase, definition sqliteTableDefinition, page, pageSize int, search string, filters map[string]string, sortColumn, sortDirection string, exactTotals bool) (sqlitePageResponse, error) {
 	page = maxInt(0, page)
 	pageSize = minInt(1000, maxInt(1, pageSize))
 	start := int64(page) * int64(pageSize)
@@ -1063,42 +1121,103 @@ func querySQLiteTable(ctx context.Context, databasePath string, definition sqlit
 	rows := make([]map[string]any, 0, pageSize)
 	var sourceTotal int64
 	var filteredTotal int64
+	var err error
+
+	writeOutput := func(mapped map[string]any) map[string]any {
+		output := make(map[string]any, len(definition.Info.Columns))
+		for _, column := range definition.Info.Columns {
+			output[column.Name] = sqliteDisplayValue(mapped[column.Name])
+		}
+		return output
+	}
+
+	walk := func(visit func(rowID int64, values []any) error) error {
+		if definition.WithoutRowID {
+			return database.walkIndexBTree(ctx, definition.RootPage, visit)
+		}
+		return database.walkTableBTree(ctx, definition.RootPage, visit)
+	}
+
+	if sortColumn != "" && (sortDirection == "asc" || sortDirection == "desc") {
+		matches := make([]sqliteSortableRow, 0, minInt(pageSize*4, maxSQLiteSortRows))
+		err = walk(func(rowID int64, values []any) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			sourceTotal++
+			mapped := definition.mapRecord(rowID, values)
+			if !sqliteRowMatches(mapped, definition.Info.Columns, search) || !sqliteRowMatchesFilters(mapped, filters) {
+				return nil
+			}
+			if len(matches) >= maxSQLiteSortRows {
+				return apiError{Status: http.StatusUnprocessableEntity, Code: "sort_result_too_large", Message: fmt.Sprintf("sorting is limited to %d matching SQLite rows; add filters to narrow the result", maxSQLiteSortRows)}
+			}
+			matches = append(matches, sqliteSortableRow{rowID: rowID, values: mapped})
+			return nil
+		})
+		if err != nil {
+			return sqlitePageResponse{}, err
+		}
+		sort.SliceStable(matches, func(i, j int) bool {
+			comparison := compareSpreadsheetValues(sqliteString(matches[i].values[sortColumn]), sqliteString(matches[j].values[sortColumn]))
+			if comparison == 0 {
+				comparison = strings.Compare(fmt.Sprintf("%020d", matches[i].rowID), fmt.Sprintf("%020d", matches[j].rowID))
+			}
+			if sortDirection == "desc" {
+				return comparison > 0
+			}
+			return comparison < 0
+		})
+		filteredTotal = int64(len(matches))
+		from := minInt(len(matches), int(start))
+		to := minInt(len(matches), int(end))
+		for _, match := range matches[from:to] {
+			rows = append(rows, writeOutput(match.values))
+		}
+		return sqlitePageResponse{
+			Table: definition.Info, Rows: rows, Page: page, PageSize: pageSize,
+			HasMore:   filteredTotal > end,
+			TotalRows: filteredTotal, SourceTotalRows: sourceTotal,
+			TotalKnown: true, SourceTotalKnown: true,
+			ScannedRows: sourceTotal, Query: search, Columns: definition.Info.Columns,
+		}, nil
+	}
+
 	visit := func(rowID int64, values []any) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		sourceTotal++
 		mapped := definition.mapRecord(rowID, values)
-		if !sqliteRowMatches(mapped, definition.Info.Columns, search) {
+		if !sqliteRowMatches(mapped, definition.Info.Columns, search) || !sqliteRowMatchesFilters(mapped, filters) {
 			return nil
 		}
 		if filteredTotal >= start && filteredTotal < end {
-			output := make(map[string]any, len(definition.Info.Columns))
-			for _, column := range definition.Info.Columns {
-				output[column.Name] = sqliteDisplayValue(mapped[column.Name])
-			}
-			rows = append(rows, output)
+			rows = append(rows, writeOutput(mapped))
 		}
 		filteredTotal++
+		if !exactTotals && filteredTotal > end {
+			return errSQLitePageComplete
+		}
 		return nil
 	}
-	if definition.WithoutRowID {
-		err = database.walkIndexBTree(ctx, definition.RootPage, visit)
-	} else {
-		err = database.walkTableBTree(ctx, definition.RootPage, visit)
-	}
-	if err != nil {
+	err = walk(visit)
+	stoppedEarly := errors.Is(err, errSQLitePageComplete)
+	if err != nil && !stoppedEarly {
 		return sqlitePageResponse{}, err
 	}
+	totalRows := filteredTotal
+	sourceRows := sourceTotal
+	totalKnown := !stoppedEarly
+	if stoppedEarly {
+		totalRows = -1
+		sourceRows = -1
+	}
 	return sqlitePageResponse{
-		Table:           definition.Info,
-		Rows:            rows,
-		Page:            page,
-		PageSize:        pageSize,
-		HasMore:         filteredTotal > end,
-		TotalRows:       filteredTotal,
-		SourceTotalRows: sourceTotal,
-		Query:           search,
-		Columns:         definition.Info.Columns,
+		Table: definition.Info, Rows: rows, Page: page, PageSize: pageSize,
+		HasMore:   stoppedEarly || filteredTotal > end,
+		TotalRows: totalRows, SourceTotalRows: sourceRows,
+		TotalKnown: totalKnown, SourceTotalKnown: totalKnown,
+		ScannedRows: sourceTotal, Query: search, Columns: definition.Info.Columns,
 	}, nil
 }

@@ -9,10 +9,6 @@
   const MAX_COLUMNS = 200;
   const DEFAULT_PAGE_SIZE = 100;
   const PAGE_SIZE_OPTIONS = [100, 250, 500, 1000];
-  const HYPARQUET_URL = 'https://cdn.jsdelivr.net/npm/hyparquet@1.26.2/src/hyparquet.min.js';
-  const HYPARQUET_COMPRESSORS_URL = 'https://cdn.jsdelivr.net/npm/hyparquet-compressors@1.1.1/+esm';
-  const SHEETJS_URL = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js';
-  let sheetJSPromise = null;
   const COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
   const NUMBER_PATTERN = /^[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:e[+-]?\d+)?$/i;
   const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}(?:[T\s].*)?$/;
@@ -301,6 +297,99 @@
     return icon;
   }
 
+  function gridValue(value) {
+    if (value === null) return { text: 'null', kind: 'null' };
+    if (value === undefined) return { text: '', kind: 'empty' };
+    const classified = classifyValue(value);
+    return { text: displayValue(value), kind: classified.kind };
+  }
+
+  function inferColumnKinds(rows, count) {
+    const kinds = Array.from({ length: count }, () => new Map());
+    for (const row of rows.slice(0, 250)) {
+      for (let column = 0; column < count; column++) {
+        const kind = gridValue(row?.[column]).kind;
+        if (kind === 'empty' || kind === 'null') continue;
+        kinds[column].set(kind, (kinds[column].get(kind) || 0) + 1);
+      }
+    }
+    return kinds.map(scores => {
+      let selected = 'text';
+      let best = 0;
+      for (const [kind, score] of scores) {
+        if (score > best) { selected = kind; best = score; }
+      }
+      return selected;
+    });
+  }
+
+  function installGridNavigation(table) {
+    let active = null;
+    const cells = () => Array.from(table.querySelectorAll('tbody td, tbody th.data-row-number'));
+    const activate = cell => {
+      if (!cell) return;
+      active?.classList?.remove('is-active-cell');
+      active = cell;
+      active.classList.add('is-active-cell');
+      active.tabIndex = 0;
+      active.focus({ preventScroll: true });
+    };
+    table.addEventListener('click', event => {
+      const cell = event.target.closest?.('tbody td, tbody th.data-row-number');
+      if (cell) activate(cell);
+    });
+    table.addEventListener('keydown', event => {
+      const cell = event.target.closest?.('tbody td, tbody th.data-row-number') || active;
+      if (!cell) return;
+      const row = cell.parentElement;
+      const index = Array.from(row.children).indexOf(cell);
+      let next = null;
+      if (event.key === 'ArrowLeft') next = row.children[index - 1];
+      else if (event.key === 'ArrowRight') next = row.children[index + 1];
+      else if (event.key === 'ArrowUp') next = row.previousElementSibling?.children[index];
+      else if (event.key === 'ArrowDown') next = row.nextElementSibling?.children[index];
+      else if ((event.ctrlKey || event.metaKey) && String(event.key).toLowerCase() === 'c') {
+        const text = cell.textContent || '';
+        if (navigator.clipboard?.writeText) void navigator.clipboard.writeText(text);
+        return;
+      }
+      if (!next) return;
+      event.preventDefault();
+      activate(next);
+    });
+  }
+
+  function installColumnResizer(handle, table, columnIndex) {
+    handle.addEventListener('pointerdown', event => {
+      event.preventDefault();
+      const header = handle.parentElement;
+      const startX = event.clientX;
+      const startWidth = Math.max(64, header.getBoundingClientRect().width);
+      handle.setPointerCapture?.(event.pointerId);
+      document.body.classList.add('is-resizing-data-column');
+      const move = moveEvent => {
+        const width = Math.max(64, Math.min(720, startWidth + moveEvent.clientX - startX));
+        for (const row of table.rows) {
+          const cell = row.cells[columnIndex];
+          if (cell) {
+            cell.style.width = `${Math.round(width)}px`;
+            cell.style.minWidth = `${Math.round(width)}px`;
+            cell.style.maxWidth = `${Math.round(width)}px`;
+          }
+        }
+      };
+      const finish = () => {
+        document.body.classList.remove('is-resizing-data-column');
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', finish);
+        window.removeEventListener('pointercancel', finish);
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', finish, { once: true });
+      window.addEventListener('pointercancel', finish, { once: true });
+    });
+  }
+
   function renderTable({
     headers,
     rows,
@@ -319,7 +408,7 @@
     emptyMessage = ''
   }) {
     const wrapper = document.createElement('section');
-    wrapper.className = queryTools ? 'data-preview has-query-tools' : 'data-preview';
+    wrapper.className = queryTools ? 'data-preview bb-data-grid has-query-tools' : 'data-preview bb-data-grid';
 
     const toolbar = document.createElement('div');
     toolbar.className = 'data-preview-toolbar';
@@ -401,9 +490,11 @@
       }
     }
 
-    if (onPage) {
+    const paginationNeeded = Boolean(onPage) && (page > 0 || hasNext || (totalKnown && knownTotal > pageSize));
+    if (typeof onPage === 'function') {
       const pagination = document.createElement('div');
-      pagination.className = 'data-preview-pagination';
+      pagination.className = `data-preview-pagination${paginationNeeded ? '' : ' is-pagination-placeholder'}`;
+      if (!paginationNeeded) pagination.setAttribute('aria-hidden', 'true');
       const totalPages = totalKnown ? Math.max(1, Math.ceil(knownTotal / pageSize)) : null;
       const previous = document.createElement('button');
       previous.type = 'button';
@@ -411,8 +502,9 @@
       previous.title = 'Previous page';
       previous.setAttribute('aria-label', 'Previous page');
       previous.appendChild(createIcon('chevron-left'));
-      previous.disabled = page <= 0;
-      previous.addEventListener('click', () => onPage(page - 1));
+      previous.disabled = !paginationNeeded || page <= 0;
+      previous.tabIndex = paginationNeeded ? 0 : -1;
+      previous.addEventListener('click', () => { if (paginationNeeded) onPage(page - 1); });
       const pageLabel = document.createElement('span');
       pageLabel.className = 'data-preview-page-label';
       pageLabel.textContent = totalKnown
@@ -424,8 +516,9 @@
       next.title = 'Next page';
       next.setAttribute('aria-label', 'Next page');
       next.appendChild(createIcon('chevron-right'));
-      next.disabled = totalKnown ? end >= knownTotal : !hasNext;
-      next.addEventListener('click', () => onPage(page + 1));
+      next.disabled = !paginationNeeded || (totalKnown ? end >= knownTotal : !hasNext);
+      next.tabIndex = paginationNeeded ? 0 : -1;
+      next.addEventListener('click', () => { if (paginationNeeded) onPage(page + 1); });
       pagination.append(previous, pageLabel, next);
       controls.appendChild(pagination);
     }
@@ -445,7 +538,11 @@
     const scroller = document.createElement('div');
     scroller.className = 'data-table-scroll';
     const table = document.createElement('table');
-    table.className = 'data-table';
+    table.className = 'data-table bb-data-grid-table';
+    table.setAttribute('role', 'grid');
+    table.setAttribute('aria-colcount', String(headers.length + 1));
+    if (totalKnown) table.setAttribute('aria-rowcount', String(knownTotal + 1));
+    const columnKinds = inferColumnKinds(rows, headers.length);
     const head = document.createElement('thead');
     const headRow = document.createElement('tr');
     const rowNumberHead = document.createElement('th');
@@ -455,6 +552,8 @@
     headers.forEach((header, columnIndex) => {
       const cell = document.createElement('th');
       cell.title = header;
+      cell.scope = 'col';
+      cell.classList.add(`is-${columnKinds[columnIndex] || 'text'}`);
       if (queryTools && queryTools.allowSort !== false) {
         const heading = document.createElement('div');
         heading.className = 'data-column-heading';
@@ -493,6 +592,13 @@
       } else {
         cell.textContent = header;
       }
+      const resizeHandle = document.createElement('span');
+      resizeHandle.className = 'data-column-resizer';
+      resizeHandle.setAttribute('role', 'separator');
+      resizeHandle.setAttribute('aria-orientation', 'vertical');
+      resizeHandle.title = `Resize ${header}`;
+      cell.appendChild(resizeHandle);
+      installColumnResizer(resizeHandle, table, columnIndex + 1);
       headRow.appendChild(cell);
     });
     head.appendChild(headRow);
@@ -508,9 +614,11 @@
       tableRow.appendChild(rowNumber);
       headers.forEach((_, columnIndex) => {
         const cell = document.createElement('td');
-        const value = displayValue(row[columnIndex]);
-        cell.textContent = value;
-        cell.title = value;
+        const value = gridValue(row[columnIndex]);
+        cell.textContent = value.text;
+        cell.title = value.text;
+        cell.className = `is-${value.kind}`;
+        cell.tabIndex = -1;
         tableRow.appendChild(cell);
       });
       body.appendChild(tableRow);
@@ -525,6 +633,7 @@
       body.appendChild(emptyRow);
     }
     table.appendChild(body);
+    installGridNavigation(table);
     scroller.appendChild(table);
     wrapper.appendChild(scroller);
     BB.render?.forwardVerticalWheel?.(scroller);
@@ -856,39 +965,6 @@
     return createQueryableTable(parseTextTable(text, extension));
   }
 
-  function loadSheetJS() {
-    if (window.XLSX?.read && window.XLSX?.utils) return Promise.resolve(window.XLSX);
-    if (sheetJSPromise) return sheetJSPromise;
-    sheetJSPromise = new Promise((resolve, reject) => {
-      const existing = document.querySelector('script[data-sheetjs-version="0.20.3"]');
-      const complete = () => {
-        if (window.XLSX?.read && window.XLSX?.utils) resolve(window.XLSX);
-        else reject(new Error('The spreadsheet reader loaded without exposing its browser API.'));
-      };
-      if (existing) {
-        existing.addEventListener('load', complete, { once: true });
-        existing.addEventListener('error', () => reject(new Error('Unable to load the spreadsheet reader.')), { once: true });
-        if (existing.dataset.loaded === 'true') complete();
-        return;
-      }
-      const script = document.createElement('script');
-      script.src = SHEETJS_URL;
-      script.async = true;
-      script.referrerPolicy = 'no-referrer';
-      script.dataset.sheetjsVersion = '0.20.3';
-      script.addEventListener('load', () => {
-        script.dataset.loaded = 'true';
-        complete();
-      }, { once: true });
-      script.addEventListener('error', () => reject(new Error('Unable to load the spreadsheet reader.')), { once: true });
-      document.head.appendChild(script);
-    }).catch(error => {
-      sheetJSPromise = null;
-      throw error;
-    });
-    return sheetJSPromise;
-  }
-
   function spreadsheetVisibility(workbook, index) {
     const hidden = Number(workbook?.Workbook?.Sheets?.[index]?.Hidden || 0);
     if (hidden === 2) return { hidden, label: 'Very hidden' };
@@ -1014,62 +1090,28 @@
     return controls;
   }
 
-  async function renderLegacySpreadsheet(url, key, size) {
-    const byteLength = Number(size || 0);
-    if (byteLength > MAX_SPREADSHEET_BYTES) {
-      throw new Error(`Legacy XLS previews are limited to ${Math.round(MAX_SPREADSHEET_BYTES / 1024 / 1024)} MiB. Download this workbook for full processing.`);
-    }
-    const XLSX = await loadSheetJS();
-    const response = await fetch(url, { cache: 'no-store' });
-    if (!response.ok) throw new Error(`Unable to read spreadsheet: HTTP ${response.status}`);
-    const data = await response.arrayBuffer();
-    const workbook = XLSX.read(data, {
-      type: 'array',
-      cellDates: true,
-      dense: true,
-      sheetRows: MAX_ROWS + 1,
-      bookVBA: false
+  async function renderUnsupportedBinarySpreadsheet(_url, key, size) {
+    const extension = BB.detect.extOf(key).toUpperCase() || 'XLS';
+    return createQueryableTable({
+      headers: ['Format', 'Preview mode', 'Object size'],
+      rows: [[extension, 'Conversion required', Number(size) > 0 ? `${Math.round(Number(size) / 1024)} KiB` : 'Unknown']],
+      rowNumbers: [1],
+      totalRows: 1,
+      sourceTotalRows: 1,
+      truncatedRows: false,
+      truncatedColumns: false
+    }, {
+      extraNotes: [
+        'This binary XLS workbook is not decoded by the constrained offline build. Download it or convert it to XLSX/CSV. No external service was contacted and the object was not downloaded for preview.'
+      ]
     });
-    const names = Array.from(workbook.SheetNames || []);
-    if (!names.length) throw new Error('The workbook does not contain any worksheets.');
-
-    const root = document.createElement('section');
-    root.className = 'spreadsheet-preview';
-    const host = document.createElement('div');
-    host.className = 'spreadsheet-sheet-host';
-    const panels = new Map();
-    let activePanel = null;
-    const descriptors = names.map((name, index) => {
-      const visibility = spreadsheetVisibility(workbook, index);
-      return { index, name, hidden: visibility.hidden === 2 ? 'veryHidden' : (visibility.hidden ? 'hidden' : '') };
-    });
-
-    const activate = index => {
-      const bounded = Math.max(0, Math.min(names.length - 1, Number(index) || 0));
-      let panel = panels.get(bounded);
-      if (!panel) {
-        const sheet = spreadsheetSheetData(XLSX, workbook.Sheets[names[bounded]]);
-        panel = createQueryableTable(sheet, {
-          beforeTableFactory: () => createSpreadsheetSheetControls(descriptors, bounded, activate)
-        });
-        panel.dataset.sheetIndex = String(bounded);
-        panels.set(bounded, panel);
-      }
-      activePanel = panel;
-      host.replaceChildren(panel);
-    };
-
-    root.documentSearch = async query => {
-      if (typeof activePanel?.documentSearch === 'function') await activePanel.documentSearch(query);
-    };
-    root.appendChild(host);
-    activate(0);
-    return root;
   }
 
   async function renderRemoteSpreadsheet(key, objectSize = 0) {
     const root = document.createElement('section');
     root.className = 'spreadsheet-preview remote-spreadsheet-preview';
+    root.dataset.previewKind = 'spreadsheet';
+    root.dataset.sourceUrl = BB.api.urlForKey(key);
     const state = {
       sheet: 0,
       page: 0,
@@ -1251,208 +1293,104 @@
   async function renderSpreadsheet(url, key, size) {
     const extension = BB.detect.extOf(key);
     if (extension === 'xlsx' || extension === 'xlsm') return renderRemoteSpreadsheet(key, size);
-    return renderLegacySpreadsheet(url, key, size);
+    return renderUnsupportedBinarySpreadsheet(url, key, size);
   }
 
-  function remoteAsyncBuffer(url, byteLength, signalProvider = null) {
-    return {
-      byteLength,
-      async slice(start, end) {
-        const finalEnd = end == null ? byteLength : Math.min(end, byteLength);
-        if (start < 0 || finalEnd < start) throw new RangeError('Invalid Parquet byte range.');
-        if (finalEnd === start) return new ArrayBuffer(0);
-        const signal = typeof signalProvider === 'function' ? signalProvider() : null;
-        const response = await fetch(url, {
-          headers: { Range: `bytes=${start}-${finalEnd - 1}` },
-          signal: signal || undefined,
-          cache: 'no-store'
-        });
-        if (!response.ok && response.status !== 206) throw new Error(`Parquet range request failed: HTTP ${response.status}`);
-        const buffer = await response.arrayBuffer();
-        if (response.status === 200 && buffer.byteLength === byteLength) return buffer.slice(start, finalEnd);
-        return buffer;
-      }
-    };
+  function parquetSummaryPanel(payload) {
+    const panel = document.createElement('div');
+    panel.className = 'data-summary parquet-summary';
+    const values = [
+      ['Rows', Number(payload.rows || 0).toLocaleString()],
+      ['Top-level columns', Number(payload.columns || 0).toLocaleString()],
+      ['Row groups', Number(payload.rowGroupCount || 0).toLocaleString()],
+      ['Metadata', `${Math.round(Number(payload.metadataBytes || 0) / 1024).toLocaleString()} KiB`],
+      ['Storage requests', Number(payload.storageRequests || 0).toLocaleString()]
+    ];
+    values.forEach(([label, value]) => {
+      const item = document.createElement('span');
+      item.className = 'data-summary-item';
+      const strong = document.createElement('strong');
+      strong.textContent = value;
+      const copy = document.createElement('small');
+      copy.textContent = label;
+      item.append(strong, copy);
+      panel.appendChild(item);
+    });
+    if (payload.createdBy) {
+      const creator = document.createElement('span');
+      creator.className = 'data-summary-created-by';
+      creator.textContent = `Created by ${payload.createdBy}`;
+      panel.appendChild(creator);
+    }
+    return panel;
   }
 
-  async function renderParquet(url, size) {
-    if (!Number.isFinite(Number(size)) || Number(size) <= 0) throw new Error('Parquet preview requires a known non-zero object size.');
-    let parquet;
-    try {
-      parquet = await import(HYPARQUET_URL);
-    } catch (error) {
-      throw new Error(`The Parquet reader could not be loaded. ${error.message || error}`);
+  async function renderParquet(key, size, options = {}) {
+    const payload = await BB.api.parquetPreview({
+      key,
+      size,
+      etag: options.etag || '',
+      instance: options.instance ?? null
+    });
+    const rows = Array.from(payload.schema || []).map(field => [
+      field.path || field.name || '',
+      field.physicalType || '',
+      field.logicalType || '',
+      field.repetition || '',
+      Number(field.children || 0) || ''
+    ]);
+    const notes = [
+      'The constrained offline viewer reads only the Parquet footer and schema by exact byte ranges. Row data is not decoded in this build, so no hidden full-object transfer occurs.'
+    ];
+    if (payload.schemaTruncated) notes.push('The schema reached the configured field limit.');
+    if (payload.rowGroupsTruncated) notes.push('The row-group summary reached the configured limit.');
+    if (Number(payload.storageBytes || 0) > 0) {
+      notes.push(`${Number(payload.storageBytes).toLocaleString()} storage bytes were transferred.`);
     }
-    let compressors;
-    try {
-      const module = await import(HYPARQUET_COMPRESSORS_URL);
-      compressors = module.compressors;
-    } catch (_) {
-      compressors = undefined;
-    }
+    return createQueryableTable({
+      headers: ['Field path', 'Physical type', 'Logical type', 'Repetition', 'Children'],
+      rows,
+      rowNumbers: rows.map((_, index) => index + 1),
+      totalRows: rows.length,
+      sourceTotalRows: rows.length,
+      truncatedRows: !!payload.schemaTruncated,
+      truncatedColumns: false
+    }, {
+      extraNotes: notes,
+      beforeTableFactory: () => parquetSummaryPanel(payload)
+    });
+  }
 
-    let activeController = null;
-    const file = remoteAsyncBuffer(url, Number(size), () => activeController?.signal || null);
-    const metadata = await parquet.parquetMetadataAsync(file);
-    const schema = parquet.parquetSchema(metadata);
-    const headers = (schema.children || []).map(child => child.element?.name || child.name).filter(Boolean).slice(0, MAX_COLUMNS);
-    const totalRows = Number(metadata.num_rows || 0);
-    const root = document.createElement('div');
-    const state = {
-      page: 0,
-      pageSize: DEFAULT_PAGE_SIZE,
-      query: '',
-      matches: null,
-      totalMatches: 0,
-      retainedLimit: 10000
-    };
-    let requestSerial = 0;
-
-    function loading(label, detail = '') {
-      const node = document.createElement('div');
-      node.className = 'preview-loading data-loading';
-      const icon = document.createElement('i');
-      icon.className = 'mdi mdi-loading mdi-spin';
-      const copy = document.createElement('span');
-      copy.textContent = detail ? `${label} ${detail}` : label;
-      node.append(icon, copy);
-      root.replaceChildren(node);
-      return copy;
-    }
-
-    async function readRows(rowStart, rowEnd) {
-      const options = { file, rowStart, rowEnd, columns: headers };
-      if (compressors) options.compressors = compressors;
-      return parquet.parquetReadObjects(options);
-    }
-
-    async function scan(query, serial) {
-      const normalized = String(query || '').trim().toLocaleLowerCase();
-      if (!normalized) {
-        state.matches = null;
-        state.totalMatches = 0;
-        return;
-      }
-      const progress = loading('Searching the complete Parquet document…');
-      const retained = [];
-      let totalMatches = 0;
-      const batchSize = 2048;
-      for (let rowStart = 0; rowStart < totalRows; rowStart += batchSize) {
-        if (serial !== requestSerial) return;
-        const rowEnd = Math.min(totalRows, rowStart + batchSize);
-        const objects = await readRows(rowStart, rowEnd);
-        if (serial !== requestSerial) return;
-        objects.forEach((object, localIndex) => {
-          const row = headers.map(header => displayValue(object[header]));
-          if (!row.some(value => value.toLocaleLowerCase().includes(normalized))) return;
-          totalMatches++;
-          if (retained.length < state.retainedLimit) retained.push({ row, rowNumber: rowStart + localIndex + 1 });
-        });
-        progress.textContent = `Searching the complete Parquet document… ${rowEnd.toLocaleString()} / ${totalRows.toLocaleString()} rows`;
-      }
-      state.matches = retained;
-      state.totalMatches = totalMatches;
-    }
-
-    async function draw(nextPage = state.page, options = {}) {
-      const serial = ++requestSerial;
-      activeController?.abort();
-      activeController = new AbortController();
-      state.page = Math.max(0, Number(nextPage) || 0);
-      try {
-        if (Object.prototype.hasOwnProperty.call(options, 'query')) {
-          state.query = String(options.query || '').trim();
-          state.page = 0;
-          await scan(state.query, serial);
-          if (serial !== requestSerial) return;
-        }
-
-        let rows;
-        let rowNumbers;
-        let total;
-        if (state.matches) {
-          const maximumPage = Math.max(0, Math.ceil(state.matches.length / state.pageSize) - 1);
-          state.page = Math.min(state.page, maximumPage);
-          const start = state.page * state.pageSize;
-          const pageEntries = state.matches.slice(start, start + state.pageSize);
-          rows = pageEntries.map(entry => entry.row);
-          rowNumbers = pageEntries.map(entry => entry.rowNumber);
-          total = state.matches.length;
-        } else {
-          const rowStart = state.page * state.pageSize;
-          const rowEnd = Math.min(rowStart + state.pageSize, totalRows);
-          loading('Reading Parquet rows…');
-          const objects = await readRows(rowStart, rowEnd);
-          if (serial !== requestSerial) return;
-          rows = objects.map(object => headers.map(header => displayValue(object[header])));
-          rowNumbers = rows.map((_, index) => rowStart + index + 1);
-          total = totalRows;
-        }
-
-        const notes = [];
-        if (headers.length >= MAX_COLUMNS) notes.push(`Preview limited to the first ${MAX_COLUMNS} top-level columns.`);
-        if (state.query) {
-          notes.push(`Search scanned all ${totalRows.toLocaleString()} rows.`);
-          if (state.totalMatches > state.matches.length) notes.push(`Showing the first ${state.matches.length.toLocaleString()} of ${state.totalMatches.toLocaleString()} matches to keep browser memory bounded.`);
-        }
-        root.replaceChildren(renderTable({
-          headers,
-          rows,
-          rowNumbers,
-          totalRows: total,
-          sourceTotalRows: state.query ? state.totalMatches : totalRows,
-          page: state.page,
-          pageSize: state.pageSize,
-          onPage: page => void draw(page).catch(error => showTableError(root, error)),
-          note: notes.join(' '),
-          queryTools: {
-            allowFilters: false,
-            allowSort: false,
-            filters: headers.map(() => ''),
-            showFilters: false,
-            sortColumn: -1,
-            sortDirection: '',
-            globalQuery: state.query,
-            onToggleFilters() {},
-            onColumnFilter() {},
-            onSort() {},
-            onPageSize(value) {
-              if (!PAGE_SIZE_OPTIONS.includes(value)) return;
-              state.pageSize = value;
-              void draw(0).catch(error => showTableError(root, error));
-            },
-            onClear() {
-              state.query = '';
-              state.matches = null;
-              state.totalMatches = 0;
-              void draw(0).catch(error => showTableError(root, error));
-            }
-          }
-        }));
-      } catch (error) {
-        if (error?.name === 'AbortError' || serial !== requestSerial) return;
-        throw error;
-      }
-    }
-
-    root.documentSearch = async query => {
-      await draw(0, { query });
-    };
-    root.cleanup = () => activeController?.abort();
-    await draw(0);
-    return root;
+  function tableErrorTitle(root, error) {
+    const code = String(error?.code || '');
+    const spreadsheet = root?.dataset?.previewKind === 'spreadsheet' || root?.classList?.contains('remote-spreadsheet-preview');
+    if (code === 'unsupported_xls_container') return 'Binary XLS file detected';
+    if (code === 'invalid_workbook_container') return 'The file is not an XLSX/XLSM workbook';
+    if (code === 'invalid_workbook_package') return 'The workbook package is incomplete';
+    if (code === 'unknown_workbook_size') return 'Workbook size is unavailable';
+    return spreadsheet ? 'Spreadsheet preview unavailable' : 'Data preview unavailable';
   }
 
   function showTableError(root, error) {
     const box = document.createElement('div');
-    box.className = 'preview-error';
+    box.className = 'preview-error data-preview-error';
     const icon = document.createElement('i');
     icon.className = 'mdi mdi-alert-circle-outline';
+    const copy = document.createElement('div');
+    copy.className = 'data-preview-error-copy';
     const title = document.createElement('strong');
-    title.textContent = 'Data preview unavailable';
+    title.textContent = tableErrorTitle(root, error);
     const message = document.createElement('p');
     message.textContent = String(error?.message || error);
-    box.append(icon, title, message);
+    copy.append(title, message);
+    box.append(icon, copy);
+    if (root?.dataset?.sourceUrl) {
+      const link = document.createElement('a');
+      link.className = 'button is-light data-preview-error-action';
+      link.href = root.dataset.sourceUrl;
+      link.textContent = 'Download original';
+      box.appendChild(link);
+    }
     root.replaceChildren(box);
   }
 
@@ -1471,7 +1409,6 @@
     renderTable,
     createQueryableTable,
     spreadsheetSheetData,
-    remoteAsyncBuffer,
     MAX_ROWS,
     MAX_COLUMNS
   };

@@ -2,7 +2,6 @@
 (function () {
   const BB = (window.BB = window.BB || {});
   if (!BB.api || !BB.detect) throw new Error('BB.api and BB.detect are required before BB.actions');
-  let downloadSequence = 0;
 
   function ui() {
     if (!BB.ui) throw new Error('BB.ui is required before BB.actions');
@@ -41,8 +40,11 @@
       }
     };
   }
-  function caps() { return (BB.cfg && BB.cfg.capabilities) || {}; }
-  function allowed(name) { return !!caps()?.[name]?.allowed; }
+  function allowed(name) {
+    if (BB.capabilities?.actionable) return BB.capabilities.actionable(BB.cfg || {}, name);
+    const capabilities = (BB.cfg && BB.cfg.capabilities) || {};
+    return capabilities?.[name]?.allowed !== false;
+  }
   function escapeHTML(value = '') { const span = document.createElement('span'); span.textContent = String(value); return span.innerHTML; }
   function ensurePrefix(value) { const clean = String(value || '').replace(/^\/+/, '').replace(/\/+$/, ''); return clean ? clean + '/' : ''; }
   function dirOf(key) { const slash = String(key || '').lastIndexOf('/'); return slash < 0 ? '' : key.slice(0, slash + 1); }
@@ -130,227 +132,6 @@
     markTaskNotification(error);
   }
 
-  function sleepWithSignal(milliseconds, signal) {
-    if (!signal) return new Promise(resolve => window.setTimeout(resolve, milliseconds));
-    if (signal.aborted) return Promise.reject(abortError());
-    return new Promise((resolve, reject) => {
-      const timer = window.setTimeout(done, milliseconds);
-      function done() {
-        signal.removeEventListener('abort', canceled);
-        resolve();
-      }
-      function canceled() {
-        window.clearTimeout(timer);
-        signal.removeEventListener('abort', canceled);
-        reject(abortError());
-      }
-      signal.addEventListener('abort', canceled, { once: true });
-    });
-  }
-
-  async function pickSaveTarget(filename, { useFilePicker = false } = {}) {
-    // Native browser downloads are the default so completed transfers are
-    // registered by Chrome and other browsers in their download history.
-    // The File System Access API remains available for future explicit UI,
-    // but is never selected implicitly because direct file writes bypass the
-    // browser download manager.
-    if (!useFilePicker || !window.isSecureContext || typeof window.showSaveFilePicker !== 'function') {
-      return { handle: null, canceled: false };
-    }
-    try {
-      const handle = await window.showSaveFilePicker({ suggestedName: filename || 'download' });
-      return { handle, canceled: false };
-    } catch (error) {
-      if (isAbortError(error)) return { handle: null, canceled: true };
-      throw error;
-    }
-  }
-
-  async function saveBlob(blob, filename, handle = null) {
-    if (handle) {
-      const writable = await handle.createWritable();
-      try {
-        await writable.write(blob);
-        await writable.close();
-      } catch (error) {
-        try { await writable.abort(); } catch (_) {}
-        throw error;
-      }
-      return;
-    }
-    const href = URL.createObjectURL(blob);
-    try {
-      const anchor = document.createElement('a');
-      anchor.href = href;
-      anchor.download = filename || 'download';
-      anchor.rel = 'noopener';
-      anchor.style.display = 'none';
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-    } finally {
-      // Keep the object URL alive long enough for slower browser download
-      // initialization paths to take ownership of it.
-      window.setTimeout(() => URL.revokeObjectURL(href), 60000);
-    }
-  }
-
-  function contentRangeTotal(value) {
-    const match = String(value || '').match(/\/\s*(\d+)\s*$/);
-    return match ? Number(match[1]) : 0;
-  }
-
-  function retriableDownloadError(error) {
-    const status = Number(error?.status || 0);
-    return status === 0 || status === 408 || status === 425 || status === 429 || status >= 500;
-  }
-
-  async function streamURL(url, options = {}) {
-    const signal = options.signal || null;
-    const onProgress = typeof options.onProgress === 'function' ? options.onProgress : () => {};
-    const onCheckpoint = typeof options.onCheckpoint === 'function' ? options.onCheckpoint : () => {};
-    const writable = options.writable || null;
-    const resumeState = options.resumeState && typeof options.resumeState === 'object' ? options.resumeState : {};
-    const chunks = writable ? [] : (Array.isArray(resumeState.chunks) ? resumeState.chunks : []);
-    let receivedBytes = Math.max(0, Number(resumeState.receivedBytes || 0));
-    let totalBytes = Math.max(0, Number(resumeState.totalBytes || options.totalBytes || 0));
-    let etag = String(resumeState.etag || '');
-    let speedBps = Math.max(0, Number(resumeState.speedBps || 0));
-    let lastMeterBytes = receivedBytes;
-    let lastMeterAt = Date.now();
-    let retryAttempt = 0;
-    let activeReader = null;
-
-    const checkpoint = () => ({ chunks, receivedBytes, totalBytes, etag, speedBps });
-    const abortedWithCheckpoint = () => {
-      const error = abortError();
-      try { error.transferState = checkpoint(); } catch (_) {}
-      return error;
-    };
-
-    const cancelReader = () => {
-      if (!activeReader) return;
-      try {
-        const canceled = activeReader.cancel(abortError());
-        if (canceled && typeof canceled.catch === 'function') canceled.catch(() => {});
-      } catch (_) {}
-    };
-    signal?.addEventListener('abort', cancelReader);
-
-    const emit = extra => {
-      const now = Date.now();
-      const elapsed = Math.max(1, now - lastMeterAt);
-      if (receivedBytes > lastMeterBytes && elapsed >= 120) {
-        const instantaneous = (receivedBytes - lastMeterBytes) * 1000 / elapsed;
-        speedBps = speedBps ? speedBps * 0.75 + instantaneous * 0.25 : instantaneous;
-        lastMeterBytes = receivedBytes;
-        lastMeterAt = now;
-      }
-      const state = {
-        phase: 'downloading',
-        receivedBytes,
-        transferredBytes: receivedBytes,
-        totalBytes,
-        progress: totalBytes > 0 ? Math.min(1, receivedBytes / totalBytes) : null,
-        speedBps,
-        etaSeconds: speedBps > 0 && totalBytes > receivedBytes ? (totalBytes - receivedBytes) / speedBps : null,
-        retryAttempt,
-        ...(extra || {})
-      };
-      onProgress(state);
-      onCheckpoint(checkpoint());
-    };
-
-    try {
-      for (;;) {
-        if (signal?.aborted) throw abortedWithCheckpoint();
-        const headers = {};
-        if (receivedBytes > 0) {
-          headers.Range = `bytes=${receivedBytes}-`;
-          if (etag) headers['If-Range'] = etag;
-        }
-        try {
-          const response = await fetch(url, { headers, signal, cache: 'no-store' });
-          if (!response.ok && response.status !== 206) {
-            const error = new Error(`Download failed: HTTP ${response.status}`);
-            error.status = response.status;
-            throw error;
-          }
-
-          if (receivedBytes > 0 && response.status !== 206) {
-            receivedBytes = 0;
-            chunks.length = 0;
-            speedBps = 0;
-            lastMeterBytes = 0;
-            lastMeterAt = Date.now();
-            if (writable) {
-              if (typeof writable.seek === 'function') await writable.seek(0);
-              if (typeof writable.truncate === 'function') await writable.truncate(0);
-            }
-          }
-          etag = response.headers.get('ETag') || etag;
-          const rangeTotal = contentRangeTotal(response.headers.get('Content-Range'));
-          const contentLength = Number(response.headers.get('Content-Length') || 0);
-          if (rangeTotal > 0) totalBytes = rangeTotal;
-          else if (contentLength > 0) totalBytes = receivedBytes + contentLength;
-
-          if (!response.body || typeof response.body.getReader !== 'function') {
-            const bytes = new Uint8Array(await response.arrayBuffer());
-            receivedBytes += bytes.byteLength;
-            if (writable) await writable.write(bytes);
-            else chunks.push(bytes);
-            emit();
-          } else {
-            const reader = response.body.getReader();
-            activeReader = reader;
-            try {
-              for (;;) {
-                if (signal?.aborted) throw abortedWithCheckpoint();
-                const result = await reader.read();
-                if (result.done) break;
-                const bytes = result.value instanceof Uint8Array ? result.value : new Uint8Array(result.value);
-                if (writable) await writable.write(bytes);
-                else chunks.push(bytes);
-                receivedBytes += bytes.byteLength;
-                emit();
-              }
-            } finally {
-              activeReader = null;
-              try { reader.releaseLock(); } catch (_) {}
-            }
-          }
-          if (totalBytes > 0 && receivedBytes < totalBytes) {
-            const error = new Error('The download stream ended before the advertised size was reached.');
-            error.status = 0;
-            throw error;
-          }
-          emit({ phase: 'completed', progress: 1, etaSeconds: 0 });
-          const blob = writable ? null : new Blob(chunks, { type: options.contentType || 'application/octet-stream' });
-          return { blob, receivedBytes, totalBytes, speedBps, state: checkpoint() };
-        } catch (error) {
-          if (isAbortError(error) || signal?.aborted) {
-            if (error?.transferState) throw error;
-            throw abortedWithCheckpoint();
-          }
-          if (!retriableDownloadError(error) || retryAttempt >= 4) throw error;
-          retryAttempt++;
-          const delay = Math.min(8000, 500 * (2 ** (retryAttempt - 1))) + Math.round(Math.random() * 250);
-          emit({ phase: 'retrying', retryInSeconds: delay / 1000 });
-          await sleepWithSignal(delay, signal);
-        }
-      }
-    } finally {
-      signal?.removeEventListener('abort', cancelReader);
-      cancelReader();
-      activeReader = null;
-    }
-  }
-
-  async function fetchBytes(url, options = {}) {
-    const result = await streamURL(url, options);
-    return new Uint8Array(await result.blob.arrayBuffer());
-  }
-
   function jobProgressMessage(job, label) {
     const processed = Number(job.processed || 0).toLocaleString();
     if (job.status === 'queued') return `${label}: queued...`;
@@ -429,23 +210,6 @@
     }
   }
 
-  function jobLabel(job) {
-    return String(job.type || 'job').replace(/_/g, ' ');
-  }
-
-  async function showJobs() {
-    try {
-      const response = await BB.api.jobs();
-      const jobs = response.jobs || [];
-      const rows = jobs.length ? jobs.map(job => `<div class="kv-row"><div class="kv-k mono">${escapeHTML(jobLabel(job))}</div><div class="kv-v"><strong>${escapeHTML(job.status)}</strong> · ${Number(job.processed || 0)} object(s)<br><small class="mono">${escapeHTML(job.source || job.prefix || job.target || '')}</small></div></div>`).join('') : '<p>No background jobs have been created for this storage instance.</p>';
-      await ui().alert({ html: `<div class="bb-details"><div class="bb-details-head"><i class="mdi mdi-progress-wrench"></i><div class="bb-details-titles"><div class="bb-details-name">Background jobs</div><div class="bb-details-prefix">Jobs are persisted and automatically resumed after a server restart.</div></div></div><div class="bb-details-body"><div class="bb-section bb-kv">${rows}</div></div></div>` });
-      return true;
-    } catch (error) {
-      await ui().alert({ title: 'Background jobs', message: String(error.message || error) });
-      return false;
-    }
-  }
-
   function formatMediaDuration(seconds) {
     const value = Number(seconds || 0);
     if (!Number.isFinite(value) || value <= 0) return '';
@@ -482,7 +246,7 @@
   }
 
   async function showMetadata(key, options = {}) {
-    if (!(await requirePermissions(['read']))) return false;
+    if (!(await requirePermissions(['details']))) return false;
     const name = key.split('/').pop() || key;
     let detailsNotification = null;
     const notificationTimer = window.setTimeout(() => {
@@ -549,7 +313,9 @@
         ? { label: 'Count lines', icon: 'format-list-numbered', kind: 'lines' }
         : (['csv', 'tsv', 'tab', 'psv'].includes(extension)
           ? { label: 'Count rows and columns', icon: 'table-row', kind: 'delimited' }
-          : null);
+          : (['xlsx', 'xlsm', 'xltx', 'xltm', 'xlam'].includes(extension)
+            ? { label: 'Scan active worksheet', icon: 'table-search', kind: 'spreadsheet' }
+            : null));
 
       const storageSection = `<section class="bb-details-section"><div class="bb-details-section-title"><i class="mdi mdi-database-outline"></i> Storage object</div><div class="bb-kv">${storageRows}</div></section>`;
       const customSection = customMetadata
@@ -589,14 +355,18 @@
             button.innerHTML = '<i class="mdi mdi-loading mdi-spin"></i><span>Calculating…</span>';
             resultHost.textContent = 'Reading the complete document…';
             try {
-              const count = await BB.api.documentCount({ key, instance: options.instance ?? null });
+              const count = await BB.api.documentCount({ key, size: Number(result.size || options.size || 0), instance: options.instance ?? null });
               resultHost.replaceChildren();
               if (countAction.kind === 'lines') {
                 resultHost.insertAdjacentHTML('beforeend', `<div class="bb-kv">${metadataRow('Lines', Number(count.lines || 0).toLocaleString())}</div>`);
               } else {
-                resultHost.insertAdjacentHTML('beforeend', `<div class="bb-kv">${metadataRow('Rows', Number(count.rows || 0).toLocaleString())}${metadataRow('Columns', Number(count.columns || 0).toLocaleString())}</div>`);
+                const sheet = countAction.kind === 'spreadsheet' && count.sheet
+                  ? metadataRow('Worksheet', count.sheet)
+                  : '';
+                resultHost.insertAdjacentHTML('beforeend', `<div class="bb-kv">${sheet}${metadataRow('Rows', Number(count.rows || 0).toLocaleString())}${metadataRow('Columns', Number(count.columns || 0).toLocaleString())}</div>`);
               }
-              button.innerHTML = '<i class="mdi mdi-check"></i><span>Calculated</span>';
+              button.hidden = true;
+              button.remove();
             } catch (countError) {
               resultHost.textContent = String(countError?.message || countError);
               button.disabled = false;
@@ -676,9 +446,40 @@
     return `<section class="folder-distribution"><div class="folder-distribution-title">${escapeHTML(title)}</div><div class="folder-distribution-bar" role="img" aria-label="${escapeHTML(title)}">${segments}</div><div class="folder-distribution-legend">${legend}</div></section>`;
   }
 
+  function statsFileListHTML(title, entries, mode, maximum = 6) {
+    const items = Array.from(entries || []).slice(0, maximum);
+    if (!items.length) {
+      return `<section class="folder-file-list"><div class="folder-file-list-title">${escapeHTML(title)}</div><div class="folder-file-list-empty">No file data available.</div></section>`;
+    }
+    const rows = items.map(entry => {
+      const path = String(entry?.path || '');
+      const name = path.split('/').filter(Boolean).pop() || path || 'Unnamed file';
+      const kind = String(entry?.type || 'other');
+      const iconName = BB.detect?.iconForType?.(kind) || 'file-outline';
+      const modified = entry?.lastModified ? new Date(entry.lastModified) : null;
+      const dateLabel = modified && !Number.isNaN(modified.getTime()) ? modified.toLocaleString() : 'Unknown date';
+      const primaryMeta = mode === 'recent' ? dateLabel : formatBytes(entry?.bytes || 0);
+      const secondaryMeta = mode === 'recent' ? formatBytes(entry?.bytes || 0) : dateLabel;
+      return `<button type="button" class="folder-file-list-row" data-insight-file="true" data-path="${escapeHTML(path)}" data-kind="file" data-size="${Math.max(0, Number(entry?.bytes || 0))}" data-mime="${escapeHTML(entry?.mime || '')}" data-etag="${escapeHTML(entry?.etag || '')}" data-modified="${escapeHTML(entry?.lastModified || '')}" title="${escapeHTML(path)}">
+        <i class="mdi mdi-${escapeHTML(iconName)}"></i>
+        <span class="folder-file-list-copy"><strong>${escapeHTML(name)}</strong><small>${escapeHTML(kind)} · ${escapeHTML(secondaryMeta)}</small></span>
+        <span class="folder-file-list-value">${escapeHTML(primaryMeta)}</span>
+      </button>`;
+    }).join('');
+    return `<section class="folder-file-list"><div class="folder-file-list-title">${escapeHTML(title)}</div><div class="folder-file-list-rows">${rows}</div></section>`;
+  }
+
   const treemapMinimumShare = 0.01;
   const treemapMaximumRectangles = 1000;
   const treemapMaximumDepth = 5;
+
+  function treemapScopeThreshold(totalBytes) {
+    const threshold = Math.max(0, Number(totalBytes || 0)) * treemapMinimumShare;
+    // Keep a stable decimal representation in both the algorithm and the DOM.
+    // This also prevents a floating-point tail from moving an exact 1% item
+    // below the cutoff in one code path and above it in another.
+    return Number(threshold.toFixed(6));
+  }
 
   function treemapObjectCount(value) {
     const count = Math.max(0, Number(value || 0));
@@ -734,7 +535,7 @@
         node.bytes = childBytes;
         node.count = childCount;
       } else {
-        // A malformed or legacy response must never make a child larger than
+        // A malformed response must never make a child larger than
         // its parent. Keeping the larger value also prevents negative local
         // "Others" totals without issuing another storage request.
         node.bytes = Math.max(Number(node.bytes || 0), childBytes);
@@ -795,29 +596,31 @@
     return root;
   }
 
-  function groupedTreemapChildren(node) {
+  function groupedTreemapChildren(node, scopeTotalBytes) {
     if (!node?.folder) return [];
     const children = Array.from(node.children?.values?.() || [])
       .filter(child => Number(child.bytes || 0) > 0)
       .sort((left, right) => Number(right.bytes || 0) - Number(left.bytes || 0) || left.name.localeCompare(right.name));
     if (!children.length && !(Number(node.bytes || 0) > 0)) return [];
 
-    const totalBytes = Math.max(0, Number(node.bytes || 0));
-    const totalCount = Math.max(0, Number(node.count || 0));
+    const nodeBytes = Math.max(0, Number(node.bytes || 0));
+    const nodeCount = Math.max(0, Number(node.count || 0));
     const listedBytes = children.reduce((sum, child) => sum + Math.max(0, Number(child.bytes || 0)), 0);
     const listedCount = children.reduce((sum, child) => sum + Math.max(0, Number(child.count || 0)), 0);
-    let otherBytes = Math.max(0, totalBytes - listedBytes);
-    let otherCount = Math.max(0, totalCount - listedCount);
+    let otherBytes = Math.max(0, nodeBytes - listedBytes);
+    let otherCount = Math.max(0, nodeCount - listedCount);
     const visible = [];
-    const threshold = totalBytes * treemapMinimumShare;
 
+    // The threshold is always based on the complete selected scope, never on
+    // the current nested folder. A 40 KiB file therefore remains below one
+    // percent in a 12 MiB scope even when its immediate parent is tiny.
+    const threshold = treemapScopeThreshold(scopeTotalBytes || nodeBytes);
     for (const child of children) {
-      // The requirement is deliberately strict: an item representing exactly
-      // one percent belongs to the local "Others" rectangle.
-      if (Number(child.bytes || 0) > threshold) {
+      const childBytes = Math.max(0, Number(child.bytes || 0));
+      if (childBytes >= threshold) {
         visible.push(child);
       } else {
-        otherBytes += Math.max(0, Number(child.bytes || 0));
+        otherBytes += childBytes;
         otherCount += Math.max(0, Number(child.count || 0));
       }
     }
@@ -844,80 +647,146 @@
     return Math.abs(hash) % 29;
   }
 
-  function splitTreemapNodes(nodes) {
-    if (nodes.length < 2) return [nodes, []];
-    const total = nodes.reduce((sum, node) => sum + Math.max(0, Number(node.bytes || 0)), 0) || 1;
-    const target = total / 2;
-    let sum = 0;
-    let split = 1;
-    for (let index = 0; index < nodes.length - 1; index++) {
-      const next = sum + Math.max(0, Number(nodes[index].bytes || 0));
-      if (index > 0 && Math.abs(target - sum) <= Math.abs(target - next)) {
-        split = index;
-        break;
+  function treemapWorstAspectRatio(row, side) {
+    if (!row.length || !(side > 0)) return Number.POSITIVE_INFINITY;
+    const areas = row.map(item => Math.max(0, Number(item.area || 0))).filter(area => area > 0);
+    if (!areas.length) return Number.POSITIVE_INFINITY;
+    const sum = areas.reduce((total, area) => total + area, 0);
+    const maximum = Math.max(...areas);
+    const minimum = Math.min(...areas);
+    const sideSquared = side * side;
+    const sumSquared = sum * sum;
+    return Math.max(
+      sideSquared * maximum / Math.max(Number.EPSILON, sumSquared),
+      sumSquared / Math.max(Number.EPSILON, sideSquared * minimum)
+    );
+  }
+
+  function layoutTreemapRow(row, bounds) {
+    const rectangles = [];
+    const totalArea = row.reduce((sum, item) => sum + Math.max(0, Number(item.area || 0)), 0);
+    if (!(totalArea > 0) || !(bounds.width > 0) || !(bounds.height > 0)) return { rectangles, remaining: bounds };
+
+    if (bounds.width >= bounds.height) {
+      const rowWidth = Math.min(bounds.width, totalArea / bounds.height);
+      let cursorY = bounds.y;
+      row.forEach((item, index) => {
+        const itemHeight = index === row.length - 1
+          ? Math.max(0, bounds.y + bounds.height - cursorY)
+          : Math.max(0, item.area / Math.max(Number.EPSILON, rowWidth));
+        rectangles.push({ node: item.node, x: bounds.x, y: cursorY, width: rowWidth, height: itemHeight });
+        cursorY += itemHeight;
+      });
+      return {
+        rectangles,
+        remaining: {
+          x: bounds.x + rowWidth,
+          y: bounds.y,
+          width: Math.max(0, bounds.width - rowWidth),
+          height: bounds.height
+        }
+      };
+    }
+
+    const rowHeight = Math.min(bounds.height, totalArea / bounds.width);
+    let cursorX = bounds.x;
+    row.forEach((item, index) => {
+      const itemWidth = index === row.length - 1
+        ? Math.max(0, bounds.x + bounds.width - cursorX)
+        : Math.max(0, item.area / Math.max(Number.EPSILON, rowHeight));
+      rectangles.push({ node: item.node, x: cursorX, y: bounds.y, width: itemWidth, height: rowHeight });
+      cursorX += itemWidth;
+    });
+    return {
+      rectangles,
+      remaining: {
+        x: bounds.x,
+        y: bounds.y + rowHeight,
+        width: bounds.width,
+        height: Math.max(0, bounds.height - rowHeight)
       }
-      sum = next;
-      split = index + 1;
-    }
-    split = Math.max(1, Math.min(nodes.length - 1, split));
-    return [nodes.slice(0, split), nodes.slice(split)];
+    };
   }
 
-  function layoutTreemapGroup(nodes, x, y, width, height, depth, output) {
-    if (output.length >= treemapMaximumRectangles) return;
-    const visible = Array.from(nodes || []).filter(node => node.bytes > 0);
-    if (!visible.length || width < 0.15 || height < 0.15) return;
-    if (visible.length === 1) {
-      collectTreemapRectangles(visible[0], x, y, width, height, depth, output);
-      return;
+  function squarifyTreemapNodes(nodes, x, y, width, height) {
+    const visible = Array.from(nodes || [])
+      .filter(node => Number(node.bytes || 0) > 0)
+      .sort((left, right) => Number(right.bytes || 0) - Number(left.bytes || 0) || left.name.localeCompare(right.name));
+    const totalBytes = visible.reduce((sum, node) => sum + Math.max(0, Number(node.bytes || 0)), 0);
+    const totalArea = Math.max(0, width) * Math.max(0, height);
+    if (!visible.length || !(totalBytes > 0) || !(totalArea > 0)) return [];
+
+    const remainingItems = visible.map(node => ({
+      node,
+      area: Math.max(0, Number(node.bytes || 0)) / totalBytes * totalArea
+    }));
+    let bounds = { x, y, width, height };
+    let row = [];
+    const rectangles = [];
+
+    while (remainingItems.length && bounds.width > 0 && bounds.height > 0) {
+      const candidate = remainingItems[0];
+      const side = Math.min(bounds.width, bounds.height);
+      if (!row.length || treemapWorstAspectRatio([...row, candidate], side) <= treemapWorstAspectRatio(row, side)) {
+        row.push(remainingItems.shift());
+        continue;
+      }
+      const result = layoutTreemapRow(row, bounds);
+      rectangles.push(...result.rectangles);
+      bounds = result.remaining;
+      row = [];
     }
-    const [first, second] = splitTreemapNodes(visible);
-    const firstBytes = first.reduce((sum, node) => sum + node.bytes, 0);
-    const total = firstBytes + second.reduce((sum, node) => sum + node.bytes, 0) || 1;
-    const ratio = Math.max(0.02, Math.min(0.98, firstBytes / total));
-    if (width >= height) {
-      const firstWidth = width * ratio;
-      layoutTreemapGroup(first, x, y, firstWidth, height, depth, output);
-      layoutTreemapGroup(second, x + firstWidth, y, width - firstWidth, height, depth, output);
-    } else {
-      const firstHeight = height * ratio;
-      layoutTreemapGroup(first, x, y, width, firstHeight, depth, output);
-      layoutTreemapGroup(second, x, y + firstHeight, width, height - firstHeight, depth, output);
+    if (row.length && bounds.width > 0 && bounds.height > 0) {
+      rectangles.push(...layoutTreemapRow(row, bounds).rectangles);
+    }
+    return rectangles;
+  }
+
+  function layoutTreemapGroup(nodes, x, y, width, height, depth, output, scopeTotalBytes) {
+    if (output.length >= treemapMaximumRectangles || width < 0.15 || height < 0.15) return;
+    const rectangles = squarifyTreemapNodes(nodes, x, y, width, height);
+    for (const rectangle of rectangles) {
+      if (output.length >= treemapMaximumRectangles) break;
+      collectTreemapRectangles(
+        rectangle.node,
+        rectangle.x,
+        rectangle.y,
+        rectangle.width,
+        rectangle.height,
+        depth,
+        output,
+        scopeTotalBytes
+      );
     }
   }
 
-  function collectTreemapRectangles(node, x, y, width, height, depth, output) {
+  function collectTreemapRectangles(node, x, y, width, height, depth, output, scopeTotalBytes) {
     if (output.length >= treemapMaximumRectangles || width < 0.15 || height < 0.15 || node.bytes <= 0) return;
-    const children = groupedTreemapChildren(node);
+    const children = groupedTreemapChildren(node, scopeTotalBytes);
     const isLeaf = !children.length || depth >= treemapMaximumDepth;
     const kind = node.other ? 'other' : (isLeaf && !node.folder ? 'file' : 'folder');
     const color = node.folder && !isLeaf
       ? `hsl(${(215 + depth * 19) % 360} 28% ${92 - depth * 3}%)`
       : statsColor(treemapColorIndex(node));
     const countLabel = treemapObjectCount(node.count);
-    const titlePath = node.other ? `${node.path || '/'} — Others` : (node.path || node.name);
+    const titlePath = node.other ? `${node.path || '/'} - Others` : (node.path || node.name);
     const title = `${titlePath}\n${formatBytes(node.bytes)} · ${countLabel}`;
     const sizeLabel = formatBytes(node.bytes);
     const detail = countLabel;
 
-    // Reserve a real title strip for parent folders. The strip is expressed as
-    // a percentage of the node itself so its label can never cover descendants.
     const header = !isLeaf && height > 2.2 ? Math.min(3.3, Math.max(1.25, height * 0.2)) : 0;
     const headerRatio = height > 0 ? Math.max(0, Math.min(100, header / height * 100)) : 0;
     const label = `<span class="folder-treemap-label"><strong><span class="folder-treemap-name">${escapeHTML(node.name)}</span><span class="folder-treemap-size">${escapeHTML(sizeLabel)}</span></strong><small>${escapeHTML(detail)}</small></span>`;
     output.push(`<div class="folder-treemap-node is-${kind}" data-kind="${kind}" data-depth="${depth}" data-header-ratio="${headerRatio}" data-path="${escapeHTML(node.path || '')}" data-size="${Math.max(0, Number(node.bytes || 0))}" data-count="${Math.max(0, Number(node.count || 0))}" data-mime="${escapeHTML(node.mime || '')}" data-etag="${escapeHTML(node.etag || '')}" data-modified="${escapeHTML(node.lastModified || '')}" title="${escapeHTML(title)}" style="left:${x}%;top:${y}%;width:${width}%;height:${height}%;z-index:${depth};--treemap-color:${color};--treemap-header:${headerRatio}%">${label}</div>`);
     if (isLeaf || output.length >= treemapMaximumRectangles) return;
 
-    // Children are flat siblings in the root coordinate system. Deeper nodes
-    // stay above their parent, while the parent's title remains confined to the
-    // reserved strip calculated above.
     const insetX = Math.min(.22, width * .02);
     const insetBottom = Math.min(.25, height * .02);
     const innerX = x + insetX;
     const innerY = y + header;
     const innerWidth = Math.max(0, width - insetX * 2);
     const innerHeight = Math.max(0, height - header - insetBottom);
-    layoutTreemapGroup(children, innerX, innerY, innerWidth, innerHeight, depth + 1, output);
+    layoutTreemapGroup(children, innerX, innerY, innerWidth, innerHeight, depth + 1, output, scopeTotalBytes);
   }
 
   function fitTreemapLabels(map) {
@@ -985,13 +854,16 @@
 
   async function collectPrefixStats(prefix, label) {
     const created = await BB.api.stats(ensurePrefix(prefix));
+    if (created.status === 'completed') return created.stats || {};
+    if (created.status === 'failed') throw new Error(created.error || 'Insights calculation failed.');
+    if (created.status === 'canceled') throw new Error('Insights calculation was canceled.');
     const completed = await waitForJob(created, label);
     if (completed.status !== 'completed') return null;
     return completed.stats || {};
   }
 
   async function showPrefixInsights(prefix, initialTab = 'overview') {
-    if (!(await requirePermissions(['read']))) return false;
+    if (!(await requirePermissions(['insights']))) return false;
     const cleanPrefix = ensurePrefix(prefix);
     const isRoot = !cleanPrefix;
     const scopeTitle = isRoot ? 'Storage insights' : 'Folder insights';
@@ -1001,14 +873,11 @@
       if (!stats) return false;
       const entries = statsTypeEntries(stats);
       const tree = buildTreemapTree(stats, cleanPrefix);
-      // Apply the same local <=1% aggregation at the selected scope root as
-      // at every nested folder. Previously root children bypassed
-      // groupedTreemapChildren(), so a tiny top-level folder could still be
-      // rendered individually while equally small nested entries became
-      // local Others rectangles.
-      const nodes = groupedTreemapChildren(tree);
+      const scopeTotalBytes = Math.max(0, Number(stats.totalBytes || tree.bytes || 0));
+      const groupingThreshold = treemapScopeThreshold(scopeTotalBytes);
+      const nodes = groupedTreemapChildren(tree, scopeTotalBytes);
       const rectangleList = [];
-      layoutTreemapGroup(nodes, 0, 0, 100, 100, 1, rectangleList);
+      layoutTreemapGroup(nodes, 0, 0, 100, 100, 1, rectangleList, scopeTotalBytes);
       const rectangles = rectangleList.join('');
       const insightID = `folder-insights-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
       const requestedTab = initialTab === 'treemap' ? 'treemap' : 'overview';
@@ -1026,10 +895,12 @@
                 <div class="folder-details-metric"><span>Total size</span><strong>${escapeHTML(formatBytes(stats.totalBytes))}</strong></div>
               </div>
               <div class="folder-distribution-grid">${distributionHTML(entries, 'bytes', 'Distribution by size')}${distributionHTML(entries, 'count', 'Distribution by object count')}</div>
+              <div class="folder-file-lists">${statsFileListHTML('Most recent files', stats.recent, 'recent')}${statsFileListHTML('Largest files', stats.largest, 'largest')}</div>
               <div class="folder-details-footer">Computed in ${Number(stats.tookMs || 0).toLocaleString()} ms</div>
             </section>
             <section class="folder-insights-panel" data-insights-panel="treemap" hidden>
-              <div class="folder-treemap" role="img" aria-label="${scopeTitle} size treemap">${rectangles || '<div class="folder-treemap-empty">No objects found.</div>'}</div>
+              <div class="folder-treemap-rule">Files and folders below 1% of this scope (${escapeHTML(formatBytes(groupingThreshold))}) are grouped into Others.</div>
+              <div class="folder-treemap" data-group-threshold="${groupingThreshold}" role="img" aria-label="${scopeTitle} size treemap">${rectangles || '<div class="folder-treemap-empty">No objects found.</div>'}</div>
             </section>
           </div>
         </div>`
@@ -1072,6 +943,20 @@
             modified: node.dataset.modified
           });
         });
+        root.addEventListener('click', event => {
+          const item = event.target.closest('[data-insight-file="true"]');
+          if (!item || !item.dataset.path) return;
+          event.preventDefault();
+          modal?.querySelector('.bb-modal-x')?.click();
+          navigateFromStats({
+            path: item.dataset.path,
+            kind: 'file',
+            size: item.dataset.size,
+            mime: item.dataset.mime,
+            etag: item.dataset.etag,
+            modified: item.dataset.modified
+          });
+        });
         if (map && typeof ResizeObserver === 'function') {
           resizeObserver = new ResizeObserver(() => fitTreemapLabels(map));
           resizeObserver.observe(map);
@@ -1099,7 +984,7 @@
   }
 
   async function copyObject(key) {
-    if (!(await requirePermissions(['read', 'write']))) return false;
+    if (!(await requirePermissions(['copy']))) return false;
     const current = key.split('/').pop() || key;
     const targetName = await ui().prompt({ title: 'Copy file', message: 'New name', defaultValue: `${current}-copy` });
     if (!targetName || targetName === current) return false;
@@ -1135,7 +1020,7 @@
   }
 
   async function renameObject(key) {
-    if (!(await requirePermissions(['read', 'write', 'delete']))) return false;
+    if (!(await requirePermissions(['rename']))) return false;
     const current = key.split('/').pop() || key;
     const targetName = await ui().prompt({ title: 'Rename file', message: 'New name', defaultValue: current });
     if (!targetName || targetName === current) return false;
@@ -1205,7 +1090,7 @@
   }
 
   async function copyPrefix(prefix) {
-    if (!(await requirePermissions(['read', 'write']))) return false;
+    if (!(await requirePermissions(['copy']))) return false;
     const source = ensurePrefix(prefix);
     const current = source.split('/').filter(Boolean).pop() || 'folder';
     const parent = source.slice(0, Math.max(0, source.length - current.length - 1));
@@ -1223,7 +1108,7 @@
   }
 
   async function renamePrefix(prefix) {
-    if (!(await requirePermissions(['read', 'write', 'delete']))) return false;
+    if (!(await requirePermissions(['rename']))) return false;
     const source = ensurePrefix(prefix);
     const current = source.split('/').filter(Boolean).pop() || 'folder';
     const parent = source.slice(0, Math.max(0, source.length - current.length - 1));
@@ -1241,7 +1126,7 @@
   }
 
   async function deletePrefix(prefix) {
-    if (!(await requirePermissions(['read', 'delete']))) return false;
+    if (!(await requirePermissions(['delete']))) return false;
     const source = ensurePrefix(prefix);
     const confirmed = await ui().confirm({ title: 'Delete folder', message: `Permanently delete "${source}" and all of its contents?` });
     if (!confirmed) return false;
@@ -1255,168 +1140,24 @@
     }
   }
 
+  function triggerBrowserDownload(url, filename = '') {
+    const anchor = document.createElement('a');
+    anchor.href = String(url || '');
+    if (filename) anchor.download = filename;
+    anchor.rel = 'noopener';
+    anchor.hidden = true;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  }
+
   async function downloadObject(key, filename) {
-    if (!allowed('read')) return false;
+    if (!allowed('download')) return false;
     const safeFilename = filename || key.split('/').pop() || 'download';
     const downloadURL = BB.api.urlForKey(key, BB.api.getInstance());
-    const target = await pickSaveTarget(safeFilename);
-    if (target.canceled) return false;
-
-    const group = transferGroup('download');
-    const id = `download-${Date.now().toString(36)}-${++downloadSequence}`;
-    let controller = null;
-    let resumeState = null;
-    let running = false;
-    let pauseRequested = false;
-    let cancelRequested = false;
-    let settled = false;
-    let resolveCompletion;
-    const completion = new Promise(resolve => { resolveCompletion = resolve; });
-
-    const item = group.add({
-      id,
-      name: safeFilename,
-      status: 'queued',
-      progress: null,
-      indeterminate: true,
-      detail: 'Queued...',
-      onPause: pause,
-      onResume: resume,
-      onCancel: cancel
-    });
-
-    function finish(value) {
-      if (settled) return;
-      settled = true;
-      resolveCompletion(value);
-    }
-
-    function currentProgress() {
-      const receivedBytes = Number(resumeState?.receivedBytes || 0);
-      const totalBytes = Number(resumeState?.totalBytes || 0);
-      return totalBytes > 0 ? Math.min(1, receivedBytes / totalBytes) : null;
-    }
-
-    function pause() {
-      if (settled || pauseRequested || !running) return;
-      pauseRequested = true;
-      cancelRequested = false;
-      item.update({
-        status: 'preparing',
-        progress: currentProgress(),
-        indeterminate: currentProgress() == null,
-        detail: 'Pausing at the last received byte...'
-      });
-      controller?.abort();
-    }
-
-    function resume() {
-      if (settled || running) return;
-      pauseRequested = false;
-      cancelRequested = false;
-      void run();
-    }
-
-    function cancel() {
-      if (settled || cancelRequested) return;
-      cancelRequested = true;
-      pauseRequested = false;
-      if (running) {
-        item.update({
-          status: 'preparing',
-          progress: currentProgress(),
-          indeterminate: currentProgress() == null,
-          detail: 'Canceling download...'
-        });
-        controller?.abort();
-      } else {
-        item.canceled({ detail: safeFilename });
-        finish(false);
-      }
-    }
-
-    async function run() {
-      if (running || settled) return;
-      running = true;
-      controller = new AbortController();
-      const activeController = controller;
-      item.update({
-        status: 'running',
-        progress: currentProgress(),
-        indeterminate: currentProgress() == null,
-        detail: resumeState?.receivedBytes ? 'Resuming download...' : 'Starting download...',
-        onPause: pause,
-        onResume: resume,
-        onCancel: cancel
-      });
-
-      try {
-        const result = await streamURL(downloadURL, {
-          signal: activeController.signal,
-          resumeState,
-          onCheckpoint(state) { resumeState = state; },
-          onProgress(progress) {
-            item.update({
-              status: 'running',
-              progress: progress.progress,
-              indeterminate: progress.progress == null,
-              detail: formatTransferDetail(progress),
-              onPause: pause,
-              onResume: resume,
-              onCancel: cancel
-            });
-          }
-        });
-        resumeState = result.state;
-        if (cancelRequested || activeController.signal.aborted) throw abortError();
-        await saveBlob(result.blob, safeFilename, target.handle);
-        item.complete({
-          detail: formatTransferDetail({
-            transferredBytes: result.receivedBytes,
-            totalBytes: result.totalBytes || result.receivedBytes,
-            speedBps: result.speedBps,
-            etaSeconds: 0
-          }),
-          duration: 6000
-        });
-        finish(true);
-      } catch (error) {
-        if (error?.transferState) resumeState = error.transferState;
-        if (isAbortError(error) || activeController.signal.aborted) {
-          if (cancelRequested) {
-            item.canceled({ detail: safeFilename });
-            finish(false);
-          } else {
-            item.update({
-              status: 'paused',
-              progress: currentProgress(),
-              indeterminate: false,
-              detail: `${formatTransferDetail({
-                receivedBytes: resumeState?.receivedBytes,
-                totalBytes: resumeState?.totalBytes,
-                speedBps: resumeState?.speedBps
-              })} · Resume continues with an HTTP range request.`,
-              onPause: pause,
-              onResume: resume,
-              onCancel: cancel
-            });
-          }
-        } else {
-          item.fail({
-            progress: currentProgress(),
-            detail: String(error?.message || error || 'Download failed'),
-            onResume: resume,
-            onCancel: cancel
-          });
-        }
-      } finally {
-        if (controller === activeController) controller = null;
-        running = false;
-      }
-    }
-
-    void run();
-    return completion;
+    triggerBrowserDownload(downloadURL, safeFilename);
+    ui().toast('Download started in the browser.', { type: 'info', duration: 4000 });
+    return true;
   }
 
   BB.actions = {
@@ -1431,13 +1172,9 @@
     copyPrefix,
     renamePrefix,
     deletePrefix,
-    showJobs,
     waitForJob,
     downloadObject,
-    pickSaveTarget,
-    saveBlob,
-    streamURL,
-    fetchBytes,
+    triggerBrowserDownload,
     formatTransferDetail,
     formatBytes,
     isAbortError,

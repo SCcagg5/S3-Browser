@@ -30,6 +30,11 @@ jobs:
           go-version: "1.22"
           cache-dependency-path: src/go.sum
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Prepare manual tag
         if: github.event_name == 'workflow_dispatch'
         shell: bash
@@ -64,6 +69,7 @@ jobs:
           echo "RELEASE_COMMIT=$commit" >> "$GITHUB_ENV"
           echo "RELEASE_BUILD_DATE=$build_date" >> "$GITHUB_ENV"
 
+
       - name: Download Go modules
         working-directory: src
         run: go mod download
@@ -76,14 +82,43 @@ jobs:
           go test -race ./...
           go vet ./...
 
-      - name: Verify self-contained runtime
-        working-directory: src
+      - name: Frontend contracts
+        working-directory: .
+        run: |
+          set -euo pipefail
+          for file in src/public/assets/js/*.js src/public/assets/js/common/*.js test/*.js; do
+            node --check "$file"
+          done
+          node test/frontend-smoke.js
+          node test/ui-normalization.js
+          node test/json-coloring.js
+          node test/json-viewer.js
+          node test/transfer-controls.js
+          node test/stats-viewer.js
+          node test/sqlite-viewer.js
+          node test/office-metadata.js
+          node test/subpath-support.js
+
+      - name: Verify self-contained and private runtime
+        working-directory: .
         shell: bash
         run: |
           set -euo pipefail
-          test "$(go list -m all | wc -l | tr -d ' ')" = "1"
-          if grep -R --include='*.go' '"os/exec"' .; then
+          test "$(cd src && go list -m all | wc -l | tr -d ' ')" = "1"
+          if grep -R --include='*.go' '"os/exec"' src; then
             echo "runtime source must not invoke external commands" >&2
+            exit 1
+          fi
+          if grep -R --include='*.go' -E 'os\.(Getenv|LookupEnv)|ProxyFromEnvironment' src; then
+            echo "runtime configuration and provider clients must not use process environment variables" >&2
+            exit 1
+          fi
+          if find . -type f \( -iname '*.ttf' -o -iname '*.otf' -o -iname '*.woff' -o -iname '*.woff2' -o -iname '*.eot' \) | grep -q .; then
+            echo "font binaries must not be shipped" >&2
+            exit 1
+          fi
+          if grep -R -E --exclude-dir=vendor --include='*.html' --include='*.js' --include='*.css' 'https?://|//cdn\.' src/public; then
+            echo "runtime frontend must not contact external asset domains" >&2
             exit 1
           fi
 

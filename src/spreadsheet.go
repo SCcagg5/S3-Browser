@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 )
@@ -72,7 +73,12 @@ type workbookSheetXML struct {
 	RelID string `xml:"id,attr"`
 }
 
+type workbookViewXML struct {
+	ActiveTab int `xml:"activeTab,attr"`
+}
+
 type workbookXML struct {
+	Views  []workbookViewXML  `xml:"bookViews>workbookView"`
 	Sheets []workbookSheetXML `xml:"sheets>sheet"`
 }
 
@@ -228,6 +234,78 @@ const spreadsheetRangeBlockBytes = int64(1 << 20)
 
 type spreadsheetObjectReaderAt struct {
 	source *objectRangeSource
+	mu     sync.Mutex
+	err    error
+}
+
+var binaryExcelCompoundSignature = []byte{0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1}
+
+func (r *spreadsheetObjectReaderAt) rememberError(err error) {
+	if r == nil || err == nil || errors.Is(err, io.EOF) {
+		return
+	}
+	r.mu.Lock()
+	if r.err == nil {
+		r.err = err
+	}
+	r.mu.Unlock()
+}
+
+func (r *spreadsheetObjectReaderAt) Error() error {
+	if r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.err
+}
+
+func spreadsheetContainerError(signature []byte) error {
+	if len(signature) >= len(binaryExcelCompoundSignature) && string(signature[:len(binaryExcelCompoundSignature)]) == string(binaryExcelCompoundSignature) {
+		return apiError{
+			Status:  http.StatusUnprocessableEntity,
+			Code:    "unsupported_xls_container",
+			Message: "this file uses the binary XLS format even though its name ends in .xlsx or .xlsm; download it or convert it to XLSX or CSV",
+		}
+	}
+	return apiError{
+		Status:  http.StatusUnprocessableEntity,
+		Code:    "invalid_workbook_container",
+		Message: "the file extension says XLSX/XLSM, but the object is not an Office ZIP package; verify the source file or download the original",
+	}
+}
+
+func newSpreadsheetZipReader(source *objectRangeSource) (*zip.Reader, error) {
+	if source == nil || source.Size() <= 0 {
+		return nil, apiError{Status: http.StatusUnprocessableEntity, Code: "unknown_workbook_size", Message: "spreadsheet preview requires a known non-zero object size"}
+	}
+
+	headerLength := minInt64(8, source.Size())
+	signature, err := source.ReadRange(0, headerLength)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, err
+	}
+	isZIP := len(signature) >= 4 && signature[0] == 'P' && signature[1] == 'K' &&
+		((signature[2] == 3 && signature[3] == 4) ||
+			(signature[2] == 5 && signature[3] == 6) ||
+			(signature[2] == 7 && signature[3] == 8))
+	if !isZIP {
+		return nil, spreadsheetContainerError(signature)
+	}
+
+	remoteReader := &spreadsheetObjectReaderAt{source: source}
+	reader, err := zip.NewReader(remoteReader, source.Size())
+	if err != nil {
+		if sourceErr := remoteReader.Error(); sourceErr != nil {
+			return nil, sourceErr
+		}
+		return nil, apiError{
+			Status:  http.StatusUnprocessableEntity,
+			Code:    "invalid_workbook_package",
+			Message: "the Office ZIP package is incomplete or its central directory cannot be read",
+		}
+	}
+	return reader, nil
 }
 
 func openSpreadsheetReader(ctx context.Context, instance *storageInstance, key string, knownSize int64) (*zip.Reader, error) {
@@ -240,23 +318,19 @@ func openSpreadsheetReader(ctx context.Context, instance *storageInstance, key s
 	// that value avoids an extra separately billed storage request merely to
 	// discover the ZIP length. The first real range response still verifies and
 	// replaces the size through Content-Range.
-	source.size = knownSize
-	if source.size <= 0 {
+	source.SetKnownSize(knownSize)
+	if source.Size() <= 0 {
 		if _, err := source.ReadSuffix(64 << 10); err != nil && err != io.EOF {
 			return nil, err
 		}
 	}
-	if source.size <= 0 {
+	if source.Size() <= 0 {
 		return nil, apiError{Status: http.StatusUnprocessableEntity, Code: "unknown_workbook_size", Message: "spreadsheet preview requires a known non-zero object size"}
 	}
-	if source.size > maxSpreadsheetObjectBytes {
+	if source.Size() > maxSpreadsheetObjectBytes {
 		return nil, apiError{Status: http.StatusRequestEntityTooLarge, Code: "workbook_too_large", Message: fmt.Sprintf("spreadsheet previews are limited to %d MiB", maxSpreadsheetObjectBytes>>20)}
 	}
-	reader, err := zip.NewReader(&spreadsheetObjectReaderAt{source: source}, source.size)
-	if err != nil {
-		return nil, apiError{Status: http.StatusUnprocessableEntity, Code: "invalid_workbook", Message: "the object is not a valid XLSX/XLSM workbook"}
-	}
-	return reader, nil
+	return newSpreadsheetZipReader(source)
 }
 
 func (r *spreadsheetObjectReaderAt) ReadAt(destination []byte, offset int64) (int, error) {
@@ -266,7 +340,7 @@ func (r *spreadsheetObjectReaderAt) ReadAt(destination []byte, offset int64) (in
 	if offset < 0 || r == nil || r.source == nil {
 		return 0, io.EOF
 	}
-	if r.source.size > 0 && offset >= r.source.size {
+	if r.source.Size() > 0 && offset >= r.source.Size() {
 		return 0, io.EOF
 	}
 
@@ -275,13 +349,14 @@ func (r *spreadsheetObjectReaderAt) ReadAt(destination []byte, offset int64) (in
 		current := offset + int64(written)
 		blockStart := current / spreadsheetRangeBlockBytes * spreadsheetRangeBlockBytes
 		blockLength := spreadsheetRangeBlockBytes
-		if r.source.size > 0 {
-			blockLength = minInt64(blockLength, r.source.size-blockStart)
+		if r.source.Size() > 0 {
+			blockLength = minInt64(blockLength, r.source.Size()-blockStart)
 		}
 		if blockLength <= 0 {
 			break
 		}
 		if _, err := r.source.ReadRange(blockStart, blockLength); err != nil && err != io.EOF {
+			r.rememberError(err)
 			return written, err
 		}
 		remainingInBlock := blockStart + blockLength - current
@@ -291,6 +366,7 @@ func (r *spreadsheetObjectReaderAt) ReadAt(destination []byte, offset int64) (in
 		}
 		chunk, err := r.source.ReadRange(current, want)
 		if err != nil && err != io.EOF {
+			r.rememberError(err)
 			return written, err
 		}
 		copied := copy(destination[written:], chunk)

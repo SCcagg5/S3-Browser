@@ -2,22 +2,29 @@
   'use strict';
 
   const BB = (window.BB = window.BB || {});
-  const config = { instanceId: '', capabilities: {}, trashPrefix: '' };
+  const config = { instanceId: '', capabilities: {}, operations: {}, runtime: { browserPersistence: false } };
   const MAX_TEXT_PREVIEW = 8 * 1024 * 1024;
-  const MAX_WORD_PREVIEW = 128 * 1024 * 1024;
   const TEXT_SNIFF_LIMIT = 128 * 1024;
-  const MAMMOTH_SCRIPT_URL = 'https://cdn.jsdelivr.net/npm/mammoth@1.12.0/mammoth.browser.min.js';
+  const PDFJS_VERSION = '4.10.38';
+  // PDF previews are rendered only through the local canvas renderer. There is
+  // no browser-native embed/iframe fallback because native PDF plugins may fetch
+  // the complete object and cannot be controlled by the application.
+  const PDFJS_MODULE_URL = `assets/vendor/pdfjs/${PDFJS_VERSION}/pdf.min.mjs`;
+  const PDFJS_WORKER_URL = `assets/vendor/pdfjs/${PDFJS_VERSION}/pdf.worker.min.mjs`;
+  const PDF_MIN_SCALE = .2;
+  const PDF_MAX_SCALE = 6;
+  const PDF_MAX_CANVAS_PIXELS = 10 * 1024 * 1024;
+  const DETERMINISTIC_ZIP_PREVIEW_EXTENSIONS = new Set(['zip', 'jar', 'war', 'ear', 'apk', 'aar', 'xpi', 'crx', 'vsix', 'epub']);
   BB.cfg = config;
 
   let currentInstance = null;
   let viewerResizeObserver = null;
   let viewerLayoutFrame = 0;
   const activeMediaCleanups = new Set();
-  let pdfLoaderPromise = null;
-  let mammothLoaderPromise = null;
   let activeDocumentSearch = null;
   let activeDocumentSearchLabel = '';
   let activeSearchController = null;
+  let pdfLoaderPromise = null;
 
   function byId(id) { return document.getElementById(id); }
 
@@ -55,17 +62,22 @@
     });
   }
 
-  function setPreviewMode(type) {
+  function setPreviewMode(type, sourceType = type) {
     const shell = document.querySelector('.viewer');
     if (!shell) return;
-    const contained = ['tabular', 'spreadsheet', 'parquet', 'json'].includes(type);
-    const wide = ['tabular', 'spreadsheet', 'parquet', 'json'].includes(type);
+    const contained = ['tabular', 'spreadsheet', 'parquet', 'json', 'archive', 'structured'].includes(type);
+    const wide = ['tabular', 'spreadsheet', 'parquet', 'json', 'pdf', 'archive', 'structured'].includes(type);
     shell.classList.toggle('is-scroll-contained', contained);
     shell.classList.toggle('is-wide-preview', wide);
     shell.classList.toggle('is-adaptive-code', type === 'code');
+    shell.classList.toggle('is-certificate-preview', sourceType === 'certificate');
     const viewportImage = ['image', 'raw-image', 'image-convert'].includes(type);
+    const viewportPDF = type === 'pdf';
     document.body.classList.toggle('is-viewport-image', viewportImage);
     document.documentElement.classList.toggle('is-viewport-image', viewportImage);
+    document.body.classList.toggle('is-viewport-pdf', viewportPDF);
+    document.documentElement.classList.toggle('is-viewport-pdf', viewportPDF);
+    if (!viewportPDF) shell.style.removeProperty('--pdf-page-shell-width');
     shell.dataset.previewType = String(type || 'unknown');
   }
 
@@ -126,7 +138,7 @@
     byId('instanceMeta').textContent = currentInstance
       ? `${currentInstance.name} · ${currentInstance.provider.toUpperCase()} · ${currentInstance.bucket}`
       : '';
-    document.title = `${name || 'Preview'} — ${currentInstance?.name || 'Object Storage Browser'}`;
+    document.title = `${name || 'Preview'} - ${currentInstance?.name || 'Object Storage Browser'}`;
   }
 
   function setVisible(id, visible) {
@@ -135,17 +147,23 @@
   }
 
   function applyCapabilities() {
-    const caps = config.capabilities || {};
-    const read = !!caps.read?.allowed;
-    const write = !!caps.write?.allowed;
-    const del = !!caps.delete?.allowed;
-    setVisible('openRawBtn', read);
-    setVisible('pv-download', read);
-    setVisible('pv-details', read);
-    setVisible('pv-copy', read && write);
-    setVisible('pv-rename', read && write && del);
-    setVisible('pv-delete', del);
-    setVisible('previewMenu', read || del);
+    const can = name => BB.capabilities?.actionable
+      ? BB.capabilities.actionable(config, name)
+      : config.capabilities?.read?.allowed !== false;
+    const preview = can('preview');
+    const download = can('download');
+    const details = can('details');
+    const copy = can('copy');
+    const rename = can('rename');
+    const remove = can('delete');
+    setVisible('openRawBtn', download);
+    setVisible('pv-download', download);
+    setVisible('pv-details', details);
+    setVisible('pv-copy', copy);
+    setVisible('pv-rename', rename);
+    setVisible('pv-delete', remove);
+    setVisible('previewMenu', download || details || copy || rename || remove);
+    return preview;
   }
 
   function updateBackLink(key) {
@@ -274,221 +292,660 @@
 
   function loadPDFLibrary() {
     if (!pdfLoaderPromise) {
-      pdfLoaderPromise = import('https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs').then(module => {
-        module.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs';
+      const moduleURL = new URL(PDFJS_MODULE_URL, document.baseURI).href;
+      const workerURL = new URL(PDFJS_WORKER_URL, document.baseURI).href;
+      pdfLoaderPromise = import(moduleURL).then(module => {
+        if (!module?.getDocument || !module?.PDFDataRangeTransport) {
+          throw new Error('The local PDF renderer did not expose the expected API.');
+        }
+        module.GlobalWorkerOptions.workerSrc = workerURL;
         return module;
+      }).catch(error => {
+        pdfLoaderPromise = null;
+        const message = String(error?.message || error || '');
+        if (message.includes('Failed to fetch dynamically imported module') || message.includes('Importing a module script failed')) {
+          throw new Error('The local PDF.js renderer is missing from this build.');
+        }
+        throw error;
       });
     }
     return pdfLoaderPromise;
   }
 
-  function pdfRangeChunkSize() {
-    const size = Number(listedObjectMetadata()?.size || 0);
+  function pdfRangeChunkSize(objectSize) {
+    const size = Number(objectSize || 0);
+    if (size > 16 * 1024 ** 3) return 8 * 1024 * 1024;
     if (size > 4 * 1024 ** 3) return 4 * 1024 * 1024;
     if (size > 512 * 1024 ** 2) return 2 * 1024 * 1024;
     if (size > 32 * 1024 ** 2) return 1024 * 1024;
     return 256 * 1024;
   }
 
-  function renderPDF(url) {
-    const wrapper = document.createElement('div');
-    wrapper.className = 'pdf-preview';
-    const toolbarRail = document.createElement('div');
-    toolbarRail.className = 'pdf-toolbar-rail';
+  function normalizePDFIfMatch(value) {
+    const etag = String(value || '').trim();
+    if (!etag) return '';
+    if (/^(?:W\/)?".*"$/.test(etag)) return etag;
+    return `"${etag.replace(/^"|"$/g, '')}"`;
+  }
+
+  async function pdfObjectMetadata(url, listed, signal) {
+    const knownLength = Number(listed?.size || 0);
+    const knownETag = String(listed?.etag || listed?.headers?.etag || '').trim();
+    if (Number.isSafeInteger(knownLength) && knownLength > 0) {
+      return { length: knownLength, etag: knownETag };
+    }
+    const response = await fetch(url, { method: 'HEAD', signal, cache: 'no-store' });
+    if (!response.ok) throw new Error(`Unable to read PDF metadata: HTTP ${response.status}`);
+    const length = Number(response.headers.get('Content-Length'));
+    if (!Number.isSafeInteger(length) || length <= 0) throw new Error('The PDF size is unavailable.');
+    return { length, etag: knownETag || String(response.headers.get('ETag') || '').trim() };
+  }
+
+  function parsePDFContentRange(value) {
+    const match = /^bytes\s+(\d+)-(\d+)\/(\d+)$/i.exec(String(value || '').trim());
+    if (!match) return null;
+    const start = Number(match[1]);
+    const end = Number(match[2]);
+    const total = Number(match[3]);
+    if (![start, end, total].every(Number.isSafeInteger) || start < 0 || end < start || end >= total) return null;
+    return { start, end, total };
+  }
+
+  function renderPDF(url, listedMetadata = null) {
+    const boundedURL = new URL(url, document.baseURI);
+    boundedURL.searchParams.set('range_only', '1');
+    const rangeURL = boundedURL.href;
+    url = rangeURL;
+    const wrapper = document.createElement('section');
+    wrapper.className = 'pdf-preview pdf-custom-preview';
+    wrapper.tabIndex = 0;
+    wrapper.setAttribute('aria-label', 'PDF preview');
+
     const toolbar = document.createElement('div');
-    toolbar.className = 'pdf-toolbar';
+    toolbar.className = 'pdf-custom-toolbar';
+    toolbar.setAttribute('role', 'toolbar');
+    toolbar.setAttribute('aria-label', 'PDF controls');
+
+    const navigation = document.createElement('div');
+    navigation.className = 'pdf-toolbar-group pdf-toolbar-navigation';
     const previous = document.createElement('button');
     previous.type = 'button';
+    previous.className = 'pdf-tool-button';
     previous.title = 'Previous page';
+    previous.setAttribute('aria-label', 'Previous page');
     previous.innerHTML = '<i class="mdi mdi-chevron-left"></i>';
+
+    const pageLabel = document.createElement('label');
+    pageLabel.className = 'pdf-page-control';
+    const pageCaption = document.createElement('span');
+    pageCaption.className = 'pdf-page-caption';
+    pageCaption.textContent = 'Page';
     const pageInput = document.createElement('input');
     pageInput.type = 'number';
     pageInput.min = '1';
+    pageInput.step = '1';
     pageInput.value = '1';
+    pageInput.inputMode = 'numeric';
     pageInput.setAttribute('aria-label', 'PDF page number');
     const pageCount = document.createElement('span');
+    pageCount.className = 'pdf-page-count';
     pageCount.textContent = '/ …';
+    pageLabel.append(pageCaption, pageInput, pageCount);
+
     const next = document.createElement('button');
     next.type = 'button';
+    next.className = 'pdf-tool-button';
     next.title = 'Next page';
+    next.setAttribute('aria-label', 'Next page');
     next.innerHTML = '<i class="mdi mdi-chevron-right"></i>';
+    navigation.append(previous, pageLabel, next);
+
+    const zoom = document.createElement('div');
+    zoom.className = 'pdf-toolbar-group pdf-toolbar-zoom';
     const zoomOut = document.createElement('button');
     zoomOut.type = 'button';
+    zoomOut.className = 'pdf-tool-button';
     zoomOut.title = 'Zoom out';
+    zoomOut.setAttribute('aria-label', 'Zoom out');
     zoomOut.innerHTML = '<i class="mdi mdi-minus"></i>';
+    const zoomValue = document.createElement('span');
+    zoomValue.className = 'pdf-zoom-value';
+    zoomValue.textContent = 'Fit width';
+    zoomValue.setAttribute('aria-live', 'polite');
     const zoomIn = document.createElement('button');
     zoomIn.type = 'button';
+    zoomIn.className = 'pdf-tool-button';
     zoomIn.title = 'Zoom in';
+    zoomIn.setAttribute('aria-label', 'Zoom in');
     zoomIn.innerHTML = '<i class="mdi mdi-plus"></i>';
-    const fit = document.createElement('button');
-    fit.type = 'button';
-    fit.title = 'Fit page width';
-    fit.innerHTML = '<i class="mdi mdi-fit-to-page-outline"></i>';
-    toolbar.append(previous, pageInput, pageCount, next, zoomOut, zoomIn, fit);
-    toolbarRail.appendChild(toolbar);
-    const toolbarSpacer = document.createElement('div');
-    toolbarSpacer.className = 'pdf-toolbar-spacer';
-    const status = document.createElement('div');
-    status.className = 'pdf-status';
-    status.textContent = 'Loading the PDF index with byte-range requests…';
+    zoom.append(zoomOut, zoomValue, zoomIn);
+
+    const fitting = document.createElement('div');
+    fitting.className = 'pdf-toolbar-group pdf-toolbar-fitting';
+    const fitWidth = document.createElement('button');
+    fitWidth.type = 'button';
+    fitWidth.className = 'pdf-tool-button pdf-fit-button is-active';
+    fitWidth.title = 'Fit page width';
+    fitWidth.setAttribute('aria-label', 'Fit page width');
+    fitWidth.innerHTML = '<i class="mdi mdi-fit-to-page-outline"></i><span>Width</span>';
+    const fitPage = document.createElement('button');
+    fitPage.type = 'button';
+    fitPage.className = 'pdf-tool-button pdf-fit-button';
+    fitPage.title = 'Fit complete page';
+    fitPage.setAttribute('aria-label', 'Fit complete page');
+    fitPage.innerHTML = '<i class="mdi mdi-file-outline"></i><span>Page</span>';
+    fitting.append(fitWidth, fitPage);
+
+    const utility = document.createElement('div');
+    utility.className = 'pdf-toolbar-group pdf-toolbar-utility';
+    const reload = document.createElement('button');
+    reload.type = 'button';
+    reload.className = 'pdf-tool-button';
+    reload.title = 'Render current page again';
+    reload.setAttribute('aria-label', 'Render current page again');
+    reload.innerHTML = '<i class="mdi mdi-refresh"></i>';
+    const fullscreen = document.createElement('button');
+    fullscreen.type = 'button';
+    fullscreen.className = 'pdf-tool-button';
+    fullscreen.title = 'Full screen';
+    fullscreen.setAttribute('aria-label', 'Full screen');
+    fullscreen.innerHTML = '<i class="mdi mdi-fullscreen"></i>';
+    utility.append(reload, fullscreen);
+
+    toolbar.append(navigation, zoom, fitting, utility);
+
+    const stage = document.createElement('div');
+    stage.className = 'pdf-custom-stage pdf-page-stage';
     const canvasWrap = document.createElement('div');
     canvasWrap.className = 'pdf-canvas-wrap';
-    const canvas = document.createElement('canvas');
-    canvasWrap.appendChild(canvas);
-    wrapper.append(toolbarRail, toolbarSpacer, status, canvasWrap);
+    const loader = document.createElement('div');
+    loader.className = 'pdf-custom-loader';
+    loader.setAttribute('role', 'status');
+    loader.setAttribute('aria-live', 'polite');
+    const loaderSpinner = document.createElement('span');
+    loaderSpinner.className = 'pdf-page-loader-spinner';
+    const loaderCopy = document.createElement('span');
+    loaderCopy.className = 'pdf-custom-loader-copy';
+    loaderCopy.textContent = 'Loading PDF index…';
+    loader.append(loaderSpinner, loaderCopy);
+
+    const errorPanel = document.createElement('div');
+    errorPanel.className = 'pdf-custom-error';
+    errorPanel.hidden = true;
+    const errorIcon = document.createElement('i');
+    errorIcon.className = 'mdi mdi-alert-circle-outline';
+    const errorCopy = document.createElement('div');
+    errorCopy.className = 'pdf-custom-error-copy';
+    const errorTitle = document.createElement('strong');
+    errorTitle.textContent = 'PDF preview unavailable';
+    const errorMessage = document.createElement('span');
+    const errorActions = document.createElement('div');
+    errorActions.className = 'pdf-custom-error-actions';
+    const retry = document.createElement('button');
+    retry.type = 'button';
+    retry.className = 'pdf-tool-button pdf-custom-error-action';
+    retry.innerHTML = '<i class="mdi mdi-refresh"></i><span>Retry</span>';
+    errorActions.append(retry);
+    errorCopy.append(errorTitle, errorMessage);
+    errorPanel.append(errorIcon, errorCopy, errorActions);
+
+    stage.append(canvasWrap, loader, errorPanel);
+    wrapper.append(toolbar, stage);
 
     const controller = new AbortController();
+    const pageCache = new Map();
+    const inFlightRanges = new Map();
     let documentTask = null;
+    let rangeTransport = null;
     let pdf = null;
     let renderTask = null;
     let currentPage = 1;
-    let scale = 1;
-    let fitWidth = true;
+    let customScale = 1;
+    let zoomMode = 'fit-width';
+    let lastEffectiveScale = 1;
+    let navigationToken = 0;
+    let rangeFailure = null;
+    let objectLength = 0;
+    let objectETag = '';
+    let storageRequests = 0;
+    let storageBytes = 0;
+    let resizeTimer = 0;
+    let resizeObserver = null;
+    let destroyed = false;
 
-    const renderPage = async pageNumber => {
-      if (!pdf || controller.signal.aborted) return;
-      currentPage = Math.max(1, Math.min(pdf.numPages, Number(pageNumber) || 1));
+    const setLoading = message => {
+      loaderCopy.textContent = message;
+      loader.hidden = false;
+      errorPanel.hidden = true;
+    };
+
+    const hideLoading = () => {
+      loader.hidden = true;
+    };
+
+    const updateFitButtons = () => {
+      fitWidth.classList.toggle('is-active', zoomMode === 'fit-width');
+      fitPage.classList.toggle('is-active', zoomMode === 'fit-page');
+    };
+
+    const updateControls = () => {
+      const total = Number(pdf?.numPages || 0);
       pageInput.value = String(currentPage);
-      pageCount.textContent = `/ ${Number(pdf.numPages).toLocaleString()}`;
-      previous.disabled = currentPage <= 1;
-      next.disabled = currentPage >= pdf.numPages;
-      renderTask?.cancel?.();
-      status.textContent = `Loading page ${currentPage.toLocaleString()}…`;
-      const page = await pdf.getPage(currentPage);
-      const baseViewport = page.getViewport({ scale: 1 });
-      const available = Math.max(320, Math.min(window.innerWidth - 32, canvasWrap.clientWidth || window.innerWidth - 32));
-      const effectiveScale = fitWidth ? Math.min(3, available / baseViewport.width) : scale;
-      const viewport = page.getViewport({ scale: effectiveScale });
-      const outputScale = Math.min(2, window.devicePixelRatio || 1);
-      canvas.width = Math.floor(viewport.width * outputScale);
-      canvas.height = Math.floor(viewport.height * outputScale);
-      canvas.style.width = `${Math.floor(viewport.width)}px`;
-      canvas.style.height = `${Math.floor(viewport.height)}px`;
-      const context = canvas.getContext('2d', { alpha: false });
-      renderTask = page.render({
-        canvasContext: context,
-        viewport,
-        transform: outputScale === 1 ? null : [outputScale, 0, 0, outputScale, 0, 0]
-      });
-      try {
-        await renderTask.promise;
-        status.textContent = `Page ${currentPage.toLocaleString()} of ${Number(pdf.numPages).toLocaleString()}`;
-        scheduleViewerLayout();
-      } catch (error) {
-        if (error?.name !== 'RenderingCancelledException') throw error;
+      pageInput.max = total ? String(total) : '';
+      pageCount.textContent = total ? `/ ${total.toLocaleString()}` : '/ …';
+      const unavailable = !pdf || Boolean(rangeFailure);
+      previous.disabled = unavailable || currentPage <= 1;
+      next.disabled = unavailable || currentPage >= total;
+      pageInput.disabled = unavailable;
+      zoomOut.disabled = unavailable;
+      zoomIn.disabled = unavailable;
+      fitWidth.disabled = unavailable;
+      fitPage.disabled = unavailable;
+      reload.disabled = unavailable;
+      const zoomText = `${Math.round(lastEffectiveScale * 100)}%`;
+      zoomValue.textContent = zoomMode === 'fit-width'
+        ? `Width · ${zoomText}`
+        : zoomMode === 'fit-page'
+          ? `Page · ${zoomText}`
+          : zoomText;
+      updateFitButtons();
+    };
+
+    const cleanupPage = page => {
+      try { page?.cleanup?.(); } catch (_) {}
+    };
+
+    const trimPageCache = () => {
+      const keep = new Set([currentPage]);
+      if (pdf && currentPage < pdf.numPages) keep.add(currentPage + 1);
+      for (const [number, page] of pageCache) {
+        if (keep.has(number)) continue;
+        pageCache.delete(number);
+        cleanupPage(page);
       }
     };
 
-    previous.addEventListener('click', () => void renderPage(currentPage - 1));
-    next.addEventListener('click', () => void renderPage(currentPage + 1));
-    pageInput.addEventListener('change', () => void renderPage(pageInput.value));
-    pageInput.addEventListener('keydown', event => { if (event.key === 'Enter') void renderPage(pageInput.value); });
-    zoomOut.addEventListener('click', () => { fitWidth = false; scale = Math.max(.25, scale / 1.2); void renderPage(currentPage); });
-    zoomIn.addEventListener('click', () => { fitWidth = false; scale = Math.min(6, scale * 1.2); void renderPage(currentPage); });
-    fit.addEventListener('click', () => { fitWidth = true; void renderPage(currentPage); });
+    const getPage = async pageNumber => {
+      const normalized = Math.max(1, Math.min(Number(pdf?.numPages || 1), Math.floor(Number(pageNumber) || 1)));
+      if (pageCache.has(normalized)) return pageCache.get(normalized);
+      const page = await pdf.getPage(normalized);
+      if (destroyed || controller.signal.aborted) {
+        cleanupPage(page);
+        throw new DOMException('PDF page loading canceled', 'AbortError');
+      }
+      pageCache.set(normalized, page);
+      trimPageCache();
+      return page;
+    };
 
-    loadPDFLibrary().then(pdfjs => {
-      if (controller.signal.aborted) return;
-      documentTask = pdfjs.getDocument({
-        url,
-        // Large PDFs otherwise require thousands of separately billed S3/GCS
-        // range requests before PDF.js can resolve the cross-reference tree.
-        rangeChunkSize: pdfRangeChunkSize(),
-        disableAutoFetch: true,
-        disableStream: true,
-        isEvalSupported: false
-      });
-      return documentTask.promise;
-    }).then(document => {
-      if (!document || controller.signal.aborted) return;
-      pdf = document;
-      void renderPage(1);
-    }).catch(error => {
-      if (controller.signal.aborted) return;
-      toolbarRail.remove();
-      toolbarSpacer.remove();
-      canvasWrap.remove();
-      status.textContent = `PDF preview unavailable: ${error.message || error}. Use “Open original” to let the browser handle the file.`;
+    const availableStageSize = () => ({
+      width: Math.max(240, stage.clientWidth - 32),
+      height: Math.max(240, stage.clientHeight - 32)
     });
 
-    const cleanup = () => {
-      controller.abort();
-      renderTask?.cancel?.();
-      documentTask?.destroy?.();
-      pdf?.destroy?.();
+    const effectiveScaleFor = page => {
+      const base = page.getViewport({ scale: 1 });
+      const available = availableStageSize();
+      if (zoomMode === 'fit-page') {
+        return Math.max(PDF_MIN_SCALE, Math.min(PDF_MAX_SCALE, available.width / base.width, available.height / base.height));
+      }
+      if (zoomMode === 'fit-width') {
+        return Math.max(PDF_MIN_SCALE, Math.min(PDF_MAX_SCALE, available.width / base.width));
+      }
+      return Math.max(PDF_MIN_SCALE, Math.min(PDF_MAX_SCALE, customScale));
     };
+
+    const renderCurrentPage = async () => {
+      if (!pdf || rangeFailure || destroyed || controller.signal.aborted) return;
+      const token = ++navigationToken;
+      renderTask?.cancel?.();
+      renderTask = null;
+      setLoading(`Loading page ${currentPage.toLocaleString()}…`);
+      updateControls();
+      trimPageCache();
+      try {
+        const page = await getPage(currentPage);
+        if (token !== navigationToken || destroyed) return;
+        const naturalViewport = page.getViewport({ scale: 1 });
+        const shell = document.querySelector('.viewer');
+        if (shell) shell.style.setProperty('--pdf-page-shell-width', `${Math.ceil(naturalViewport.width + 34)}px`);
+        const effectiveScale = effectiveScaleFor(page);
+        const viewport = page.getViewport({ scale: effectiveScale });
+        const targetPixelRatio = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+        const cssPixels = Math.max(1, viewport.width * viewport.height);
+        const pixelCapRatio = Math.sqrt(PDF_MAX_CANVAS_PIXELS / cssPixels);
+        const outputScale = Math.max(.25, Math.min(targetPixelRatio, pixelCapRatio));
+        const canvas = document.createElement('canvas');
+        canvas.className = 'pdf-page-canvas';
+        canvas.width = Math.max(1, Math.floor(viewport.width * outputScale));
+        canvas.height = Math.max(1, Math.floor(viewport.height * outputScale));
+        canvas.style.width = `${Math.max(1, Math.floor(viewport.width))}px`;
+        canvas.style.height = `${Math.max(1, Math.floor(viewport.height))}px`;
+        const context = canvas.getContext('2d', { alpha: false });
+        if (!context) throw new Error('The browser could not create a PDF canvas.');
+        context.save();
+        context.fillStyle = '#ffffff';
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.restore();
+        renderTask = page.render({
+          canvasContext: context,
+          viewport,
+          background: '#ffffff',
+          transform: outputScale === 1 ? null : [outputScale, 0, 0, outputScale, 0, 0]
+        });
+        await renderTask.promise;
+        if (token !== navigationToken || destroyed || currentPage !== page.pageNumber) return;
+        canvasWrap.replaceChildren(canvas);
+        stage.classList.add('has-page');
+        lastEffectiveScale = effectiveScale;
+        hideLoading();
+        updateControls();
+        scheduleViewerLayout();
+        if (currentPage < pdf.numPages) {
+          void getPage(currentPage + 1).then(() => {
+            trimPageCache();
+          }).catch(error => {
+            if (!['AbortError', 'RenderingCancelledException'].includes(error?.name)) handleRangeFailure(error);
+          });
+        }
+      } catch (error) {
+        if (['AbortError', 'RenderingCancelledException'].includes(error?.name)) return;
+        handleRangeFailure(error);
+      } finally {
+        renderTask = null;
+      }
+    };
+
+    const goToPage = value => {
+      if (!pdf || rangeFailure) return;
+      const requested = Math.floor(Number(value) || currentPage);
+      const nextPage = Math.max(1, Math.min(pdf.numPages, requested));
+      if (nextPage !== currentPage) {
+        currentPage = nextPage;
+        trimPageCache();
+      }
+      void renderCurrentPage();
+    };
+
+    const setZoomMode = (mode, scale = customScale) => {
+      zoomMode = mode;
+      if (mode === 'custom') customScale = Math.max(PDF_MIN_SCALE, Math.min(PDF_MAX_SCALE, scale));
+      void renderCurrentPage();
+    };
+
+    function handleRangeFailure(error) {
+      if (rangeFailure || controller.signal.aborted || destroyed) return;
+      rangeFailure = error instanceof Error ? error : new Error(String(error));
+      navigationToken += 1;
+      renderTask?.cancel?.();
+      renderTask = null;
+      hideLoading();
+      errorMessage.textContent = rangeFailure.message;
+      errorPanel.hidden = false;
+      updateControls();
+      void documentTask?.destroy?.();
+    }
+
+    const createRangeTransport = (pdfjs, length, etag) => {
+      const transport = new pdfjs.PDFDataRangeTransport(length, new Uint8Array(0), false);
+      const ifMatch = normalizePDFIfMatch(etag);
+      transport.requestDataRange = (requestedBegin, requestedEnd) => {
+        const begin = Math.max(0, Math.floor(Number(requestedBegin) || 0));
+        const end = Math.min(length, Math.max(begin + 1, Math.floor(Number(requestedEnd) || 0)));
+        const requestKey = `${begin}-${end}`;
+        if (inFlightRanges.has(requestKey) || controller.signal.aborted || rangeFailure || destroyed) return;
+        const requestController = new AbortController();
+        const abortRequest = () => requestController.abort();
+        controller.signal.addEventListener('abort', abortRequest, { once: true });
+        const headers = { Range: `bytes=${begin}-${end - 1}` };
+        if (ifMatch) headers['If-Match'] = ifMatch;
+        const request = (async () => {
+          const response = await fetch(rangeURL, {
+            method: 'GET',
+            headers,
+            signal: requestController.signal,
+            cache: 'no-store'
+          });
+          const contentRange = parsePDFContentRange(response.headers.get('Content-Range'));
+          if (response.status === 412 || response.status === 409) {
+            await response.body?.cancel?.();
+            throw new Error('The PDF changed while it was being previewed. Reopen the file to load its current version.');
+          }
+          if (response.status !== 206 || !contentRange || contentRange.start !== begin || contentRange.end !== end - 1 || contentRange.total !== length) {
+            await response.body?.cancel?.();
+            throw new Error('The storage provider did not return the exact PDF byte range. The preview stopped without downloading the complete object.');
+          }
+          const expectedLength = end - begin;
+          const advertisedHeader = response.headers.get('Content-Length');
+          const advertisedLength = advertisedHeader == null || advertisedHeader === '' ? null : Number(advertisedHeader);
+          if (advertisedLength !== null && (!Number.isFinite(advertisedLength) || advertisedLength !== expectedLength)) {
+            await response.body?.cancel?.();
+            throw new Error('The storage provider returned an invalid PDF range length.');
+          }
+          const data = new Uint8Array(await response.arrayBuffer());
+          if (data.byteLength !== expectedLength) throw new Error('The storage provider truncated the requested PDF byte range.');
+          storageRequests += 1;
+          storageBytes += data.byteLength;
+          transport.onDataRange(begin, data);
+          transport.onDataProgress?.(storageBytes, length);
+        })().catch(error => {
+          if (error?.name !== 'AbortError') handleRangeFailure(error);
+        }).finally(() => {
+          controller.signal.removeEventListener('abort', abortRequest);
+          inFlightRanges.delete(requestKey);
+        });
+        inFlightRanges.set(requestKey, { request, controller: requestController });
+      };
+      transport.abort = () => {
+        for (const entry of inFlightRanges.values()) entry.controller.abort();
+        inFlightRanges.clear();
+      };
+      return transport;
+    };
+
+    let canvasCleanup = null;
+
+    const startDocument = async () => {
+      setLoading('Loading PDF index…');
+      errorPanel.hidden = true;
+      try {
+        const pdfjs = await loadPDFLibrary();
+        const metadata = await pdfObjectMetadata(url, listedMetadata, controller.signal);
+        if (controller.signal.aborted || destroyed) return;
+        objectLength = metadata.length;
+        objectETag = metadata.etag;
+        rangeTransport = createRangeTransport(pdfjs, objectLength, objectETag);
+        documentTask = pdfjs.getDocument({
+          range: rangeTransport,
+          length: objectLength,
+          rangeChunkSize: pdfRangeChunkSize(objectLength),
+          disableAutoFetch: true,
+          disableStream: true,
+          isEvalSupported: false,
+          stopAtErrors: false
+        });
+        rangeTransport.transportReady?.();
+        pdf = await documentTask.promise;
+        if (controller.signal.aborted || destroyed || rangeFailure) return;
+        currentPage = 1;
+        wrapper.dataset.renderer = 'pdfjs-canvas';
+        updateControls();
+        await renderCurrentPage();
+      } catch (error) {
+        if (error?.name !== 'AbortError') handleRangeFailure(error);
+      }
+    };
+
+    previous.addEventListener('click', () => goToPage(currentPage - 1));
+    next.addEventListener('click', () => goToPage(currentPage + 1));
+    pageInput.addEventListener('change', () => goToPage(pageInput.value));
+    pageInput.addEventListener('keydown', event => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      goToPage(pageInput.value);
+    });
+    zoomOut.addEventListener('click', () => setZoomMode('custom', lastEffectiveScale / 1.2));
+    zoomIn.addEventListener('click', () => setZoomMode('custom', lastEffectiveScale * 1.2));
+    fitWidth.addEventListener('click', () => setZoomMode('fit-width'));
+    fitPage.addEventListener('click', () => setZoomMode('fit-page'));
+    reload.addEventListener('click', () => void renderCurrentPage());
+    retry.addEventListener('click', () => location.reload());
+
+    const onFullscreenChange = () => {
+      const active = document.fullscreenElement === wrapper;
+      fullscreen.classList.toggle('is-active', active);
+      fullscreen.title = active ? 'Exit full screen' : 'Full screen';
+      fullscreen.setAttribute('aria-label', fullscreen.title);
+      fullscreen.innerHTML = `<i class="mdi mdi-${active ? 'fullscreen-exit' : 'fullscreen'}"></i>`;
+      if (zoomMode !== 'custom') {
+        clearTimeout(resizeTimer);
+        resizeTimer = window.setTimeout(() => void renderCurrentPage(), 80);
+      }
+    };
+    fullscreen.addEventListener('click', async () => {
+      try {
+        if (document.fullscreenElement === wrapper) await document.exitFullscreen?.();
+        else await wrapper.requestFullscreen?.();
+      } catch (_) {}
+    });
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+
+    wrapper.addEventListener('keydown', event => {
+      if (event.target === pageInput || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.key === 'PageUp' || event.key === 'ArrowLeft') {
+        event.preventDefault();
+        goToPage(currentPage - 1);
+      } else if (event.key === 'PageDown' || event.key === 'ArrowRight') {
+        event.preventDefault();
+        goToPage(currentPage + 1);
+      } else if (event.key === '+' || event.key === '=') {
+        event.preventDefault();
+        setZoomMode('custom', lastEffectiveScale * 1.2);
+      } else if (event.key === '-') {
+        event.preventDefault();
+        setZoomMode('custom', lastEffectiveScale / 1.2);
+      } else if (event.key === '0') {
+        event.preventDefault();
+        setZoomMode('fit-width');
+      }
+    });
+
+    if ('ResizeObserver' in window) {
+      resizeObserver = new ResizeObserver(() => {
+        if (!pdf || zoomMode === 'custom' || rangeFailure) return;
+        clearTimeout(resizeTimer);
+        resizeTimer = window.setTimeout(() => void renderCurrentPage(), 120);
+      });
+      resizeObserver.observe(stage);
+    }
+
+    const cleanup = () => {
+      if (destroyed) return;
+      destroyed = true;
+      controller.abort();
+      navigationToken += 1;
+      clearTimeout(resizeTimer);
+      resizeObserver?.disconnect?.();
+      document.removeEventListener('fullscreenchange', onFullscreenChange);
+      renderTask?.cancel?.();
+      rangeTransport?.abort?.();
+      for (const page of pageCache.values()) cleanupPage(page);
+      pageCache.clear();
+      canvasWrap.replaceChildren();
+      void documentTask?.destroy?.();
+      void pdf?.destroy?.();
+    };
+    canvasCleanup = cleanup;
     activeMediaCleanups.add(cleanup);
+
+    updateControls();
+    void startDocument();
     return wrapper;
   }
 
-  function loadMammothLibrary() {
-    if (window.mammoth?.convertToHtml) return Promise.resolve(window.mammoth);
-    if (!mammothLoaderPromise) {
-      mammothLoaderPromise = new Promise((resolve, reject) => {
-        const existing = document.querySelector('script[data-mammoth-version="1.12.0"]');
-        const complete = () => window.mammoth?.convertToHtml
-          ? resolve(window.mammoth)
-          : reject(new Error('The Word document reader loaded without exposing its browser API.'));
-        if (existing) {
-          existing.addEventListener('load', complete, { once: true });
-          existing.addEventListener('error', () => reject(new Error('Unable to load the Word document reader.')), { once: true });
-          if (existing.dataset.loaded === 'true') complete();
-          return;
-        }
-        const script = document.createElement('script');
-        script.src = MAMMOTH_SCRIPT_URL;
-        script.async = true;
-        script.crossOrigin = 'anonymous';
-        script.referrerPolicy = 'no-referrer';
-        script.dataset.mammothVersion = '1.12.0';
-        script.addEventListener('load', () => {
-          script.dataset.loaded = 'true';
-          complete();
-        }, { once: true });
-        script.addEventListener('error', () => reject(new Error('Unable to load the Word document reader.')), { once: true });
-        document.head.appendChild(script);
-      }).catch(error => {
-        mammothLoaderPromise = null;
-        throw error;
+  function renderWordTable(rows) {
+    const scroller = document.createElement('div');
+    scroller.className = 'data-table-scroll word-table-scroll';
+    const table = document.createElement('table');
+    table.className = 'data-table bb-data-grid word-table';
+    table.setAttribute('role', 'grid');
+    const body = document.createElement('tbody');
+    (rows || []).forEach((row, rowIndex) => {
+      const tr = document.createElement('tr');
+      (row || []).forEach(value => {
+        const cell = document.createElement(rowIndex === 0 ? 'th' : 'td');
+        if (rowIndex === 0) cell.scope = 'col';
+        cell.textContent = value == null ? '' : String(value);
+        tr.appendChild(cell);
       });
-    }
-    return mammothLoaderPromise;
+      body.appendChild(tr);
+    });
+    table.appendChild(body);
+    scroller.appendChild(table);
+    return scroller;
   }
 
-  async function renderWordDocument(url, size) {
-    if (Number(size) > MAX_WORD_PREVIEW) {
-      throw new Error(`Word previews are limited to ${MAX_WORD_PREVIEW / 1024 / 1024} MiB to protect browser memory.`);
-    }
-    const [mammoth, response] = await Promise.all([
-      loadMammothLibrary(),
-      fetch(url, { cache: 'no-store' })
-    ]);
-    if (!response.ok) throw new Error(`Unable to read Word document: HTTP ${response.status}`);
-    const arrayBuffer = await response.arrayBuffer();
-    const result = await mammoth.convertToHtml({ arrayBuffer }, {
-      convertImage: mammoth.images.imgElement(image => image.read('base64').then(value => ({
-        src: `data:${image.contentType || 'image/png'};base64,${value}`
-      })))
-    });
+  async function renderWordDocument(key, size, etag = '') {
+    const payload = await BB.api.wordPreview({ key, size, etag, instance: config.instanceId });
     const wrapper = document.createElement('article');
     wrapper.className = 'word-document';
-    wrapper.innerHTML = BB.render.sanitizeHTML(result.value || '', { allowDataImages: true });
-    if (!wrapper.childNodes.length) {
-      wrapper.appendChild(unavailablePreview('The document is empty', 'No readable Word content was found.', 'file-word-outline'));
-    }
-    if (Array.isArray(result.messages) && result.messages.length) {
-      const details = document.createElement('details');
-      details.className = 'word-preview-warnings';
-      const summary = document.createElement('summary');
-      summary.textContent = `${result.messages.length} conversion notice${result.messages.length === 1 ? '' : 's'}`;
-      const list = document.createElement('ul');
-      result.messages.slice(0, 25).forEach(message => {
+    let activeList = null;
+    let activeListLevel = 0;
+
+    const closeList = () => {
+      activeList = null;
+      activeListLevel = 0;
+    };
+
+    (payload.blocks || []).forEach(block => {
+      const type = String(block?.type || 'paragraph');
+      if (type === 'list-item') {
+        const level = Math.max(1, Math.min(8, Number(block.level || 1)));
+        if (!activeList || activeListLevel !== level) {
+          activeList = document.createElement(block.ordered ? 'ol' : 'ul');
+          activeList.className = 'word-list';
+          activeList.style.setProperty('--word-list-level', String(level));
+          wrapper.appendChild(activeList);
+          activeListLevel = level;
+        }
         const item = document.createElement('li');
-        item.textContent = String(message?.message || message || 'Word conversion notice');
-        list.appendChild(item);
-      });
-      details.append(summary, list);
-      wrapper.prepend(details);
+        item.textContent = String(block.text || '');
+        activeList.appendChild(item);
+        return;
+      }
+      closeList();
+      if (type === 'heading') {
+        const level = Math.max(1, Math.min(6, Number(block.level || 1)));
+        const heading = document.createElement(`h${level}`);
+        heading.textContent = String(block.text || '');
+        wrapper.appendChild(heading);
+      } else if (type === 'table') {
+        wrapper.appendChild(renderWordTable(block.rows || []));
+      } else {
+        const paragraph = document.createElement('p');
+        paragraph.textContent = String(block.text || '');
+        wrapper.appendChild(paragraph);
+      }
+    });
+
+    if (payload.truncated || payload.macrosIgnored) {
+      const notices = document.createElement('div');
+      notices.className = 'preview-notice word-preview-notice';
+      if (payload.truncated) {
+        const item = document.createElement('p');
+        item.textContent = 'The preview reached its bounded text or table limit. The original document was not modified.';
+        notices.appendChild(item);
+      }
+      if (payload.macrosIgnored) {
+        const item = document.createElement('p');
+        item.textContent = 'Document macros were not loaded or executed.';
+        notices.appendChild(item);
+      }
+      wrapper.prepend(notices);
+    }
+
+    if (!wrapper.querySelector('p, h1, h2, h3, h4, h5, h6, table, ul, ol')) {
+      wrapper.appendChild(unavailablePreview('The document is empty', 'No readable Word content was found.', 'file-word-outline'));
     }
     return wrapper;
   }
@@ -510,7 +967,8 @@
     const labels = {
       'word-unavailable': ['Word preview is not available', 'This binary Word document is not rendered as text. Download it and open it with a compatible word processor.', 'file-word-outline'],
       'sheet-unavailable': ['Spreadsheet preview is not available', 'This spreadsheet format is not supported by the built-in viewer. XLS, XLSX, XLSM, CSV, TSV, JSON Lines, and Parquet files have dedicated previews.', 'file-excel-outline'],
-      'slide-unavailable': ['Presentation preview is not available', 'This binary presentation format is not rendered in the browser. Download it and open it with a compatible presentation application.', 'file-powerpoint-outline']
+      'slide-unavailable': ['Presentation preview is not available', 'This presentation format is not rendered by the built-in viewer. Its metadata remains available in Details.', 'file-powerpoint-outline'],
+      'diagram-unavailable': ['Diagram preview is not available', 'This Visio document is not rendered by the built-in viewer. Its metadata remains available in Details.', 'file-document-outline']
     };
     return unavailablePreview(...labels[type]);
   }
@@ -684,7 +1142,7 @@
       renderError(new Error('No object key is present in the URL.'));
       return;
     }
-    if (!config.capabilities.read?.allowed) {
+    if (BB.capabilities?.actionable && !BB.capabilities.actionable(config, 'preview')) {
       setDocMeta(key, NaN);
       updateBackLink(key);
       renderError(new Error('Read access is not available for this storage instance.'));
@@ -707,18 +1165,18 @@
       updateBackLink(key);
       const rawURL = BB.api.urlForKey(key);
       const browserPreviewURL = BB.api.previewURLForKey(key);
-      byId('openRawBtn').href = rawURL;
+      byId('openRawBtn').href = BB.api.openURLForKey(key);
       const type = BB.detect.resolveType(key, metadata.mime);
       let node;
       let className = 'preview-content';
 
       if (type === 'image') node = renderImage(browserPreviewURL);
       else if (type === 'raw-image' || type === 'image-convert') node = renderImage(BB.api.imagePreviewURL(key));
-      else if (type === 'video') node = unavailablePreview('Video preview is disabled', 'Download the original video to play it with a local media player.', 'file-video-outline');
+      else if (type === 'video') node = BB.structuredViewers.renderVideo(browserPreviewURL, key);
       else if (type === 'audio') node = renderAudio(browserPreviewURL, key, metadata.mime);
-      else if (type === 'pdf') node = renderPDF(browserPreviewURL);
+      else if (type === 'pdf') node = renderPDF(browserPreviewURL, metadata);
       else if (type === 'word') {
-        node = await renderWordDocument(rawURL, metadata.size);
+        node = await renderWordDocument(key, metadata.size, metadata.etag || metadata.headers?.etag || '');
         className = 'preview-document word-preview';
       } else if (type === 'json') {
         node = BB.jsonViewer.render({
@@ -734,6 +1192,16 @@
       } else if (type === 'code') {
         node = BB.render.renderCode(await fetchLimitedText(rawURL, metadata.size), BB.detect.resolveLang(key, metadata.mime));
         className = 'preview-code';
+      } else if (type === 'contact' || type === 'calendar' || type === 'email' || type === 'certificate') {
+        const payload = await BB.api.structuredPreview(key, {
+          size: metadata.size,
+          mime: metadata.mime,
+          etag: metadata.etag || metadata.headers?.etag || '',
+          lastModified: metadata.lastModified || metadata.headers?.['last-modified'] || '',
+          instance: config.instanceId
+        });
+        node = BB.structuredViewers.renderStructured(payload);
+        className = 'preview-data structured-preview-root';
       } else if (type === 'tabular') {
         node = await BB.tabular.fetchTextTable(rawURL, key, metadata.size, {
           etag: metadata.etag || metadata.headers?.etag || '',
@@ -744,15 +1212,27 @@
         node = await BB.tabular.renderSpreadsheet(rawURL, key, metadata.size);
         className = 'preview-data';
       } else if (type === 'parquet') {
-        node = await BB.tabular.renderParquet(rawURL, metadata.size);
+        node = await BB.tabular.renderParquet(key, metadata.size, { etag: metadata.etag || metadata.headers?.etag || '', instance: config.instanceId });
         className = 'preview-data';
       } else if (type === 'sqlite') {
         node = await BB.sqliteViewer.render({ key, size: metadata.size, instance: config.instanceId });
         className = 'preview-data sqlite-preview-host';
-      } else if (type === 'word-unavailable' || type === 'sheet-unavailable' || type === 'slide-unavailable') {
+      } else if (type === 'word-unavailable' || type === 'sheet-unavailable' || type === 'slide-unavailable' || type === 'diagram-unavailable') {
         node = officeUnavailable(type);
       } else if (type === 'archive') {
-        node = unavailablePreview('Archive preview is not available', 'Download the archive to inspect its contents.', 'folder-zip-outline');
+        const extension = BB.detect.extOf(key);
+        if (DETERMINISTIC_ZIP_PREVIEW_EXTENSIONS.has(extension)) {
+          const payload = await BB.api.archivePreview(key, {
+            size: metadata.size,
+            etag: metadata.etag || metadata.headers?.etag || '',
+            lastModified: metadata.lastModified || metadata.headers?.['last-modified'] || '',
+            instance: config.instanceId
+          });
+          node = BB.structuredViewers.renderArchive(payload);
+          className = 'preview-data archive-preview-root';
+        } else {
+          node = unavailablePreview('Archive preview is not available', 'This format requires a complete explicit scan and is not previewed automatically.', 'folder-zip-outline');
+        }
       } else {
         const text = await sniffUnknownText(rawURL, key, metadata.size);
         if (text != null) {
@@ -763,7 +1243,10 @@
         }
       }
 
-      setPreviewMode(type);
+      const previewMode = (type === 'contact' || type === 'calendar' || type === 'email' || type === 'certificate')
+        ? 'structured'
+        : type;
+      setPreviewMode(previewMode, type);
       container.className = className;
       container.replaceChildren(node);
       normalizeHorizontalPreviewScrollers(node);
@@ -782,6 +1265,7 @@
     try {
       const response = await BB.api.instances();
       const instances = response.instances || [];
+      config.runtime = BB.runtime?.configure(response.runtime || {}) || (response.runtime || {});
       const build = response.build || {};
       const buildBadge = byId('previewBuild');
       if (buildBadge && build.display) {
@@ -798,7 +1282,7 @@
 
       config.instanceId = currentInstance.id;
       config.capabilities = currentInstance.capabilities || {};
-      config.trashPrefix = currentInstance.trashPrefix || '';
+      config.operations = currentInstance.operations || {};
       BB.api.setInstance(currentInstance.id);
       applyCapabilities();
       await render();

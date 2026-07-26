@@ -31,9 +31,9 @@ const mermaidMarkdown = `\`\`\`mermaid
 flowchart TD
     in["route_indices[]<br/>+ shared_pools_data"]
     p0["Phase 0 — marginal prefilter"]
-    p1["Phase 1 — sonde VR"]
+    p1["Phase 1 — VR probe"]
     p2["Phase 2 — top-K"]
-    p3["Phase 3 — optimisation golden"]
+    p3["Phase 3 — golden-section optimization"]
     out["Option&lt;ArbitrageOpportunity&gt;"]
 
     in --> p0
@@ -57,7 +57,7 @@ assert.equal(detect.resolveType('events.ndjson', ''), 'tabular');
 assert.equal(detect.resolveType('dataset.parquet', ''), 'parquet');
 assert.equal(detect.resolveType('contract.docx', 'application/zip'), 'word');
 assert.equal(detect.resolveType('template.dotx', 'application/zip'), 'word');
-assert.equal(detect.resolveType('legacy.doc', 'application/msword'), 'word-unavailable');
+assert.equal(detect.resolveType('binary.doc', 'application/msword'), 'word-unavailable');
 assert.equal(detect.resolveType('large.json', 'application/json'), 'json');
 assert.equal(detect.resolveType('sheet.xls', 'application/vnd.ms-excel'), 'spreadsheet');
 assert.equal(detect.resolveType('sheet.xlsx', 'application/zip'), 'spreadsheet');
@@ -193,6 +193,13 @@ assert.match(previewHTML, /<html lang="en" class="preview-root">/);
 assert.match(previewHTML, /<body class="preview-page">/);
 assert.match(previewHTML, /id="previewBuild"/);
 assert.match(previewHTML, /common\/json-viewer\.js/);
+assert.ok(index.indexOf('assets/css/interaction.css') > index.indexOf('assets/css/viewers.css'), 'interaction.css must be the last project CSS layer');
+assert.ok(previewHTML.indexOf('assets/css/interaction.css') > previewHTML.indexOf('assets/css/viewers.css'), 'preview interaction.css must be loaded last');
+assert.match(index, /class="storage-switcher-trigger has-bb-chevron"/);
+assert.match(index, /class="has-bb-chevron" icon-pack="mdi" icon-left="cogs"/);
+assert.match(index, /class="has-bb-chevron" icon-pack="mdi" icon-left="plus"/);
+assert.doesNotMatch(`${index}
+${previewHTML}`, /<i[^>]+mdi-chevron-down/);
 const jsonViewerSource = read('src/public/assets/js/common/json-viewer.js');
 assert.match(jsonViewerSource, /createModeButton\('raw', 'Raw'/);
 assert.match(jsonViewerSource, /createModeButton\('beautify', 'Beautify'/);
@@ -208,7 +215,20 @@ assert.match(favicon, /viewBox="0 0 512 512"/);
 assert.match(favicon, /#167df0/i);
 assert.doesNotMatch(favicon, /<rect\b/i);
 
-const style = read('src/public/assets/css/style.css');
+const styleCSS = read('src/public/assets/css/style.css');
+const componentsCSS = read('src/public/assets/css/components.css');
+const viewersCSS = read('src/public/assets/css/viewers.css');
+const interactionCSS = read('src/public/assets/css/interaction.css');
+const iconsCSS = read('src/public/assets/css/icons.css');
+const style = [
+  'src/public/assets/css/style.css',
+  'src/public/assets/css/tokens.css',
+  'src/public/assets/css/base.css',
+  'src/public/assets/css/components.css',
+  'src/public/assets/css/data-grid.css',
+  'src/public/assets/css/viewers.css',
+  'src/public/assets/css/interaction.css'
+].map(read).join('\n');
 assert.match(style, /\.code-line-numbers/);
 assert.match(style, /text-align:\s*left/);
 assert.match(style, /html\.preview-root,\s*\nbody\.preview-page\s*\{[^}]*height:\s*auto[^}]*overflow-y:\s*auto/s);
@@ -264,6 +284,21 @@ assert.match(style, /html\.preview-root\.is-viewport-image/);
 assert.match(style, /object-fit:\s*contain/);
 assert.match(style, /\.toolbar \.dropdown-item > \.mdi/);
 assert.match(style, /\.build-version/);
+assert.match(interactionCSS, /\.select:not\(\.is-multiple\):not\(\.is-loading\)::after,\s*\n\.has-bb-chevron::after/);
+assert.match(interactionCSS, /icons\/mdi\/chevron-down\.svg/);
+assert.doesNotMatch(styleCSS, /#app \.select:not\(\.is-multiple\):not\(\.is-loading\)::after/);
+assert.match(interactionCSS, /\.bb-menu-popover,\s*\n\.dropdown-content,\s*\n\.breadcrumb-overflow-popover/);
+assert.match(interactionCSS, /\.bb-menu-item,\s*\n\.dropdown-item,/);
+assert.doesNotMatch(interactionCSS, /\.bb-modal-x\s*\{/);
+assert.match(componentsCSS, /\.bb-btn:not\(\.bb-modal-x\)/);
+assert.match(interactionCSS, /\.bb-permission-result\s*\{[^}]*white-space:\s*nowrap/s);
+assert.match(interactionCSS, /\.bb-permission-result\.is-allowed[^}]*color:\s*#067647/s);
+assert.match(interactionCSS, /\.bb-permission-result\.is-denied[^}]*color:\s*#b42318/s);
+assert.match(interactionCSS, /\.bb-permission-result\.is-unknown[^}]*color:\s*#475467/s);
+for (const icon of ['file-outline', 'file-excel-outline', 'file-word-outline', 'file-pdf-box', 'folder', 'file-upload-outline', 'folder-upload-outline', 'database-outline']) {
+  assert.equal(fs.existsSync(path.join(root, 'src/public/assets/icons/mdi', `${icon}.svg`)), true, `missing local icon ${icon}`);
+  assert.match(iconsCSS, new RegExp(`\\.mdi-${icon.replaceAll('-', '\\-')} \\{ --bb-mdi-icon: url\\("\\.\\.\\/icons\\/mdi\\/${icon.replaceAll('-', '\\-')}\\.svg"\\); \\}`));
+}
 
 const uiCSS = read('src/public/assets/css/ui.css');
 assert.match(uiCSS, /#bb-toast-host\s*\{[^}]*position:\s*fixed[^}]*right:[^}]*bottom:/s);
@@ -276,22 +311,24 @@ assert.match(uiCSS, /\.bb-toast,\s*\n\.bb-transfer-panel\s*\{[^}]*background:\s*
 assert.match(uiCSS, /\.bb-toast strong,[\s\S]*color:\s*var\(--bb-text\)/);
 assert.match(uiCSS, /\.folder-distribution-grid/);
 assert.match(uiCSS, /grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/);
-assert.match(uiCSS, /\.folder-insights-tabs \.spreadsheet-tab/);
+assert.doesNotMatch(uiCSS, /\.folder-insights-tabs \.spreadsheet-tab/);
+assert.match(style, /\.spreadsheet-tab\s*\{[^}]*height:\s*34px[^}]*background:\s*#f8fafc[^}]*border-radius:\s*7px 7px 0 0/s);
 assert.match(uiCSS, /\.folder-treemap-name/);
 assert.match(uiCSS, /\.folder-treemap-size/);
 assert.match(uiCSS, /@media screen and \(min-width: 1200px\)[\s\S]*--browser-shell-max:\s*1152px/);
 assert.match(uiCSS, /@media screen and \(min-width: 1408px\)[\s\S]*--browser-shell-max:\s*1344px/);
 assert.match(uiCSS, /\.bb-modal-html > \.bb-modal-x\s*\{[^}]*position:\s*absolute[^}]*right:\s*-\.55rem/s);
+assert.doesNotMatch(interactionCSS, /\.folder-insights-tabs \.spreadsheet-tab/);
 assert.match(uiCSS, /#app \.build-version\s*\{[^}]*top:\s*\.08rem/s);
 
 const uiSource = read('src/public/assets/js/common/ui.js');
 assert.match(uiSource, /const transferGroups = new Map\(\)/);
 assert.match(uiSource, /function transferGroup\(kind = 'transfer'\)/);
 assert.match(uiSource, /existing && !existing\.closed/);
-assert.match(uiSource, /Pause all/);
-assert.match(uiSource, /Resume all/);
-assert.match(uiSource, /function pauseAll\(\)/);
-assert.match(uiSource, /function resumeAll\(\)/);
+assert.match(uiSource, /Pause<\/span>/);
+assert.match(uiSource, /Resume<\/span>/);
+assert.match(uiSource, /function pauseTransfers\(\)/);
+assert.match(uiSource, /function resumeTransfers\(\)/);
 assert.match(uiSource, /function transferStatusRank\(item\)/);
 assert.match(uiSource, /function reorderItems\(\)/);
 assert.match(uiSource, /value === 'running' && recentlyTransferred/);
@@ -306,14 +343,14 @@ assert.match(uiSource, /BB\.ui = \{ alert, confirm, prompt, toast, transferGroup
 
 
 const sqliteSource = read('src/public/assets/js/common/sqlite-viewer.js');
-assert.match(sqliteSource, /Search the complete table/);
+assert.doesNotMatch(sqliteSource, /Search the complete table|sqlite-query-toolbar/);
 assert.match(sqliteSource, /deleteSQLiteSession/);
 assert.match(sqliteSource, /spreadsheet-tabs/);
-assert.match(sqliteSource, /sqlite-table-host/);
 assert.match(sqliteSource, /keepVerticalWheelOnPage/);
-assert.match(sqliteSource, /tableHost\.replaceChildren\(table\)/);
-assert.match(sqliteSource, /payload\.totalRows/);
-assert.match(sqliteSource, /payload\.sourceTotalRows/);
+assert.match(sqliteSource, /payload\.totalKnown/);
+assert.match(sqliteSource, /payload\.hasMore/);
+assert.match(sqliteSource, /filters: activeFilters\(\)/);
+assert.match(sqliteSource, /sortColumn: state\.sortColumn/);
 
 const apiSource = read('src/public/assets/js/common/api.js');
 assert.match(apiSource, /new XMLHttpRequest\(\)/);
@@ -372,18 +409,10 @@ assert.match(actionsSource, /File details ready/);
 assert.match(actionsSource, /Computing storage insights/);
 assert.match(actionsSource, /persistent:\s*true,[\s\S]*status:\s*'loading'/);
 assert.match(actionsSource, /notification\.update\(jobCompletionMessage/);
-assert.match(actionsSource, /showSaveFilePicker/);
 assert.match(actionsSource, /anchor\.download = filename/);
-assert.match(actionsSource, /URL\.revokeObjectURL\(href\), 60000/);
-assert.match(actionsSource, /const group = transferGroup\('download'\)/);
+assert.match(actionsSource, /triggerBrowserDownload\(downloadURL, safeFilename\)/);
 assert.match(actionsSource, /const downloadURL = BB\.api\.urlForKey\(key, BB\.api\.getInstance\(\)\)/);
-assert.match(actionsSource, /streamURL\(downloadURL/);
-assert.match(actionsSource, /onPause: pause/);
-assert.match(actionsSource, /onResume: resume/);
-assert.match(actionsSource, /onCancel: cancel/);
-assert.match(actionsSource, /error\.transferState = checkpoint\(\)/);
-assert.match(actionsSource, /headers\.Range = `bytes=\$\{receivedBytes\}-`/);
-assert.match(actionsSource, /headers\['If-Range'\] = etag/);
+assert.doesNotMatch(actionsSource, /streamURL|fetchBytes|new Blob\(chunks|bytes=\$\{receivedBytes\}-/);
 assert.match(actionsSource, /formatTransferDetail/);
 assert.match(actionsSource, /showTaskFailure/);
 assert.match(actionsSource, /taskNotificationShown/);
@@ -403,19 +432,34 @@ assert.match(actionsSource, /formatBitRate/);
 assert.match(actionsSource, /track\.frameRate/);
 assert.match(actionsSource, /Distribution by size/);
 assert.match(actionsSource, /Distribution by object count/);
+assert.match(actionsSource, /Most recent files/);
+assert.match(actionsSource, /Largest files/);
 assert.match(actionsSource, /async function showPrefixInsights\(prefix, initialTab = 'overview'\)/);
 assert.match(actionsSource, /folder-insights-tabs/);
 assert.match(actionsSource, /folder-treemap/);
 assert.match(actionsSource, /slice\(0, treemapMaximumRectangles\)/);
 assert.match(actionsSource, /treemapMinimumShare = 0\.01/);
-assert.match(actionsSource, /const nodes = groupedTreemapChildren\(tree\)/);
+assert.match(actionsSource, /function treemapScopeThreshold\(totalBytes\)/);
+assert.match(actionsSource, /const threshold = treemapScopeThreshold\(scopeTotalBytes \|\| nodeBytes\)/);
+assert.match(actionsSource, /if \(childBytes >= threshold\)/);
+assert.match(actionsSource, /function squarifyTreemapNodes\(/);
+assert.match(actionsSource, /const nodes = groupedTreemapChildren\(tree, scopeTotalBytes\)/);
 assert.match(actionsSource, /function distributionEntries\(entries, field, maximum = 7\)/);
 assert.match(actionsSource, /function layoutTreemapGroup\(/);
 assert.match(actionsSource, /function collectTreemapRectangles\(/);
 assert.doesNotMatch(actionsSource, /function treemapRectHTML\(/);
 assert.match(actionsSource, /url\.searchParams\.set\('listed', '1'\)/);
 
+assert.doesNotMatch(index, /Background jobs|showJobs/);
+assert.doesNotMatch(apiSource, /async jobs\(\)/);
 const appSource = read('src/public/assets/js/app.js');
+const runtimeSource = read('src/public/assets/js/common/runtime.js');
+assert.match(runtimeSource, /case 'allowed': return 'Allowed'/);
+assert.match(runtimeSource, /case 'denied': return 'Denied'/);
+assert.match(runtimeSource, /default: return 'On use'/);
+assert.doesNotMatch(runtimeSource, /Available, verified|Available/);
+assert.match(appSource, /stateName === 'allowed' \? 'Allowed' : \(stateName === 'denied' \? 'Denied' : 'On use'\)/);
+assert.doesNotMatch(appSource, /mdi-chevron-down/);
 assert.match(appSource, /function createUploadManager\(browser\)/);
 assert.match(appSource, /const group = BB\.ui\.transferGroup\('upload'\)/);
 assert.match(appSource, /function add\(uploadEntries\) \{\s*const group = BB\.ui\.transferGroup\('upload'\)/);
@@ -431,10 +475,10 @@ assert.match(appSource, /entry\.uploadId = String\(upload\?\.id \|\| ''\)/);
 assert.match(appSource, /BB\.api\.cancelUpload\(entry\.uploadId\)/);
 assert.match(appSource, /instanceId: this\.instanceId|const instanceId = this\.instanceId/);
 assert.match(appSource, /basePrefix = this\.pathPrefix/);
-assert.match(appSource, /BB\.api\.urlForKey\(source\.key, instanceId\)/);
-assert.match(appSource, /const group = BB\.ui\.transferGroup\('download'\)/);
-assert.match(appSource, /creating ZIP/);
-assert.match(appSource, /window\.fflate\.zip\(archiveInput/);
+assert.match(appSource, /BB\.api\.archiveURL\(\{/);
+assert.match(appSource, /BB\.actions\.triggerBrowserDownload\(url, archiveName\)/);
+assert.match(appSource, /Archive download started in the browser/);
+assert.doesNotMatch(appSource, /window\.fflate\.zip\(/);
 assert.match(appSource, /droppedUploadEntries/);
 assert.doesNotMatch(appSource, /getAsFileSystemHandle/);
 assert.match(appSource, /webkitGetAsEntry/);
@@ -450,7 +494,7 @@ assert.doesNotMatch(appSource, /window\.alert\s*\(/);
 assert.match(appSource, /uploadResolvedFiles/);
 assert.match(appSource, /window\.addEventListener\('dragenter'/);
 assert.match(appSource, /onPrefixDownload/);
-assert.match(appSource, /BB\.api\.listAllItems/);
+assert.match(appSource, /async downloadArchive\(\{ archiveName, basePrefix = '', instanceId = '' \}\)/);
 assert.match(appSource, /BB\.detect\.iconForType\(BB\.detect\.resolveType/);
 assert.match(appSource, /otherInstances\(\) \{ return this\.instances\.filter/);
 assert.match(appSource, /breadcrumbVisibleStart/);
@@ -461,6 +505,21 @@ assert.match(appSource, /const separatorCount = start > 0 \? visibleCount \+ 1 :
 assert.match(appSource, /while \(start > 0 && requiredWidth\(start - 1\) <= available\) start--/);
 assert.match(appSource, /ResizeObserver\(\(\) => this\.scheduleBreadcrumbLayout\(\)\)/);
 assert.match(appSource, /async showPermissionDetails\(\)/);
+assert.match(appSource, /navigationSortAvailable/);
+assert.match(appSource, /const initialDirection = field === 'name' \? 'asc' : 'desc'/);
+assert.match(appSource, /navigationSortField = ''[\s\S]*navigationSortDirection = ''/);
+assert.match(appSource, /left\?\.type === 'content' \? left\.size : 0/);
+assert.match(appSource, /left\?\.dateModified instanceof Date \? left\.dateModified\.getTime\(\) : 0/);
+assert.match(appSource, /scanComplete = data\.scanComplete === true/);
+assert.match(appSource, /navigationSortAvailable = data\.sortAvailable === true/);
+const indexSource = read('src/public/index.html');
+assert.match(indexSource, /visiblePathContentTableData/);
+assert.match(indexSource, /class="navigation-sort-icon" :class="\{ 'is-placeholder': !navigationSortAvailable \}"/);
+assert.match(indexSource, /toggleNavigationSort\('size'\)/);
+assert.match(indexSource, /toggleNavigationSort\('dateModified'\)/);
+assert.match(interactionCSS, /\.navigation-sort-icon\s*\{[^}]*width:\s*1rem/s);
+assert.match(interactionCSS, /\.navigation-sort-icon\.is-placeholder\s*\{\s*visibility:\s*hidden/s);
+assert.match(actionsSource, /if \(created\.status === 'completed'\) return created\.stats \|\| \{\}/);
 assert.match(index, /storage-switcher-permissions is-interactive/);
 assert.doesNotMatch(appSource, /async refreshPermissions\(/);
 assert.match(appSource, /onRowContextMenu\(event\)/);
@@ -514,23 +573,61 @@ assert.match(composeSource, /target: runtime/);
 assert.doesNotMatch(composeSource, /BROWSER_RUNTIME_TARGET/);
 
 const previewSource = read('src/public/assets/js/preview.js');
+assert.doesNotMatch(previewHTML, /assets\/js\/bootstrap\.js/);
 assert.match(previewSource, /is-scroll-contained/);
 assert.match(previewSource, /contentHeight > shell\.clientHeight \+ 1/);
 assert.doesNotMatch(previewSource, /BB\.api\.listAll\(/);
 assert.match(previewSource, /previewURLForKey/);
-assert.match(previewSource, /pdfjs-dist@4\.10\.38/);
-assert.match(previewSource, /function pdfRangeChunkSize\(\)/);
-assert.match(previewSource, /toolbarRail\.className = 'pdf-toolbar-rail'/);
-assert.match(previewSource, /toolbarSpacer\.className = 'pdf-toolbar-spacer'/);
-assert.match(previewSource, /rangeChunkSize:\s*pdfRangeChunkSize\(\)/);
+assert.match(previewSource, /function renderPDF\(url, listedMetadata = null\)/);
+assert.doesNotMatch(previewSource, /BB\.pdfViewer\?\.render/);
+assert.match(previewSource, /new pdfjs\.PDFDataRangeTransport/);
+assert.match(previewSource, /Range: `bytes=\$\{begin\}-\$\{end - 1\}`/);
 assert.match(previewSource, /disableAutoFetch:\s*true/);
 assert.match(previewSource, /disableStream:\s*true/);
-assert.match(previewSource, /documentTask\?\.destroy/);
-assert.match(previewSource, /Video preview is disabled/);
+assert.match(previewSource, /isEvalSupported:\s*false/);
+assert.match(previewSource, /canvas\.className = 'pdf-page-canvas'/);
+assert.match(previewSource, /wrapper\.dataset\.renderer = 'pdfjs-canvas'/);
+assert.doesNotMatch(previewSource, /browser-fallback/);
+assert.doesNotMatch(previewSource, /frame\.className = 'pdf-render-frame'/);
+assert.match(previewSource, /searchParams\.set\('range_only', '1'\)/);
+assert.doesNotMatch(previewSource, /nativeURL\.searchParams\.delete\('range_only'\)/);
+assert.match(previewSource, /fetch\(rangeURL,/);
+assert.doesNotMatch(read('src/public/assets/js/common/actions.js'), />Calculated</);
+assert.match(read('src/public/assets/css/icons.css'), /\.mdi-arrow-up\s*\{[^}]*arrow-up\.svg/);
+assert.match(read('src/public/assets/css/icons.css'), /\.mdi-arrow-down\s*\{[^}]*arrow-down\.svg/);
+
+assert.match(read('src/app.go'), /bounded_range_required/);
+assert.match(previewSource, /BB\.structuredViewers\.renderVideo/);
 assert.doesNotMatch(previewSource, /media-sessions|media-probe|HLS\.js|hls\.js|FFmpeg/);
 assert.match(previewSource, /Native audio playback is unavailable/);
+assert.match(previewSource, /audio\.preload = 'metadata'/);
+assert.match(read('src/public/assets/js/common/structured-viewers.js'), /video\.preload = 'metadata'/);
+const structuredViewerSource = read('src/public/assets/js/common/structured-viewers.js');
+assert.match(structuredViewerSource, /pageSizeCaption\.textContent = 'Items'/);
+assert.match(structuredViewerSource, /\[100, 250, 500, 1000\]\.forEach/);
+assert.match(structuredViewerSource, /let pageSize = 100/);
+const archiveRenderer = structuredViewerSource.slice(structuredViewerSource.indexOf('function renderArchive'), structuredViewerSource.indexOf('function renderVideo'));
+assert.doesNotMatch(archiveRenderer, /createTabs\(/);
+assert.doesNotMatch(archiveRenderer, /Details|payload\.properties|propertyGrid\(/);
+assert.match(archiveRenderer, /archive-preview-layout/);
+assert.match(archiveRenderer, /contentsHeading\.textContent = 'Contents'/);
+const archiveEntriesRenderer = structuredViewerSource.slice(structuredViewerSource.indexOf('function archiveEntries'), structuredViewerSource.indexOf('function epubPreview'));
+assert.match(archiveEntriesRenderer, /document\.createElement\('colgroup'\)/);
+assert.match(archiveEntriesRenderer, /archive-cell-name/);
+assert.match(archiveEntriesRenderer, /archive-cell-compressed is-numeric/);
+assert.match(archiveEntriesRenderer, /archive-cell-size is-numeric/);
+assert.match(archiveEntriesRenderer, /nameContent\.className = 'archive-entry-name'/);
+assert.match(interactionCSS, /viewer\[data-preview-type="archive"\] > \.bb-menu-constrain[\s\S]*--app-container-max/);
+assert.match(interactionCSS, /\.archive-entry-table[\s\S]*table-layout:\s*fixed/);
+assert.match(interactionCSS, /\.archive-entry-table \.archive-cell-compressed,[\s\S]*text-align:\s*right/);
+assert.match(interactionCSS, /\.data-table-scroll\s*\{[^}]*width:\s*100%[^}]*scrollbar-gutter:\s*auto/s);
+assert.match(interactionCSS, /\.archive-entry-scroll\s*\{[^}]*max-height:\s*none[^}]*overflow-x:\s*auto/s);
+assert.match(interactionCSS, /\.viewer\.is-certificate-preview > \.bb-menu-constrain\s*\{[^}]*max-width:\s*var\(--app-container-max\)/s);
+assert.match(interactionCSS, /\.viewer\.is-certificate-preview \.structured-preview-host\s*\{[^}]*padding:\s*0/s);
+assert.match(previewSource, /setPreviewMode\(previewMode, type\)/);
 assert.match(previewSource, /renderWordDocument/);
-assert.match(previewSource, /mammoth@1\.12\.0/);
+assert.match(previewSource, /BB\.api\.wordPreview\(\{ key, size, etag/);
+assert.doesNotMatch(previewSource, /mammoth|cdn\.jsdelivr|unpkg/i);
 assert.match(previewSource, /BB\.jsonViewer\.render/);
 assert.match(previewSource, /BB\.sqliteViewer\.render/);
 assert.match(previewSource, /openDocumentSearch/);
@@ -542,12 +639,17 @@ assert.match(previewSource, /if \(type === 'tabular'\) \{[\s\S]*searchRawDocumen
 assert.match(previewSource, /type === 'sqlite'/);
 assert.doesNotMatch(previewSource, /contentNeedsViewport/);
 
-assert.match(style, /\.pdf-preview\s*\{[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\)/s);
-assert.match(style, /\.pdf-toolbar-rail\s*\{[\s\S]*position:\s*fixed[\s\S]*right:\s*0[\s\S]*left:\s*0/s);
-assert.match(style, /\.sqlite-table-host \.data-table-scroll\s*\{[\s\S]*overflow-y:\s*visible/s);
+assert.match(viewersCSS, /\.pdf-custom-preview\s*\{[\s\S]*grid-template-rows:[^}]*gap:\s*0/s);
+assert.match(viewersCSS, /\.pdf-custom-error\s*\{[\s\S]*position:\s*absolute[\s\S]*z-index:\s*7/s);
+assert.match(viewersCSS, /\.pdf-custom-preview:fullscreen\s*\{[\s\S]*height:\s*100vh/s);
+assert.match(read('src/app.go'), /object-src 'none'/);
+assert.doesNotMatch(styleCSS, /\.pdf-toolbar-shell|\.pdf-toolbar\s*\{|\.pdf-page-stage|\.pdf-custom-fallback/);
+assert.match(style, /\.viewer\[data-preview-type="word"\] > \.bb-menu-constrain\s*\{[^}]*max-width:\s*var\(--browser-container-max\)/s);
+assert.match(uiCSS, /\.sqlite-preview \.data-table-scroll\s*\{[\s\S]*overflow-y:\s*visible/s);
 
 const renderSource = read('src/public/assets/js/common/render.js');
-assert.match(renderSource, /mermaid@11\.16\.0/);
+assert.doesNotMatch(renderSource, /mermaid@|cdn\.jsdelivr|unpkg/i);
+assert.match(renderSource, /if \(window\.mermaid\) return Promise\.resolve\(window\.mermaid\)/);
 assert.match(renderSource, /prepareMermaidBlocks/);
 assert.match(renderSource, /pre > code\.language-mermaid/);
 assert.match(renderSource, /securityLevel:\s*'strict'/);
@@ -574,6 +676,16 @@ assert.match(detectSource, /farbfeld/);
 assert.match(detectSource, /fits/);
 
 const tabularSource = read('src/public/assets/js/common/tabular.js');
+assert.match(index, /is-pagination-placeholder/);
+assert.doesNotMatch(index, /v-if="hasPagination"/);
+assert.match(index, /formatByteParts\(props\.row\.size\)/);
+assert.match(tabularSource, /data-preview-pagination\$\{paginationNeeded \? '' : ' is-pagination-placeholder'\}/);
+assert.match(interactionCSS, /\.object-size\s*\{[\s\S]*grid-template-columns:\s*7ch 2\.5ch[\s\S]*font-variant-numeric:\s*tabular-nums/s);
+assert.match(interactionCSS, /modified-column-header[\s\S]*navigation-meta-right-pad/s);
+assert.match(interactionCSS, /\.mdi-loading::before[\s\S]*border-top-color:\s*currentColor[\s\S]*animation:\s*bb-loader-spin/s);
+assert.match(detectSource, /jsx:\s*'JavaScript XML'/);
+assert.match(detectSource, /tsx:\s*'TypeScript XML'/);
+assert.match(detectSource, /python:\s*'Python'/);
 assert.match(tabularSource, /PAGE_SIZE_OPTIONS = \[100, 250, 500, 1000\]/);
 assert.match(tabularSource, /createRemoteDelimitedTable/);
 assert.match(tabularSource, /BB\.api\.delimitedPage/);
@@ -582,12 +694,13 @@ assert.match(tabularSource, /Use Count rows to scan the complete document/);
 assert.match(tabularSource, /extension === 'tsv' \|\| extension === 'tab'/);
 assert.match(tabularSource, /previousScrollLeft/);
 assert.match(tabularSource, /scrollLeft = previousScrollLeft/);
-assert.match(tabularSource, /xlsx-0\.20\.3\/package\/dist\/xlsx\.full\.min\.js/);
+assert.doesNotMatch(tabularSource, /xlsx-0\.20\.3|xlsx\.full\.min|cdn\.jsdelivr|unpkg/i);
+assert.match(tabularSource, /Conversion required/);
 assert.match(tabularSource, /renderSpreadsheet/);
 assert.match(tabularSource, /renderRemoteSpreadsheet/);
 assert.match(tabularSource, /BB\.api\.spreadsheet/);
 assert.match(tabularSource, /if \(descriptors\.length < 2\) return null/);
-assert.match(tabularSource, /workbook\.SheetNames/);
+assert.match(tabularSource, /createSpreadsheetSheetControls/);
 assert.match(tabularSource, /beforeTableFactory/);
 assert.match(tabularSource, /spreadsheet-sheet-controls/);
 assert.match(tabularSource, /controls\.className = 'data-preview-controls'/);
@@ -604,135 +717,9 @@ assert.doesNotMatch(tabularSource, /data-global-filter/);
 assert.doesNotMatch(tabularSource, /Column filters use contains matching by default/);
 assert.doesNotMatch(tabularSource, /Plain text means contains/);
 assert.match(tabularSource, /root\.documentSearch = async query/);
-assert.match(tabularSource, /Searching the complete Parquet document/);
+assert.match(tabularSource, /BB\.api\.parquetPreview/);
+assert.match(tabularSource, /reads only the Parquet footer and schema by exact byte ranges/);
+assert.doesNotMatch(tabularSource, /hyparquet|cdn\.jsdelivr|unpkg/i);
 
-function loadActions(fetchImplementation) {
-  const actionWindow = {
-    BB: { api: {}, detect: {} },
-    setTimeout,
-    clearTimeout
-  };
-  actionWindow.window = actionWindow;
-  const actionContext = vm.createContext({
-    window: actionWindow,
-    document: {
-      createElement() {
-        return {
-          textContent: '',
-          style: {},
-          appendChild() {},
-          remove() {},
-          click() {},
-          get innerHTML() { return this.textContent; }
-        };
-      },
-      body: { appendChild() {} }
-    },
-    console,
-    Blob,
-    Uint8Array,
-    DOMException,
-    AbortController,
-    ReadableStream,
-    Response,
-    URL,
-    setTimeout,
-    clearTimeout,
-    fetch: fetchImplementation
-  });
-  vm.runInContext(read('src/public/assets/js/common/actions.js'), actionContext, {
-    filename: 'src/public/assets/js/common/actions.js'
-  });
-  return actionWindow.BB.actions;
-}
 
-async function assertDownloadAbortIsImmediate() {
-  const actions = loadActions(async () => {
-    let timer = 0;
-    let emitted = 0;
-    return new Response(new ReadableStream({
-      pull(controller) {
-        return new Promise(resolve => {
-          timer = setTimeout(() => {
-            emitted += 64;
-            controller.enqueue(new Uint8Array(64));
-            if (emitted >= 1024) controller.close();
-            resolve();
-          }, 12);
-        });
-      },
-      cancel() { clearTimeout(timer); }
-    }), { headers: { 'Content-Length': '1024' } });
-  });
-
-  const controller = new AbortController();
-  const transfer = actions.streamURL('/slow-object', { signal: controller.signal, totalBytes: 1024 });
-  setTimeout(() => controller.abort(), 24);
-  await assert.rejects(transfer, error => error?.name === 'AbortError' && error?.transferState?.receivedBytes >= 0);
-}
-
-async function assertDownloadResumeUsesRange() {
-  let request = 0;
-  const actions = loadActions(async (_url, options = {}) => {
-    request++;
-    const headers = options.headers || {};
-    if (request === 1) {
-      assert.equal(headers.Range, undefined);
-      let sent = false;
-      return new Response(new ReadableStream({
-        pull(controller) {
-          if (sent) return;
-          sent = true;
-          controller.enqueue(Uint8Array.from([0, 1, 2, 3]));
-        }
-      }), {
-        status: 200,
-        headers: { 'Content-Length': '10', ETag: '"checkpoint"' }
-      });
-    }
-    assert.equal(headers.Range, 'bytes=4-');
-    assert.equal(headers['If-Range'], '"checkpoint"');
-    return new Response(Uint8Array.from([4, 5, 6, 7, 8, 9]), {
-      status: 206,
-      headers: {
-        'Content-Length': '6',
-        'Content-Range': 'bytes 4-9/10',
-        ETag: '"checkpoint"'
-      }
-    });
-  });
-
-  const firstController = new AbortController();
-  let checkpoint = null;
-  try {
-    await actions.streamURL('/resumable-object', {
-      signal: firstController.signal,
-      totalBytes: 10,
-      onProgress(progress) {
-        if (progress.receivedBytes >= 4) firstController.abort();
-      }
-    });
-    assert.fail('The first transfer should have been paused');
-  } catch (error) {
-    assert.equal(error?.name, 'AbortError');
-    checkpoint = error.transferState;
-  }
-  assert.equal(checkpoint.receivedBytes, 4);
-  assert.equal(checkpoint.totalBytes, 10);
-  assert.equal(checkpoint.etag, '"checkpoint"');
-
-  const result = await actions.streamURL('/resumable-object', { resumeState: checkpoint, totalBytes: 10 });
-  assert.equal(result.receivedBytes, 10);
-  assert.equal(result.totalBytes, 10);
-  assert.deepEqual(Array.from(new Uint8Array(await result.blob.arrayBuffer())), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
-  assert.equal(request, 2);
-}
-
-Promise.resolve()
-  .then(assertDownloadAbortIsImmediate)
-  .then(assertDownloadResumeUsesRange)
-  .then(() => console.log('frontend smoke tests passed'))
-  .catch(error => {
-    console.error(error);
-    process.exitCode = 1;
-  });
+console.log('frontend smoke tests passed');

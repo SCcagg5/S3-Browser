@@ -43,33 +43,45 @@ type gcsTokenSource struct {
 }
 
 type gcsBackend struct {
-	cfg      storageConfig
+	cfg      bucketConfig
 	endpoint *url.URL
 	client   *http.Client
 	tokens   *gcsTokenSource
 }
 
-func newGCSBackend(cfg storageConfig) (*gcsBackend, error) {
-	endpoint, err := parseStorageEndpoint("gcs", cfg.Endpoint)
-	if err != nil {
-		return nil, err
+func newGCSBackendWithAuthentication(cfg bucketConfig, auth *sharedAuthentication) (*gcsBackend, error) {
+	if auth == nil || auth.cfg.Provider != "gcs" {
+		return nil, fmt.Errorf("bucket %q requires a GCS authentication", cfg.ID)
 	}
-	client := newStorageHTTPClient(cfg.InsecureSkipVerify)
-	backend := &gcsBackend{cfg: cfg, endpoint: endpoint, client: client}
-	if cfg.Auth == "service_account" {
-		tokens, err := loadGCSTokenSource(cfg.CredentialsFile, client)
-		if err != nil {
-			return nil, err
-		}
-		backend.tokens = tokens
-	}
-	return backend, nil
+	return &gcsBackend{
+		cfg:      cfg,
+		endpoint: auth.endpoint,
+		client:   auth.client,
+		tokens:   auth.gcsToken,
+	}, nil
 }
 
+const maxGCSCredentialsBytes = 4 << 20
+
 func loadGCSTokenSource(filename string, client *http.Client) (*gcsTokenSource, error) {
-	data, err := os.ReadFile(filename)
+	file, err := os.Open(filename)
+	if err != nil {
+		return nil, fmt.Errorf("open gcs credentials file %q: %w", filename, err)
+	}
+	defer file.Close()
+	fileInfo, err := file.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("inspect gcs credentials file %q: %w", filename, err)
+	}
+	if fileInfo.Size() > maxGCSCredentialsBytes {
+		return nil, fmt.Errorf("gcs credentials file %q exceeds the %d-byte limit", filename, maxGCSCredentialsBytes)
+	}
+	data, err := io.ReadAll(io.LimitReader(file, maxGCSCredentialsBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("read gcs credentials file %q: %w", filename, err)
+	}
+	if len(data) > maxGCSCredentialsBytes {
+		return nil, fmt.Errorf("gcs credentials file %q exceeds the %d-byte limit", filename, maxGCSCredentialsBytes)
 	}
 	var info gcsServiceAccount
 	if err := json.Unmarshal(data, &info); err != nil {
@@ -306,6 +318,9 @@ func (g *gcsBackend) Get(ctx context.Context, key string, requestHeaders http.He
 			headers.Set(name, value)
 		}
 	}
+	if headers.Get("Range") != "" {
+		headers.Set("Accept-Encoding", "identity")
+	}
 	resp, err := g.do(ctx, http.MethodGet, u, nil, 0, headers)
 	if err != nil {
 		return objectResponse{}, err
@@ -524,7 +539,7 @@ func (g *gcsBackend) Delete(ctx context.Context, key string) error {
 }
 
 func (g *gcsBackend) Copy(ctx context.Context, sourceKey, destinationKey string) error {
-	basePath := "storage/v1/b/" + pathSegment(g.cfg.Bucket) + "/o/" + pathSegment(sourceKey) +
+	objectPath := "storage/v1/b/" + pathSegment(g.cfg.Bucket) + "/o/" + pathSegment(sourceKey) +
 		"/rewriteTo/b/" + pathSegment(g.cfg.Bucket) + "/o/" + pathSegment(destinationKey)
 	var rewriteToken string
 	for attempts := 0; attempts < 10000; attempts++ {
@@ -532,7 +547,7 @@ func (g *gcsBackend) Copy(ctx context.Context, sourceKey, destinationKey string)
 		if rewriteToken != "" {
 			query.Set("rewriteToken", rewriteToken)
 		}
-		u := g.apiURL(basePath, query)
+		u := g.apiURL(objectPath, query)
 		headers := make(http.Header)
 		headers.Set("Content-Type", "application/json")
 		resp, err := g.do(ctx, http.MethodPost, u, strings.NewReader("{}"), 2, headers)

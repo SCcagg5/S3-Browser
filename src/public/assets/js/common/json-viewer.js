@@ -29,7 +29,7 @@
         instance: input.instance == null ? null : String(input.instance)
       };
     }
-    const url = new URL(String(input || ''), window.location.origin);
+    const url = BB.runtime.resolveURL(String(input || ''));
     return {
       key: String(url.searchParams.get('key') || ''),
       size: Math.max(0, Number(fallbackSize) || 0),
@@ -208,7 +208,7 @@
     let expanded = false;
     let loading = false;
     let initialized = false;
-    let cursor = 0;
+    let cursor = '';
     let nextIndex = 0;
     let done = false;
 
@@ -221,14 +221,14 @@
       for (const child of payload.children || []) {
         children.appendChild(createTreeNode(view, child, depth + 1));
       }
-      cursor = Math.max(0, Number(payload.cursor) || 0);
+      cursor = String(payload.cursor || '');
       nextIndex = Math.max(0, Number(payload.nextIndex) || 0);
       done = payload.done === true;
       const knownCount = payload.node?.countKnown === true;
       const displayedCount = knownCount ? Number(payload.node?.count || nextIndex) : nextIndex;
       if (node.container) preview.textContent = containerPreview(displayedCount, knownCount || done);
       initialized = true;
-      if (!done && cursor > 0) {
+      if (!done && cursor) {
         const more = makeButton('dots-horizontal', 'Load more', 'json-tree-more');
         more.addEventListener('click', event => {
           event.stopPropagation();
@@ -378,6 +378,11 @@
     const buttons = { raw: rawTab, beautify: beautifyTab, tree: treeTab };
     const panels = { raw: rawPanel, beautify: beautifyPanel, tree: treePanel };
     const loaded = new Set();
+    let activeMode = 'raw';
+
+    const syncCountButton = () => {
+      countButton.hidden = activeMode === 'tree' || view.summaryState === 'ready';
+    };
 
     view.ensureSummary = () => {
       if (view.summaryPromise) return view.summaryPromise;
@@ -395,9 +400,11 @@
       }).then(summary => {
         view.summary = summary || null;
         view.summaryState = 'ready';
-        countButton.querySelector('i').className = 'mdi mdi-check';
-        countButton.querySelector('span').textContent = 'Totals ready';
-        countButton.title = 'Line and page totals have been calculated';
+        countButton.disabled = false;
+        countButton.querySelector('i').className = 'mdi mdi-counter';
+        countButton.querySelector('span').textContent = 'Count lines and pages';
+        countButton.title = 'Count lines and pages';
+        syncCountButton();
         rawPanel.refreshSummary?.();
         beautifyPanel.refreshSummary?.();
         return summary;
@@ -407,7 +414,9 @@
         view.summaryPromise = null;
         countButton.disabled = false;
         countButton.querySelector('i').className = 'mdi mdi-alert-circle-outline';
-        countButton.querySelector('span').textContent = 'Count failed';
+        countButton.querySelector('span').textContent = 'Retry count';
+        countButton.title = 'Retry line and page count';
+        syncCountButton();
         rawPanel.refreshSummary?.();
         beautifyPanel.refreshSummary?.();
         return null;
@@ -418,6 +427,8 @@
 
     function selectMode(mode) {
       const selected = panels[mode] ? mode : 'raw';
+      activeMode = selected;
+      syncCountButton();
       for (const [name, button] of Object.entries(buttons)) {
         const active = name === selected;
         button.classList.toggle('is-active', active);

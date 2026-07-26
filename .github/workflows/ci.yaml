@@ -29,6 +29,7 @@ jobs:
         with:
           node-version: "22"
 
+
       - name: Check formatting
         run: test -z "$(gofmt -l *.go)"
 
@@ -48,26 +49,43 @@ jobs:
         working-directory: .
         run: |
           node test/frontend-smoke.js
+          node test/ui-normalization.js
+          node test/json-coloring.js
           node test/json-viewer.js
           node test/transfer-controls.js
           node test/stats-viewer.js
           node test/sqlite-viewer.js
+          node test/office-metadata.js
+          node test/subpath-support.js
 
       - name: Shell syntax
         working-directory: .
         run: |
           for file in test/*.sh test/garage/scripts/*.sh; do
+            [ -e "$file" ] || continue
             sh -n "$file"
           done
 
-      - name: Verify self-contained runtime
-        working-directory: src
+      - name: Verify self-contained and private runtime
+        working-directory: .
         shell: bash
         run: |
           set -euo pipefail
-          test "$(go list -m all | wc -l | tr -d ' ')" = "1"
-          if grep -R --include='*.go' '"os/exec"' .; then
+          test "$(cd src && go list -m all | wc -l | tr -d ' ')" = "1"
+          if grep -R --include='*.go' '"os/exec"' src; then
             echo "runtime source must not invoke external commands" >&2
+            exit 1
+          fi
+          if grep -R --include='*.go' -E 'os\.(Getenv|LookupEnv)|ProxyFromEnvironment' src; then
+            echo "runtime configuration and provider clients must not use process environment variables" >&2
+            exit 1
+          fi
+          if find . -type f \( -iname '*.ttf' -o -iname '*.otf' -o -iname '*.woff' -o -iname '*.woff2' -o -iname '*.eot' \) | grep -q .; then
+            echo "font binaries must not be shipped" >&2
+            exit 1
+          fi
+          if grep -R -E --exclude-dir=vendor --include='*.html' --include='*.js' --include='*.css' 'https?://|//cdn\.' src/public; then
+            echo "runtime frontend must not contact external asset domains" >&2
             exit 1
           fi
 

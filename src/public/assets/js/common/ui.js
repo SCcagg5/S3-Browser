@@ -434,13 +434,16 @@
     heading.append(headingIcon, headingCopy);
 
     const groupActions = el('div', 'bb-transfer-group-actions', '');
-    const pauseAllButton = el('button', 'bb-transfer-group-action', '<i class="mdi mdi-pause"></i><span>Pause all</span>');
-    pauseAllButton.type = 'button';
-    pauseAllButton.title = 'Pause all active transfers';
-    const resumeAllButton = el('button', 'bb-transfer-group-action', '<i class="mdi mdi-play"></i><span>Resume all</span>');
-    resumeAllButton.type = 'button';
-    resumeAllButton.title = 'Resume all paused transfers';
-    groupActions.append(pauseAllButton, resumeAllButton);
+    const pauseButton = el('button', 'bb-transfer-group-action', '<i class="mdi mdi-pause"></i><span>Pause</span>');
+    pauseButton.type = 'button';
+    pauseButton.title = 'Pause active transfers';
+    const resumeButton = el('button', 'bb-transfer-group-action', '<i class="mdi mdi-play"></i><span>Resume</span>');
+    resumeButton.type = 'button';
+    resumeButton.title = 'Resume paused transfers';
+    const cancelButton = el('button', 'bb-transfer-group-action is-danger', '<i class="mdi mdi-close"></i><span>Cancel</span>');
+    cancelButton.type = 'button';
+    cancelButton.title = 'Cancel pending transfers';
+    groupActions.append(pauseButton, resumeButton, cancelButton);
     header.append(heading, groupActions);
 
     const list = el('div', 'bb-transfer-list', '');
@@ -487,15 +490,19 @@
       if (counts.completed && !counts.active && !counts.paused && !counts.failed) parts.push(`${counts.completed} completed`);
       headingSummary.textContent = parts.join(' · ') || 'No active transfers';
 
-      const canPauseAll = Array.from(items.values()).some(item =>
+      const canPause = Array.from(items.values()).some(item =>
         ['queued', 'preparing', 'running'].includes(item.state.status) && typeof item.handlers.pause === 'function'
       );
-      const canResumeAll = Array.from(items.values()).some(item =>
+      const canResume = Array.from(items.values()).some(item =>
         item.state.status === 'paused' && typeof item.handlers.resume === 'function'
       );
-      pauseAllButton.hidden = !canPauseAll;
-      resumeAllButton.hidden = !canResumeAll;
-      groupActions.hidden = !canPauseAll && !canResumeAll;
+      const canCancel = Array.from(items.values()).some(item =>
+        !['completed', 'canceled'].includes(item.state.status) && typeof item.handlers.cancel === 'function'
+      );
+      pauseButton.hidden = !canPause;
+      resumeButton.hidden = !canResume;
+      cancelButton.hidden = !canCancel;
+      groupActions.hidden = !canPause && !canResume && !canCancel;
     }
 
     function schedulePanelRemoval() {
@@ -772,17 +779,24 @@
       return controller;
     }
 
-    function pauseAll() {
+    function pauseTransfers() {
       for (const item of items.values()) {
         if (!['queued', 'preparing', 'running'].includes(item.state.status) || typeof item.handlers.pause !== 'function') continue;
-        try { item.handlers.pause(); } catch (error) { console.error('pause all failed', error); }
+        try { item.handlers.pause(); } catch (error) { console.error('bulk pause failed', error); }
       }
     }
 
-    function resumeAll() {
+    function resumeTransfers() {
       for (const item of items.values()) {
         if (item.state.status !== 'paused' || typeof item.handlers.resume !== 'function') continue;
-        try { item.handlers.resume(); } catch (error) { console.error('resume all failed', error); }
+        try { item.handlers.resume(); } catch (error) { console.error('bulk resume failed', error); }
+      }
+    }
+
+    function cancelTransfers() {
+      for (const item of Array.from(items.values())) {
+        if (['completed', 'canceled'].includes(item.state.status) || typeof item.handlers.cancel !== 'function') continue;
+        invokeTransferAction(item.handlers.cancel);
       }
     }
 
@@ -795,16 +809,18 @@
       transferGroups.delete(normalizedKind);
     }
 
-    pauseAllButton.addEventListener('click', pauseAll);
-    resumeAllButton.addEventListener('click', resumeAll);
+    pauseButton.addEventListener('click', pauseTransfers);
+    resumeButton.addEventListener('click', resumeTransfers);
+    cancelButton.addEventListener('click', cancelTransfers);
 
     const controller = {
       kind: normalizedKind,
       element: panel,
       items,
       add,
-      pauseAll,
-      resumeAll,
+      pause: pauseTransfers,
+      resume: resumeTransfers,
+      cancel: cancelTransfers,
       close,
       get closed() { return closed; }
     };

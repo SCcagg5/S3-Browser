@@ -23,6 +23,28 @@ import (
 	"testing"
 )
 
+func newGCSBackendForTest(t *testing.T, endpoint, bucket, mode, credentialsFile string) *gcsBackend {
+	t.Helper()
+	auth, err := newSharedAuthentication(authConfig{
+		ID: "test-gcs", Provider: "gcs", Mode: mode, Endpoint: endpoint, CredentialsFile: credentialsFile,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(auth.close)
+	backend, err := newGCSBackendWithAuthentication(bucketConfig{
+		ID: "test-bucket", AuthID: auth.cfg.ID, Provider: "gcs", Bucket: bucket,
+	}, auth)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return backend
+}
+
+func newAnonymousGCSBackendForTest(t *testing.T, endpoint, bucket string) *gcsBackend {
+	return newGCSBackendForTest(t, endpoint, bucket, "anonymous", "")
+}
+
 func TestGCSServiceAccountJWTAndPermissionDiscovery(t *testing.T) {
 	privateKey, err := rsa.GenerateKey(rand.Reader, 1024)
 	if err != nil {
@@ -71,12 +93,7 @@ func TestGCSServiceAccountJWTAndPermissionDiscovery(t *testing.T) {
 	defer server.Close()
 
 	credentialsPath := writeTestServiceAccount(t, privateKey, server.URL+"/token")
-	backend, err := newGCSBackend(storageConfig{
-		Provider: "gcs", Endpoint: server.URL, Bucket: "test-bucket", Auth: "service_account", CredentialsFile: credentialsPath,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	backend := newGCSBackendForTest(t, server.URL, "test-bucket", "service_account", credentialsPath)
 
 	discovered, err := backend.DiscoverCapabilities(context.Background())
 	if err != nil {
@@ -127,10 +144,7 @@ func TestGCSRewriteFollowsContinuationToken(t *testing.T) {
 	}))
 	defer server.Close()
 
-	backend, err := newGCSBackend(storageConfig{Provider: "gcs", Endpoint: server.URL, Bucket: "bucket", Auth: "anonymous"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	backend := newAnonymousGCSBackendForTest(t, server.URL, "bucket")
 	if err := backend.Copy(context.Background(), "source/one", "destination/two"); err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +213,7 @@ func verifyServiceAccountAssertion(t *testing.T, assertion string, publicKey *rs
 	}
 }
 
-func TestGCSAPIURLWithBasePath(t *testing.T) {
+func TestGCSAPIURLPreservesEndpointPath(t *testing.T) {
 	t.Parallel()
 	backend := &gcsBackend{endpoint: mustParseURL(t, "https://example.test/emulator/v1")}
 	u := backend.apiURL("storage/v1/b/a%20bucket/o", url.Values{"prefix": {"a/b"}})
@@ -231,10 +245,7 @@ func TestGCSGetPassesThroughNotModified(t *testing.T) {
 	}))
 	defer server.Close()
 
-	backend, err := newGCSBackend(storageConfig{Provider: "gcs", Endpoint: server.URL, Bucket: "bucket", Auth: "anonymous"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	backend := newAnonymousGCSBackendForTest(t, server.URL, "bucket")
 	headers := make(http.Header)
 	headers.Set("If-None-Match", `"etag"`)
 	response, err := backend.Get(context.Background(), "object.txt", headers)
@@ -291,10 +302,7 @@ func TestGCSResumableUploadLifecycle(t *testing.T) {
 	}))
 	defer server.Close()
 
-	backend, err := newGCSBackend(storageConfig{Provider: "gcs", Endpoint: server.URL, Bucket: "bucket", Auth: "anonymous"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	backend := newAnonymousGCSBackendForTest(t, server.URL, "bucket")
 	session, err := backend.InitiateResumable(context.Background(), "large.bin", 10, "application/octet-stream")
 	if err != nil {
 		t.Fatal(err)
@@ -318,10 +326,7 @@ func TestGCSResumableUploadLifecycle(t *testing.T) {
 
 func TestGCSResumableURLRejectsUnexpectedHost(t *testing.T) {
 	t.Parallel()
-	backend, err := newGCSBackend(storageConfig{Provider: "gcs", Endpoint: "https://storage.googleapis.com", Bucket: "bucket", Auth: "anonymous"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	backend := newAnonymousGCSBackendForTest(t, "https://storage.googleapis.com", "bucket")
 	if _, err := backend.validateResumableURL("https://attacker.example/upload"); err == nil {
 		t.Fatal("unexpected resumable host was accepted")
 	}
@@ -348,10 +353,7 @@ func TestGCSGetForwardsRangeResumeHeaders(t *testing.T) {
 	}))
 	defer server.Close()
 
-	backend, err := newGCSBackend(storageConfig{Provider: "gcs", Endpoint: server.URL, Bucket: "bucket", Auth: "anonymous"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	backend := newAnonymousGCSBackendForTest(t, server.URL, "bucket")
 	headers := make(http.Header)
 	headers.Set("Range", "bytes=100-")
 	headers.Set("If-Range", `"etag"`)

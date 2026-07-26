@@ -1,0 +1,960 @@
+/*
+ * Final interaction contract.
+ *
+ * Dropdowns, sheet tabs and disclosure chevrons intentionally share one
+ * implementation across Vue/Buefy and the plain DOM menus used by previews.
+ */
+
+/* Every downward disclosure uses the same SVG mask and pseudo-element. */
+.select:not(.is-multiple):not(.is-loading)::after,
+.has-bb-chevron::after {
+  content: "" !important;
+  display: inline-block;
+  width: 1rem !important;
+  height: 0.7rem !important;
+  flex: 0 0 1rem;
+  margin: 0 0 0 .35rem !important;
+  background: currentColor;
+  border: 0 !important;
+  border-radius: 0 !important;
+  -webkit-mask: url("../icons/mdi/chevron-down.svg") center / contain no-repeat;
+  mask: url("../icons/mdi/chevron-down.svg") center / contain no-repeat;
+  pointer-events: none;
+  transform: none !important;
+  transform-origin: center !important;
+}
+.select:not(.is-multiple):not(.is-loading)::after {
+  position: absolute;
+  top: 50% !important;
+  right: .72rem !important;
+  left: auto !important;
+  margin: 0 !important;
+  color: #667085;
+  transform: translateY(-50%) !important;
+}
+.storage-switcher-trigger.has-bb-chevron::after {
+  align-self: center;
+  justify-self: center;
+  margin: 0 !important;
+  color: #98a2b3;
+}
+.toolbar .button.has-bb-chevron::after { color: currentColor; }
+
+/* The context menu is the source of truth for every dropdown surface. */
+.bb-menu-popover,
+.dropdown-content,
+.breadcrumb-overflow-popover {
+  color: var(--bb-text, #111827);
+  background: #fff;
+  border: 1px solid var(--bb-border, #e5e7eb);
+  border-radius: 8px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, .12);
+}
+.dropdown-menu { padding-top: 6px; }
+.dropdown-content {
+  min-width: 220px;
+  max-width: min(360px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  padding: 6px;
+  overflow: auto;
+}
+.bb-menu-list { padding: 6px; }
+.bb-menu-item,
+.dropdown-item,
+a.dropdown-item,
+button.dropdown-item,
+.breadcrumb-overflow-item {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  gap: .5rem;
+  margin: 0;
+  padding: 3px 10px;
+  color: var(--bb-text, #111827);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.35;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.bb-menu-item:hover,
+.bb-menu-item:focus-visible,
+.dropdown-item:hover:not(.is-disabled),
+.dropdown-item:focus-visible:not(.is-disabled),
+.breadcrumb-overflow-item:hover,
+.breadcrumb-overflow-item:focus-visible {
+  color: var(--bb-text, #111827);
+  background: #f3f4f6;
+  outline: 0;
+}
+.bb-menu-item > .mdi,
+.dropdown-item > .mdi,
+.breadcrumb-overflow-item > .mdi {
+  width: 1.25rem;
+  flex: 0 0 1.25rem;
+  margin: 0;
+  color: #667085;
+  font-size: 18px;
+}
+.bb-menu-item.danger,
+.dropdown-item.is-danger { color: #b91c1c; }
+.bb-menu-item.danger > .mdi,
+.dropdown-item.is-danger > .mdi { color: currentColor; }
+.bb-menu-item.danger:hover,
+.dropdown-item.is-danger:hover { background: #fef2f2; }
+.dropdown-item.is-disabled,
+.dropdown-item[disabled] {
+  cursor: not-allowed;
+  opacity: .5;
+}
+.dropdown-divider,
+.bb-menu-divider {
+  height: 1px;
+  margin: 6px 4px;
+  background: var(--bb-border, #e5e7eb);
+  border: 0;
+}
+.toolbar .dropdown-item {
+  min-width: 220px;
+  gap: .5rem;
+}
+.toolbar .dropdown-item > .mdi {
+  width: 1.25rem;
+  flex-basis: 1.25rem;
+}
+/* Storage options contain richer two-line content but use the same shell. */
+.storage-switcher .dropdown-content {
+  width: 100%;
+  min-width: 100%;
+  max-width: 100%;
+  padding: 6px;
+  border-radius: 8px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, .12);
+}
+.storage-switcher .dropdown-item,
+.storage-switcher .dropdown-item.is-current-storage {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  min-height: 58px;
+  align-items: center;
+  gap: .55rem;
+  padding: .52rem .68rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  white-space: normal;
+}
+.storage-switcher .dropdown-item:hover { background: #f3f4f6; border-color: transparent; }
+.storage-switcher .dropdown-item.is-current-storage { background: #eef6ff; border-color: #d6e9ff; }
+
+/* Worksheet, database, JSON and insight tabs intentionally use the original
+   spreadsheet-tab contract from style.css without a second override layer. */
+
+/* The modal close button intentionally keeps the original ui.css contract.
+   Shared button rules exclude .bb-modal-x and this layer does not restyle it. */
+
+/* Compact permission rows: one visible state per operation. Detailed
+   provider explanations remain available through the row title tooltip. */
+.bb-permission-details { width: min(100%, 660px); }
+.bb-permission-summary { display: grid; gap: .5rem; }
+.bb-permission-summary-row {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) max-content;
+  min-width: 0;
+  align-items: center;
+  gap: .65rem;
+  padding: .58rem .65rem;
+  background: #f8fafc;
+  border: 1px solid #e4e9f0;
+  border-radius: 8px;
+}
+.bb-permission-summary-icon {
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  color: #667085;
+  background: #fff;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-size: 1.05rem;
+}
+.bb-permission-summary-copy {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  white-space: nowrap;
+}
+.bb-permission-summary-copy strong {
+  overflow: hidden;
+  color: #243244;
+  font-size: .9rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bb-permission-result {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 .58rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: .72rem;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+.bb-permission-summary-icon.is-allowed { color: var(--primary-color, #167df0); }
+.bb-permission-result.is-allowed { color: #067647; }
+.bb-permission-summary-icon.is-allowed { background: #eff6ff; border-color: #bfdbfe; }
+.bb-permission-result.is-allowed { background: #ecfdf3; border-color: #abefc6; }
+.bb-permission-summary-icon.is-denied,
+.bb-permission-result.is-denied { color: #b42318; }
+.bb-permission-summary-icon.is-denied { background: #fef3f2; border-color: #fecdca; }
+.bb-permission-result.is-denied { background: #fef3f2; border-color: #fecdca; }
+.bb-permission-summary-icon.is-unknown,
+.bb-permission-result.is-unknown { color: #475467; }
+.bb-permission-summary-icon.is-unknown { background: #f2f4f7; border-color: #d0d5dd; }
+.bb-permission-result.is-unknown { background: #f2f4f7; border-color: #d0d5dd; }
+.bb-permission-provider {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  min-width: 0;
+  align-items: baseline;
+  gap: 1rem;
+  padding: .65rem .15rem 0;
+  color: #667085;
+  font-size: .75rem;
+}
+.bb-permission-provider strong { color: #475467; font-weight: 500; white-space: nowrap; }
+.bb-permission-provider span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
+
+@media (max-width: 560px) {
+  .bb-permission-summary-row { grid-template-columns: 30px minmax(0, 1fr) max-content; gap: .45rem; }
+  .bb-permission-summary-icon { width: 30px; height: 30px; }
+  .bb-permission-result { padding-inline: .42rem; font-size: .68rem; }
+  .bb-permission-provider { grid-template-columns: 1fr; gap: .2rem; }
+  .bb-permission-provider span { text-align: left; }
+}
+
+.folder-treemap-rule {
+  margin: 0 0 .55rem;
+  color: #667085;
+  font-size: .76rem;
+  line-height: 1.35;
+}
+
+
+/* Targeted layout contracts: preserve navigation rhythm and make byte sizes scan-friendly. */
+.pagination-control .is-pagination-placeholder,
+.data-preview-pagination.is-pagination-placeholder {
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+th.size-column-header,
+td.size-column {
+  text-align: right !important;
+}
+
+.object-size {
+  display: grid;
+  grid-template-columns: 7ch 2.5ch;
+  align-items: baseline;
+  justify-content: end;
+  column-gap: .75ch;
+  width: 100%;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+  white-space: nowrap;
+}
+
+.object-size-value { text-align: right; }
+.object-size-unit { text-align: left; }
+.object-size-empty { color: var(--bb-text-muted, #78869b); }
+
+
+/* Navigation metadata columns: stable numeric rhythm and responsive alignment. */
+.browser-card {
+  --navigation-size-column: clamp(7rem, 10vw, 8.75rem);
+  --navigation-modified-column: clamp(9rem, 14vw, 11.25rem);
+  --navigation-actions-column: 2.875rem;
+  --navigation-meta-right-pad: clamp(.85rem, 1.55vw, 1.65rem);
+}
+.browser-card .b-table table.table {
+  width: 100%;
+  table-layout: fixed;
+}
+.browser-card th.name-column,
+.browser-card td.name-column,
+.browser-card .name-column,
+.browser-card .object-name-cell {
+  min-width: 0;
+}
+.browser-card .table th.size-column-header,
+.browser-card .table td.size-column {
+  width: var(--navigation-size-column) !important;
+  min-width: var(--navigation-size-column) !important;
+  max-width: var(--navigation-size-column) !important;
+  text-align: right !important;
+  padding-right: var(--navigation-meta-right-pad) !important;
+}
+.browser-card .table th.modified-column-header,
+.browser-card .table td.modified-column {
+  width: var(--navigation-modified-column) !important;
+  min-width: var(--navigation-modified-column) !important;
+  max-width: var(--navigation-modified-column) !important;
+  text-align: right !important;
+  padding-right: var(--navigation-meta-right-pad) !important;
+}
+.browser-card .table th.size-column-header .th-wrap,
+.browser-card .table th.modified-column-header .th-wrap {
+  width: 100%;
+  min-width: 0;
+  justify-content: flex-end !important;
+  text-align: right;
+  white-space: nowrap;
+}
+.browser-card .table td.modified-column {
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+}
+.object-modified {
+  display: block;
+  width: 100%;
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+}
+.object-modified-empty { color: var(--bb-text-muted, #78869b); }
+@media (max-width: 920px) {
+  .browser-card {
+    --navigation-size-column: clamp(6.5rem, 14vw, 7.75rem);
+    --navigation-modified-column: clamp(8.25rem, 22vw, 10rem);
+    --navigation-meta-right-pad: .85rem;
+  }
+  .browser-card .table th.modified-column-header,
+  .browser-card .table td.modified-column {
+    display: table-cell !important;
+  }
+}
+@media (max-width: 700px) {
+  .browser-card {
+    --navigation-size-column: 6.75rem;
+    --navigation-modified-column: 8.75rem;
+    --navigation-meta-right-pad: .65rem;
+  }
+  .browser-card .table th.modified-column-header .th-wrap {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+@media (max-width: 640px) {
+  .browser-card .table th.modified-column-header,
+  .browser-card .table td.modified-column {
+    display: none !important;
+  }
+  .browser-card .table th.size-column-header,
+  .browser-card .table td.size-column {
+    display: table-cell !important;
+  }
+}
+
+/* Loader contract: a CSS ring avoids baseline/cropping artefacts from rotating SVG masks. */
+.mdi-loading {
+  top: 0 !important;
+  transform: none !important;
+  animation: none !important;
+}
+.mdi-loading::before {
+  width: .92em !important;
+  height: .92em !important;
+  margin: 0 !important;
+  box-sizing: border-box;
+  border: .13em solid color-mix(in srgb, currentColor 24%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  background: transparent !important;
+  -webkit-mask: none !important;
+  mask: none !important;
+  transform-origin: 50% 50%;
+  animation: bb-loader-spin .8s linear infinite !important;
+}
+.pdf-page-loader-spinner {
+  display: inline-block;
+  width: 1.1rem;
+  height: 1.1rem;
+  flex: 0 0 1.1rem;
+  box-sizing: border-box;
+  border: 2px solid color-mix(in srgb, currentColor 24%, transparent) !important;
+  border-top-color: currentColor !important;
+  border-radius: 50%;
+  transform-origin: 50% 50%;
+  animation: bb-loader-spin .8s linear infinite !important;
+}
+@keyframes bb-loader-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .mdi-loading::before,
+  .pdf-page-loader-spinner { animation-duration: 1.8s !important; }
+}
+
+/* Final navigation header alignment: keep Size centered over its padded numeric column. */
+.browser-card .table th.size-column-header .th-wrap {
+  padding-right: calc(var(--navigation-meta-right-pad, 1.25rem) + .65rem) !important;
+}
+
+/* Range-safe PDF viewport: the document shell never makes the page itself
+   scroll. Only the canvas stage scrolls when a manual zoom exceeds the
+   available viewport. The shell grows from the normal browser width up to the
+   available page width. */
+html.is-viewport-pdf,
+body.is-viewport-pdf {
+  height: 100%;
+  overflow: hidden;
+}
+body.is-viewport-pdf {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+}
+body.is-viewport-pdf > .bar { flex: 0 0 auto; }
+body.is-viewport-pdf > .viewer {
+  box-sizing: border-box;
+  display: flex;
+  min-height: 0;
+  height: auto;
+  flex: 1 1 auto;
+  overflow: hidden;
+  padding-block: .5rem;
+}
+body.is-viewport-pdf .viewer[data-preview-type="pdf"] > .bb-menu-constrain {
+  width: min(100%, max(var(--app-container-max), var(--pdf-page-shell-width, 0px)));
+  min-width: min(100%, var(--app-container-max));
+  max-width: 100%;
+  height: 100%;
+  min-height: 0;
+  margin-inline: auto;
+}
+body.is-viewport-pdf .viewer[data-preview-type="pdf"] #viewer,
+body.is-viewport-pdf .pdf-custom-preview {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  max-height: 100%;
+}
+body.is-viewport-pdf .pdf-custom-stage { min-height: 0; }
+
+/* Structured, archive, contact, calendar, email and certificate previews. */
+.viewer[data-preview-type="structured"] #viewer,
+.viewer[data-preview-type="archive"] #viewer {
+  padding: 0;
+  overflow: hidden;
+}
+.structured-preview {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  background: var(--color-bg-panel, #fff);
+}
+.structured-preview-tabs { flex: 0 0 auto; }
+.structured-preview-host {
+  min-width: 0;
+  padding: clamp(.8rem, 2vw, 1.35rem);
+}
+.structured-preview-panel[hidden] { display: none !important; }
+.structured-preview-panel {
+  min-width: 0;
+  color: var(--color-text, #344054);
+}
+.structured-empty {
+  padding: 2.5rem 1rem;
+  color: var(--color-text-muted, #667085);
+  text-align: center;
+}
+.structured-property-grid {
+  display: grid;
+  width: 100%;
+  gap: 0;
+  margin: 0;
+  border: 1px solid var(--color-border, #e4e7ec);
+  border-radius: var(--radius-md, 8px);
+  overflow: hidden;
+}
+.structured-property-row {
+  display: grid;
+  grid-template-columns: minmax(9rem, .34fr) minmax(0, 1fr);
+  min-width: 0;
+  border-bottom: 1px solid var(--color-border, #e4e7ec);
+}
+.structured-property-row:last-child { border-bottom: 0; }
+.structured-property-row dt,
+.structured-property-row dd {
+  min-width: 0;
+  margin: 0;
+  padding: .58rem .72rem;
+  overflow-wrap: anywhere;
+}
+.structured-property-row dt {
+  color: var(--color-text-muted, #667085);
+  background: var(--color-bg-subtle, #f8fafc);
+  font-size: .78rem;
+  font-weight: 600;
+}
+.structured-property-row dd {
+  color: var(--color-text, #344054);
+  background: #fff;
+  font-size: .82rem;
+}
+.structured-chips {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: .35rem;
+}
+.structured-chip {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  padding: .25rem .48rem;
+  color: #344054;
+  background: #f2f4f7;
+  border: 1px solid #e4e7ec;
+  border-radius: 999px;
+  font-size: .75rem;
+  overflow-wrap: anywhere;
+}
+.contact-preview-grid,
+.calendar-preview-list,
+.certificate-preview {
+  display: grid;
+  min-width: 0;
+  gap: .8rem;
+}
+.contact-preview-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); }
+.contact-preview-card,
+.calendar-preview-card,
+.certificate-preview-card,
+.email-preview {
+  min-width: 0;
+  padding: .9rem;
+  background: #fff;
+  border: 1px solid var(--color-border, #e4e7ec);
+  border-radius: var(--radius-md, 8px);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, .04);
+}
+.contact-preview-card {
+  display: grid;
+  grid-template-columns: 3rem minmax(0, 1fr);
+  align-items: start;
+  gap: .8rem;
+}
+.contact-preview-avatar {
+  display: grid;
+  width: 3rem;
+  height: 3rem;
+  place-items: center;
+  color: var(--color-primary, #167df0);
+  background: var(--color-primary-soft, #eff8ff);
+  border: 1px solid #b2ddff;
+  border-radius: 50%;
+  font-weight: 700;
+}
+.contact-preview-body,
+.calendar-preview-body { min-width: 0; }
+.contact-preview-body h2,
+.calendar-preview-header h2,
+.calendar-preview-body h3,
+.certificate-preview-card h2,
+.email-preview h2,
+.archive-summary h2,
+.epub-preview h1,
+.epub-preview h2 {
+  margin: 0;
+  color: var(--color-text-strong, #101828);
+  font-family: var(--font-ui);
+}
+.contact-preview-body h2 { font-size: 1rem; }
+.contact-preview-subtitle,
+.calendar-preview-header p,
+.calendar-preview-meta {
+  margin: .18rem 0 .65rem;
+  color: var(--color-text-muted, #667085);
+  font-size: .78rem;
+}
+.structured-card-field {
+  display: grid;
+  grid-template-columns: 5.3rem minmax(0, 1fr);
+  align-items: start;
+  gap: .5rem;
+  margin-top: .55rem;
+}
+.structured-card-field > strong {
+  display: inline-flex;
+  align-items: center;
+  gap: .28rem;
+  color: var(--color-text-muted, #667085);
+  font-size: .75rem;
+}
+.calendar-preview-header {
+  margin-bottom: .75rem;
+  padding-bottom: .7rem;
+  border-bottom: 1px solid var(--color-border, #e4e7ec);
+}
+.calendar-preview-card {
+  display: grid;
+  grid-template-columns: minmax(7rem, .28fr) minmax(0, 1fr);
+  gap: .8rem;
+}
+.calendar-preview-date {
+  color: var(--color-primary, #167df0);
+  font-family: var(--font-mono);
+  font-size: .76rem;
+  overflow-wrap: anywhere;
+}
+.calendar-preview-description { margin: .45rem 0; white-space: pre-wrap; }
+.email-preview {
+  display: grid;
+  gap: 1rem;
+}
+.email-preview h2,
+.archive-summary h2,
+.epub-preview h2 { font-size: .92rem; }
+.email-preview-body {
+  max-height: 52vh;
+  margin: 0;
+  padding: .9rem;
+  overflow: auto;
+  color: #101828;
+  background: #f8fafc;
+  border: 1px solid #e4e7ec;
+  border-radius: 7px;
+  font: .8rem/1.55 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.email-attachment-list { display: grid; gap: .45rem; }
+.email-attachment {
+  display: grid;
+  grid-template-columns: 1.5rem minmax(0, 1fr);
+  align-items: center;
+  gap: .55rem;
+  padding: .55rem .65rem;
+  background: #f8fafc;
+  border: 1px solid #e4e7ec;
+  border-radius: 7px;
+}
+.email-attachment > div { display: grid; min-width: 0; }
+.email-attachment span { color: #667085; font-size: .74rem; }
+.certificate-preview-card h2 {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  margin-bottom: .7rem;
+  font-size: .92rem;
+}
+.structured-raw-preview { min-width: 0; }
+.structured-raw-note { margin-bottom: .65rem; }
+.structured-raw-preview .code-viewer { min-width: 0; }
+.archive-entries-preview { min-width: 0; }
+.archive-preview-toolbar {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .55rem;
+  padding: 0 0 .7rem;
+  margin-bottom: 0px !important;
+}
+.archive-entry-search {
+  min-width: min(18rem, 100%);
+  flex: 1 1 18rem;
+}
+.archive-page-size { flex: 0 0 auto; }
+.archive-entry-scroll {
+  max-height: min(62vh, 720px);
+  border: 1px solid var(--color-border, #e4e7ec);
+  border-radius: var(--radius-md, 8px);
+}
+.archive-entry-name {
+  display: flex;
+  min-width: 18rem;
+  align-items: center;
+  gap: .42rem;
+}
+.archive-entry-name > span { overflow-wrap: anywhere; }
+.archive-pagination { min-height: 2.5rem; }
+.archive-summary { display: grid; gap: .8rem; }
+.epub-preview { display: grid; gap: .8rem; }
+.epub-preview h1 { font-size: 1.25rem; }
+.epub-description { margin: 0; white-space: pre-wrap; }
+.epub-toc { display: grid; gap: .35rem; margin: 0; padding-left: 1.4rem; }
+.epub-toc li { padding-left: calc(var(--epub-depth, 0) * .75rem); }
+.epub-toc li span { display: block; color: #667085; font: .72rem var(--font-mono); overflow-wrap: anywhere; }
+
+/* Native media previews intentionally request metadata first and rely on the
+   same-origin Range gateway. */
+.viewer[data-preview-type="video"] #viewer { padding: 0; overflow: hidden; }
+.media-video-stage.media-preview { min-height: 0; }
+
+.bb-transfer-group-action.is-danger {
+  color: var(--color-danger, #d92d20);
+}
+.bb-transfer-group-action.is-danger:hover,
+.bb-transfer-group-action.is-danger:focus-visible {
+  color: #b42318;
+  background: #fef3f2;
+}
+
+@media (max-width: 700px) {
+  .structured-preview-host { padding: .65rem; }
+  .structured-property-row { grid-template-columns: 1fr; }
+  .structured-property-row dt { padding-bottom: .2rem; }
+  .structured-property-row dd { padding-top: .2rem; }
+  .contact-preview-card,
+  .calendar-preview-card { grid-template-columns: 1fr; }
+  .structured-card-field { grid-template-columns: 1fr; }
+}
+
+
+/* Final PDF viewport contract. The preview, toolbar and canvas stage together
+   are capped to the visible page height. The browser page itself never scrolls
+   in PDF mode; only the canvas stage may scroll for an enlarged page. The shell
+   uses at least the normal navigation width when available and expands up to
+   the full viewport for wide pages. */
+html.is-viewport-pdf,
+body.is-viewport-pdf {
+  width: 100%;
+  height: 100dvh !important;
+  min-height: 100dvh !important;
+  max-height: 100dvh !important;
+  overflow: hidden !important;
+}
+body.is-viewport-pdf {
+  display: flex !important;
+  flex-direction: column;
+}
+body.is-viewport-pdf > .bar {
+  position: relative;
+  inset: auto;
+  z-index: 20;
+  flex: 0 0 auto;
+}
+body.is-viewport-pdf > .viewer[data-preview-type="pdf"] {
+  display: flex;
+  width: 100%;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  flex: 1 1 0;
+  overflow: hidden !important;
+  box-sizing: border-box;
+}
+body.is-viewport-pdf .viewer[data-preview-type="pdf"] > .bb-menu-constrain {
+  width: min(100%, max(min(100%, var(--app-container-max)), var(--pdf-page-shell-width, 0px))) !important;
+  min-width: min(100%, var(--app-container-max)) !important;
+  max-width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: 100% !important;
+  flex: 0 1 auto;
+}
+body.is-viewport-pdf .viewer[data-preview-type="pdf"] #viewer,
+body.is-viewport-pdf .pdf-custom-preview {
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: 100% !important;
+  overflow: hidden !important;
+  box-sizing: border-box;
+}
+body.is-viewport-pdf .pdf-custom-preview {
+  grid-template-rows: auto minmax(0, 1fr) !important;
+}
+body.is-viewport-pdf .pdf-custom-toolbar {
+  flex: 0 0 auto;
+  max-height: min(38dvh, 11rem);
+  overflow: auto;
+}
+body.is-viewport-pdf .pdf-custom-stage {
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: 100% !important;
+  overflow: auto !important;
+}
+
+/* Archive previews use the same maximum width as the object navigation.
+   EPUB publication metadata may precede the inventory; other ZIP-derived
+   formats show the inventory directly. */
+.viewer[data-preview-type="archive"] > .bb-menu-constrain {
+  width: min(100%, var(--app-container-max));
+  max-width: var(--app-container-max);
+  margin-inline: auto;
+}
+.viewer[data-preview-type="archive"] #viewer {
+  overflow: auto;
+}
+.archive-preview-layout {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  gap: 1rem;
+  padding: clamp(.8rem, 2vw, 1.35rem);
+}
+.archive-preview-section {
+  display: grid;
+  min-width: 0;
+  gap: .7rem;
+}
+.archive-preview-section > h2 {
+  margin: 0;
+  color: var(--color-text-strong, #101828);
+  font-size: .92rem;
+}
+.archive-page-size {
+  flex: 0 0 auto;
+}
+
+/* Navigation sorting reserves one icon column whether sorting is available,
+   inactive, ascending, or descending. This keeps Size and Last modified in the
+   same horizontal position for every bucket and scan state. */
+.navigation-sort-button {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) 1rem;
+  align-items: center;
+  gap: .35rem;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  font: inherit;
+  font-weight: inherit;
+  text-align: left;
+}
+.navigation-sort-button.is-numeric { text-align: right; }
+.navigation-sort-button.is-numeric > span:first-child { justify-self: end; }
+.navigation-sort-button.is-sortable { cursor: pointer; }
+.navigation-sort-button:disabled { cursor: default; opacity: 1; }
+.navigation-sort-button.is-active { color: var(--primary-color); }
+.navigation-sort-icon {
+  display: inline-grid;
+  width: 1rem;
+  height: 1rem;
+  place-items: center;
+  justify-self: end;
+  color: #98a2b3;
+}
+.navigation-sort-button.is-active .navigation-sort-icon { color: var(--primary-color); }
+.navigation-sort-icon.is-placeholder { visibility: hidden; }
+.browser-card .table th.name-column-header .th-wrap,
+.browser-card .table th.size-column-header .th-wrap,
+.browser-card .table th.modified-column-header .th-wrap {
+  width: 100%;
+  min-width: 0;
+}
+.browser-card .table th.size-column-header .th-wrap,
+.browser-card .table th.modified-column-header .th-wrap {
+  padding-right: var(--navigation-meta-right-pad) !important;
+}
+
+/* Data grids occupy the full preview width. A permanently reserved scrollbar
+   gutter created an unnecessary empty strip on the right. */
+.data-table-scroll {
+  width: 100%;
+  max-width: none;
+  margin-right: 0;
+  scrollbar-gutter: auto;
+  box-sizing: border-box;
+}
+.bb-data-grid,
+.data-preview,
+.sqlite-table-host,
+.spreadsheet-table-host {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+/* Archive inventories use a single column contract for header and body. The
+   name cell keeps table-cell layout; Flexbox is confined to its inner wrapper. */
+.archive-entry-table {
+  width: 100%;
+  min-width: 68rem;
+  table-layout: fixed;
+}
+.archive-entry-table th,
+.archive-entry-table td {
+  min-width: 0;
+  max-width: none;
+  box-sizing: border-box;
+  vertical-align: middle;
+}
+.archive-entry-table .archive-cell-name,
+.archive-entry-table .archive-cell-type,
+.archive-entry-table .archive-cell-method,
+.archive-entry-table .archive-cell-modified,
+.archive-entry-table .archive-cell-crc { text-align: left; }
+.archive-entry-table .archive-cell-compressed,
+.archive-entry-table .archive-cell-size { text-align: right; }
+.archive-entry-table .archive-cell-compressed,
+.archive-entry-table .archive-cell-size,
+.archive-entry-table .archive-cell-modified,
+.archive-entry-table .archive-cell-crc {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.archive-entry-name {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: .42rem;
+}
+.archive-entry-name > .mdi { flex: 0 0 auto; }
+.archive-entry-name > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Archive inventories grow with their content so the document page owns the
+   vertical scroll. The inner table wrapper only provides horizontal overflow
+   when the fixed column contract is wider than the viewport. */
+.viewer[data-preview-type="archive"] #viewer {
+  overflow: visible;
+}
+.archive-entry-scroll {
+  max-height: none;
+  overflow-x: auto;
+  overflow-y: visible;
+}
+
+/* Certificate and key previews use the same maximum width as the object
+   navigation. Their tab strip is directly attached to the preview host. */
+.viewer.is-certificate-preview > .bb-menu-constrain {
+  width: min(100%, var(--app-container-max));
+  max-width: var(--app-container-max);
+  margin-inline: auto;
+}
+.viewer.is-certificate-preview #viewer {
+  padding: 0;
+  overflow: visible;
+}
+.viewer.is-certificate-preview .structured-preview-host {
+  padding: 0;
+}
+.viewer.is-certificate-preview .structured-preview-tabs {
+  margin-bottom: 0;
+}
+

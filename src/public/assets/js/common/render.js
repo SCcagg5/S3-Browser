@@ -1,12 +1,10 @@
-/* Safe code and Markdown rendering helpers. Mermaid is imported lazily for diagram blocks. */
+/* Safe code and Markdown rendering helpers. All runtime assets are local. */
 (function () {
   'use strict';
 
   const BB = (window.BB = window.BB || {});
-  const MERMAID_MODULE_URL = 'https://cdn.jsdelivr.net/npm/mermaid@11.16.0/dist/mermaid.esm.min.mjs';
   const MERMAID_DISPLAY_MAX_WIDTH = 680;
   const MERMAID_DISPLAY_MAX_HEIGHT = 500;
-  let mermaidModulePromise = null;
   let mermaidInitialized = false;
   let mermaidSequence = 0;
   const blockedTags = new Set([
@@ -160,7 +158,7 @@
         let lookahead = index;
         while (lookahead < text.length && /\s/.test(text[lookahead])) lookahead++;
         const isKey = closed && text[lookahead] === ':';
-        appendSyntaxToken(fragment, text.slice(start, index), isKey ? 'json-syntax-key' : 'json-syntax-string');
+        appendSyntaxToken(fragment, text.slice(start, index), isKey ? 'json-syntax-key json-token-string' : 'json-syntax-string json-token-string');
         continue;
       }
 
@@ -181,21 +179,21 @@
       const remainder = text.slice(index);
       const literal = /^(?:true|false|null)\b/.exec(remainder);
       if (literal) {
-        appendSyntaxToken(fragment, literal[0], literal[0] === 'null' ? 'json-syntax-null' : 'json-syntax-boolean');
+        appendSyntaxToken(fragment, literal[0], literal[0] === 'null' ? 'json-syntax-null json-token-null' : 'json-syntax-boolean json-token-boolean');
         index += literal[0].length;
         continue;
       }
 
       const number = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/.exec(remainder);
       if (number) {
-        appendSyntaxToken(fragment, number[0], 'json-syntax-number');
+        appendSyntaxToken(fragment, number[0], 'json-syntax-number json-token-number');
         index += number[0].length;
         continue;
       }
 
       const start = index++;
       while (index < text.length && !/[\s{}[\],:"]/.test(text[index])) index++;
-      appendSyntaxToken(fragment, text.slice(start, index), 'json-syntax-unknown');
+      appendSyntaxToken(fragment, text.slice(start, index), 'json-syntax-unknown json-token-invalid');
     }
     return fragment;
   }
@@ -212,7 +210,7 @@
     if (!lines.length) lines.push('');
     const fragment = document.createDocumentFragment();
     const jsonState = {
-      inString: language === 'json' && options.startInString === true,
+      inString: language === 'json' && (options.startInString === true || options.startsInString === true),
       escaped: language === 'json' && options.startEscaped === true
     };
     lines.forEach((line, index) => {
@@ -235,6 +233,10 @@
     });
     wrapper.appendChild(fragment);
     return wrapper;
+  }
+
+  function renderWrappedJSON(code, options = {}) {
+    return renderWrappedCode(code, 'json', options);
   }
 
   function prepareMermaidBlocks(wrapper) {
@@ -262,10 +264,7 @@
 
   function loadMermaid() {
     if (window.mermaid) return Promise.resolve(window.mermaid);
-    if (!mermaidModulePromise) {
-      mermaidModulePromise = import(MERMAID_MODULE_URL).then(module => module.default || module);
-    }
-    return mermaidModulePromise;
+    return Promise.reject(new Error('The optional Mermaid renderer is not embedded in this build. The diagram source remains available below.'));
   }
 
   function renderMermaidFailure(figure, source, error) {
@@ -398,5 +397,5 @@
     return wrapper;
   }
 
-  BB.render = { renderCode, renderWrappedCode, renderMarkdown, renderMermaid, sanitizeMermaidSVG, sanitizeHTML, forwardVerticalWheel };
+  BB.render = { renderCode, renderWrappedCode, renderWrappedJSON, renderMarkdown, renderMermaid, sanitizeMermaidSVG, sanitizeHTML, forwardVerticalWheel };
 })();

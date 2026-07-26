@@ -1,31 +1,31 @@
 #!/bin/sh
 set -eu
 
-: "${RPC_SECRET:?RPC_SECRET is required}"
-: "${ADMIN_TOKEN:?ADMIN_TOKEN is required}"
+CONFIG_FILE="/config/config.hcl"
+RPC_SECRET="b0a2d8f1a0e9b7c44c0b5aa9b18d8d29d9ab188f28e1c5f8c3a5d7e9f0123456"
+ADMIN_TOKEN="local-test-admin-token"
+METRICS_TOKEN="local-test-metrics-token"
+S3_REGION="garage"
+ROOT_DOMAIN=".garage"
+USE_LOCAL_TZ="false"
+REPLICATION_FACTOR="1"
+COMPRESSION_LEVEL="0"
 
-BROWSER_CONFIG_FILE="${BROWSER_CONFIG_FILE:-/config/config.hcl}"
-S3_REGION="${S3_REGION:-garage}"
-ROOT_DOMAIN="${ROOT_DOMAIN:-.garage}"
-USE_LOCAL_TZ="${USE_LOCAL_TZ:-false}"
-REPLICATION_FACTOR="${REPLICATION_FACTOR:-1}"
-COMPRESSION_LEVEL="${COMPRESSION_LEVEL:-2}"
-
-if [ ! -r "$BROWSER_CONFIG_FILE" ]; then
-  echo "Browser HCL config is not readable: $BROWSER_CONFIG_FILE" >&2
+if [ ! -r "$CONFIG_FILE" ]; then
+  echo "Browser HCL config is not readable: $CONFIG_FILE" >&2
   exit 1
 fi
 
 read_hcl_string() {
   attribute="$1"
-  sed -n "s/^[[:space:]]*${attribute}[[:space:]]*=[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$BROWSER_CONFIG_FILE" | head -n 1
+  sed -n "s/^[[:space:]]*${attribute}[[:space:]]*=[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$CONFIG_FILE" | head -n 1
 }
 
 KEY_ID="$(read_hcl_string access_key_id)"
 KEY_SECRET="$(read_hcl_string secret_access_key)"
 
 if [ -z "$KEY_ID" ] || [ -z "$KEY_SECRET" ]; then
-  echo "The first S3 storage block in $BROWSER_CONFIG_FILE must define access_key_id and secret_access_key" >&2
+  echo "The S3 auth block in $CONFIG_FILE must define access_key_id and secret_access_key" >&2
   exit 1
 fi
 
@@ -38,10 +38,7 @@ printf '%s' "$KEY_SECRET" | grep -Eq '^[0-9a-f]{64}$' || {
   exit 1
 }
 
-metrics_line=""
-if [ -n "${METRICS_TOKEN:-}" ]; then
-  metrics_line="metrics_token = \"${METRICS_TOKEN}\""
-fi
+metrics_line="metrics_token = \"${METRICS_TOKEN}\""
 
 cat > /etc/garage.toml <<EOF_CONFIG
 metadata_dir = "/var/lib/garage/meta"

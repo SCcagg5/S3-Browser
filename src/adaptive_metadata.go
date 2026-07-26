@@ -49,18 +49,18 @@ func metadataRangeLength(source *objectRangeSource, start, desired int64) int64 
 	if desired <= 0 {
 		return 0
 	}
-	if source.size <= 0 {
+	if source.Size() <= 0 {
 		return desired
 	}
-	if start >= source.size {
+	if start >= source.Size() {
 		return 0
 	}
-	return minInt64(desired, source.size-start)
+	return minInt64(desired, source.Size()-start)
 }
 
 func metadataStructureLimit(source *objectRangeSource) int64 {
-	if source.size > 0 {
-		return minInt64(source.size, maxMetadataStructureBytes)
+	if source.Size() > 0 {
+		return minInt64(source.Size(), maxMetadataStructureBytes)
 	}
 	return maxMetadataStructureBytes
 }
@@ -72,7 +72,7 @@ func inspectAdaptiveMetadata(source *objectRangeSource, extension, contentType s
 
 	switch {
 	case extension == "jpg" || extension == "jpeg" || contentType == "image/jpeg":
-		metadata, err := readJPEGMetadataAt(source, 0, source.size)
+		metadata, err := readJPEGMetadataAt(source, 0, source.Size())
 		mergeMediaMetadata(&result.mediaMetadata, metadata)
 		return result, err
 	case extension == "png" || contentType == "image/png":
@@ -130,7 +130,7 @@ func inspectAdaptiveMetadata(source *objectRangeSource, extension, contentType s
 		if err != nil && err != io.EOF {
 			return result, err
 		}
-		mergeMediaMetadata(&result.mediaMetadata, parseBoundedFileMetadata(prefix, extension, contentType, source.size))
+		mergeMediaMetadata(&result.mediaMetadata, parseBoundedFileMetadata(prefix, extension, contentType, source.Size()))
 		if width, height, ok := parseAdditionalImageDimensions(prefix, extension, contentType); ok {
 			result.Width, result.Height = width, height
 		}
@@ -144,7 +144,7 @@ func inspectFixedHeaderImage(source *objectRangeSource, extension, contentType s
 	if err != nil && err != io.EOF {
 		return result, err
 	}
-	mergeMediaMetadata(&result.mediaMetadata, parseBoundedFileMetadata(data, extension, contentType, source.size))
+	mergeMediaMetadata(&result.mediaMetadata, parseBoundedFileMetadata(data, extension, contentType, source.Size()))
 	if width, height, ok := parseAdditionalImageDimensions(data, extension, contentType); ok {
 		result.Width, result.Height = width, height
 	}
@@ -202,7 +202,7 @@ func inspectPNGMetadata(source *objectRangeSource) (adaptiveMediaMetadata, error
 			return result, nil
 		}
 		offset = payloadStart + length + 4 // payload plus CRC
-		if source.size > 0 && offset >= source.size {
+		if source.Size() > 0 && offset >= source.Size() {
 			break
 		}
 	}
@@ -282,7 +282,7 @@ func inspectWebPMetadata(source *objectRangeSource) (adaptiveMediaMetadata, erro
 			}
 		}
 		offset = payloadStart + length + length%2
-		if source.size > 0 && offset >= source.size {
+		if source.Size() > 0 && offset >= source.Size() {
 			break
 		}
 	}
@@ -573,12 +573,12 @@ func inspectJPEG2000Metadata(source *objectRangeSource) (adaptiveMediaMetadata, 
 	if len(prefix) < 12 || string(prefix[4:8]) != "jP  " {
 		return result, nil
 	}
-	for offset, boxes := int64(0), 0; boxes < 4096 && (source.size <= 0 || offset+8 <= source.size); boxes++ {
+	for offset, boxes := int64(0), 0; boxes < 4096 && (source.Size() <= 0 || offset+8 <= source.Size()); boxes++ {
 		header, headerErr := readISOBoxHeader(source, offset)
 		if headerErr != nil {
 			return result, headerErr
 		}
-		if header.Size <= 0 || (source.size > 0 && offset+header.Size > source.size) {
+		if header.Size <= 0 || (source.Size() > 0 && offset+header.Size > source.Size()) {
 			break
 		}
 		if header.Type == "jp2h" {
@@ -786,8 +786,8 @@ func isHEIFImage(extension, contentType string) bool {
 
 func readJPEGMetadataAt(source *objectRangeSource, start, available int64) (mediaMetadata, error) {
 	result := newMediaMetadata()
-	if available <= 0 && source.size > start {
-		available = source.size - start
+	if available <= 0 && source.Size() > start {
+		available = source.Size() - start
 	}
 	limit := maxMetadataStructureBytes
 	if available > 0 {
@@ -870,11 +870,11 @@ func inspectRAFMetadata(source *objectRangeSource) (adaptiveMediaMetadata, error
 		return result, err
 	}
 	offset, length, ok := rafPreviewRange(header)
-	if !ok || offset < 0 || length <= 0 || (source.size > 0 && offset >= source.size) {
+	if !ok || offset < 0 || length <= 0 || (source.Size() > 0 && offset >= source.Size()) {
 		return result, nil
 	}
-	if source.size > 0 {
-		length = minInt64(length, source.size-offset)
+	if source.Size() > 0 {
+		length = minInt64(length, source.Size()-offset)
 	}
 	metadata, err := readJPEGMetadataAt(source, offset, length)
 	mergeMediaMetadata(&result.mediaMetadata, metadata)
@@ -893,7 +893,7 @@ func inspectTIFFMetadata(source *objectRangeSource) (adaptiveMediaMetadata, erro
 	if exif := parseEXIFMetadata(data); exif != nil {
 		mergeMediaMetadata(&result.mediaMetadata, *exif)
 	}
-	if offset, length, ok := embeddedTIFFJPEGRange(data); ok && offset >= 0 && length > 0 && (source.size <= 0 || offset < source.size) {
+	if offset, length, ok := embeddedTIFFJPEGRange(data); ok && offset >= 0 && length > 0 && (source.Size() <= 0 || offset < source.Size()) {
 		metadata, rangeErr := readJPEGMetadataAt(source, offset, metadataRangeLength(source, offset, length))
 		if rangeErr == nil {
 			mergeMediaMetadata(&result.mediaMetadata, metadata)
@@ -920,7 +920,7 @@ func readAdaptiveTIFFHeader(source *objectRangeSource) ([]byte, bool, error) {
 		if offset < 0 || length <= 0 || offset > maxMetadataStructureBytes || length > maxMetadataStructureBytes-offset {
 			return nil, apiError{Status: 422, Code: "image_metadata_too_large", Message: "the TIFF metadata structure is too large to inspect safely"}
 		}
-		if source.size > 0 && (offset > source.size || length > source.size-offset) {
+		if source.Size() > 0 && (offset > source.Size() || length > source.Size()-offset) {
 			return nil, io.ErrUnexpectedEOF
 		}
 		chunk, readErr := source.ReadRange(offset, metadataRangeLength(source, offset, length))
@@ -930,7 +930,7 @@ func readAdaptiveTIFFHeader(source *objectRangeSource) ([]byte, bool, error) {
 		if int64(len(chunk)) < length {
 			return nil, io.ErrUnexpectedEOF
 		}
-		if source.bytes > maxMetadataStructureBytes {
+		if source.BytesRead() > maxMetadataStructureBytes {
 			return nil, apiError{Status: 422, Code: "image_metadata_too_large", Message: "the TIFF metadata structure is too large to inspect safely"}
 		}
 		required := offset + length
@@ -1137,7 +1137,7 @@ type isoBoxHeader struct {
 func inspectISOMetadata(source *objectRangeSource) (adaptiveMediaMetadata, error) {
 	result := adaptiveMediaMetadata{mediaMetadata: newMediaMetadata()}
 	var selected []byte
-	for offset, count := int64(0), 0; count < 4096 && (source.size <= 0 || offset+8 <= source.size); count++ {
+	for offset, count := int64(0), 0; count < 4096 && (source.Size() <= 0 || offset+8 <= source.Size()); count++ {
 		if !source.hasByte(offset) {
 			if _, err := source.ReadRange(offset, metadataRangeLength(source, offset, metadataGrowthFloor)); err != nil && err != io.EOF {
 				return result, err
@@ -1147,7 +1147,7 @@ func inspectISOMetadata(source *objectRangeSource) (adaptiveMediaMetadata, error
 		if err != nil {
 			return result, err
 		}
-		if header.Size <= 0 || (source.size > 0 && header.Offset+header.Size > source.size) {
+		if header.Size <= 0 || (source.Size() > 0 && header.Offset+header.Size > source.Size()) {
 			break
 		}
 		if header.Type == "moov" || header.Type == "meta" {
@@ -1202,7 +1202,7 @@ func readISOBoxHeader(source *objectRangeSource, offset int64) (isoBoxHeader, er
 		size = int64(binary.BigEndian.Uint64(data[8:16]))
 		headerSize = 16
 	} else if size == 0 {
-		size = source.size - offset
+		size = source.Size() - offset
 	}
 	if size < headerSize {
 		return isoBoxHeader{}, fmt.Errorf("invalid ISO base media box size")
@@ -1687,7 +1687,7 @@ func inspectMP3Metadata(source *objectRangeSource) (adaptiveMediaMetadata, error
 	if err != nil && err != io.EOF {
 		return result, err
 	}
-	mergeMediaMetadata(&result.mediaMetadata, parseMP3Metadata(data, source.size))
+	mergeMediaMetadata(&result.mediaMetadata, parseMP3Metadata(data, source.Size()))
 	return result, nil
 }
 
@@ -1740,7 +1740,7 @@ func inspectWAVMetadata(source *objectRangeSource) (adaptiveMediaMetadata, error
 			return result, err
 		}
 		required, complete := riffMetadataRequirement(data)
-		if complete || int64(len(data)) >= minInt64(source.size, maxMetadataStructureBytes) {
+		if complete || int64(len(data)) >= minInt64(source.Size(), maxMetadataStructureBytes) {
 			mergeMediaMetadata(&result.mediaMetadata, parseWAVMetadata(data))
 			return result, nil
 		}
@@ -1785,9 +1785,9 @@ func inspectOggMetadata(source *objectRangeSource) (adaptiveMediaMetadata, error
 		result.Properties["Channels"] = strconv.Itoa(int(prefix[index+11]))
 		sampleRate = int(binary.LittleEndian.Uint32(prefix[index+12 : index+16]))
 	}
-	if sampleRate > 0 && source.size > 0 {
-		tailLength := minInt64(source.size, metadataGrowthFloor)
-		tail, tailErr := source.ReadRange(source.size-tailLength, tailLength)
+	if sampleRate > 0 && source.Size() > 0 {
+		tailLength := minInt64(source.Size(), metadataGrowthFloor)
+		tail, tailErr := source.ReadRange(source.Size()-tailLength, tailLength)
 		if tailErr == nil {
 			if granule, ok := lastOggGranule(tail); ok {
 				result.DurationSeconds = float64(granule) / float64(sampleRate)

@@ -1,0 +1,148 @@
+/*
+ * Local Material Design icon mask layer.
+ *
+ * The original interface used Material Design Icons 7.4.47. The glyphs used
+ * by this project are now vendored as small SVG masks so the established
+ * `mdi mdi-…` class contract and visual identity are preserved without
+ * shipping a webfont or contacting a third-party host.
+ */
+.mdi,
+.mdi-set {
+  display: inline-flex;
+  width: 1.25em;
+  height: 1.25em;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  color: inherit;
+  font-size: inherit;
+  font-style: normal;
+  font-weight: 400;
+  line-height: 1;
+  position: relative;
+  top: -.075em;
+  vertical-align: middle;
+}
+.mdi::before,
+.mdi-set::before {
+  content: "";
+  display: block;
+  margin-bottom: 3px;
+  width: 1em;
+  height: 1em;
+  flex: 0 0 auto;
+  background-color: currentColor;
+  -webkit-mask: var(--bb-mdi-icon, url("../icons/mdi/file-outline.svg")) center / contain no-repeat;
+  mask: var(--bb-mdi-icon, url("../icons/mdi/file-outline.svg")) center / contain no-repeat;
+}
+.mdi-alert-circle-outline { --bb-mdi-icon: url("../icons/mdi/alert-circle-outline.svg"); }
+.mdi-archive-arrow-down-outline { --bb-mdi-icon: url("../icons/mdi/archive-arrow-down-outline.svg"); }
+.mdi-arrow-left { --bb-mdi-icon: url("../icons/mdi/arrow-left.svg"); }
+.mdi-arrow-up { --bb-mdi-icon: url("../icons/mdi/arrow-up.svg"); }
+.mdi-arrow-down { --bb-mdi-icon: url("../icons/mdi/arrow-down.svg"); }
+.mdi-chart-box-outline { --bb-mdi-icon: url("../icons/mdi/chart-box-outline.svg"); }
+.mdi-chart-donut { --bb-mdi-icon: url("../icons/mdi/chart-donut.svg"); }
+.mdi-chart-tree { --bb-mdi-icon: url("../icons/mdi/chart-tree.svg"); }
+.mdi-counter { --bb-mdi-icon: url("../icons/mdi/counter.svg"); }
+.mdi-check { --bb-mdi-icon: url("../icons/mdi/check.svg"); }
+.mdi-check-circle-outline { --bb-mdi-icon: url("../icons/mdi/check-circle-outline.svg"); }
+.mdi-chevron-down { --bb-mdi-icon: url("../icons/mdi/chevron-down.svg"); }
+.mdi-chevron-left { --bb-mdi-icon: url("../icons/mdi/chevron-left.svg"); }
+.mdi-chevron-right { --bb-mdi-icon: url("../icons/mdi/chevron-right.svg"); }
+.mdi-circle-outline { --bb-mdi-icon: url("../icons/mdi/circle-outline.svg"); }
+.mdi-circle-small { --bb-mdi-icon: url("../icons/mdi/circle-small.svg"); }
+.mdi-clock-outline { --bb-mdi-icon: url("../icons/mdi/clock-outline.svg"); }
+.mdi-close { --bb-mdi-icon: url("../icons/mdi/close.svg"); }
+.mdi-close-circle-outline { --bb-mdi-icon: url("../icons/mdi/close-circle-outline.svg"); }
+.mdi-cloud-alert-outline { --bb-mdi-icon: url("../icons/mdi/cloud-alert-outline.svg"); }
+.mdi-cloud-download-outline { --bb-mdi-icon: url("../icons/mdi/cloud-download-outline.svg"); }
+.mdi-cloud-upload-outline { --bb-mdi-icon: url("../icons/mdi/cloud-upload-outline.svg"); }
+.mdi-code-json { --bb-mdi-icon: url("../icons/mdi/code-json.svg"); }
+.mdi-cogs { --bb-mdi-icon: url("../icons/mdi/cogs.svg"); }
+.mdi-content-copy { --bb-mdi-icon: url("../icons/mdi/content-copy.svg"); }
+.mdi-database-off-outline { --bb-mdi-icon: url("../icons/mdi/database-off-outline.svg"); }
+.mdi-database-outline { --bb-mdi-icon: url("../icons/mdi/database-outline.svg"); }
+.mdi-database-search-outline { --bb-mdi-icon: url("../icons/mdi/database-search-outline.svg"); }
+.mdi-delete { --bb-mdi-icon: url("../icons/mdi/delete.svg"); }
+.mdi-delete-outline { --bb-mdi-icon: url("../icons/mdi/delete-outline.svg"); }
+.mdi-dots-horizontal { --bb-mdi-icon: url("../icons/mdi/dots-horizontal.svg"); }
+.mdi-dots-vertical { --bb-mdi-icon: url("../icons/mdi/dots-vertical.svg"); }
+.mdi-download { --bb-mdi-icon: url("../icons/mdi/download.svg"); }
+.mdi-eye-off-outline { --bb-mdi-icon: url("../icons/mdi/eye-off-outline.svg"); }
+.mdi-eye-outline { --bb-mdi-icon: url("../icons/mdi/eye-outline.svg"); }
+.mdi-fast-forward { --bb-mdi-icon: url("../icons/mdi/fast-forward.svg"); }
+.mdi-file { --bb-mdi-icon: url("../icons/mdi/file.svg"); }
+.mdi-file-code-outline { --bb-mdi-icon: url("../icons/mdi/file-code-outline.svg"); }
+.mdi-file-document-outline { --bb-mdi-icon: url("../icons/mdi/file-document-outline.svg"); }
+.mdi-file-excel-outline { --bb-mdi-icon: url("../icons/mdi/file-excel-outline.svg"); }
+.mdi-file-image-outline { --bb-mdi-icon: url("../icons/mdi/file-image-outline.svg"); }
+.mdi-file-music-outline { --bb-mdi-icon: url("../icons/mdi/file-music-outline.svg"); }
+.mdi-file-outline { --bb-mdi-icon: url("../icons/mdi/file-outline.svg"); }
+.mdi-file-pdf-box { --bb-mdi-icon: url("../icons/mdi/file-pdf-box.svg"); }
+.mdi-file-powerpoint-outline { --bb-mdi-icon: url("../icons/mdi/file-powerpoint-outline.svg"); }
+.mdi-file-question-outline { --bb-mdi-icon: url("../icons/mdi/file-question-outline.svg"); }
+.mdi-file-search-outline { --bb-mdi-icon: url("../icons/mdi/file-search-outline.svg"); }
+.mdi-file-table-outline { --bb-mdi-icon: url("../icons/mdi/file-table-outline.svg"); }
+.mdi-file-upload-outline { --bb-mdi-icon: url("../icons/mdi/file-upload-outline.svg"); }
+.mdi-file-video-outline { --bb-mdi-icon: url("../icons/mdi/file-video-outline.svg"); }
+.mdi-file-word-outline { --bb-mdi-icon: url("../icons/mdi/file-word-outline.svg"); }
+.mdi-fit-to-page-outline { --bb-mdi-icon: url("../icons/mdi/fit-to-page-outline.svg"); }
+.mdi-folder { --bb-mdi-icon: url("../icons/mdi/folder.svg"); }
+.mdi-folder-download-outline { --bb-mdi-icon: url("../icons/mdi/folder-download-outline.svg"); }
+.mdi-folder-open-outline { --bb-mdi-icon: url("../icons/mdi/folder-open-outline.svg"); }
+.mdi-folder-upload { --bb-mdi-icon: url("../icons/mdi/folder-upload.svg"); }
+.mdi-folder-upload-outline { --bb-mdi-icon: url("../icons/mdi/folder-upload-outline.svg"); }
+.mdi-folder-zip-outline { --bb-mdi-icon: url("../icons/mdi/folder-zip-outline.svg"); }
+.mdi-format-list-numbered { --bb-mdi-icon: url("../icons/mdi/format-list-numbered.svg"); }
+.mdi-fullscreen { --bb-mdi-icon: url("../icons/mdi/fullscreen.svg"); }
+.mdi-fullscreen-exit { --bb-mdi-icon: url("../icons/mdi/fullscreen-exit.svg"); }
+.mdi-information-outline { --bb-mdi-icon: url("../icons/mdi/information-outline.svg"); }
+.mdi-loading { --bb-mdi-icon: none; }
+.mdi-magnify { --bb-mdi-icon: url("../icons/mdi/magnify.svg"); }
+.mdi-minus { --bb-mdi-icon: url("../icons/mdi/minus.svg"); }
+.mdi-minus-box-outline { --bb-mdi-icon: url("../icons/mdi/minus-box-outline.svg"); }
+.mdi-open-in-new { --bb-mdi-icon: url("../icons/mdi/open-in-new.svg"); }
+.mdi-page-first { --bb-mdi-icon: url("../icons/mdi/page-first.svg"); }
+.mdi-page-last { --bb-mdi-icon: url("../icons/mdi/page-last.svg"); }
+.mdi-pause { --bb-mdi-icon: url("../icons/mdi/pause.svg"); }
+.mdi-pause-circle-outline { --bb-mdi-icon: url("../icons/mdi/pause-circle-outline.svg"); }
+.mdi-pencil-outline { --bb-mdi-icon: url("../icons/mdi/pencil-outline.svg"); }
+.mdi-play { --bb-mdi-icon: url("../icons/mdi/play.svg"); }
+.mdi-playlist-music { --bb-mdi-icon: url("../icons/mdi/playlist-music.svg"); }
+.mdi-plus { --bb-mdi-icon: url("../icons/mdi/plus.svg"); }
+.mdi-plus-box-outline { --bb-mdi-icon: url("../icons/mdi/plus-box-outline.svg"); }
+.mdi-printer { --bb-mdi-icon: url("../icons/mdi/printer.svg"); }
+.mdi-progress-wrench { --bb-mdi-icon: url("../icons/mdi/progress-wrench.svg"); }
+.mdi-refresh { --bb-mdi-icon: url("../icons/mdi/refresh.svg"); }
+.mdi-rename-outline { --bb-mdi-icon: url("../icons/mdi/rename-outline.svg"); }
+.mdi-rewind { --bb-mdi-icon: url("../icons/mdi/rewind.svg"); }
+.mdi-rotate-left { --bb-mdi-icon: url("../icons/mdi/rotate-left.svg"); }
+.mdi-rotate-right { --bb-mdi-icon: url("../icons/mdi/rotate-right.svg"); }
+.mdi-search-web { --bb-mdi-icon: url("../icons/mdi/search-web.svg"); }
+.mdi-shield-key-outline { --bb-mdi-icon: url("../icons/mdi/shield-key-outline.svg"); }
+.mdi-shield-lock-outline { --bb-mdi-icon: url("../icons/mdi/shield-lock-outline.svg"); }
+.mdi-source-commit { --bb-mdi-icon: url("../icons/mdi/source-commit.svg"); }
+.mdi-subdirectory-arrow-right { --bb-mdi-icon: url("../icons/mdi/subdirectory-arrow-right.svg"); }
+.mdi-swap-vertical { --bb-mdi-icon: url("../icons/mdi/swap-vertical.svg"); }
+.mdi-table { --bb-mdi-icon: url("../icons/mdi/table.svg"); }
+.mdi-table-large { --bb-mdi-icon: url("../icons/mdi/table-large.svg"); }
+.mdi-table-row { --bb-mdi-icon: url("../icons/mdi/table-row.svg"); }
+.mdi-tag-multiple-outline { --bb-mdi-icon: url("../icons/mdi/tag-multiple-outline.svg"); }
+.mdi-text-search { --bb-mdi-icon: url("../icons/mdi/text-search.svg"); }
+.mdi-volume-high { --bb-mdi-icon: url("../icons/mdi/volume-high.svg"); }
+.mdi-volume-off { --bb-mdi-icon: url("../icons/mdi/volume-off.svg"); }
+.mdi-zip-box { --bb-mdi-icon: url("../icons/mdi/zip-box.svg"); }
+
+.mdi-18px { font-size: 18px; }
+.mdi-24px { font-size: 24px; }
+.mdi-36px { font-size: 36px; }
+.mdi-48px { font-size: 48px; }
+.mdi-spin { animation: bb-icon-spin 1s linear infinite; }
+.mdi-pulse { animation: bb-icon-spin 1s steps(8) infinite; }
+@keyframes bb-icon-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .mdi-spin,
+  .mdi-pulse { animation-duration: 2s; }
+}
+
+.mdi-unfold-more-horizontal { --bb-mdi-icon: url("../icons/mdi/unfold-more-horizontal.svg"); }

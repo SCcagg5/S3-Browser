@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -164,5 +165,70 @@ func TestSpreadsheetPreviewHasNoCrossRequestOrPersistentCache(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(app.config.DataDir, "spreadsheets")); !os.IsNotExist(err) {
 		t.Fatalf("spreadsheet cache directory exists or cannot be checked: %v", err)
+	}
+}
+
+func spreadsheetPreviewErrorCode(t *testing.T, app *application, path string) (int, string, string) {
+	t.Helper()
+	recorder := httptest.NewRecorder()
+	app.routes().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+	var payload struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode error response: %v; body = %s", err, recorder.Body.String())
+	}
+	return recorder.Code, payload.Error.Code, payload.Error.Message
+}
+
+func TestSpreadsheetPreviewExplainsMismatchedExtension(t *testing.T) {
+	app, _, backend := testApplication(t)
+	contents := []byte("this object is plain text, not an Office package")
+	backend.mu.Lock()
+	backend.objects["tenant/not-really.xlsx"] = memoryObject{data: contents, contentType: "text/plain"}
+	backend.mu.Unlock()
+
+	status, code, message := spreadsheetPreviewErrorCode(t, app, "/api/spreadsheet?instance=rw&key=not-really.xlsx&size="+strconv.Itoa(len(contents)))
+	if status != http.StatusUnprocessableEntity || code != "invalid_workbook_container" {
+		t.Fatalf("status/code = %d/%q, message = %q", status, code, message)
+	}
+	if !strings.Contains(message, "extension says XLSX/XLSM") {
+		t.Fatalf("message = %q", message)
+	}
+}
+
+func TestSpreadsheetPreviewExplainsBinaryXLSRenamedAsXLSX(t *testing.T) {
+	app, _, backend := testApplication(t)
+	contents := append([]byte(nil), binaryExcelCompoundSignature...)
+	contents = append(contents, make([]byte, 64)...)
+	backend.mu.Lock()
+	backend.objects["tenant/binary-xls.xlsx"] = memoryObject{data: contents, contentType: "application/vnd.ms-excel"}
+	backend.mu.Unlock()
+
+	status, code, message := spreadsheetPreviewErrorCode(t, app, "/api/spreadsheet?instance=rw&key=binary-xls.xlsx&size="+strconv.Itoa(len(contents)))
+	if status != http.StatusUnprocessableEntity || code != "unsupported_xls_container" {
+		t.Fatalf("status/code = %d/%q, message = %q", status, code, message)
+	}
+	if !strings.Contains(message, "binary XLS format") {
+		t.Fatalf("message = %q", message)
+	}
+}
+
+func TestSpreadsheetPreviewExplainsCorruptOfficeZIP(t *testing.T) {
+	app, _, backend := testApplication(t)
+	contents := []byte{'P', 'K', 3, 4, 0, 0, 0, 0, 1, 2, 3, 4}
+	backend.mu.Lock()
+	backend.objects["tenant/corrupt.xlsx"] = memoryObject{data: contents, contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}
+	backend.mu.Unlock()
+
+	status, code, message := spreadsheetPreviewErrorCode(t, app, "/api/spreadsheet?instance=rw&key=corrupt.xlsx&size="+strconv.Itoa(len(contents)))
+	if status != http.StatusUnprocessableEntity || code != "invalid_workbook_package" {
+		t.Fatalf("status/code = %d/%q, message = %q", status, code, message)
+	}
+	if !strings.Contains(message, "central directory") {
+		t.Fatalf("message = %q", message)
 	}
 }

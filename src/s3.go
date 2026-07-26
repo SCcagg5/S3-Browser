@@ -23,32 +23,28 @@ type s3Credentials struct {
 }
 
 type s3Backend struct {
-	cfg      storageConfig
+	cfg      bucketConfig
 	endpoint *url.URL
 	client   *http.Client
 	creds    s3Credentials
+	authMode string
+	region   string
 }
 
-func newS3Backend(cfg storageConfig) (*s3Backend, error) {
-	endpoint, err := parseStorageEndpoint("s3", cfg.Endpoint)
-	if err != nil {
-		return nil, err
+func newS3BackendWithAuthentication(cfg bucketConfig, auth *sharedAuthentication) (*s3Backend, error) {
+	if auth == nil || auth.cfg.Provider != "s3" {
+		return nil, fmt.Errorf("bucket %q requires an S3 authentication", cfg.ID)
 	}
-
-	creds := s3Credentials{
-		AccessKeyID:     cfg.AccessKeyID,
-		SecretAccessKey: cfg.SecretAccessKey,
-		SessionToken:    cfg.SessionToken,
+	if auth.cfg.Mode == "access_key" && (auth.s3Creds.AccessKeyID == "" || auth.s3Creds.SecretAccessKey == "") {
+		return nil, fmt.Errorf("S3 credentials are incomplete")
 	}
-	if cfg.Auth == "access_key" && (creds.AccessKeyID == "" || creds.SecretAccessKey == "") {
-		return nil, fmt.Errorf("s3 credentials are incomplete")
-	}
-
 	return &s3Backend{
 		cfg:      cfg,
-		endpoint: endpoint,
-		client:   newStorageHTTPClient(cfg.InsecureSkipVerify),
-		creds:    creds,
+		endpoint: auth.endpoint,
+		client:   auth.client,
+		creds:    auth.s3Creds,
+		authMode: auth.cfg.Mode,
+		region:   auth.cfg.Region,
 	}, nil
 }
 
@@ -134,6 +130,9 @@ func (s *s3Backend) Get(ctx context.Context, key string, requestHeaders http.Hea
 		if value := requestHeaders.Get(name); value != "" {
 			headers.Set(name, value)
 		}
+	}
+	if headers.Get("Range") != "" {
+		headers.Set("Accept-Encoding", "identity")
 	}
 	resp, err := s.do(ctx, http.MethodGet, key, nil, nil, 0, headers)
 	if err != nil {
@@ -393,8 +392,8 @@ func (s *s3Backend) do(
 	if body != nil {
 		req.ContentLength = size
 	}
-	if s.cfg.Auth == "access_key" {
-		if err := signS3Request(req, s.creds, s.cfg.Region, time.Now().UTC()); err != nil {
+	if s.authMode == "access_key" {
+		if err := signS3Request(req, s.creds, s.region, time.Now().UTC()); err != nil {
 			return nil, err
 		}
 	}

@@ -58,7 +58,7 @@ func (a *application) handleDocumentSearch(w http.ResponseWriter, r *http.Reques
 		writeAPIError(w, apiError{Status: http.StatusBadRequest, Code: "search_query_too_long", Message: fmt.Sprintf("search queries are limited to %d bytes", maxSearchQueryBytes)})
 		return
 	}
-	response, err := instance.backend.Get(r.Context(), instance.fullKey(key), nil)
+	response, err := instance.Get(r.Context(), instance.fullKey(key), nil)
 	if err != nil {
 		writeAPIError(w, err)
 		return

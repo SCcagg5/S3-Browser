@@ -60,7 +60,7 @@ docker run \
 
 attempt=0
 while [ "$attempt" -lt 30 ]; do
-  if docker exec "$CONTAINER" /s3-browser healthcheck --url http://127.0.0.1:8080/healthz >/dev/null 2>&1; then
+  if docker exec "$CONTAINER" /s3-browser healthcheck -c /config/config.hcl >/dev/null 2>&1; then
     echo "scratch runtime healthcheck passed"
     exit 0
   fi

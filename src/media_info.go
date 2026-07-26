@@ -80,7 +80,7 @@ func (a *application) handleMediaInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !extensionMayContainInspectableMetadata(extension) && !contentTypeMayContainInspectableMetadata(contentTypeHint) {
-		head, headErr := instance.backend.Head(r.Context(), instance.fullKey(key))
+		head, headErr := instance.Head(r.Context(), instance.fullKey(key))
 		if headErr != nil {
 			writeAPIError(w, headErr)
 			return
@@ -110,8 +110,8 @@ func (a *application) handleMediaInfo(w http.ResponseWriter, r *http.Request) {
 		// hiding them behind HEAD could silently turn later preview reads into full,
 		// unexpectedly expensive object downloads.
 		var upstream *upstreamError
-		if source.requests == 0 && errors.As(inspectErr, &upstream) && upstream.StatusCode == http.StatusRequestedRangeNotSatisfiable {
-			head, headErr := instance.backend.Head(r.Context(), instance.fullKey(key))
+		if source.RequestCount() == 0 && errors.As(inspectErr, &upstream) && upstream.StatusCode == http.StatusRequestedRangeNotSatisfiable {
+			head, headErr := instance.Head(r.Context(), instance.fullKey(key))
 			if headErr == nil {
 				if head.Body != nil {
 					_ = head.Body.Close()
@@ -125,8 +125,8 @@ func (a *application) handleMediaInfo(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, inspectErr)
 		return
 	}
-	if source.headers == nil {
-		head, headErr := instance.backend.Head(r.Context(), instance.fullKey(key))
+	if source.Headers() == nil {
+		head, headErr := instance.Head(r.Context(), instance.fullKey(key))
 		if headErr != nil {
 			writeAPIError(w, headErr)
 			return
@@ -136,7 +136,7 @@ func (a *application) handleMediaInfo(w http.ResponseWriter, r *http.Request) {
 		}
 		populateMediaStorageFields(&response, head.Header, 0)
 	} else {
-		populateMediaStorageFields(&response, source.headers, source.size)
+		populateMediaStorageFields(&response, source.Headers(), source.Size())
 	}
 	response.Container = mediaContainer(extension, response.MIME)
 	response.Width = metadata.Width

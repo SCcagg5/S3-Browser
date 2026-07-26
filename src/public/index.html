@@ -7,12 +7,18 @@
   <link rel="icon" type="image/svg+xml" href="favicon.svg?v=2" />
   <title>Object Storage Browser</title>
 
-  <link rel="stylesheet" href="assets/vendor/mdi/7.4.47/css/materialdesignicons.min.css" />
+  <link rel="stylesheet" href="assets/css/icons.css" />
   <link rel="stylesheet" href="assets/vendor/github-markdown-css/5/github-markdown-light.min.css" />
   <link rel="stylesheet" href="assets/vendor/highlightjs/11/styles/github.min.css" />
   <link rel="stylesheet" href="assets/vendor/buefy/1.0.1/buefy.min.css" />
+  <link rel="stylesheet" href="assets/css/tokens.css" />
+  <link rel="stylesheet" href="assets/css/base.css" />
   <link rel="stylesheet" href="assets/css/style.css" />
   <link rel="stylesheet" href="assets/css/ui.css" />
+  <link rel="stylesheet" href="assets/css/components.css" />
+  <link rel="stylesheet" href="assets/css/data-grid.css" />
+  <link rel="stylesheet" href="assets/css/viewers.css" />
+  <link rel="stylesheet" href="assets/css/interaction.css" />
 </head>
 <body>
   <div id="root" v-cloak>
@@ -104,7 +110,7 @@
                 :mobile-modal="false"
                 aria-role="list">
                 <template #trigger>
-                  <button type="button" class="storage-switcher-trigger" aria-haspopup="listbox" :title="permissionSummaryTitle">
+                  <button type="button" class="storage-switcher-trigger has-bb-chevron" aria-haspopup="listbox" :title="permissionSummaryTitle">
                     <i class="mdi mdi-database-outline storage-switcher-icon"></i>
                     <span class="storage-switcher-copy">
                       <span class="storage-switcher-title-row">
@@ -122,15 +128,14 @@
                             v-for="item in permissionStates"
                             :key="item.key"
                             class="storage-permission-dot"
-                            :class="item.state.allowed ? 'is-allowed' : 'is-denied'"
-                            :title="`${item.label}: ${item.state.allowed ? 'allowed' : 'denied'}`">
+                            :class="capabilityClass(item.state)"
+                            :title="`${item.label}: ${capabilityLabel(item.state)}`">
                             <i class="mdi" :class="`mdi-${item.icon}`"></i>
                           </span>
                         </span>
                       </span>
                       <small>{{ currentInstance.bucket }} · {{ currentInstance.provider.toUpperCase() }}</small>
                     </span>
-                    <i class="mdi mdi-chevron-down storage-switcher-chevron"></i>
                   </button>
                 </template>
 
@@ -150,8 +155,8 @@
                           v-for="item in permissionStatesFor(instance)"
                           :key="item.key"
                           class="storage-permission-dot"
-                          :class="item.state.allowed ? 'is-allowed' : 'is-denied'"
-                          :title="`${item.label}: ${item.state.allowed ? 'allowed' : 'denied'}`">
+                          :class="capabilityClass(item.state)"
+                          :title="`${item.label}: ${capabilityLabel(item.state)}`">
                           <i class="mdi" :class="`mdi-${item.icon}`"></i>
                         </span>
                       </span>
@@ -180,8 +185,8 @@
                             v-for="item in permissionStates"
                             :key="item.key"
                             class="storage-permission-dot"
-                            :class="item.state.allowed ? 'is-allowed' : 'is-denied'"
-                            :title="`${item.label}: ${item.state.allowed ? 'allowed' : 'denied'}`">
+                            :class="capabilityClass(item.state)"
+                            :title="`${item.label}: ${capabilityLabel(item.state)}`">
                             <i class="mdi" :class="`mdi-${item.icon}`"></i>
                           </span>
                         </span>
@@ -234,9 +239,8 @@
 
             <b-dropdown position="is-bottom-left" :mobile-modal="false" append-to-body aria-role="menu">
               <template #trigger>
-                <b-button type="is-light" icon-pack="mdi" icon-left="cogs">
+                <b-button type="is-light" class="has-bb-chevron" icon-pack="mdi" icon-left="cogs">
                   Actions
-                  <i class="mdi mdi-chevron-down toolbar-chevron"></i>
                 </b-button>
               </template>
               <b-dropdown-item :disabled="!canDownloadAll" @click="canDownloadAll && downloadAllFiles()">
@@ -247,17 +251,12 @@
                 <i class="mdi mdi-chart-box-outline"></i>
                 <span>{{ currentInsightsLabel }}</span>
               </b-dropdown-item>
-              <b-dropdown-item @click="showJobs">
-                <i class="mdi mdi-progress-wrench"></i>
-                <span>Background jobs</span>
-              </b-dropdown-item>
             </b-dropdown>
 
             <b-dropdown v-if="canWrite" position="is-bottom-left" :mobile-modal="false" append-to-body aria-role="menu">
               <template #trigger>
-                <b-button type="is-primary" icon-pack="mdi" icon-left="plus">
+                <b-button type="is-primary" class="has-bb-chevron" icon-pack="mdi" icon-left="plus">
                   New
-                  <i class="mdi mdi-chevron-down toolbar-chevron"></i>
                 </b-button>
               </template>
               <b-dropdown-item @click="triggerUpload">
@@ -306,7 +305,7 @@
         </div>
 
         <div v-else class="card browser-card">
-          <div class="card-content browser-card-head">
+          <div v-if="hasRows" class="card-content browser-card-head">
             <div class="page-size-control">
               <b-select v-model="pageSize" size="is-small" :disabled="isRefreshing">
                 <option :value="50">50</option>
@@ -321,9 +320,11 @@
                 type="is-light"
                 icon-pack="mdi"
                 icon-left="chevron-left"
-                class="icon-btn-disc"
+                :class="['icon-btn-disc', { 'is-pagination-placeholder': !hasPagination }]"
                 title="Previous page"
-                :disabled="previousContinuationTokens.length === 0 || isRefreshing"
+                :aria-hidden="!hasPagination ? 'true' : 'false'"
+                :tabindex="hasPagination ? 0 : -1"
+                :disabled="!hasPreviousPage || isRefreshing"
                 @click="previousPage">
               </b-button>
               <span>Items {{ rangeStart }}–{{ rangeEnd }}</span>
@@ -331,45 +332,100 @@
                 type="is-light"
                 icon-pack="mdi"
                 icon-right="chevron-right"
-                class="icon-btn-disc"
+                :class="['icon-btn-disc', { 'is-pagination-placeholder': !hasPagination }]"
                 title="Next page"
-                :disabled="!nextContinuationToken || isRefreshing"
+                :aria-hidden="!hasPagination ? 'true' : 'false'"
+                :tabindex="hasPagination ? 0 : -1"
+                :disabled="!hasNextPage || isRefreshing"
                 @click="nextPage">
               </b-button>
             </div>
           </div>
 
           <div class="card-content table-card-content">
-            <div class="table-wrap">
+            <div v-if="hasRows || isRefreshing" class="table-wrap">
               <b-table
-                :data="pathContentTableData"
+                :data="visiblePathContentTableData"
                 :hoverable="true"
                 :striped="false"
                 :loading="isRefreshing"
                 :mobile-cards="true"
                 :sortable="false">
 
-                <b-table-column v-slot="props" field="name" label="Name" cell-class="name-column">
-                  <div v-if="props.row.type === 'content'" class="object-name-cell">
-                    <b-icon pack="mdi" :icon="fileRowIcon(props.row)" class="name-column-icon is-smmd"></b-icon>
-                    <button type="button" class="object-link" :title="props.row.name" @click="openPreview(props.row)">{{ props.row.name }}</button>
-                  </div>
-                  <div v-else class="object-name-cell">
-                    <b-icon pack="mdi" icon="folder" class="name-column-icon is-smmd"></b-icon>
-                    <button type="button" class="object-link" :title="props.row.name" @click="goToPrefix(props.row.prefix)">{{ props.row.name }}</button>
-                  </div>
+                <b-table-column field="name" label="Name" cell-class="name-column" header-class="name-column-header">
+                  <template #header>
+                    <button
+                      type="button"
+                      class="navigation-sort-button"
+                      :class="{ 'is-sortable': navigationSortAvailable, 'is-active': navigationSortField === 'name' }"
+                      :disabled="!navigationSortAvailable"
+                      :aria-label="navigationSortAvailable ? 'Sort by name' : 'Name'"
+                      @click="toggleNavigationSort('name')">
+                      <span>Name</span>
+                      <span class="navigation-sort-icon" :class="{ 'is-placeholder': !navigationSortAvailable }" aria-hidden="true">
+                        <i v-if="navigationSortIcon('name')" class="mdi" :class="`mdi-${navigationSortIcon('name')}`"></i>
+                      </span>
+                    </button>
+                  </template>
+                  <template #default="props">
+                    <div v-if="props.row.type === 'content'" class="object-name-cell">
+                      <b-icon pack="mdi" :icon="fileRowIcon(props.row)" class="name-column-icon is-smmd"></b-icon>
+                      <button type="button" class="object-link" :title="props.row.name" @click="openPreview(props.row)">{{ props.row.name }}</button>
+                    </div>
+                    <div v-else class="object-name-cell">
+                      <b-icon pack="mdi" icon="folder" class="name-column-icon is-smmd"></b-icon>
+                      <button type="button" class="object-link" :title="props.row.name" @click="goToPrefix(props.row.prefix)">{{ props.row.name }}</button>
+                    </div>
+                  </template>
                 </b-table-column>
 
-                <b-table-column v-slot="props" field="size" label="Size" width="130">
-                  <span v-if="props.row.type === 'content'">{{ formatBytes(props.row.size) }}</span>
-                  <span v-else>—</span>
+                <b-table-column field="size" label="Size" cell-class="size-column" header-class="size-column-header">
+                  <template #header>
+                    <button
+                      type="button"
+                      class="navigation-sort-button is-numeric"
+                      :class="{ 'is-sortable': navigationSortAvailable, 'is-active': navigationSortField === 'size' }"
+                      :disabled="!navigationSortAvailable"
+                      :aria-label="navigationSortAvailable ? 'Sort by size' : 'Size'"
+                      @click="toggleNavigationSort('size')">
+                      <span>Size</span>
+                      <span class="navigation-sort-icon" :class="{ 'is-placeholder': !navigationSortAvailable }" aria-hidden="true">
+                        <i v-if="navigationSortIcon('size')" class="mdi" :class="`mdi-${navigationSortIcon('size')}`"></i>
+                      </span>
+                    </button>
+                  </template>
+                  <template #default="props">
+                    <span v-if="props.row.type === 'content'" class="object-size" :title="formatBytes(props.row.size)">
+                      <span class="object-size-value">{{ formatByteParts(props.row.size).value }}</span>
+                      <span class="object-size-unit">{{ formatByteParts(props.row.size).unit }}</span>
+                    </span>
+                    <span v-else class="object-size object-size-empty" aria-hidden="true">
+                      <span class="object-size-value">-</span><span class="object-size-unit"></span>
+                    </span>
+                  </template>
                 </b-table-column>
 
-                <b-table-column v-slot="props" field="dateModified" label="Last modified" width="170">
-                  <span v-if="props.row.dateModified" :title="formatDateTime_utc(props.row.dateModified)">
-                    {{ formatDateTime_relative(props.row.dateModified) }}
-                  </span>
-                  <span v-else>—</span>
+                <b-table-column field="dateModified" label="Last modified" cell-class="modified-column" header-class="modified-column-header">
+                  <template #header>
+                    <button
+                      type="button"
+                      class="navigation-sort-button is-numeric"
+                      :class="{ 'is-sortable': navigationSortAvailable, 'is-active': navigationSortField === 'dateModified' }"
+                      :disabled="!navigationSortAvailable"
+                      :aria-label="navigationSortAvailable ? 'Sort by last modified' : 'Last modified'"
+                      @click="toggleNavigationSort('dateModified')">
+                      <span>Last modified</span>
+                      <span class="navigation-sort-icon" :class="{ 'is-placeholder': !navigationSortAvailable }" aria-hidden="true">
+                        <i v-if="navigationSortIcon('dateModified')" class="mdi" :class="`mdi-${navigationSortIcon('dateModified')}`"></i>
+                      </span>
+                    </button>
+                  </template>
+                  <template #default="props">
+                    <span v-if="props.row.dateModified" class="object-modified" :title="formatDateTime_utc(props.row.dateModified)">
+                      {{ formatDateTime_relative(props.row.dateModified) }}
+                    </span>
+                    <span v-else class="object-modified object-modified-empty">-</span>
+                  </template>
                 </b-table-column>
 
                 <b-table-column v-slot="props" field="__actions" label="" width="46" cell-class="is-right" header-class="is-right">
@@ -414,6 +470,10 @@
                 </template>
               </b-table>
             </div>
+            <div v-else class="table-empty browser-empty-folder">
+              <i class="mdi mdi-folder-open-outline"></i>
+              <span>This folder is empty.</span>
+            </div>
           </div>
         </div>
       </main>
@@ -421,13 +481,12 @@
   </div>
 
   <script src="assets/vendor/vue/3.5.18/vue.global.prod.js"></script>
-  <script>window.process = { env: { NODE_ENV: 'production' } };</script>
   <script src="assets/vendor/buefy/1.0.1/buefy.min.js"></script>
-  <script src="assets/vendor/fflate/0.8.2/index.min.js"></script>
   <script src="assets/vendor/highlightjs/11/highlight.min.js"></script>
   <script src="assets/vendor/marked/12.0.2/marked.min.js"></script>
 
   <script src="assets/js/common/detect.js"></script>
+  <script src="assets/js/common/runtime.js"></script>
   <script src="assets/js/common/api.js"></script>
   <script src="assets/js/common/ui.js"></script>
   <script src="assets/js/common/actions.js"></script>

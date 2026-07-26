@@ -13,9 +13,7 @@ import (
 	"log"
 	"mime"
 	"net/http"
-	"net/url"
 	"path"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -26,13 +24,14 @@ import (
 var embeddedPublic embed.FS
 
 type application struct {
-	config    appConfig
-	instances map[string]*storageInstance
-	order     []string
-	publicFS  fs.FS
-	jobs      *jobManager
-	uploads   *uploadManager
-	sqlite    *sqliteSessionManager
+	config          appConfig
+	authentications map[string]*sharedAuthentication
+	instances       map[string]*storageInstance
+	order           []string
+	publicFS        fs.FS
+	jobs            *jobManager
+	uploads         *uploadManager
+	sqlite          *sqliteSessionManager
 }
 
 func newApplication(cfg appConfig) (*application, error) {
@@ -40,36 +39,55 @@ func newApplication(cfg appConfig) (*application, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open embedded frontend: %w", err)
 	}
+	concurrency := newStorageConcurrency(cfg.Runtime.MaxConcurrentStorageRequests)
 	app := &application{
-		config:    cfg,
-		instances: make(map[string]*storageInstance, len(cfg.Storages)),
-		publicFS:  publicFS,
+		config:          cfg,
+		authentications: make(map[string]*sharedAuthentication, len(cfg.Authentications)),
+		instances:       make(map[string]*storageInstance, len(cfg.Buckets)),
+		publicFS:        publicFS,
 	}
-	for _, storageCfg := range cfg.Storages {
-		instance, err := newStorageInstance(storageCfg)
+	for _, authCfg := range cfg.Authentications {
+		auth, err := newSharedAuthentication(authCfg)
 		if err != nil {
-			return nil, fmt.Errorf("initialize storage %q: %w", storageCfg.ID, err)
+			app.closeAuthentications()
+			return nil, fmt.Errorf("initialize auth %q: %w", authCfg.ID, err)
 		}
-		app.instances[storageCfg.ID] = instance
-		app.order = append(app.order, storageCfg.ID)
+		app.authentications[authCfg.ID] = auth
 	}
-	if cfg.DataDir == "" {
-		cfg.DataDir = filepath.Join(cfg.SourceDir, ".s3-browser-data")
-		app.config.DataDir = cfg.DataDir
+	for _, bucketCfg := range cfg.Buckets {
+		auth := app.authentications[bucketCfg.AuthID]
+		instance, err := newStorageInstance(bucketCfg, auth, cfg.Runtime, concurrency)
+		if err != nil {
+			app.closeAuthentications()
+			return nil, fmt.Errorf("initialize bucket %q: %w", bucketCfg.ID, err)
+		}
+		app.instances[bucketCfg.ID] = instance
+		app.order = append(app.order, bucketCfg.ID)
 	}
-	jobs, err := newJobManager(app, cfg.DataDir, cfg.JobHistoryLimit)
+	jobs, err := newJobManager(app, cfg.DataDir, cfg.JobHistoryLimit, cfg.Runtime.persistent())
 	if err != nil {
+		app.closeAuthentications()
 		return nil, err
 	}
 	app.jobs = jobs
-	uploads, err := newUploadManager(app, cfg.DataDir)
+	uploads, err := newUploadManager(app, cfg.DataDir, cfg.Runtime.persistent())
 	if err != nil {
 		jobs.close()
+		app.closeAuthentications()
 		return nil, err
 	}
 	app.uploads = uploads
 	app.sqlite = newSQLiteSessionManager(app)
 	return app, nil
+}
+
+func (a *application) closeAuthentications() {
+	if a == nil {
+		return
+	}
+	for _, auth := range a.authentications {
+		auth.close()
+	}
 }
 
 func (a *application) close() {
@@ -82,6 +100,7 @@ func (a *application) close() {
 	if a.jobs != nil {
 		a.jobs.close()
 	}
+	a.closeAuthentications()
 }
 
 func (a *application) routes() http.Handler {
@@ -91,16 +110,19 @@ func (a *application) routes() http.Handler {
 	mux.HandleFunc("/api/permissions/refresh", a.handlePermissionRefresh)
 	mux.HandleFunc("/api/list", a.handleList)
 	mux.HandleFunc("/api/stats", a.handleStats)
+	mux.HandleFunc("/api/archive", a.handleArchive)
 	mux.HandleFunc("/api/copy", a.handleCopy)
 	mux.HandleFunc("/api/rename", a.handleRename)
 	mux.HandleFunc("/api/delete-prefix", a.handleDeletePrefix)
-	mux.HandleFunc("/api/jobs", a.handleJobs)
+	mux.HandleFunc("/api/jobs", http.NotFound)
 	mux.HandleFunc("/api/jobs/", a.handleJobs)
 	mux.HandleFunc("/api/uploads", a.handleUploads)
 	mux.HandleFunc("/api/uploads/", a.handleUploads)
 	mux.HandleFunc("/api/spreadsheet", a.handleSpreadsheet)
 	mux.HandleFunc("/api/delimited", a.handleDelimitedPage)
 	mux.HandleFunc("/api/document-count", a.handleDocumentCount)
+	mux.HandleFunc("/api/document/word", a.handleWordPreview)
+	mux.HandleFunc("/api/parquet", a.handleParquetPreview)
 	mux.HandleFunc("/api/sqlite/sessions", a.handleSQLiteSessions)
 	mux.HandleFunc("/api/sqlite/sessions/", a.handleSQLiteSessions)
 	mux.HandleFunc("/api/json/raw", a.handleJSONRaw)
@@ -109,20 +131,23 @@ func (a *application) routes() http.Handler {
 	mux.HandleFunc("/api/json/tree", a.handleJSONTree)
 	mux.HandleFunc("/api/search", a.handleDocumentSearch)
 	mux.HandleFunc("/api/media-info", a.handleMediaInfo)
+	mux.HandleFunc("/api/structured-preview", a.handleStructuredPreview)
+	mux.HandleFunc("/api/archive-preview", a.handleArchivePreview)
 	mux.HandleFunc("/api/image-preview", a.handleImagePreview)
 	mux.HandleFunc("/healthz", a.handleHealth)
+	mux.HandleFunc("/open/", a.handleOpenOriginal)
 	mux.Handle("/", secureStaticHandler(a.publicFS))
 	router := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// net/http.ServeMux canonicalizes dot segments and repeated slashes. S3
-		// and GCS object keys are opaque, so route the object gateway before the
-		// mux to preserve the exact escaped key supplied by the client.
-		if r.URL.Path == "/s3" || strings.HasPrefix(r.URL.Path, "/s3/") {
+		// Object keys are opaque. Route the gateway before ServeMux so escaped
+		// key bytes are not canonicalized as URL path segments.
+		if r.URL.Path == "/s3" {
 			a.handleObjectGateway(w, r)
 			return
 		}
 		mux.ServeHTTP(w, r)
 	})
-	return requestLogMiddleware(securityHeadersMiddleware(router))
+	internal := requestLogMiddleware(a.config.Runtime.LogMode, requestBudgetMiddleware(a.config.Runtime, sameOriginMutationMiddleware(router)))
+	return securityHeadersMiddleware(internal)
 }
 
 func (a *application) handleInstances(w http.ResponseWriter, r *http.Request) {
@@ -138,6 +163,7 @@ func (a *application) handleInstances(w http.ResponseWriter, r *http.Request) {
 		"default":   a.order[0],
 		"instances": instances,
 		"build":     currentBuildInfo(),
+		"runtime":   publicRuntimeInfo(a.config.Runtime),
 	})
 }
 
@@ -187,6 +213,44 @@ type listResponseJSON struct {
 	Items                 []listItemJSON `json:"items"`
 	NextContinuationToken string         `json:"nextContinuationToken,omitempty"`
 	IsTruncated           bool           `json:"isTruncated"`
+	ScanComplete          bool           `json:"scanComplete"`
+	SortAvailable         bool           `json:"sortAvailable"`
+}
+
+const providerListPageSize = 1000
+
+func scanListPages(ctx context.Context, instance *storageInstance, options listOptions, maxPages int) (listPage, bool, error) {
+	if instance == nil {
+		return listPage{}, false, fmt.Errorf("storage instance is nil")
+	}
+	if maxPages < 0 {
+		return listPage{}, false, fmt.Errorf("max scan pages cannot be negative")
+	}
+	aggregated := listPage{}
+	pageToken := options.PageToken
+	for pageNumber := 0; ; pageNumber++ {
+		options.MaxResults = providerListPageSize
+		options.PageToken = pageToken
+		page, err := instance.List(ctx, options)
+		if err != nil {
+			return listPage{}, false, err
+		}
+		aggregated.Objects = append(aggregated.Objects, page.Objects...)
+		aggregated.Prefixes = append(aggregated.Prefixes, page.Prefixes...)
+		next := page.NextPageToken
+		if next == "" {
+			aggregated.NextPageToken = ""
+			return aggregated, true, nil
+		}
+		if next == pageToken {
+			return listPage{}, false, fmt.Errorf("provider returned the same continuation token twice")
+		}
+		aggregated.NextPageToken = next
+		if maxPages > 0 && pageNumber+1 >= maxPages {
+			return aggregated, false, nil
+		}
+		pageToken = next
+	}
 }
 
 func (a *application) handleList(w http.ResponseWriter, r *http.Request) {
@@ -212,13 +276,12 @@ func (a *application) handleList(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, apiError{Status: http.StatusBadRequest, Code: "invalid_delimiter", Message: "delimiter must be empty or /"})
 		return
 	}
-	maxResults := parseBoundedInt(r.URL.Query().Get("max"), 50, 1, 1000)
-	page, err := instance.backend.List(r.Context(), listOptions{
-		Prefix:     instance.fullKey(prefix),
-		Delimiter:  delimiter,
-		MaxResults: maxResults,
-		PageToken:  r.URL.Query().Get("continuationToken"),
-	})
+	pageToken := r.URL.Query().Get("continuationToken")
+	page, scanComplete, err := scanListPages(r.Context(), instance, listOptions{
+		Prefix:    instance.fullKey(prefix),
+		Delimiter: delimiter,
+		PageToken: pageToken,
+	}, instance.cfg.MaxScanPages)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -289,6 +352,8 @@ func (a *application) handleList(w http.ResponseWriter, r *http.Request) {
 		Items:                 items,
 		NextContinuationToken: page.NextPageToken,
 		IsTruncated:           page.NextPageToken != "",
+		ScanComplete:          scanComplete,
+		SortAvailable:         pageToken == "" && scanComplete,
 	}
 	if r.Method == http.MethodHead {
 		w.WriteHeader(http.StatusOK)
@@ -316,17 +381,21 @@ type statsEntry struct {
 }
 
 type statsResponse struct {
-	Instance      string               `json:"instance"`
-	LayoutVersion int                  `json:"layoutVersion,omitempty"`
-	Prefix        string               `json:"prefix"`
-	Count         int64                `json:"count"`
-	TotalBytes    int64                `json:"totalBytes"`
-	TookMS        int64                `json:"tookMs"`
-	ByType        map[string]aggregate `json:"byType"`
-	ByFolder      map[string]aggregate `json:"byFolder"`
-	Largest       []statsEntry         `json:"largest,omitempty"`
-	Newest        *time.Time           `json:"newest,omitempty"`
-	Oldest        *time.Time           `json:"oldest,omitempty"`
+	Instance                string               `json:"instance"`
+	LayoutVersion           int                  `json:"layoutVersion,omitempty"`
+	Prefix                  string               `json:"prefix"`
+	Count                   int64                `json:"count"`
+	TotalBytes              int64                `json:"totalBytes"`
+	TookMS                  int64                `json:"tookMs"`
+	ByType                  map[string]aggregate `json:"byType"`
+	ByFolder                map[string]aggregate `json:"byFolder"`
+	FolderLimit             int                  `json:"folderLimit,omitempty"`
+	FoldersTruncated        bool                 `json:"foldersTruncated,omitempty"`
+	FolderAggregatesOmitted int64                `json:"folderAggregatesOmitted,omitempty"`
+	Largest                 []statsEntry         `json:"largest,omitempty"`
+	Recent                  []statsEntry         `json:"recent,omitempty"`
+	Newest                  *time.Time           `json:"newest,omitempty"`
+	Oldest                  *time.Time           `json:"oldest,omitempty"`
 }
 
 func (a *application) handleStats(w http.ResponseWriter, r *http.Request) {
@@ -344,13 +413,24 @@ func (a *application) handleStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	prefix := normalizePrefix(cleanRelativeKey(r.URL.Query().Get("prefix")))
-	job, err := a.jobs.create(persistentJob{
-		Type:     jobTypeStatsPrefix,
-		Instance: instance.cfg.ID,
-		Prefix:   prefix,
-	})
-	if err != nil {
-		writeAPIError(w, err)
+	job, found := a.jobs.reusableStatsJob(instance.cfg.ID, prefix, time.Now().UTC())
+	if !found {
+		job, err = a.jobs.create(persistentJob{
+			Type:     jobTypeStatsPrefix,
+			Instance: instance.cfg.ID,
+			Prefix:   prefix,
+		})
+		if err != nil {
+			writeAPIError(w, err)
+			return
+		}
+	}
+	if job.Status == jobStatusCompleted && job.Stats != nil {
+		writeJSON(w, http.StatusOK, job.public())
+		return
+	}
+	if finished, ok := a.jobs.waitForTerminal(r.Context(), job.ID, statsInlineWait); ok {
+		writeJSON(w, http.StatusOK, finished.public())
 		return
 	}
 	writeJSON(w, http.StatusAccepted, job.public())
@@ -509,11 +589,11 @@ func copyOrMove(ctx context.Context, instance *storageInstance, source, target s
 	}
 
 	if !isPrefix {
-		if err := instance.backend.Copy(ctx, instance.fullKey(source), instance.fullKey(target)); err != nil {
+		if err := instance.Copy(ctx, instance.fullKey(source), instance.fullKey(target)); err != nil {
 			return 0, err
 		}
 		if move {
-			if err := instance.backend.Delete(ctx, instance.fullKey(source)); err != nil {
+			if err := instance.Delete(ctx, instance.fullKey(source)); err != nil {
 				return 0, fmt.Errorf("copy succeeded but source deletion failed: %w", err)
 			}
 		}
@@ -531,7 +611,7 @@ func copyOrMove(ctx context.Context, instance *storageInstance, source, target s
 	for _, key := range keys {
 		relativeSuffix := strings.TrimPrefix(key, source)
 		destination := target + relativeSuffix
-		if err := instance.backend.Copy(ctx, instance.fullKey(key), instance.fullKey(destination)); err != nil {
+		if err := instance.Copy(ctx, instance.fullKey(key), instance.fullKey(destination)); err != nil {
 			return copied, fmt.Errorf("copy %q to %q after %d object(s): %w", key, destination, copied, err)
 		}
 		copied++
@@ -539,7 +619,7 @@ func copyOrMove(ctx context.Context, instance *storageInstance, source, target s
 	if move {
 		deleted := 0
 		for _, key := range keys {
-			if err := instance.backend.Delete(ctx, instance.fullKey(key)); err != nil {
+			if err := instance.Delete(ctx, instance.fullKey(key)); err != nil {
 				return copied, fmt.Errorf("all copies succeeded but deletion of %q failed after %d object(s): %w", key, deleted, err)
 			}
 			deleted++
@@ -560,7 +640,7 @@ func collectObjectKeys(ctx context.Context, instance *storageInstance, prefix st
 func forEachObject(ctx context.Context, instance *storageInstance, prefix string, fn func(objectInfo, string) error) error {
 	var pageToken string
 	for {
-		page, err := instance.backend.List(ctx, listOptions{
+		page, err := instance.List(ctx, listOptions{
 			Prefix:     instance.fullKey(prefix),
 			MaxResults: 1000,
 			PageToken:  pageToken,
@@ -587,6 +667,112 @@ func forEachObject(ctx context.Context, instance *storageInstance, prefix string
 	}
 }
 
+func (a *application) handleOpenOriginal(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		methodNotAllowed(w, http.MethodGet, http.MethodHead)
+		return
+	}
+	instance, err := a.instanceFromRequest(r, "")
+	if err != nil {
+		writeGatewayError(w, err)
+		return
+	}
+	if err := requirePermission(instance, permissionRead); err != nil {
+		writeGatewayError(w, err)
+		return
+	}
+	key := cleanRelativeKey(r.URL.Query().Get("key"))
+	if key == "" {
+		writeGatewayError(w, apiError{Status: http.StatusBadRequest, Code: "invalid_key", Message: "object key cannot be empty"})
+		return
+	}
+	fullKey := instance.fullKey(key)
+	filename := path.Base(key)
+	if filename == "." || filename == "/" || filename == "" {
+		filename = "download"
+	}
+	if r.Method == http.MethodHead {
+		response, err := instance.Head(r.Context(), fullKey)
+		if err != nil {
+			writeGatewayError(w, err)
+			return
+		}
+		if response.Body != nil {
+			defer response.Body.Close()
+		}
+		copyObjectHeaders(w.Header(), response.Header)
+		applyOpenOriginalHeaders(w.Header(), key, filename)
+		applyObjectSafetyHeaders(w.Header())
+		w.WriteHeader(response.StatusCode)
+		return
+	}
+	response, err := instance.Get(r.Context(), fullKey, r.Header)
+	if err != nil {
+		writeGatewayError(w, err)
+		return
+	}
+	defer response.Body.Close()
+	copyObjectHeaders(w.Header(), response.Header)
+	applyOpenOriginalHeaders(w.Header(), key, filename)
+	applyObjectSafetyHeaders(w.Header())
+	w.WriteHeader(response.StatusCode)
+	_, _ = io.Copy(w, response.Body)
+}
+
+func applyOpenOriginalHeaders(headers http.Header, key, filename string) {
+	contentType := strings.TrimSpace(headers.Get("Content-Type"))
+	if isGenericObjectContentType(contentType) {
+		if inferred := previewContentType(key); inferred != "" {
+			contentType = inferred
+			headers.Set("Content-Type", inferred)
+		}
+	}
+	disposition := "attachment"
+	if browserInlineContent(key, contentType) {
+		disposition = "inline"
+	}
+	if value := mime.FormatMediaType(disposition, map[string]string{"filename": filename}); value != "" {
+		headers.Set("Content-Disposition", value)
+	} else {
+		headers.Set("Content-Disposition", disposition)
+	}
+	headers.Set("Accept-Ranges", "bytes")
+}
+
+func browserInlineContent(key, contentType string) bool {
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		mediaType = strings.TrimSpace(strings.SplitN(contentType, ";", 2)[0])
+	}
+	mediaType = strings.ToLower(mediaType)
+	extension := strings.ToLower(path.Ext(key))
+
+	// Only advertise inline rendering for formats that current browsers can
+	// commonly open without a plugin. A provider-supplied image/audio/video MIME
+	// alone is not sufficient: unsupported codecs such as MKV, AVI or WMA must
+	// download with the real object filename instead of opening as an object
+	// named after the gateway route.
+	inlineExtensions := map[string]struct{}{
+		".pdf": {}, ".txt": {}, ".log": {}, ".css": {}, ".json": {}, ".xml": {}, ".html": {}, ".htm": {},
+		".png": {}, ".jpg": {}, ".jpeg": {}, ".gif": {}, ".webp": {}, ".avif": {}, ".bmp": {}, ".ico": {}, ".svg": {},
+		".mp3": {}, ".m4a": {}, ".aac": {}, ".flac": {}, ".wav": {}, ".ogg": {}, ".oga": {}, ".opus": {},
+		".mp4": {}, ".m4v": {}, ".mov": {}, ".webm": {}, ".ogv": {},
+	}
+	if _, ok := inlineExtensions[extension]; ok {
+		return true
+	}
+
+	switch mediaType {
+	case "application/pdf", "text/plain", "text/css", "text/html", "application/json", "application/xml", "text/xml",
+		"image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "image/bmp", "image/x-icon", "image/vnd.microsoft.icon", "image/svg+xml",
+		"audio/mpeg", "audio/mp4", "audio/aac", "audio/flac", "audio/wav", "audio/x-wav", "audio/ogg", "audio/opus",
+		"video/mp4", "video/quicktime", "video/webm", "video/ogg":
+		return true
+	default:
+		return false
+	}
+}
+
 func (a *application) handleObjectGateway(w http.ResponseWriter, r *http.Request) {
 	instance, err := a.instanceFromRequest(r, "")
 	if err != nil {
@@ -604,25 +790,32 @@ func (a *application) handleObjectGateway(w http.ResponseWriter, r *http.Request
 	}
 	fullKey := instance.fullKey(key)
 	preview := r.URL.Query().Get("preview") == "1"
+	rangeOnly := preview && r.URL.Query().Get("range_only") == "1"
 	switch r.Method {
 	case http.MethodGet:
 		if err := requirePermission(instance, permissionRead); err != nil {
 			writeGatewayError(w, err)
 			return
 		}
-		response, err := instance.backend.Get(r.Context(), fullKey, r.Header)
+		if rangeOnly && !isBoundedPreviewRange(r.Header.Get("Range"), 16<<20) {
+			w.Header().Set("Accept-Ranges", "bytes")
+			w.Header().Set("Cache-Control", "private, no-store")
+			writeJSON(w, http.StatusRequestedRangeNotSatisfiable, map[string]any{
+				"error":   "bounded_range_required",
+				"message": "PDF preview requires one explicit byte range no larger than 16 MiB; the complete object was not downloaded",
+			})
+			return
+		}
+		response, err := instance.Get(r.Context(), fullKey, r.Header)
 		if err != nil {
 			writeGatewayError(w, err)
 			return
 		}
 		defer response.Body.Close()
-		if preview && r.Header.Get("Range") != "" && response.StatusCode != http.StatusPartialContent {
-			writeGatewayError(w, apiError{
-				Status:  http.StatusBadGateway,
-				Code:    "preview_range_unsupported",
-				Message: "the storage provider did not honor the byte-range request required for this preview",
-			})
-			return
+		if preview && strings.TrimSpace(r.Header.Get("Range")) != "" {
+			if handled := a.writePreviewRangeResponse(w, r, instance, fullKey, key, response); handled {
+				return
+			}
 		}
 		copyObjectHeaders(w.Header(), response.Header)
 		if preview {
@@ -636,7 +829,7 @@ func (a *application) handleObjectGateway(w http.ResponseWriter, r *http.Request
 			writeGatewayError(w, err)
 			return
 		}
-		response, err := instance.backend.Head(r.Context(), fullKey)
+		response, err := instance.Head(r.Context(), fullKey)
 		if err != nil {
 			writeGatewayError(w, err)
 			return
@@ -652,7 +845,7 @@ func (a *application) handleObjectGateway(w http.ResponseWriter, r *http.Request
 			writeGatewayError(w, err)
 			return
 		}
-		if err := instance.backend.Put(r.Context(), fullKey, r.Body, r.ContentLength, r.Header.Get("Content-Type")); err != nil {
+		if err := instance.Put(r.Context(), fullKey, r.Body, r.ContentLength, r.Header.Get("Content-Type")); err != nil {
 			writeGatewayError(w, err)
 			return
 		}
@@ -662,7 +855,7 @@ func (a *application) handleObjectGateway(w http.ResponseWriter, r *http.Request
 			writeGatewayError(w, err)
 			return
 		}
-		if err := instance.backend.Delete(r.Context(), fullKey); err != nil {
+		if err := instance.Delete(r.Context(), fullKey); err != nil {
 			writeGatewayError(w, err)
 			return
 		}
@@ -673,6 +866,169 @@ func (a *application) handleObjectGateway(w http.ResponseWriter, r *http.Request
 	default:
 		methodNotAllowed(w, http.MethodGet, http.MethodHead, http.MethodPut, http.MethodDelete, http.MethodOptions)
 	}
+}
+
+func isBoundedPreviewRange(value string, maximumSpan int64) bool {
+	if maximumSpan <= 0 {
+		return false
+	}
+	value = strings.TrimSpace(value)
+	if !strings.HasPrefix(strings.ToLower(value), "bytes=") || strings.Contains(value, ",") {
+		return false
+	}
+	parts := strings.SplitN(strings.TrimSpace(value[len("bytes="):]), "-", 2)
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+		return false
+	}
+	start, err := strconv.ParseInt(strings.TrimSpace(parts[0]), 10, 64)
+	if err != nil || start < 0 {
+		return false
+	}
+	end, err := strconv.ParseInt(strings.TrimSpace(parts[1]), 10, 64)
+	return err == nil && end >= start && end-start+1 <= maximumSpan
+}
+
+type gatewayByteRange struct {
+	start int64
+	end   int64
+}
+
+func parseGatewayContentRange(value string) (gatewayByteRange, int64, error) {
+	value = strings.TrimSpace(value)
+	if !strings.HasPrefix(strings.ToLower(value), "bytes ") {
+		return gatewayByteRange{}, -1, fmt.Errorf("invalid content range")
+	}
+	raw := strings.TrimSpace(value[len("bytes "):])
+	parts := strings.SplitN(raw, "/", 2)
+	if len(parts) != 2 || parts[0] == "*" || parts[1] == "*" {
+		return gatewayByteRange{}, -1, fmt.Errorf("invalid content range")
+	}
+	total, err := strconv.ParseInt(strings.TrimSpace(parts[1]), 10, 64)
+	if err != nil || total < 0 {
+		return gatewayByteRange{}, -1, fmt.Errorf("invalid content range total")
+	}
+	bounds := strings.SplitN(strings.TrimSpace(parts[0]), "-", 2)
+	if len(bounds) != 2 {
+		return gatewayByteRange{}, -1, fmt.Errorf("invalid content range bounds")
+	}
+	start, err := strconv.ParseInt(strings.TrimSpace(bounds[0]), 10, 64)
+	if err != nil || start < 0 {
+		return gatewayByteRange{}, -1, fmt.Errorf("invalid content range start")
+	}
+	end, err := strconv.ParseInt(strings.TrimSpace(bounds[1]), 10, 64)
+	if err != nil || end < start || (total > 0 && end >= total) {
+		return gatewayByteRange{}, -1, fmt.Errorf("invalid content range end")
+	}
+	return gatewayByteRange{start: start, end: end}, total, nil
+}
+
+func parseGatewayByteRange(value string, total int64) (gatewayByteRange, error) {
+	value = strings.TrimSpace(value)
+	if !strings.HasPrefix(strings.ToLower(value), "bytes=") || total < 0 {
+		return gatewayByteRange{}, fmt.Errorf("invalid byte range")
+	}
+	raw := strings.TrimSpace(value[len("bytes="):])
+	if raw == "" || strings.Contains(raw, ",") {
+		return gatewayByteRange{}, fmt.Errorf("multiple or empty byte ranges are not supported")
+	}
+	parts := strings.SplitN(raw, "-", 2)
+	if len(parts) != 2 {
+		return gatewayByteRange{}, fmt.Errorf("invalid byte range")
+	}
+	left := strings.TrimSpace(parts[0])
+	right := strings.TrimSpace(parts[1])
+	if left == "" {
+		suffix, err := strconv.ParseInt(right, 10, 64)
+		if err != nil || suffix <= 0 || total == 0 {
+			return gatewayByteRange{}, fmt.Errorf("invalid suffix byte range")
+		}
+		if suffix > total {
+			suffix = total
+		}
+		return gatewayByteRange{start: total - suffix, end: total - 1}, nil
+	}
+	start, err := strconv.ParseInt(left, 10, 64)
+	if err != nil || start < 0 || start >= total {
+		return gatewayByteRange{}, fmt.Errorf("byte range starts beyond the object")
+	}
+	end := total - 1
+	if right != "" {
+		end, err = strconv.ParseInt(right, 10, 64)
+		if err != nil || end < start {
+			return gatewayByteRange{}, fmt.Errorf("invalid byte range end")
+		}
+		if end >= total {
+			end = total - 1
+		}
+	}
+	return gatewayByteRange{start: start, end: end}, nil
+}
+
+func (a *application) writePreviewRangeResponse(
+	w http.ResponseWriter,
+	r *http.Request,
+	_ *storageInstance,
+	_ string,
+	key string,
+	response objectResponse,
+) bool {
+	if response.Body == nil || (response.StatusCode != http.StatusPartialContent && response.StatusCode != http.StatusOK) {
+		return false
+	}
+
+	upstreamRange, total, err := parseGatewayContentRange(response.Header.Get("Content-Range"))
+	if err != nil {
+		writeGatewayError(w, apiError{
+			Status:  http.StatusBadGateway,
+			Code:    "preview_range_not_supported",
+			Message: "the storage provider ignored the byte-range request required for this preview; the server refused to scan or buffer the complete object",
+		})
+		return true
+	}
+
+	requested, err := parseGatewayByteRange(r.Header.Get("Range"), total)
+	if err != nil {
+		copyObjectHeaders(w.Header(), response.Header)
+		w.Header().Set("Accept-Ranges", "bytes")
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", total))
+		w.Header().Del("Content-Length")
+		applyObjectSafetyHeaders(w.Header())
+		w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
+		return true
+	}
+
+	if upstreamRange != requested {
+		writeGatewayError(w, apiError{
+			Status:  http.StatusBadGateway,
+			Code:    "preview_range_mismatch",
+			Message: "the storage provider returned a different byte range than the preview requested",
+		})
+		return true
+	}
+
+	length := requested.end - requested.start + 1
+	if advertised := strings.TrimSpace(response.Header.Get("Content-Length")); advertised != "" {
+		contentLength, parseErr := strconv.ParseInt(advertised, 10, 64)
+		if parseErr != nil || contentLength != length {
+			writeGatewayError(w, apiError{
+				Status:  http.StatusBadGateway,
+				Code:    "preview_range_truncated",
+				Message: "the storage provider returned an invalid byte count for the requested preview range",
+			})
+			return true
+		}
+	}
+
+	copyObjectHeaders(w.Header(), response.Header)
+	w.Header().Set("Accept-Ranges", "bytes")
+	w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", requested.start, requested.end, total))
+	w.Header().Set("Content-Length", strconv.FormatInt(length, 10))
+	w.Header().Del("Content-Encoding")
+	applyPreviewObjectHeaders(w.Header(), key)
+	applyObjectSafetyHeaders(w.Header())
+	w.WriteHeader(http.StatusPartialContent)
+	_, _ = io.CopyN(w, response.Body, length)
+	return true
 }
 
 func (a *application) handleRawList(w http.ResponseWriter, r *http.Request, instance *storageInstance) {
@@ -690,7 +1046,7 @@ func (a *application) handleRawList(w http.ResponseWriter, r *http.Request, inst
 	if startAfter != "" {
 		startAfter = instance.fullKey(startAfter)
 	}
-	page, err := instance.backend.List(r.Context(), listOptions{
+	page, err := instance.List(r.Context(), listOptions{
 		Prefix:     instance.fullKey(cleanRelativeKey(query.Get("prefix"))),
 		Delimiter:  query.Get("delimiter"),
 		MaxResults: maxResults,
@@ -794,35 +1150,19 @@ func requirePermission(instance *storageInstance, permission string) error {
 }
 
 func keyFromGatewayPath(r *http.Request) (string, error) {
-	// The query form is preferred by the frontend because browser URL parsers
-	// normalize path segments such as "." and ".." before issuing a request.
-	// A query value preserves the exact object key, including repeated slashes
-	// and dot segments. The path form remains available for compatibility.
-	if r.URL.Path == "/s3" || r.URL.Path == "/s3/" {
-		if values, present := r.URL.Query()["key"]; present {
-			if len(values) != 1 {
-				return "", apiError{Status: http.StatusBadRequest, Code: "invalid_key", Message: "exactly one key query parameter is required"}
-			}
-			key := cleanRelativeKey(values[0])
-			if key == "" {
-				return "", apiError{Status: http.StatusBadRequest, Code: "invalid_key", Message: "object key cannot be empty"}
-			}
-			return key, nil
-		}
+	if r.URL.Path != "/s3" {
+		return "", apiError{Status: http.StatusBadRequest, Code: "invalid_path", Message: "invalid object gateway path"}
+	}
+	values, present := r.URL.Query()["key"]
+	if !present {
 		return "", nil
 	}
-
-	escaped := r.URL.EscapedPath()
-	if !strings.HasPrefix(escaped, "/s3/") {
-		return "", apiError{Status: http.StatusBadRequest, Code: "invalid_path", Message: "invalid object path"}
+	if len(values) != 1 {
+		return "", apiError{Status: http.StatusBadRequest, Code: "invalid_key", Message: "exactly one key query parameter is required"}
 	}
-	key, err := url.PathUnescape(strings.TrimPrefix(escaped, "/s3/"))
-	if err != nil {
-		return "", apiError{Status: http.StatusBadRequest, Code: "invalid_path", Message: "object path is not valid URL encoding"}
-	}
-	key = cleanRelativeKey(key)
+	key := cleanRelativeKey(values[0])
 	if key == "" {
-		return "", nil
+		return "", apiError{Status: http.StatusBadRequest, Code: "invalid_key", Message: "object key cannot be empty"}
 	}
 	return key, nil
 }
@@ -932,40 +1272,51 @@ func isGenericObjectContentType(value string) bool {
 func previewContentType(key string) string {
 	extension := strings.ToLower(path.Ext(key))
 	known := map[string]string{
-		".mp4":  "video/mp4",
-		".m4v":  "video/x-m4v",
-		".mov":  "video/quicktime",
-		".webm": "video/webm",
-		".mkv":  "video/x-matroska",
-		".mxf":  "application/mxf",
-		".avi":  "video/x-msvideo",
-		".ogv":  "video/ogg",
-		".mpg":  "video/mpeg",
-		".mpeg": "video/mpeg",
-		".m2ts": "video/mp2t",
-		".mts":  "video/mp2t",
-		".ts":   "video/mp2t",
-		".vob":  "video/dvd",
-		".mp3":  "audio/mpeg",
-		".m4a":  "audio/mp4",
-		".aac":  "audio/aac",
-		".flac": "audio/flac",
-		".wav":  "audio/wav",
-		".ogg":  "audio/ogg",
-		".opus": "audio/ogg; codecs=opus",
-		".aif":  "audio/aiff",
-		".aiff": "audio/aiff",
-		".jpg":  "image/jpeg",
-		".jpeg": "image/jpeg",
-		".png":  "image/png",
-		".gif":  "image/gif",
-		".webp": "image/webp",
-		".avif": "image/avif",
-		".svg":  "image/svg+xml",
-		".bmp":  "image/bmp",
-		".tif":  "image/tiff",
-		".tiff": "image/tiff",
-		".pdf":  "application/pdf",
+		".mp4":   "video/mp4",
+		".m4v":   "video/x-m4v",
+		".mov":   "video/quicktime",
+		".webm":  "video/webm",
+		".mkv":   "video/x-matroska",
+		".mxf":   "application/mxf",
+		".avi":   "video/x-msvideo",
+		".ogv":   "video/ogg",
+		".mpg":   "video/mpeg",
+		".mpeg":  "video/mpeg",
+		".m2ts":  "video/mp2t",
+		".mts":   "video/mp2t",
+		".ts":    "video/mp2t",
+		".vob":   "video/dvd",
+		".mp3":   "audio/mpeg",
+		".m4a":   "audio/mp4",
+		".aac":   "audio/aac",
+		".flac":  "audio/flac",
+		".wav":   "audio/wav",
+		".ogg":   "audio/ogg",
+		".opus":  "audio/ogg; codecs=opus",
+		".aif":   "audio/aiff",
+		".aiff":  "audio/aiff",
+		".jpg":   "image/jpeg",
+		".jpeg":  "image/jpeg",
+		".png":   "image/png",
+		".gif":   "image/gif",
+		".webp":  "image/webp",
+		".avif":  "image/avif",
+		".svg":   "image/svg+xml",
+		".bmp":   "image/bmp",
+		".ico":   "image/x-icon",
+		".vcf":   "text/vcard; charset=utf-8",
+		".vcard": "text/vcard; charset=utf-8",
+		".ics":   "text/calendar; charset=utf-8",
+		".ifb":   "text/calendar; charset=utf-8",
+		".eml":   "message/rfc822",
+		".mime":  "message/rfc822",
+		".pem":   "application/x-pem-file",
+		".crt":   "application/x-x509-ca-cert",
+		".cer":   "application/pkix-cert",
+		".der":   "application/pkix-cert",
+		".tif":   "image/tiff",
+		".tiff":  "image/tiff",
+		".pdf":   "application/pdf",
 	}
 	if value := known[extension]; value != "" {
 		return value
@@ -1005,6 +1356,9 @@ func decodeJSONBody(r *http.Request, destination any) error {
 }
 
 func writeAPIError(w http.ResponseWriter, err error) {
+	if budgetErr, ok := resourceLimitAPIError(err); ok {
+		err = budgetErr
+	}
 	status := statusFromError(err)
 	code := "storage_error"
 	message := publicStorageError(err)
@@ -1026,6 +1380,9 @@ func writeAPIError(w http.ResponseWriter, err error) {
 
 func writeGatewayError(w http.ResponseWriter, err error) {
 	w.Header().Set("Cache-Control", "no-store")
+	if budgetErr, ok := resourceLimitAPIError(err); ok {
+		err = budgetErr
+	}
 	status := statusFromError(err)
 	message := publicStorageError(err)
 	var apiErr apiError
@@ -1081,11 +1438,19 @@ func detectKind(key, contentType string) string {
 		return "document"
 	case "xls", "xlsx", "xlsm", "xlsb", "xlt", "xltx", "xltm", "ods", "csv", "tsv", "tab", "psv", "numbers", "parquet", "arrow", "feather":
 		return "spreadsheet"
-	case "ppt", "pptx", "pptm", "pps", "ppsx", "odp", "key":
+	case "ppt", "pptx", "pptm", "pps", "ppsx", "odp":
 		return "presentation"
 	case "sqlite", "sqlite3", "db", "db3", "s3db", "sl3":
 		return "database"
-	case "zip", "rar", "7z", "tar", "gz", "tgz", "bz2", "tbz", "xz", "txz", "zst":
+	case "vcf", "vcard":
+		return "contact"
+	case "ics", "ifb":
+		return "calendar"
+	case "eml", "mime", "mht", "mhtml":
+		return "email"
+	case "pem", "crt", "cer", "cert", "der", "csr", "req", "p7b", "p7c", "spc", "pfx", "p12", "key", "pub":
+		return "certificate"
+	case "zip", "jar", "war", "ear", "apk", "aar", "xpi", "crx", "vsix", "epub", "rar", "7z", "tar", "gz", "tgz", "bz2", "tbz", "xz", "txz", "zst":
 		return "archive"
 	case "js", "mjs", "cjs", "jsx", "ts", "mts", "cts", "tsx", "json", "geojson", "jsonl", "ndjson", "yaml", "yml", "toml", "ini", "hcl", "tf", "tfvars", "sh", "bash", "zsh", "fish", "ps1", "py", "pyw", "pyi", "rb", "php", "java", "kt", "kts", "go", "mod", "sum", "work", "rs", "c", "cc", "cpp", "cxx", "h", "hpp", "hxx", "cs", "swift", "sql", "css", "scss", "sass", "less", "html", "htm", "xhtml", "xml", "proto", "graphql", "gql", "diff", "patch":
 		return "code"
@@ -1137,7 +1502,10 @@ func serveEmbeddedFile(w http.ResponseWriter, r *http.Request, root fs.FS, reque
 		http.NotFound(w, r)
 		return
 	}
-	if contentType := mime.TypeByExtension(path.Ext(requested)); contentType != "" {
+	extension := strings.ToLower(path.Ext(requested))
+	if extension == ".mjs" {
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+	} else if contentType := mime.TypeByExtension(extension); contentType != "" {
 		w.Header().Set("Content-Type", contentType)
 	}
 	if strings.HasPrefix(requested, "/assets/") {
@@ -1162,6 +1530,13 @@ func securityHeadersMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "same-origin")
 		w.Header().Set("X-Frame-Options", "SAMEORIGIN")
+		w.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
+		w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
+		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; base-uri 'self'; connect-src 'self'; font-src 'self'; frame-ancestors 'self'; img-src 'self' data: blob:; media-src 'self' blob:; object-src 'none'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:")
+		if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/s3" {
+			w.Header().Set("Cache-Control", "private, no-store")
+		}
 		next.ServeHTTP(w, r)
 	})
 }
@@ -1171,6 +1546,8 @@ type statusRecorder struct {
 	status int
 	bytes  int64
 }
+
+func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
 
 func (r *statusRecorder) WriteHeader(status int) {
 	if r.status == 0 {
@@ -1194,7 +1571,7 @@ func (r *statusRecorder) Flush() {
 	}
 }
 
-func requestLogMiddleware(next http.Handler) http.Handler {
+func requestLogMiddleware(mode string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		recorder := &statusRecorder{ResponseWriter: w}
@@ -1204,8 +1581,15 @@ func requestLogMiddleware(next http.Handler) http.Handler {
 			status = http.StatusOK
 		}
 		loggedPath := r.URL.Path
-		if strings.HasPrefix(loggedPath, "/s3/") {
-			loggedPath = "/s3/<object>"
+		if mode != logModeDetailed {
+			switch {
+			case strings.HasPrefix(loggedPath, "/api/jobs/"):
+				loggedPath = "/api/jobs/<id>"
+			case strings.HasPrefix(loggedPath, "/api/uploads/"):
+				loggedPath = "/api/uploads/<id>"
+			case strings.HasPrefix(loggedPath, "/api/sqlite/sessions/"):
+				loggedPath = "/api/sqlite/sessions/<id>"
+			}
 		}
 		log.Printf("%s %s %d %dB %s", r.Method, loggedPath, status, recorder.bytes, time.Since(start).Round(time.Millisecond))
 	})

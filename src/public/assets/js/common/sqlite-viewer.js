@@ -1,4 +1,4 @@
-/* Read-only SQLite viewer backed by a short-lived server-side working copy. */
+/* Read-only SQLite viewer backed by bounded remote page reads. */
 (function () {
   'use strict';
 
@@ -50,63 +50,15 @@
     selectLabel.append(selectText, select);
     controls.append(tabs, selectLabel);
 
-    controls.setActive = index => {
-      const bounded = Math.max(0, Math.min(tables.length - 1, Number(index) || 0));
-      buttons.forEach((button, buttonIndex) => {
-        const active = buttonIndex === bounded;
-        button.classList.toggle('is-active', active);
-        button.setAttribute('aria-selected', active ? 'true' : 'false');
-      });
-      select.value = String(bounded);
-    };
-    controls.setActive(activeIndex);
+    const bounded = Math.max(0, Math.min(tables.length - 1, Number(activeIndex) || 0));
+    buttons.forEach((button, index) => {
+      const active = index === bounded;
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-selected', active ? 'true' : 'false');
+      button.tabIndex = active ? 0 : -1;
+    });
+    select.value = String(bounded);
     return controls;
-  }
-
-  function createSearchControls(state, redraw) {
-    const toolbar = document.createElement('div');
-    toolbar.className = 'sqlite-query-toolbar';
-    const search = document.createElement('label');
-    search.className = 'sqlite-search';
-    search.appendChild(icon('magnify'));
-    const input = document.createElement('input');
-    input.type = 'search';
-    input.placeholder = 'Search the complete table...';
-    input.autocomplete = 'off';
-    input.spellcheck = false;
-    input.setAttribute('aria-label', 'Search the complete SQLite table');
-    let timer = 0;
-    input.addEventListener('input', () => {
-      window.clearTimeout(timer);
-      state.query = input.value;
-      timer = window.setTimeout(() => redraw(0, { focusSearch: true }), 280);
-    });
-    search.appendChild(input);
-
-    const rows = document.createElement('label');
-    rows.className = 'data-page-size';
-    const rowsText = document.createElement('span');
-    rowsText.textContent = 'Rows';
-    const select = document.createElement('select');
-    PAGE_SIZES.forEach(size => {
-      const option = document.createElement('option');
-      option.value = String(size);
-      option.textContent = String(size);
-      select.appendChild(option);
-    });
-    select.addEventListener('change', () => {
-      state.pageSize = Number(select.value) || 100;
-      redraw(0);
-    });
-    rows.append(rowsText, select);
-    toolbar.append(search, rows);
-    toolbar.searchInput = input;
-    toolbar.sync = () => {
-      if (input.value !== state.query) input.value = state.query;
-      select.value = String(state.pageSize);
-    };
-    toolbar.sync();
-    return toolbar;
   }
 
   function normalizeWheelDelta(event, page) {
@@ -132,37 +84,47 @@
     }, { passive: false });
   }
 
-  function createTableLoader(label) {
+  function loadingView(label) {
     const loader = document.createElement('div');
-    loader.className = 'sqlite-table-loader';
+    loader.className = 'preview-loading data-loading';
     loader.append(icon('loading mdi-spin'), document.createTextNode(label));
     return loader;
+  }
+
+  function errorView(error) {
+    const box = document.createElement('div');
+    box.className = 'preview-error';
+    box.innerHTML = '<i class="mdi mdi-alert-circle-outline"></i><strong>SQLite query failed</strong>';
+    const detail = document.createElement('p');
+    detail.textContent = String(error?.message || error);
+    box.appendChild(detail);
+    return box;
   }
 
   async function renderSQLite({ key, size = 0, instance = '' } = {}) {
     const root = document.createElement('section');
     root.className = 'sqlite-preview preview-data';
-    const loading = document.createElement('div');
-    loading.className = 'preview-loading';
-    loading.append(icon('loading mdi-spin'), document.createTextNode('Preparing the SQLite database...'));
-    root.appendChild(loading);
+    root.appendChild(loadingView('Preparing the SQLite database...'));
 
     const abortController = new AbortController();
-    let session = null;
     let requestController = null;
     let requestSerial = 0;
-    const state = { table: 0, page: 0, pageSize: 100, query: '' };
+    let redrawTimer = 0;
+    let session = null;
+    const state = {
+      table: 0,
+      page: 0,
+      pageSize: 100,
+      filters: {},
+      showFilters: false,
+      sortColumn: '',
+      sortDirection: ''
+    };
 
     try {
       session = await BB.api.createSQLiteSession({ key, size, instance, signal: abortController.signal });
     } catch (error) {
-      const message = document.createElement('div');
-      message.className = 'preview-error';
-      message.innerHTML = '<i class="mdi mdi-alert-circle-outline"></i><strong>SQLite preview unavailable</strong>';
-      const detail = document.createElement('p');
-      detail.textContent = String(error?.message || error);
-      message.appendChild(detail);
-      root.replaceChildren(message);
+      root.replaceChildren(errorView(error));
       root.cleanup = () => abortController.abort();
       return root;
     }
@@ -180,64 +142,75 @@
       return root;
     }
 
-    root.replaceChildren();
-    const tableHost = document.createElement('div');
-    tableHost.className = 'sqlite-table-host';
-    let tabs = null;
-    let searchControls = null;
+    function activeFilters() {
+      return Object.fromEntries(Object.entries(state.filters).filter(([, value]) => String(value || '').trim()));
+    }
 
-    const activateTable = index => {
+    function restoreFocus(columnIndex) {
+      if (!Number.isInteger(columnIndex) || columnIndex < 0) return;
+      requestAnimationFrame(() => {
+        const input = root.querySelector(`[data-filter-column="${columnIndex}"]`);
+        if (!input) return;
+        input.focus({ preventScroll: true });
+        const end = input.value.length;
+        input.setSelectionRange?.(end, end);
+      });
+    }
+
+    function activateTable(index) {
       const bounded = Math.max(0, Math.min(tables.length - 1, Number(index) || 0));
-      if (bounded === state.table && tableHost.childElementCount) return;
+      if (bounded === state.table) return;
       state.table = bounded;
-      state.query = '';
       state.page = 0;
-      tabs?.setActive?.(bounded);
-      searchControls?.sync?.();
+      state.filters = {};
+      state.sortColumn = '';
+      state.sortDirection = '';
       void draw(0);
-    };
-
-    tabs = createTableTabs(tables, state.table, activateTable);
-    searchControls = createSearchControls(state, draw);
-    if (tabs) root.appendChild(tabs);
-    root.append(searchControls, tableHost);
-
-    function showLoading(label) {
-      tableHost.classList.add('is-loading');
-      tableHost.querySelector(':scope > .sqlite-table-loader')?.remove();
-      tableHost.appendChild(createTableLoader(label));
     }
 
-    function hideLoading() {
-      tableHost.classList.remove('is-loading');
-      tableHost.querySelector(':scope > .sqlite-table-loader')?.remove();
+    function scheduleFilter(columnIndex) {
+      window.clearTimeout(redrawTimer);
+      redrawTimer = window.setTimeout(() => void draw(0, columnIndex, true), 220);
     }
 
-    async function draw(nextPage = state.page, options = {}) {
+    async function draw(nextPage = state.page, focusColumn = -1, preserveHorizontalScroll = false) {
+      const previousScrollLeft = preserveHorizontalScroll
+        ? Number(root.querySelector('.data-table-scroll')?.scrollLeft || 0)
+        : 0;
       state.page = Math.max(0, Number(nextPage) || 0);
       requestController?.abort();
       requestController = new AbortController();
       const serial = ++requestSerial;
       const active = tables[Math.max(0, Math.min(tables.length - 1, state.table))];
-      tabs?.setActive?.(state.table);
-      searchControls?.sync?.();
-      showLoading(`Reading ${active.name}...`);
+      if (!root.querySelector('.bb-data-grid')) root.replaceChildren(loadingView(`Reading ${active.name}...`));
+      else {
+        root.classList.add('is-loading-query');
+        root.setAttribute('aria-busy', 'true');
+      }
+
       try {
         const payload = await BB.api.sqliteTable({
           id: session.id,
           table: active.name,
           page: state.page,
           pageSize: state.pageSize,
-          query: state.query,
+          filters: activeFilters(),
+          sortColumn: state.sortColumn,
+          sortDirection: state.sortDirection,
           signal: requestController.signal
         });
         if (serial !== requestSerial) return;
+        state.page = Math.max(0, Number(payload.page) || 0);
+        state.pageSize = Math.max(1, Number(payload.pageSize) || state.pageSize);
         const columns = Array.from(payload.columns || active.columns || []);
         const headers = columns.map(column => column.name);
         const rows = Array.from(payload.rows || []).map(row => headers.map(header => row?.[header]));
         const rowNumbers = rows.map((_, index) => state.page * state.pageSize + index + 1);
-        const totalRows = Math.max(0, Number(payload.totalRows) || 0);
-        const sourceTotalRows = Math.max(totalRows, Number(payload.sourceTotalRows) || 0);
+        const totalRows = payload.totalKnown ? Math.max(0, Number(payload.totalRows) || 0) : Number.NaN;
+        const sourceTotalRows = payload.sourceTotalKnown ? Math.max(0, Number(payload.sourceTotalRows) || 0) : Number.NaN;
+        const filterValues = headers.map(header => String(state.filters[header] || ''));
+        const sortColumnIndex = headers.indexOf(state.sortColumn);
+
         const table = BB.tabular.renderTable({
           headers,
           rows,
@@ -246,36 +219,77 @@
           sourceTotalRows,
           page: state.page,
           pageSize: state.pageSize,
-          onPage: page => draw(page),
-          note: payload.query ? `Search scans the complete ${active.type}.` : ''
+          hasNext: Boolean(payload.hasMore),
+          onPage: page => void draw(page),
+          beforeTable: createTableTabs(tables, state.table, activateTable),
+          emptyMessage: 'This table contains no matching rows.',
+          queryTools: {
+            filters: filterValues,
+            showFilters: state.showFilters,
+            sortColumn: sortColumnIndex,
+            sortDirection: state.sortDirection,
+            globalQuery: '',
+            onColumnFilter(columnIndex, value) {
+              const header = headers[columnIndex];
+              if (!header) return;
+              state.filters[header] = String(value || '');
+              scheduleFilter(columnIndex);
+            },
+            onToggleFilters() {
+              window.clearTimeout(redrawTimer);
+              state.showFilters = !state.showFilters;
+              void draw(state.page, -1, true);
+            },
+            onSort(columnIndex) {
+              window.clearTimeout(redrawTimer);
+              const header = headers[columnIndex];
+              if (!header) return;
+              if (state.sortColumn !== header) {
+                state.sortColumn = header;
+                state.sortDirection = 'asc';
+              } else if (state.sortDirection === 'asc') {
+                state.sortDirection = 'desc';
+              } else if (state.sortDirection === 'desc') {
+                state.sortColumn = '';
+                state.sortDirection = '';
+              } else {
+                state.sortDirection = 'asc';
+              }
+              void draw(0, -1, true);
+            },
+            onPageSize(value) {
+              window.clearTimeout(redrawTimer);
+              if (!PAGE_SIZES.includes(value)) return;
+              state.pageSize = value;
+              void draw(0, -1, true);
+            },
+            onClear() {
+              window.clearTimeout(redrawTimer);
+              state.filters = {};
+              state.sortColumn = '';
+              state.sortDirection = '';
+              void draw(0, -1, true);
+            }
+          }
         });
-        tableHost.replaceChildren(table);
-        tableHost.classList.remove('is-loading');
-        keepVerticalWheelOnPage(table.querySelector('.data-table-scroll'));
-        if (options.focusSearch) requestAnimationFrame(() => searchControls.searchInput?.focus({ preventScroll: true }));
+        root.replaceChildren(table);
+        root.classList.remove('is-loading-query');
+        root.removeAttribute('aria-busy');
+        const scroller = root.querySelector('.data-table-scroll');
+        keepVerticalWheelOnPage(scroller);
+        if (preserveHorizontalScroll && scroller) scroller.scrollLeft = previousScrollLeft;
+        restoreFocus(focusColumn);
       } catch (error) {
         if (error?.name === 'AbortError') return;
-        const box = document.createElement('div');
-        box.className = 'preview-error';
-        box.innerHTML = '<i class="mdi mdi-alert-circle-outline"></i><strong>SQLite query failed</strong>';
-        const detail = document.createElement('p');
-        detail.textContent = String(error?.message || error);
-        box.appendChild(detail);
-        tableHost.replaceChildren(box);
-        tableHost.classList.remove('is-loading');
-      } finally {
-        if (serial === requestSerial) hideLoading();
+        root.replaceChildren(errorView(error));
+        root.classList.remove('is-loading-query');
+        root.removeAttribute('aria-busy');
       }
     }
 
     await draw(0);
-
-    root.documentSearch = async query => {
-      state.query = String(query || '').trim();
-      searchControls.sync();
-      await draw(0, { focusSearch: true });
-    };
     root.cleanup = () => {
+      window.clearTimeout(redrawTimer);
       requestController?.abort();
       abortController.abort();
       if (session?.id) BB.api.deleteSQLiteSession(session.id, { keepalive: true }).catch(() => {});

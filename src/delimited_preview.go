@@ -3,9 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
-	"encoding/base64"
 	"encoding/csv"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -24,10 +22,12 @@ const (
 )
 
 type delimitedCursor struct {
-	Offset  int64 `json:"o"`
-	Records int64 `json:"r"`
-	Columns int   `json:"c"`
-	Comma   rune  `json:"d"`
+	Offset  int64         `json:"o"`
+	Records int64         `json:"r"`
+	Columns int           `json:"c"`
+	Comma   rune          `json:"d"`
+	Scope   string        `json:"s"`
+	Version objectVersion `json:"v,omitempty"`
 }
 
 type delimitedPageResponse struct {
@@ -46,28 +46,24 @@ type delimitedPageResponse struct {
 
 type documentCountResponse struct {
 	Kind    string `json:"kind"`
+	Sheet   string `json:"sheet,omitempty"`
 	Lines   int64  `json:"lines,omitempty"`
 	Rows    int64  `json:"rows,omitempty"`
 	Columns int64  `json:"columns,omitempty"`
 }
 
-func encodeDelimitedCursor(cursor delimitedCursor) string {
-	payload, _ := json.Marshal(cursor)
-	return base64.RawURLEncoding.EncodeToString(payload)
+func encodeDelimitedCursor(cursor delimitedCursor) (string, error) {
+	return encodeSignedCursor(cursor)
 }
 
-func decodeDelimitedCursor(raw string) (delimitedCursor, bool, error) {
+func decodeDelimitedCursor(raw, expectedScope string) (delimitedCursor, bool, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return delimitedCursor{}, false, nil
 	}
-	payload, err := base64.RawURLEncoding.DecodeString(raw)
-	if err != nil {
-		return delimitedCursor{}, false, apiError{Status: http.StatusBadRequest, Code: "invalid_cursor", Message: "invalid delimited continuation cursor"}
-	}
 	var cursor delimitedCursor
-	if err := json.Unmarshal(payload, &cursor); err != nil || cursor.Offset < 0 || cursor.Records < 0 || cursor.Columns < 1 || cursor.Columns > delimitedMaxColumns || !validDelimitedComma(cursor.Comma) {
-		return delimitedCursor{}, false, apiError{Status: http.StatusBadRequest, Code: "invalid_cursor", Message: "invalid delimited continuation cursor"}
+	if err := decodeSignedCursor(raw, &cursor); err != nil || cursor.Scope != expectedScope || cursor.Offset < 0 || cursor.Records < 0 || cursor.Columns < 1 || cursor.Columns > delimitedMaxColumns || !validDelimitedComma(cursor.Comma) {
+		return delimitedCursor{}, false, apiError{Status: http.StatusBadRequest, Code: "invalid_cursor", Message: "invalid or expired delimited continuation cursor"}
 	}
 	return cursor, true, nil
 }
@@ -88,37 +84,15 @@ func delimiterForObject(key string, sample []byte) rune {
 	}
 }
 
-func openObjectStreamAt(ctx context.Context, instance *storageInstance, key string, offset int64, etag string) (io.ReadCloser, http.Header, error) {
-	requestHeaders := make(http.Header)
-	if offset > 0 {
-		requestHeaders.Set("Range", fmt.Sprintf("bytes=%d-", offset))
+func openObjectStreamAt(ctx context.Context, instance *storageInstance, key string, offset int64, etag string, version objectVersion) (*objectWindowReader, http.Header, error) {
+	if version.empty() {
+		version.ETag = etag
 	}
-	if strings.TrimSpace(etag) != "" {
-		value := strings.TrimSpace(etag)
-		if !strings.HasPrefix(value, `"`) && !strings.HasPrefix(value, `W/"`) {
-			value = `"` + strings.Trim(value, `"`) + `"`
-		}
-		requestHeaders.Set("If-Match", value)
-	}
-	response, err := instance.backend.Get(ctx, instance.fullKey(key), requestHeaders)
+	reader, err := newObjectWindowReaderVersion(ctx, instance, key, offset, version)
 	if err != nil {
 		return nil, nil, err
 	}
-	if response.Body == nil {
-		return nil, nil, apiError{Status: http.StatusBadGateway, Code: "empty_object_response", Message: "the storage provider returned an empty object response"}
-	}
-	if !isSuccessfulObjectReadStatus(response.StatusCode) {
-		response.Body.Close()
-		return nil, nil, &upstreamError{StatusCode: response.StatusCode, Code: "ObjectRangeReadFailed"}
-	}
-	if offset > 0 {
-		contentRange := strings.TrimSpace(response.Header.Get("Content-Range"))
-		if response.StatusCode != http.StatusPartialContent || contentRange == "" {
-			response.Body.Close()
-			return nil, nil, apiError{Status: http.StatusBadGateway, Code: "range_not_supported", Message: "the storage provider ignored the byte-range request"}
-		}
-	}
-	return response.Body, response.Header.Clone(), nil
+	return reader, reader.Headers(), nil
 }
 
 func configuredCSVReader(reader io.Reader, comma rune) *csv.Reader {
@@ -209,13 +183,14 @@ func (a *application) handleDelimitedPage(w http.ResponseWriter, r *http.Request
 		return
 	}
 	pageSize := parseBoundedInt(r.URL.Query().Get("pageSize"), delimitedDefaultPageSize, 1, delimitedMaxPageSize)
-	cursor, continuing, err := decodeDelimitedCursor(r.URL.Query().Get("cursor"))
+	scope := signedCursorScope("delimited", instance.cfg.ID, key)
+	cursor, continuing, err := decodeDelimitedCursor(r.URL.Query().Get("cursor"), scope)
 	if err != nil {
 		writeAPIError(w, err)
 		return
 	}
 
-	body, _, err := openObjectStreamAt(r.Context(), instance, key, cursor.Offset, etag)
+	body, _, err := openObjectStreamAt(r.Context(), instance, key, cursor.Offset, etag, cursor.Version)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -346,12 +321,18 @@ func (a *application) handleDelimitedPage(w http.ResponseWriter, r *http.Request
 		response.EndRow = rowNumbers[len(rowNumbers)-1]
 	}
 	if !done {
-		response.NextCursor = encodeDelimitedCursor(delimitedCursor{
+		response.NextCursor, err = encodeDelimitedCursor(delimitedCursor{
 			Offset:  committedOffset,
 			Records: committedRecords,
 			Columns: columns,
 			Comma:   comma,
+			Scope:   scope,
+			Version: body.Version(),
 		})
+		if err != nil {
+			writeAPIError(w, fmt.Errorf("create delimited continuation cursor: %w", err))
+			return
+		}
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, response)
@@ -392,6 +373,14 @@ func (a *application) handleDocumentCount(w http.ResponseWriter, r *http.Request
 			return
 		}
 		writeJSON(w, http.StatusOK, documentCountResponse{Kind: "lines", Lines: lines})
+	case "xlsx", "xlsm", "xltx", "xltm", "xlam":
+		knownSize := int64(parseBoundedInt(r.URL.Query().Get("size"), 0, 0, int(maxSpreadsheetObjectBytes)))
+		summary, countErr := inspectSpreadsheetDimensions(r.Context(), instance, key, knownSize)
+		if countErr != nil {
+			writeAPIError(w, countErr)
+			return
+		}
+		writeJSON(w, http.StatusOK, documentCountResponse{Kind: "spreadsheet", Sheet: summary.ActiveSheet, Rows: summary.Rows, Columns: summary.Columns})
 	default:
 		writeAPIError(w, apiError{Status: http.StatusBadRequest, Code: "unsupported_count", Message: "this document type does not expose an explicit count operation"})
 	}

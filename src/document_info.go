@@ -31,7 +31,7 @@ func inspectDocumentDetails(ctx context.Context, instance *storageInstance, key,
 	// hidden inside a routine Details request.
 	switch extension {
 	case "csv", "tsv", "tab", "psv":
-		head, err := instance.backend.Head(ctx, instance.fullKey(key))
+		head, err := instance.Head(ctx, instance.fullKey(key))
 		if err != nil {
 			return response, true, err
 		}
@@ -45,7 +45,7 @@ func inspectDocumentDetails(ctx context.Context, instance *storageInstance, key,
 		}
 		return response, true, nil
 	case "json", "geojson":
-		head, err := instance.backend.Head(ctx, instance.fullKey(key))
+		head, err := instance.Head(ctx, instance.fullKey(key))
 		if err != nil {
 			return response, true, err
 		}
@@ -55,18 +55,48 @@ func inspectDocumentDetails(ctx context.Context, instance *storageInstance, key,
 		populateMediaStorageFields(&response, head.Header, listed.Size)
 		response.Container = strings.ToUpper(extension)
 		return response, true, nil
-	case "xlsx", "xlsm":
+	case "docx", "docm", "dotx", "dotm":
+		summary, err := inspectWordProperties(ctx, instance, key, extension, listed)
+		if err != nil {
+			return response, true, err
+		}
+		populateMediaStorageFields(&response, summary.Headers, summary.Size)
+		response.Container = summary.Container
+		response.Properties = summary.Properties
+		return response, true, nil
+	case "xlsx", "xlsm", "xltx", "xltm", "xlam":
 		summary, headers, size, err := inspectSpreadsheetSummary(ctx, instance, key, listed.Size)
 		if err != nil {
 			return response, true, err
 		}
-		populateMediaStorageFields(&response, headers, size)
-		response.Container = strings.ToUpper(extension)
-		response.Properties = map[string]string{
-			"Worksheets": strconv.Itoa(summary.Sheets),
-			"Rows":       formatInteger(summary.Rows),
-			"Columns":    formatInteger(summary.Columns),
+		office, err := inspectOfficeOpenXMLProperties(ctx, instance, key, extension, listed, officeFamilySpreadsheet)
+		if err != nil {
+			return response, true, err
 		}
+		populateMediaStorageFields(&response, headers, size)
+		response.Container = officeOpenXMLContainerLabel(extension)
+		response.Properties = mergeOfficeProperties(office.Properties, map[string]string{
+			"Worksheets":       strconv.Itoa(summary.Sheets),
+			"Active worksheet": summary.ActiveSheet,
+		})
+		return response, true, nil
+	case "pptx", "pptm", "potx", "potm", "ppsx", "ppsm", "ppam", "sldx", "sldm":
+		summary, err := inspectOfficeOpenXMLProperties(ctx, instance, key, extension, listed, officeFamilyPresentation)
+		if err != nil {
+			return response, true, err
+		}
+		populateMediaStorageFields(&response, summary.Headers, summary.Size)
+		response.Container = summary.Container
+		response.Properties = summary.Properties
+		return response, true, nil
+	case "vsdx", "vsdm", "vssx", "vssm", "vstx", "vstm":
+		summary, err := inspectOfficeOpenXMLProperties(ctx, instance, key, extension, listed, officeFamilyVisio)
+		if err != nil {
+			return response, true, err
+		}
+		populateMediaStorageFields(&response, summary.Headers, summary.Size)
+		response.Container = summary.Container
+		response.Properties = summary.Properties
 		return response, true, nil
 	case "parquet":
 		summary, headers, size, err := inspectParquetSummary(ctx, instance, key, listed.Size)
@@ -90,8 +120,18 @@ func inspectDocumentDetails(ctx context.Context, instance *storageInstance, key,
 		response.Properties = summary
 		return response, true, nil
 	}
+	if summary, handled, err := inspectStructuredMetadata(ctx, instance, key, extension, contentType, listed); handled {
+		if err != nil {
+			return response, true, err
+		}
+		populateMediaStorageFields(&response, summary.Headers, summary.Size)
+		response.Container = summary.Container
+		response.Properties = summary.Properties
+		return response, true, nil
+	}
+
 	if extension == "" && isDelimitedContentType(contentType) {
-		head, err := instance.backend.Head(ctx, instance.fullKey(key))
+		head, err := instance.Head(ctx, instance.fullKey(key))
 		if err != nil {
 			return response, true, err
 		}
@@ -110,13 +150,15 @@ func inspectDocumentDetails(ctx context.Context, instance *storageInstance, key,
 	if !isTextLineCountCandidate(key, contentType) {
 		return response, false, nil
 	}
-	lines, headers, size, err := countObjectLines(ctx, instance, key)
+	head, err := instance.Head(ctx, instance.fullKey(key))
 	if err != nil {
 		return response, true, err
 	}
-	populateMediaStorageFields(&response, headers, size)
-	response.Container = textContainerLabel(extension, contentType)
-	response.Properties = map[string]string{"Lines": formatInteger(lines)}
+	if head.Body != nil {
+		defer head.Body.Close()
+	}
+	populateMediaStorageFields(&response, head.Header, listed.Size)
+	response.Container = textContainerLabel(key, extension, contentType)
 	return response, true, nil
 }
 
@@ -135,7 +177,7 @@ type delimitedSummary struct {
 // so a quoted field or a complete CSV file may be larger than available RAM.
 // The first non-empty record is treated as the header, matching the preview.
 func inspectDelimitedSummary(ctx context.Context, instance *storageInstance, key, extension string) (delimitedSummary, http.Header, int64, error) {
-	response, err := instance.backend.Get(ctx, instance.fullKey(key), nil)
+	response, err := instance.Get(ctx, instance.fullKey(key), nil)
 	if err != nil {
 		return delimitedSummary{}, nil, 0, err
 	}
@@ -375,12 +417,52 @@ func formatInteger(value int64) string {
 	return strconv.FormatInt(value, 10)
 }
 
-func textContainerLabel(extension, contentType string) string {
-	if extension != "" {
-		return strings.ToUpper(extension)
+var textContainerLabels = map[string]string{
+	"sh": "Shell", "bash": "Shell", "zsh": "Shell", "ksh": "Shell", "fish": "Shell", "envrc": "Shell",
+	"ps1": "PowerShell", "psm1": "PowerShell", "psd1": "PowerShell",
+	"js": "JavaScript", "mjs": "JavaScript module", "cjs": "CommonJS JavaScript", "jsx": "JavaScript XML",
+	"ts": "TypeScript", "mts": "TypeScript module", "cts": "TypeScript module", "tsx": "TypeScript XML",
+	"json": "JSON", "json5": "JSON5", "hjson": "Hjson", "geojson": "GeoJSON", "ipynb": "Jupyter Notebook",
+	"yaml": "YAML", "yml": "YAML", "toml": "TOML", "hcl": "Terraform HCL", "tf": "Terraform HCL", "tfvars": "Terraform variables",
+	"html": "HTML", "htm": "HTML", "xhtml": "XHTML", "vue": "Vue single-file component", "svelte": "Svelte component", "xml": "XML", "svg": "SVG",
+	"css": "CSS", "scss": "SCSS", "sass": "Sass", "less": "Less",
+	"ini": "INI", "conf": "Configuration", "cfg": "Configuration", "properties": "Java properties", "cnf": "Configuration",
+	"md": "Markdown", "markdown": "Markdown", "mdown": "Markdown", "mkd": "Markdown", "rmd": "R Markdown", "adoc": "AsciiDoc", "asciidoc": "AsciiDoc",
+	"txt": "Plain text", "log": "Log", "out": "Plain text", "diff": "Diff", "patch": "Patch",
+	"sql": "SQL", "gql": "GraphQL", "graphql": "GraphQL", "proto": "Protocol Buffers", "thrift": "Apache Thrift",
+	"mk": "Makefile", "nginx": "Nginx configuration",
+	"java": "Java", "kt": "Kotlin", "kts": "Kotlin", "groovy": "Groovy", "scala": "Scala",
+	"c": "C", "h": "C", "cpp": "C++", "cxx": "C++", "cc": "C++", "hpp": "C++", "hxx": "C++", "inl": "C++",
+	"m": "Objective-C", "mm": "Objective-C++", "cs": "C#",
+	"go": "Go", "mod": "Go module", "sum": "Go checksum list", "work": "Go workspace", "rs": "Rust", "swift": "Swift",
+	"py": "Python", "pyw": "Python", "pyi": "Python type stub", "rb": "Ruby", "php": "PHP", "phtml": "PHP",
+	"pl": "Perl", "pm": "Perl", "lua": "Lua", "r": "R", "dart": "Dart", "zig": "Zig", "cue": "CUE", "nix": "Nix",
+	"bat": "DOS batch", "cmd": "DOS batch", "vb": "Visual Basic .NET", "vbs": "VBScript", "fs": "F#", "fsx": "F#",
+	"hs": "Haskell", "ml": "OCaml", "mli": "OCaml", "pas": "Pascal", "pp": "Pascal",
+	"mustache": "Mustache template", "hbs": "Handlebars", "handlebars": "Handlebars", "ejs": "Embedded JavaScript template",
+	"njk": "Nunjucks template", "twig": "Twig template", "jinja": "Jinja template", "lock": "Lock file",
+}
+
+func textContainerLabel(key, extension, contentType string) string {
+	extension = strings.ToLower(strings.TrimSpace(extension))
+	if label := textContainerLabels[extension]; label != "" {
+		return label
+	}
+	name := strings.ToLower(path.Base(key))
+	switch {
+	case strings.HasPrefix(name, "dockerfile"):
+		return "Dockerfile"
+	case strings.HasPrefix(name, "containerfile"):
+		return "Containerfile"
+	case name == "makefile" || name == "gnumakefile":
+		return "Makefile"
+	case strings.HasPrefix(name, "jenkinsfile"):
+		return "Jenkins pipeline"
+	case strings.HasPrefix(name, ".env"):
+		return "Environment configuration"
 	}
 	if strings.HasPrefix(strings.ToLower(contentType), "text/") {
-		return "TEXT"
+		return "Plain text"
 	}
 	return ""
 }
@@ -416,14 +498,19 @@ func isTextLineCountCandidate(key, contentType string) bool {
 		"xhtml": true, "xml": true, "svg": true, "yaml": true, "yml": true, "toml": true, "hcl": true,
 		"tf": true, "tfvars": true, "ini": true, "conf": true, "cfg": true, "properties": true,
 		"sh": true, "bash": true, "zsh": true, "fish": true, "ps1": true, "sql": true, "proto": true,
-		"graphql": true, "gql": true, "diff": true, "patch": true, "json": true, "geojson": true,
+		"graphql": true, "gql": true, "diff": true, "patch": true, "json": true, "json5": true, "hjson": true, "geojson": true, "ipynb": true,
 		"jsonl": true, "ndjson": true, "csv": true, "tsv": true, "tab": true, "psv": true,
+		"psm1": true, "psd1": true, "ksh": true, "envrc": true, "adoc": true, "asciidoc": true, "out": true,
+		"thrift": true, "mk": true, "nginx": true, "groovy": true, "scala": true, "inl": true, "dart": true,
+		"zig": true, "cue": true, "nix": true, "bat": true, "cmd": true, "vb": true, "vbs": true, "fs": true, "fsx": true,
+		"hs": true, "ml": true, "mli": true, "pas": true, "pp": true, "mustache": true, "hbs": true,
+		"handlebars": true, "ejs": true, "njk": true, "twig": true, "jinja": true, "lock": true,
 	}
 	return textExtensions[extension]
 }
 
 func countObjectLines(ctx context.Context, instance *storageInstance, key string) (int64, http.Header, int64, error) {
-	response, err := instance.backend.Get(ctx, instance.fullKey(key), nil)
+	response, err := instance.Get(ctx, instance.fullKey(key), nil)
 	if err != nil {
 		return 0, nil, 0, err
 	}
@@ -457,9 +544,10 @@ func countObjectLines(ctx context.Context, instance *storageInstance, key string
 }
 
 type spreadsheetSummary struct {
-	Sheets  int
-	Rows    int64
-	Columns int64
+	Sheets      int
+	ActiveSheet string
+	Rows        int64
+	Columns     int64
 }
 
 func inspectSpreadsheetSummary(ctx context.Context, instance *storageInstance, key string, knownSize int64) (spreadsheetSummary, http.Header, int64, error) {
@@ -467,21 +555,21 @@ func inspectSpreadsheetSummary(ctx context.Context, instance *storageInstance, k
 	if err != nil {
 		return spreadsheetSummary{}, nil, 0, err
 	}
-	source.size = knownSize
-	if source.size <= 0 {
+	source.SetKnownSize(knownSize)
+	if source.Size() <= 0 {
 		if _, err := source.ReadSuffix(64 << 10); err != nil && err != io.EOF {
 			return spreadsheetSummary{}, nil, 0, err
 		}
 	}
-	if source.size <= 0 {
+	if source.Size() <= 0 {
 		return spreadsheetSummary{}, nil, 0, apiError{Status: http.StatusUnprocessableEntity, Code: "unknown_workbook_size", Message: "spreadsheet details require a known non-zero object size"}
 	}
-	if source.size > maxSpreadsheetObjectBytes {
+	if source.Size() > maxSpreadsheetObjectBytes {
 		return spreadsheetSummary{}, nil, 0, apiError{Status: http.StatusRequestEntityTooLarge, Code: "workbook_too_large", Message: fmt.Sprintf("spreadsheet details are limited to %d MiB", maxSpreadsheetObjectBytes>>20)}
 	}
-	reader, err := zip.NewReader(&spreadsheetObjectReaderAt{source: source}, source.size)
+	reader, err := newSpreadsheetZipReader(source)
 	if err != nil {
-		return spreadsheetSummary{}, nil, 0, apiError{Status: http.StatusUnprocessableEntity, Code: "invalid_workbook", Message: "the object is not a valid XLSX/XLSM workbook"}
+		return spreadsheetSummary{}, nil, 0, err
 	}
 	files := make(map[string]*zip.File, len(reader.File))
 	for _, file := range reader.File {
@@ -492,17 +580,92 @@ func inspectSpreadsheetSummary(ctx context.Context, instance *storageInstance, k
 		return spreadsheetSummary{}, nil, 0, err
 	}
 	summary := spreadsheetSummary{Sheets: len(sheets)}
-	for _, sheet := range sheets {
-		rows, columns, err := countWorksheetDimensions(files[sheet.Target])
-		if err != nil {
-			return spreadsheetSummary{}, nil, 0, err
-		}
-		summary.Rows += rows
-		if columns > summary.Columns {
-			summary.Columns = columns
+	if len(sheets) == 0 {
+		return summary, source.Headers().Clone(), source.Size(), nil
+	}
+	activeIndex, err := readWorkbookActiveSheetIndex(files["xl/workbook.xml"], sheets)
+	if err != nil {
+		return spreadsheetSummary{}, nil, 0, err
+	}
+	active := sheets[activeIndex]
+	summary.ActiveSheet = active.Name
+	// Exact used-row and used-column counts require traversing the complete
+	// active worksheet. Details deliberately omit them; the explicit document
+	// count action performs that scan when the user requests it.
+	return summary, source.Headers().Clone(), source.Size(), nil
+}
+
+func inspectSpreadsheetDimensions(ctx context.Context, instance *storageInstance, key string, knownSize int64) (spreadsheetSummary, error) {
+	source, err := openObjectRangeSource(ctx, instance, key)
+	if err != nil {
+		return spreadsheetSummary{}, err
+	}
+	source.SetKnownSize(knownSize)
+	if source.Size() <= 0 {
+		if _, err := source.ReadSuffix(64 << 10); err != nil && !errors.Is(err, io.EOF) {
+			return spreadsheetSummary{}, err
 		}
 	}
-	return summary, source.headers.Clone(), source.size, nil
+	if source.Size() <= 0 {
+		return spreadsheetSummary{}, apiError{Status: http.StatusUnprocessableEntity, Code: "unknown_workbook_size", Message: "spreadsheet dimensions require a known non-zero object size"}
+	}
+	if source.Size() > maxSpreadsheetObjectBytes {
+		return spreadsheetSummary{}, apiError{Status: http.StatusRequestEntityTooLarge, Code: "workbook_too_large", Message: fmt.Sprintf("spreadsheet dimension scans are limited to %d MiB", maxSpreadsheetObjectBytes>>20)}
+	}
+	reader, err := newSpreadsheetZipReader(source)
+	if err != nil {
+		return spreadsheetSummary{}, err
+	}
+	files := make(map[string]*zip.File, len(reader.File))
+	for _, file := range reader.File {
+		files[path.Clean(strings.TrimLeft(file.Name, "/"))] = file
+	}
+	sheets, err := readWorkbookSheets(files)
+	if err != nil {
+		return spreadsheetSummary{}, err
+	}
+	summary := spreadsheetSummary{Sheets: len(sheets)}
+	if len(sheets) == 0 {
+		return summary, nil
+	}
+	activeIndex, err := readWorkbookActiveSheetIndex(files["xl/workbook.xml"], sheets)
+	if err != nil {
+		return spreadsheetSummary{}, err
+	}
+	active := sheets[activeIndex]
+	summary.ActiveSheet = active.Name
+	summary.Rows, summary.Columns, err = countWorksheetDimensions(files[active.Target])
+	if err != nil {
+		return spreadsheetSummary{}, err
+	}
+	return summary, nil
+}
+
+func readWorkbookActiveSheetIndex(file *zip.File, sheets []spreadsheetSheetInfo) (int, error) {
+	if len(sheets) == 0 || file == nil {
+		return 0, nil
+	}
+	var workbook workbookXML
+	if err := decodeZipXML(file, &workbook); err != nil {
+		return 0, apiError{Status: http.StatusUnprocessableEntity, Code: "invalid_workbook", Message: "unable to read the active worksheet"}
+	}
+	activeTab := 0
+	if len(workbook.Views) > 0 && workbook.Views[0].ActiveTab >= 0 {
+		activeTab = workbook.Views[0].ActiveTab
+	}
+	if activeTab >= len(workbook.Sheets) {
+		activeTab = 0
+	}
+	activeName := ""
+	if activeTab < len(workbook.Sheets) {
+		activeName = workbook.Sheets[activeTab].Name
+	}
+	for index, sheet := range sheets {
+		if sheet.Name == activeName {
+			return index, nil
+		}
+	}
+	return 0, nil
 }
 
 func countWorksheetDimensions(file *zip.File) (int64, int64, error) {
@@ -515,8 +678,9 @@ func countWorksheetDimensions(file *zip.File) (int64, int64, error) {
 	}
 	defer reader.Close()
 	decoder := xml.NewDecoder(reader)
-	var rows int64
+	var maximumRow int64
 	var maximumColumn int64
+	var fallbackRow int64
 	for {
 		token, err := decoder.Token()
 		if errors.Is(err, io.EOF) {
@@ -529,18 +693,29 @@ func countWorksheetDimensions(file *zip.File) (int64, int64, error) {
 		if !ok || start.Name.Local != "row" {
 			continue
 		}
+		fallbackRow++
+		rowNumber := fallbackRow
+		for _, attribute := range start.Attr {
+			if attribute.Name.Local != "r" {
+				continue
+			}
+			if parsed, parseErr := strconv.ParseInt(strings.TrimSpace(attribute.Value), 10, 64); parseErr == nil && parsed > 0 {
+				rowNumber = parsed
+				fallbackRow = parsed
+			}
+		}
 		visible, rowMaximum, err := countWorksheetRow(decoder, start)
 		if err != nil {
 			return 0, 0, err
 		}
-		if visible {
-			rows++
+		if visible && rowNumber > maximumRow {
+			maximumRow = rowNumber
 		}
 		if rowMaximum > maximumColumn {
 			maximumColumn = rowMaximum
 		}
 	}
-	return rows, maximumColumn, nil
+	return maximumRow, maximumColumn, nil
 }
 
 func countWorksheetRow(decoder *xml.Decoder, start xml.StartElement) (bool, int64, error) {
@@ -622,7 +797,7 @@ func inspectSQLiteHeader(ctx context.Context, instance *storageInstance, key str
 	if err != nil {
 		return nil, nil, 0, err
 	}
-	source.size = knownSize
+	source.SetKnownSize(knownSize)
 	header, err := source.ReadRange(0, 100)
 	if err != nil {
 		return nil, nil, 0, err
@@ -655,7 +830,7 @@ func inspectSQLiteHeader(ctx context.Context, instance *storageInstance, key str
 	if version := binary.BigEndian.Uint32(header[96:100]); version != 0 {
 		properties["SQLite version"] = fmt.Sprintf("%d.%d.%d", version/1_000_000, (version/1_000)%1_000, version%1_000)
 	}
-	return properties, source.headers.Clone(), source.size, nil
+	return properties, source.Headers().Clone(), source.Size(), nil
 }
 
 type parquetSummary struct {
@@ -668,7 +843,7 @@ func inspectParquetSummary(ctx context.Context, instance *storageInstance, key s
 	if err != nil {
 		return parquetSummary{}, nil, 0, err
 	}
-	source.size = knownSize
+	source.SetKnownSize(knownSize)
 	footer, err := source.ReadSuffix(8)
 	if err != nil {
 		return parquetSummary{}, nil, 0, err
@@ -677,10 +852,10 @@ func inspectParquetSummary(ctx context.Context, instance *storageInstance, key s
 		return parquetSummary{}, nil, 0, apiError{Status: http.StatusUnprocessableEntity, Code: "invalid_parquet", Message: "the object is not a valid Parquet file"}
 	}
 	metadataLength := int64(binary.LittleEndian.Uint32(footer[:4]))
-	if metadataLength <= 0 || metadataLength > 128<<20 || source.size < metadataLength+8 {
+	if metadataLength <= 0 || metadataLength > 128<<20 || source.Size() < metadataLength+8 {
 		return parquetSummary{}, nil, 0, apiError{Status: http.StatusUnprocessableEntity, Code: "invalid_parquet_metadata", Message: "the Parquet footer metadata length is invalid"}
 	}
-	metadata, err := source.ReadRange(source.size-8-metadataLength, metadataLength)
+	metadata, err := source.ReadRange(source.Size()-8-metadataLength, metadataLength)
 	if err != nil {
 		return parquetSummary{}, nil, 0, err
 	}
@@ -688,7 +863,7 @@ func inspectParquetSummary(ctx context.Context, instance *storageInstance, key s
 	if err != nil {
 		return parquetSummary{}, nil, 0, apiError{Status: http.StatusUnprocessableEntity, Code: "invalid_parquet_metadata", Message: err.Error()}
 	}
-	return summary, source.headers.Clone(), source.size, nil
+	return summary, source.Headers().Clone(), source.Size(), nil
 }
 
 // Minimal Thrift compact-protocol reader for the two FileMetaData fields needed
@@ -713,64 +888,6 @@ const (
 	compactMap          = 11
 	compactStruct       = 12
 )
-
-func parseParquetFileMetadata(data []byte) (parquetSummary, error) {
-	reader := &thriftCompactReader{data: data}
-	var summary parquetSummary
-	lastField := int16(0)
-	for {
-		fieldID, fieldType, nextLast, err := reader.fieldHeader(lastField)
-		if err != nil {
-			return summary, err
-		}
-		if fieldType == compactStop {
-			break
-		}
-		lastField = nextLast
-		switch fieldID {
-		case 2: // schema list
-			if fieldType != compactList {
-				return summary, fmt.Errorf("unexpected Parquet schema field type")
-			}
-			size, elementType, err := reader.collectionHeader()
-			if err != nil {
-				return summary, err
-			}
-			for index := 0; index < size; index++ {
-				if elementType != compactStruct {
-					if err := reader.skip(elementType); err != nil {
-						return summary, err
-					}
-					continue
-				}
-				children, err := reader.readParquetSchemaElement(index == 0)
-				if err != nil {
-					return summary, err
-				}
-				if index == 0 && children > 0 {
-					summary.Columns = children
-				}
-			}
-		case 3: // num_rows
-			if fieldType != compactI64 && fieldType != compactI32 && fieldType != compactI16 {
-				return summary, fmt.Errorf("unexpected Parquet row-count field type")
-			}
-			value, err := reader.readZigZag()
-			if err != nil {
-				return summary, err
-			}
-			summary.Rows = value
-		default:
-			if err := reader.skip(fieldType); err != nil {
-				return summary, err
-			}
-		}
-	}
-	if summary.Rows < 0 || summary.Columns < 0 {
-		return parquetSummary{}, fmt.Errorf("Parquet metadata contains invalid dimensions")
-	}
-	return summary, nil
-}
 
 func (r *thriftCompactReader) readParquetSchemaElement(root bool) (int, error) {
 	lastField := int16(0)

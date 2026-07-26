@@ -13,17 +13,7 @@ COPY src/go.mod src/go.sum ./
 RUN go mod download
 COPY src/ ./
 
-# A release can be unpacked over an older source tree. Remove the retired
-# media-pipeline files before testing so stale files cannot re-enter the image.
-RUN rm -f \
-      media_sessions.go \
-      media_sessions_test.go \
-      media_process_unix_test.go \
-      media_source_cache.go \
-      media_source_cache_test.go \
-      process_other.go \
-      process_unix.go \
-    && go test ./...
+RUN go test ./...
 
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
@@ -53,13 +43,10 @@ FROM scratch AS runtime
 COPY --from=builder /out/rootfs/ /
 USER 65532:65532
 WORKDIR /data
-ENV HOME=/data \
-    TMPDIR=/tmp \
-    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 VOLUME ["/data"]
 EXPOSE 8080
 STOPSIGNAL SIGTERM
 ENTRYPOINT ["/s3-browser"]
 CMD ["-c", "/config/config.hcl"]
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD ["/s3-browser", "healthcheck", "--url", "http://127.0.0.1:8080/healthz"]
+  CMD ["/s3-browser", "healthcheck", "-c", "/config/config.hcl"]

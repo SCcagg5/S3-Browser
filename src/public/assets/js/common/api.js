@@ -13,7 +13,7 @@
   }
 
   function withInstance(path, extraParams, explicitInstance = null) {
-    const url = new URL(path, window.location.origin);
+    const url = BB.runtime.resolveURL(path);
     const id = explicitInstance === null || explicitInstance === undefined
       ? selectedInstance()
       : String(explicitInstance || '');
@@ -23,11 +23,11 @@
       // undefined and null mean that the caller did not supply a value.
       if (value !== undefined && value !== null) url.searchParams.set(key, String(value));
     });
-    return url.pathname + url.search;
+    return url.href;
   }
 
   async function request(path, options) {
-    const response = await fetch(path, { cache: 'no-store', ...(options || {}) });
+    const response = await fetch(BB.runtime.resolvePath(path), { cache: 'no-store', ...(options || {}) });
     if (response.ok) return response;
     let message = `HTTP ${response.status}`;
     let code = '';
@@ -110,7 +110,7 @@
         return;
       }
       const xhr = new XMLHttpRequest();
-      xhr.open(method, path, true);
+      xhr.open(method, BB.runtime.resolvePath(path), true);
       Object.entries(headers).forEach(([name, value]) => xhr.setRequestHeader(name, value));
       xhr.responseType = 'text';
 
@@ -201,15 +201,11 @@
   }
 
   function readStoredUpload(storageKey) {
-    try { return localStorage.getItem(storageKey) || ''; }
-    catch (_) { return ''; }
+    return BB.runtime?.readState(storageKey) || '';
   }
 
   function storeUpload(storageKey, id) {
-    try {
-      if (id) localStorage.setItem(storageKey, id);
-      else localStorage.removeItem(storageKey);
-    } catch (_) {}
+    BB.runtime?.writeState(storageKey, id || '');
   }
 
   const api = {
@@ -236,6 +232,12 @@
       return withInstance('/s3', { key: clean, preview: 1 }, explicitInstance);
     },
 
+    openURLForKey(key, explicitInstance = null) {
+      const clean = String(key || '').replace(/^\/+/, '');
+      const filename = clean.split('/').filter(Boolean).pop() || 'download';
+      return withInstance(`/open/${encodeURIComponent(filename)}`, { key: clean }, explicitInstance);
+    },
+
     async head(key) {
       const response = await request(this.urlForKey(key), { method: 'HEAD' });
       const headers = {};
@@ -245,16 +247,6 @@
         size: Number(response.headers.get('Content-Length') || 0),
         headers
       };
-    },
-
-    async getText(key) {
-      const response = await request(this.urlForKey(key));
-      return response.text();
-    },
-
-    async getBlob(key) {
-      const response = await request(this.urlForKey(key));
-      return response.blob();
     },
 
     async spreadsheet({
@@ -295,8 +287,26 @@
       return response.json();
     },
 
-    async documentCount({ key, instance = null, signal = null } = {}) {
-      const response = await request(withInstance('/api/document-count', { key }, instance), { signal });
+    async documentCount({ key, size = 0, instance = null, signal = null } = {}) {
+      const parameters = { key };
+      if (Number(size) > 0) parameters.size = Math.floor(Number(size));
+      const response = await request(withInstance('/api/document-count', parameters, instance), { signal });
+      return response.json();
+    },
+
+    async wordPreview({ key, size = 0, etag = '', instance = null, signal = null } = {}) {
+      const parameters = { key };
+      if (Number(size) > 0) parameters.size = Math.floor(Number(size));
+      if (etag) parameters.etag = String(etag);
+      const response = await request(withInstance('/api/document/word', parameters, instance), { signal });
+      return response.json();
+    },
+
+    async parquetPreview({ key, size = 0, etag = '', instance = null, signal = null } = {}) {
+      const parameters = { key };
+      if (Number(size) > 0) parameters.size = Math.floor(Number(size));
+      if (etag) parameters.etag = String(etag);
+      const response = await request(withInstance('/api/parquet', parameters, instance), { signal });
       return response.json();
     },
 
@@ -331,7 +341,7 @@
     async jsonTree({
       key,
       start = 0,
-      cursor = 0,
+      cursor = '',
       index = 0,
       type = '',
       limit = 50,
@@ -341,7 +351,7 @@
     } = {}) {
       const parameters = { key, limit };
       if (Number(start) > 0) parameters.start = Math.floor(Number(start));
-      if (Number(cursor) > 0) parameters.cursor = Math.floor(Number(cursor));
+      if (String(cursor || '').trim()) parameters.cursor = String(cursor);
       if (Number(index) > 0) parameters.index = Math.floor(Number(index));
       if (type) parameters.type = type;
       if (etag) parameters.etag = etag;
@@ -363,9 +373,16 @@
       return response.json();
     },
 
-    async sqliteTable({ id, table, page = 0, pageSize = 100, query = '', signal = null } = {}) {
+    async sqliteTable({ id, table, page = 0, pageSize = 100, filters = {}, sortColumn = '', sortDirection = '', signal = null } = {}) {
       const path = `/api/sqlite/sessions/${encodeURIComponent(id)}/table`;
-      const response = await request(withInstance(path, { table, page, pageSize, q: query }, ''), { signal });
+      const parameters = { table, page, pageSize };
+      const activeFilters = Object.fromEntries(Object.entries(filters || {}).filter(([, value]) => String(value || '').trim()));
+      if (Object.keys(activeFilters).length) parameters.filters = JSON.stringify(activeFilters);
+      if (sortColumn && (sortDirection === 'asc' || sortDirection === 'desc')) {
+        parameters.sortColumn = sortColumn;
+        parameters.sortDirection = sortDirection;
+      }
+      const response = await request(withInstance(path, parameters, ''), { signal });
       return response.json();
     },
 
@@ -386,6 +403,31 @@
       if (options.etag) parameters.etag = String(options.etag);
       if (options.lastModified) parameters.lastModified = String(options.lastModified);
       const response = await request(withInstance('/api/media-info', parameters, options.instance ?? null), {
+        signal: options.signal || null
+      });
+      return response.json();
+    },
+
+    async structuredPreview(key, options = {}) {
+      const parameters = { key };
+      const size = Number(options.size);
+      if (Number.isFinite(size) && size >= 0) parameters.size = String(size);
+      if (options.mime) parameters.mime = String(options.mime);
+      if (options.etag) parameters.etag = String(options.etag);
+      if (options.lastModified) parameters.lastModified = String(options.lastModified);
+      const response = await request(withInstance('/api/structured-preview', parameters, options.instance ?? null), {
+        signal: options.signal || null
+      });
+      return response.json();
+    },
+
+    async archivePreview(key, options = {}) {
+      const parameters = { key };
+      const size = Number(options.size);
+      if (Number.isFinite(size) && size >= 0) parameters.size = String(size);
+      if (options.etag) parameters.etag = String(options.etag);
+      if (options.lastModified) parameters.lastModified = String(options.lastModified);
+      const response = await request(withInstance('/api/archive-preview', parameters, options.instance ?? null), {
         signal: options.signal || null
       });
       return response.json();
@@ -621,9 +663,9 @@
       return true;
     },
 
-    async list({ prefix = '', delimiter = '/', max = 50, continuationToken = '', exclude = '', signal = null, instance = null } = {}) {
+    async list({ prefix = '', delimiter = '/', continuationToken = '', exclude = '', signal = null, instance = null } = {}) {
       const response = await request(
-        withInstance('/api/list', { prefix, delimiter, max, continuationToken, exclude }, instance),
+        withInstance('/api/list', { prefix, delimiter, continuationToken, exclude }, instance),
         { signal }
       );
       return response.json();
@@ -640,7 +682,6 @@
         const page = await this.list({
           prefix,
           delimiter: '',
-          max: 1000,
           continuationToken,
           exclude,
           signal,
@@ -653,6 +694,10 @@
         continuationToken = page.nextContinuationToken || '';
       } while (continuationToken);
       return items;
+    },
+
+    archiveURL({ prefix = '', name = 'archive.zip', instance = null } = {}) {
+      return withInstance('/api/archive', { prefix, name }, instance);
     },
 
     async listAll(prefix = '', options = {}) {
@@ -689,11 +734,6 @@
 
     async stats(prefix = '') {
       const response = await request(withInstance('/api/stats', { prefix }));
-      return response.json();
-    },
-
-    async jobs() {
-      const response = await request(withInstance('/api/jobs'));
       return response.json();
     },
 

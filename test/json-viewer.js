@@ -28,6 +28,8 @@ assert.match(viewer, /Lines \$\{lineStart\.toLocaleString\(\)\}–\$\{lineEnd\.t
 assert.match(viewer, /json-active-pager/);
 assert.match(viewer, /Count lines and pages/);
 assert.match(viewer, /view\.summaryState === 'loading'/);
+assert.match(viewer, /countButton\.hidden = activeMode === 'tree' \|\| view\.summaryState === 'ready'/);
+assert.doesNotMatch(viewer, /Totals ready/);
 assert.match(viewer, /element\$\{numeric === 1 \? '' : 's'\}/);
 assert.match(viewer, /initialPayload: payload\.node\?\.container \? payload : null/);
 assert.match(viewer, /setExpanded\(true\)/);

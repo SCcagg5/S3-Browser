@@ -1,238 +1,329 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestLoadConfigMultipleProviders(t *testing.T) {
-	dir := t.TempDir()
-	credentialsDir := filepath.Join(dir, "credentials")
-	if err := os.Mkdir(credentialsDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	gcsCredentials := filepath.Join(credentialsDir, "gcs.json")
-	if err := os.WriteFile(gcsCredentials, []byte(`{"type":"service_account"}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	configPath := filepath.Join(dir, "config.hcl")
-	config := `
-server {
-  listen   = ":9090"
-  data_dir = "./state"
-}
-
-storage "primary" {
-  name              = "Primary S3"
+func TestOmittedPermissionsInheritCredentialCapabilities(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config.hcl")
+	writeConfig(t, path, `
+auth "shared" {
   provider          = "s3"
-  endpoint          = "http://127.0.0.1:9000/"
-  region            = "us-east-1"
-  bucket            = "assets"
-  auth              = "access_key"
-  access_key_id     = "local-key"
-  secret_access_key = "local-secret"
-  permissions       = ["read", "write", "delete"]
-  root_prefix       = "/tenant-a"
+  mode              = "access_key"
+  endpoint          = "http://localhost:9000"
+  region            = "test"
+  access_key_id     = "key"
+  secret_access_key = "secret"
 }
 
-storage "archive" {
-  name             = "Archive GCS"
-  provider         = "gcs"
-  bucket           = "archive-bucket"
-  auth             = "service_account"
-  credentials_file = "./credentials/gcs.json"
+bucket "inherited" {
+  auth   = "shared"
+  bucket = "bucket"
 }
-`
-	if err := os.WriteFile(configPath, []byte(config), 0o600); err != nil {
+`)
+	cfg, err := loadConfig(path)
+	if err != nil {
 		t.Fatal(err)
 	}
+	bucket := cfg.Buckets[0]
+	if bucket.PermissionsDefined || len(bucket.Permissions) != 0 {
+		t.Fatalf("omitted permissions must not create an application ceiling: %#v", bucket)
+	}
+	caps := initialCapabilities(bucket)
+	for name, state := range map[string]capabilityState{
+		permissionRead: caps.Read, permissionWrite: caps.Write, permissionDelete: caps.Delete,
+	} {
+		if state.State != capabilityUnknown || !state.Allowed || state.Verified {
+			t.Fatalf("%s capability = %#v, want tentable unknown", name, state)
+		}
+	}
+}
 
+func TestLoadConfigSharesAuthenticationAcrossBuckets(t *testing.T) {
+	dir := t.TempDir()
+	secretPath := filepath.Join(dir, "s3-secret.txt")
+	if err := os.WriteFile(secretPath, []byte("shared-secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(dir, "config.hcl")
+	writeConfig(t, configPath, `
+server {
+  listen     = ":9090"
+  state_mode = "persistent"
+  data_dir   = "./state"
+}
+
+auth "production" {
+  provider               = "s3"
+  mode                   = "access_key"
+  endpoint               = "http://127.0.0.1:9000/"
+  region                 = "us-east-1"
+  access_key_id          = "shared-key"
+  secret_access_key_file = "./s3-secret.txt"
+}
+
+bucket "documents" {
+  name        = "Documents"
+  auth        = "production"
+  bucket      = "documents"
+  permissions   = ["read", "write", "delete"]
+  root_prefix  = "/tenant-a"
+  max_scan_pages = 15
+}
+
+bucket "archive" {
+  name        = "Archive"
+  auth        = "production"
+  bucket      = "archive"
+  permissions = ["read"]
+}
+`)
 	cfg, err := loadConfig(configPath)
 	if err != nil {
 		t.Fatalf("loadConfig() error = %v", err)
 	}
 	if cfg.Listen != ":9090" {
-		t.Fatalf("Listen = %q", cfg.Listen)
-	}
-	if cfg.SourceName != configPath {
-		t.Fatalf("SourceName = %q, want %q", cfg.SourceName, configPath)
+		t.Fatalf("server listen = %q", cfg.Listen)
 	}
 	if cfg.DataDir != filepath.Join(dir, "state") {
 		t.Fatalf("DataDir = %q", cfg.DataDir)
 	}
-	if len(cfg.Storages) != 2 {
-		t.Fatalf("storages = %d, want 2", len(cfg.Storages))
+	if len(cfg.Authentications) != 1 || len(cfg.Buckets) != 2 {
+		t.Fatalf("auth=%d buckets=%d", len(cfg.Authentications), len(cfg.Buckets))
 	}
+	for _, bucket := range cfg.Buckets {
+		if bucket.AuthID != "production" || bucket.Provider != "s3" || bucket.Region != "us-east-1" {
+			t.Fatalf("bucket did not resolve shared auth identity: %+v", bucket)
+		}
+	}
+	auth := cfg.Authentications[0]
+	if auth.AccessKeyID != "shared-key" || auth.SecretAccessKey != "shared-secret" {
+		t.Fatalf("shared authentication credentials were not loaded: %+v", auth)
+	}
+	if cfg.Buckets[0].RootPrefix != "tenant-a/" {
+		t.Fatalf("RootPrefix = %q", cfg.Buckets[0].RootPrefix)
+	}
+	if cfg.Buckets[0].MaxScanPages != 15 || cfg.Buckets[1].MaxScanPages != 1 {
+		t.Fatalf("max scan pages = documents:%d archive:%d", cfg.Buckets[0].MaxScanPages, cfg.Buckets[1].MaxScanPages)
+	}
+	if got := strings.Join(cfg.Buckets[0].Permissions, ","); got != "read,write,delete" {
+		t.Fatalf("documents permissions = %q", got)
+	}
+	if got := strings.Join(cfg.Buckets[1].Permissions, ","); got != "read" {
+		t.Fatalf("archive permissions = %q", got)
+	}
+}
 
-	s3 := cfg.Storages[0]
-	if s3.ID != "primary" || s3.Name != "Primary S3" || s3.Endpoint != "http://127.0.0.1:9000" {
-		t.Fatalf("unexpected S3 config: %+v", s3)
+func TestLoadConfigSupportsGCSAuthentication(t *testing.T) {
+	dir := t.TempDir()
+	credentials := filepath.Join(dir, "gcs.json")
+	if err := os.WriteFile(credentials, []byte(`{"type":"service_account"}`), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	if s3.AccessKeyID != "local-key" || s3.SecretAccessKey != "local-secret" {
-		t.Fatal("direct S3 credentials were not preserved")
-	}
-	if s3.RootPrefix != "tenant-a/" {
-		t.Fatalf("RootPrefix = %q", s3.RootPrefix)
-	}
-	if got := strings.Join(s3.Permissions, ","); got != "read,write,delete" {
-		t.Fatalf("Permissions = %q", got)
-	}
+	configPath := filepath.Join(dir, "config.hcl")
+	writeConfig(t, configPath, `
+auth "gcs" {
+  provider         = "gcs"
+  mode             = "service_account"
+  credentials_file = "./gcs.json"
+}
 
-	gcs := cfg.Storages[1]
-	if gcs.Endpoint != "https://storage.googleapis.com" {
-		t.Fatalf("GCS default endpoint = %q", gcs.Endpoint)
+bucket "archive" {
+  auth   = "gcs"
+  bucket = "archive-bucket"
+}
+`)
+	cfg, err := loadConfig(configPath)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if gcs.CredentialsFile != gcsCredentials {
-		t.Fatalf("credentials path = %q, want %q", gcs.CredentialsFile, gcsCredentials)
+	bucket := cfg.Buckets[0]
+	if bucket.Provider != "gcs" || bucket.AuthID != "gcs" {
+		t.Fatalf("resolved GCS bucket = %+v", bucket)
 	}
-	if gcs.PermissionsDefined {
-		t.Fatal("GCS permissions should be auto-discovered when omitted")
+	auth := cfg.Authentications[0]
+	if auth.Endpoint != "https://storage.googleapis.com" || auth.CredentialsFile != credentials {
+		t.Fatalf("resolved GCS authentication = %+v", auth)
+	}
+}
+
+func TestLoadConfigRejectsUnknownAuthenticationAttributes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.hcl")
+	writeConfig(t, path, `
+auth "broken" {
+  provider          = "s3"
+  endpoint          = "http://localhost:9000"
+  region            = "test"
+  unsupported_option = "value"
+}
+
+bucket "bucket" {
+  auth   = "broken"
+  bucket = "bucket"
+}
+`)
+	_, err := loadConfig(path)
+	if err == nil || !strings.Contains(err.Error(), `unknown attribute "unsupported_option"`) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestLoadConfigRejectsUnknownAuthentication(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.hcl")
+	writeConfig(t, path, `
+auth "public" {
+  provider = "s3"
+  mode     = "anonymous"
+  endpoint = "http://localhost:9000"
+  region   = "test"
+}
+
+bucket "broken" {
+  auth   = "missing"
+  bucket = "bucket"
+}
+`)
+	_, err := loadConfig(path)
+	if err == nil || !strings.Contains(err.Error(), `auth "missing" is not defined`) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestLoadConfigRejectsDataDirectoryInEphemeralMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.hcl")
+	writeConfig(t, path, `
+server { data_dir = "./state" }
+
+auth "public" {
+  provider = "s3"
+  mode     = "anonymous"
+  endpoint = "http://localhost:9000"
+  region   = "test"
+}
+
+bucket "bucket" { auth = "public" bucket = "bucket" }
+`)
+	_, err := loadConfig(path)
+	if err == nil || !strings.Contains(err.Error(), "data_dir requires state_mode") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestLoadConfigRejectsUnknownServerAttribute(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.hcl")
+	writeConfig(t, path, `
+server { public_prefix = "/browser/" }
+
+auth "public" {
+  provider = "s3"
+  mode     = "anonymous"
+  endpoint = "http://localhost:9000"
+  region   = "test"
+}
+
+bucket "bucket" { auth = "public" bucket = "bucket" }
+`)
+	_, err := loadConfig(path)
+	if err == nil || !strings.Contains(err.Error(), "public_prefix") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestLoadConfigValidatesMaxScanPages(t *testing.T) {
+	for _, value := range []string{"1000001"} {
+		t.Run(value, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.hcl")
+			writeConfig(t, path, `
+auth "public" {
+  provider = "s3"
+  mode     = "anonymous"
+  endpoint = "http://localhost:9000"
+  region   = "test"
+}
+
+bucket "bucket" {
+  auth           = "public"
+  bucket         = "bucket"
+  max_scan_pages = `+value+`
+}
+`)
+			if _, err := loadConfig(path); err == nil || !strings.Contains(err.Error(), "max_scan_pages") {
+				t.Fatalf("error = %v", err)
+			}
+		})
+	}
+}
+
+func TestLoadConfigRejectsOversizedConfiguration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.hcl")
+	data := strings.Repeat("# padding\n", int(maxConfigurationBytes/10)+2)
+	if int64(len(data)) <= maxConfigurationBytes {
+		data += strings.Repeat("x", int(maxConfigurationBytes)-len(data)+1)
+	}
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := loadConfig(path)
+	if err == nil || !strings.Contains(err.Error(), "exceeds the") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestLoadConfigRejectsOversizedSecretFile(t *testing.T) {
+	dir := t.TempDir()
+	secretPath := filepath.Join(dir, "secret.txt")
+	if err := os.WriteFile(secretPath, bytes.Repeat([]byte{'x'}, int(maxSecretFileBytes)+1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(dir, "config.hcl")
+	writeConfig(t, configPath, `
+auth "shared" {
+  provider               = "s3"
+  mode                   = "access_key"
+  endpoint               = "http://localhost:9000"
+  region                 = "test"
+  access_key_id          = "key"
+  secret_access_key_file = "./secret.txt"
+}
+
+bucket "bucket" { auth = "shared" bucket = "bucket" }
+`)
+	_, err := loadConfig(configPath)
+	if err == nil || !strings.Contains(err.Error(), "exceeds the") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestLoadRuntimeConfigRequiresPath(t *testing.T) {
+	_, err := loadRuntimeConfig("")
+	if err == nil || !strings.Contains(err.Error(), "configuration path is required") {
+		t.Fatalf("error = %v", err)
 	}
 }
 
 func TestLoadConfigRejectsWrongAttributeType(t *testing.T) {
-	t.Parallel()
 	path := filepath.Join(t.TempDir(), "config.hcl")
-	content := `
-storage "broken" {
+	writeConfig(t, path, `
+auth "public" {
   provider = "s3"
+  mode     = "anonymous"
   endpoint = "http://localhost:9000"
-  region = "test"
-  bucket = "bucket"
-  auth = "anonymous"
+  region   = "test"
+}
+
+bucket "broken" {
+  auth        = "public"
+  bucket      = "bucket"
   permissions = true
 }
-`
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
+`)
 	_, err := loadConfig(path)
 	if err == nil || !strings.Contains(err.Error(), `attribute "permissions" must be a string list`) {
-		t.Fatalf("error = %v", err)
-	}
-}
-
-func TestLoadConfigSupportsS3EnvironmentAndFileCredentials(t *testing.T) {
-	dir := t.TempDir()
-	secretFile := filepath.Join(dir, "secret.txt")
-	if err := os.WriteFile(secretFile, []byte("file-secret\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("S3_TEST_ACCESS_KEY", "environment-key")
-	path := filepath.Join(dir, "config.hcl")
-	content := `
-storage "configured" {
-  provider               = "s3"
-  endpoint               = "http://localhost:9000"
-  region                 = "test"
-  bucket                 = "bucket"
-  auth                   = "access_key"
-  access_key_id_env      = "S3_TEST_ACCESS_KEY"
-  secret_access_key_file = "./secret.txt"
-}
-`
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := loadConfig(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	storage := cfg.Storages[0]
-	if storage.AccessKeyID != "environment-key" || storage.SecretAccessKey != "file-secret" {
-		t.Fatalf("resolved credentials are incorrect: access=%q secret=%q", storage.AccessKeyID, storage.SecretAccessKey)
-	}
-}
-
-func TestLoadConfigRejectsMultipleSourcesForCredential(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.hcl")
-	content := `
-storage "broken" {
-  provider          = "s3"
-  endpoint          = "http://localhost:9000"
-  region            = "test"
-  bucket            = "bucket"
-  auth              = "access_key"
-  access_key_id     = "direct"
-  access_key_id_env = "S3_ACCESS_KEY"
-  secret_key        = "secret"
-}
-`
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	_, err := loadConfig(path)
-	if err == nil || !strings.Contains(err.Error(), "only one of access_key_id") {
-		t.Fatalf("error = %v", err)
-	}
-}
-
-func TestLoadConfigRejectsMissingCredentialEnvironmentVariable(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.hcl")
-	content := `
-storage "broken" {
-  provider          = "s3"
-  endpoint          = "http://localhost:9000"
-  region            = "test"
-  bucket            = "bucket"
-  auth              = "access_key"
-  access_key_id_env = "S3_BROWSER_TEST_MISSING"
-  secret_key        = "secret"
-}
-`
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	_, err := loadConfig(path)
-	if err == nil || !strings.Contains(err.Error(), "is not set") {
-		t.Fatalf("error = %v", err)
-	}
-}
-
-func TestLoadRuntimeConfigSourcePrecedence(t *testing.T) {
-	dir := t.TempDir()
-	explicitPath := filepath.Join(dir, "explicit.hcl")
-	environmentPath := filepath.Join(dir, "environment.hcl")
-	writeMinimalConfig(t, explicitPath, "explicit")
-	writeMinimalConfig(t, environmentPath, "environment")
-
-	t.Setenv(configFileEnvironment, environmentPath)
-	t.Setenv(configHCLEnvironment, minimalConfig("inline"))
-
-	cfg, err := loadRuntimeConfig(explicitPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Storages[0].ID != "explicit" {
-		t.Fatalf("explicit source did not win: %q", cfg.Storages[0].ID)
-	}
-
-	cfg, err = loadRuntimeConfig("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Storages[0].ID != "environment" {
-		t.Fatalf("file environment source did not win: %q", cfg.Storages[0].ID)
-	}
-
-	t.Setenv(configFileEnvironment, "")
-	cfg, err = loadRuntimeConfig("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Storages[0].ID != "inline" || cfg.SourceName != configHCLEnvironment {
-		t.Fatalf("inline source was not loaded: %+v", cfg)
-	}
-}
-
-func TestLoadRuntimeConfigRequiresSource(t *testing.T) {
-	t.Setenv(configFileEnvironment, "")
-	t.Setenv(configHCLEnvironment, "")
-	_, err := loadRuntimeConfig("")
-	if err == nil || !strings.Contains(err.Error(), "configuration is required") {
 		t.Fatalf("error = %v", err)
 	}
 }
@@ -243,7 +334,7 @@ func TestParseHCLSubsetCommentsAndEscapes(t *testing.T) {
 // line comment
 server { listen = ":8080" }
 /* block comment */
-storage "one" {
+bucket "one" {
   name = "A\nB"
   permissions = ["read", "write",]
 }
@@ -259,45 +350,24 @@ storage "one" {
 	}
 }
 
-func writeMinimalConfig(t *testing.T, path, id string) {
-	t.Helper()
-	if err := os.WriteFile(path, []byte(minimalConfig(id)), 0o600); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func minimalConfig(id string) string {
-	return `
-storage "` + id + `" {
-  provider = "s3"
-  endpoint = "http://localhost:9000"
-  region = "test"
-  bucket = "bucket"
-  auth = "anonymous"
-}
-`
-}
-
 func TestLoadConfigJobHistoryLimit(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "config.hcl")
-	content := `
+	path := filepath.Join(t.TempDir(), "config.hcl")
+	writeConfig(t, path, `
 server {
+  state_mode       = "persistent"
   data_dir         = "./state"
   job_history_limit = 37
 }
 
-storage "primary" {
+auth "public" {
   provider = "s3"
+  mode     = "anonymous"
   endpoint = "http://localhost:9000"
   region   = "test"
-  bucket   = "bucket"
-  auth     = "anonymous"
 }
-`
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
+
+bucket "primary" { auth = "public" bucket = "bucket" }
+`)
 	cfg, err := loadConfig(path)
 	if err != nil {
 		t.Fatal(err)
@@ -311,26 +381,28 @@ func TestLoadConfigRejectsInvalidJobHistoryLimit(t *testing.T) {
 	for _, value := range []string{"0", "10001", `"100"`} {
 		t.Run(value, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "config.hcl")
-			content := `
-server {
-  job_history_limit = ` + value + `
-}
+			writeConfig(t, path, `
+server { job_history_limit = `+value+` }
 
-storage "primary" {
+auth "public" {
   provider = "s3"
+  mode     = "anonymous"
   endpoint = "http://localhost:9000"
   region   = "test"
-  bucket   = "bucket"
-  auth     = "anonymous"
 }
-`
-			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			_, err := loadConfig(path)
-			if err == nil {
+
+bucket "primary" { auth = "public" bucket = "bucket" }
+`)
+			if _, err := loadConfig(path); err == nil {
 				t.Fatal("expected invalid job history limit to fail")
 			}
 		})
+	}
+}
+
+func writeConfig(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
 	}
 }

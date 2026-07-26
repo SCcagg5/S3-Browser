@@ -11,12 +11,12 @@ services:
       - ./config.hcl:/config/config.hcl:ro
       - browser-data:/data
     ports:
-      - "${PORT:-8080}:8080"
+      - "8080:8080"
     depends_on:
       garage:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "/s3-browser", "healthcheck", "--url", "http://127.0.0.1:8080/healthz"]
+      test: ["CMD", "/s3-browser", "healthcheck", "-c", "/config/config.hcl"]
       interval: 10s
       timeout: 3s
       retries: 10
@@ -31,16 +31,6 @@ services:
       nofile:
         soft: 262144
         hard: 262144
-    environment:
-      BROWSER_CONFIG_FILE: /config/config.hcl
-      RPC_SECRET: "${RPC_SECRET}"
-      ADMIN_TOKEN: "${ADMIN_TOKEN}"
-      METRICS_TOKEN: "${METRICS_TOKEN}"
-      S3_REGION: garage
-      ROOT_DOMAIN: .garage
-      USE_LOCAL_TZ: "false"
-      REPLICATION_FACTOR: "1"
-      COMPRESSION_LEVEL: "0"
     volumes:
       - ./config.hcl:/config/config.hcl:ro
 

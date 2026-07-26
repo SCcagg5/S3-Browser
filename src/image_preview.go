@@ -41,14 +41,14 @@ func (a *application) handleImagePreview(w http.ResponseWriter, r *http.Request)
 		if sourceErr == nil {
 			if extension == "raf" {
 				header, headerErr := source.ReadRange(0, 128)
-				if (headerErr == nil || errors.Is(headerErr, io.EOF)) && source.size > 0 {
-					if offset, length, ok := rafPreviewRange(header); ok && embeddedPreviewFitsObject(offset, length, source.size) {
+				if (headerErr == nil || errors.Is(headerErr, io.EOF)) && source.Size() > 0 {
+					if offset, length, ok := rafPreviewRange(header); ok && embeddedPreviewFitsObject(offset, length, source.Size()) {
 						a.serveEmbeddedImageRange(w, r, instance, key, offset, length)
 						return
 					}
 				}
-			} else if header, valid, headerErr := readAdaptiveTIFFHeader(source); headerErr == nil && valid && source.size > 0 {
-				if offset, length, ok := embeddedTIFFJPEGRange(header); ok && embeddedPreviewFitsObject(offset, length, source.size) {
+			} else if header, valid, headerErr := readAdaptiveTIFFHeader(source); headerErr == nil && valid && source.Size() > 0 {
+				if offset, length, ok := embeddedTIFFJPEGRange(header); ok && embeddedPreviewFitsObject(offset, length, source.Size()) {
 					a.serveEmbeddedImageRange(w, r, instance, key, offset, length)
 					return
 				}
@@ -74,7 +74,7 @@ func (a *application) serveEmbeddedImageRange(w http.ResponseWriter, r *http.Req
 	}
 	headers := make(http.Header)
 	headers.Set("Range", fmt.Sprintf("bytes=%d-%d", offset, offset+length-1))
-	object, err := instance.backend.Get(r.Context(), instance.fullKey(key), headers)
+	object, err := instance.Get(r.Context(), instance.fullKey(key), headers)
 	if err != nil {
 		writeAPIError(w, err)
 		return

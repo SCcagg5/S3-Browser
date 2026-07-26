@@ -19,13 +19,57 @@ const (
 	permissionRead   = "read"
 	permissionWrite  = "write"
 	permissionDelete = "delete"
+
+	capabilityUnknown = "unknown"
+	capabilityAllowed = "allowed"
+	capabilityDenied  = "denied"
 )
 
 type capabilityState struct {
+	State    string `json:"state"`
 	Allowed  bool   `json:"allowed"`
 	Verified bool   `json:"verified"`
 	Source   string `json:"source"`
 	Reason   string `json:"reason,omitempty"`
+}
+
+func normalizedCapabilityState(state capabilityState) capabilityState {
+	if state.State == "" {
+		switch {
+		case state.Verified && state.Allowed:
+			state.State = capabilityAllowed
+		case state.Verified && !state.Allowed:
+			state.State = capabilityDenied
+		default:
+			state.State = capabilityUnknown
+			// Unknown capabilities are intentionally tentable. The backend remains
+			// authoritative and will learn an explicit provider denial in memory.
+			state.Allowed = true
+		}
+	}
+	if state.State == capabilityUnknown {
+		state.Allowed = true
+		state.Verified = false
+	}
+	if state.State == capabilityAllowed {
+		state.Allowed = true
+	}
+	if state.State == capabilityDenied {
+		state.Allowed = false
+	}
+	return state
+}
+
+func unknownCapability(source, reason string) capabilityState {
+	return capabilityState{State: capabilityUnknown, Allowed: true, Verified: false, Source: source, Reason: reason}
+}
+
+func allowedCapability(source, reason string, verified bool) capabilityState {
+	return capabilityState{State: capabilityAllowed, Allowed: true, Verified: verified, Source: source, Reason: reason}
+}
+
+func deniedCapability(source, reason string, verified bool) capabilityState {
+	return capabilityState{State: capabilityDenied, Allowed: false, Verified: verified, Source: source, Reason: reason}
 }
 
 type capabilities struct {
@@ -51,6 +95,7 @@ func (c capabilities) state(name string) capabilityState {
 }
 
 func (c *capabilities) set(name string, state capabilityState) {
+	state = normalizedCapabilityState(state)
 	switch name {
 	case permissionRead:
 		c.Read = state
@@ -121,7 +166,6 @@ func parseStorageEndpoint(provider, raw string) (*url.URL, error) {
 func newStorageHTTPClient(insecureSkipVerify bool) *http.Client {
 	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
 	transport := &http.Transport{
-		Proxy:                 http.ProxyFromEnvironment,
 		DialContext:           dialer.DialContext,
 		ForceAttemptHTTP2:     true,
 		TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: insecureSkipVerify}, // #nosec G402 -- explicitly configured for local test services only
@@ -132,7 +176,12 @@ func newStorageHTTPClient(insecureSkipVerify bool) *http.Client {
 		ResponseHeaderTimeout: 30 * time.Second,
 		ExpectContinueTimeout: time.Second,
 	}
-	return &http.Client{Transport: transport}
+	return &http.Client{
+		Transport: transport,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 }
 
 func publicStorageError(err error) string {
@@ -173,87 +222,116 @@ func safeProviderErrorCode(value string) string {
 	return value
 }
 
-type storageBackend interface {
+type ObjectLister interface {
 	List(context.Context, listOptions) (listPage, error)
+}
+type ObjectStatReader interface {
 	Head(context.Context, string) (objectResponse, error)
+}
+type ObjectReader interface {
 	Get(context.Context, string, http.Header) (objectResponse, error)
+}
+type ObjectWriter interface {
 	Put(context.Context, string, io.Reader, int64, string) error
+}
+type ObjectDeleter interface {
 	Delete(context.Context, string) error
+}
+type ObjectCopier interface {
 	Copy(context.Context, string, string) error
+}
+type CapabilityDiscoverer interface {
 	DiscoverCapabilities(context.Context) (discoveredCapabilities, error)
 }
 
-type storageInstance struct {
-	cfg     storageConfig
-	backend storageBackend
-	mu      sync.RWMutex
-	caps    capabilities
+type storageBackend interface {
+	ObjectLister
+	ObjectStatReader
+	ObjectReader
+	ObjectWriter
+	ObjectDeleter
+	ObjectCopier
+	CapabilityDiscoverer
 }
 
-func newStorageInstance(cfg storageConfig) (*storageInstance, error) {
+type storageInstance struct {
+	cfg           bucketConfig
+	backend       storageBackend
+	mu            sync.RWMutex
+	caps          capabilities
+	forceReadOnly bool
+	policy        runtimePolicy
+	concurrency   *storageConcurrency
+	gate          chan struct{}
+}
+
+func newStorageInstance(cfg bucketConfig, auth *sharedAuthentication, policy runtimePolicy, concurrency *storageConcurrency) (*storageInstance, error) {
+	if auth == nil {
+		return nil, fmt.Errorf("bucket %q references an unavailable authentication", cfg.ID)
+	}
+	if auth.cfg.ID != cfg.AuthID || auth.cfg.Provider != cfg.Provider {
+		return nil, fmt.Errorf("bucket %q authentication does not match its resolved configuration", cfg.ID)
+	}
 	var (
 		backend storageBackend
 		err     error
 	)
 	switch cfg.Provider {
 	case "s3":
-		backend, err = newS3Backend(cfg)
+		backend, err = newS3BackendWithAuthentication(cfg, auth)
 	case "gcs":
-		backend, err = newGCSBackend(cfg)
+		backend, err = newGCSBackendWithAuthentication(cfg, auth)
 	default:
 		err = fmt.Errorf("unsupported provider %q", cfg.Provider)
 	}
 	if err != nil {
 		return nil, err
 	}
-	instance := &storageInstance{cfg: cfg, backend: backend}
-	instance.caps = initialCapabilities(cfg)
+	perStorage := policy.MaxConcurrentRequestsPerStore
+	if perStorage <= 0 {
+		perStorage = defaultMaxConcurrentPerStorage
+	}
+	instance := &storageInstance{
+		cfg: cfg, backend: backend, forceReadOnly: policy.forceReadOnly(), policy: policy,
+		concurrency: concurrency, gate: make(chan struct{}, perStorage),
+	}
+	instance.caps = initialCapabilities(cfg, instance.forceReadOnly)
 	return instance, nil
 }
 
-func initialCapabilities(cfg storageConfig) capabilities {
+func initialCapabilities(cfg bucketConfig, forceReadOnlyValues ...bool) capabilities {
+	forceReadOnly := len(forceReadOnlyValues) > 0 && forceReadOnlyValues[0]
 	var out capabilities
 	for _, name := range []string{permissionRead, permissionWrite, permissionDelete} {
-		allowed := cfg.PermissionsDefined && containsString(cfg.Permissions, name)
-		reason := "permission is disabled by the configuration"
-		if allowed {
-			reason = "permission is enabled by the configuration; provider verification is not performed automatically to avoid additional storage requests"
+		if forceReadOnly && name != permissionRead {
+			out.set(name, deniedCapability("runtime", "mutations are disabled by the administrative force_read_only policy", true))
+			continue
 		}
-		out.set(name, capabilityState{
-			Allowed:  allowed,
-			Verified: false,
-			Source:   "configuration",
-			Reason:   reason,
-		})
-	}
-	if !cfg.PermissionsDefined {
-		for _, name := range []string{permissionRead, permissionWrite, permissionDelete} {
-			out.set(name, capabilityState{
-				Allowed:  false,
-				Verified: false,
-				Source:   "discovery",
-				Reason:   "permissions are not configured; provider discovery requires an explicit refresh request",
-			})
+		if cfg.PermissionsDefined && !containsString(cfg.Permissions, name) {
+			out.set(name, deniedCapability("configuration", "action is disabled by the storage permission ceiling", true))
+			continue
 		}
+		reason := "the provider permission has not been tested; the action remains available and will be verified when used"
+		if cfg.PermissionsDefined {
+			reason = "the permission is enabled by the configuration ceiling and will be verified when used"
+		}
+		out.set(name, unknownCapability("credentials", reason))
 	}
 	return out
 }
 
 func (s *storageInstance) refreshCapabilities(ctx context.Context) capabilities {
-	discovered, err := s.backend.DiscoverCapabilities(ctx)
-	merged := mergeCapabilities(s.cfg, discovered, err)
+	discovered, err := s.discoverCapabilities(ctx)
+	merged := mergeCapabilitiesWithPolicy(s.cfg, s.forceReadOnly, discovered, err)
 	s.mu.Lock()
 	s.caps = merged
 	s.mu.Unlock()
 	return merged
 }
 
-func mergeCapabilities(cfg storageConfig, discovered discoveredCapabilities, discoveryErr error) capabilities {
+func mergeCapabilitiesWithPolicy(cfg bucketConfig, forceReadOnly bool, discovered discoveredCapabilities, discoveryErr error) capabilities {
 	now := time.Now().UTC()
-	out := capabilities{
-		Permissions: append([]string(nil), discovered.Permissions...),
-		CheckedAt:   &now,
-	}
+	out := capabilities{Permissions: append([]string(nil), discovered.Permissions...), CheckedAt: &now}
 	publicDiscoveryError := publicStorageError(discoveryErr)
 	if publicDiscoveryError != "" {
 		out.Error = publicDiscoveryError
@@ -261,55 +339,38 @@ func mergeCapabilities(cfg storageConfig, discovered discoveredCapabilities, dis
 	sort.Strings(out.Permissions)
 
 	for _, name := range []string{permissionRead, permissionWrite, permissionDelete} {
-		discoveredState, known := discovered.States[name]
-		declared := containsString(cfg.Permissions, name)
-
-		if cfg.PermissionsDefined {
-			if !declared {
-				out.set(name, capabilityState{
-					Allowed:  false,
-					Verified: true,
-					Source:   "configuration",
-					Reason:   "action is disabled in the configuration",
-				})
-				continue
-			}
-			if known && discoveredState.Verified {
-				discoveredState.Allowed = discoveredState.Allowed && declared
+		if forceReadOnly && name != permissionRead {
+			out.set(name, deniedCapability("runtime", "mutations are disabled by the administrative force_read_only policy", true))
+			continue
+		}
+		if cfg.PermissionsDefined && !containsString(cfg.Permissions, name) {
+			out.set(name, deniedCapability("configuration", "action is disabled by the storage permission ceiling", true))
+			continue
+		}
+		if discoveredState, known := discovered.States[name]; known {
+			discoveredState = normalizedCapabilityState(discoveredState)
+			if discoveredState.Verified {
 				out.set(name, discoveredState)
 				continue
 			}
-			reason := "permission is declared in the configuration; the provider cannot verify it without a destructive operation"
-			if discoveryErr != nil {
-				reason = "permission is declared in the configuration; verification failed: " + publicDiscoveryError
-			} else if known && discoveredState.Reason != "" {
-				reason = discoveredState.Reason
+			reason := discoveredState.Reason
+			if reason == "" {
+				reason = "the provider cannot verify this permission without executing the real operation"
 			}
-			out.set(name, capabilityState{
-				Allowed:  true,
-				Verified: false,
-				Source:   "configuration",
-				Reason:   reason,
-			})
+			out.set(name, unknownCapability(discoveredState.Source, reason))
 			continue
 		}
-
-		if known {
-			out.set(name, discoveredState)
-			continue
-		}
-		reason := "permission is not verified"
+		reason := "the provider permission has not been tested; the action remains available and will be verified when used"
 		if discoveryErr != nil {
-			reason = "permission discovery failed: " + publicDiscoveryError
+			reason = "permission discovery failed; the action remains tentable: " + publicDiscoveryError
 		}
-		out.set(name, capabilityState{
-			Allowed:  false,
-			Verified: false,
-			Source:   "discovery",
-			Reason:   reason,
-		})
+		out.set(name, unknownCapability("credentials", reason))
 	}
 	return out
+}
+
+func mergeCapabilities(cfg bucketConfig, discovered discoveredCapabilities, discoveryErr error) capabilities {
+	return mergeCapabilitiesWithPolicy(cfg, false, discovered, discoveryErr)
 }
 
 func (s *storageInstance) capabilities() capabilities {
@@ -337,6 +398,47 @@ func (s *storageInstance) relativeKey(full string) (string, bool) {
 	return strings.TrimPrefix(full, s.cfg.RootPrefix), true
 }
 
+func combineCapabilityStates(states ...capabilityState) capabilityState {
+	if len(states) == 0 {
+		return deniedCapability("application", "operation is not implemented", true)
+	}
+	unknown := false
+	reasons := make([]string, 0, len(states))
+	seenReasons := make(map[string]struct{}, len(states))
+	for _, state := range states {
+		state = normalizedCapabilityState(state)
+		if state.Reason != "" {
+			if _, exists := seenReasons[state.Reason]; !exists {
+				seenReasons[state.Reason] = struct{}{}
+				reasons = append(reasons, state.Reason)
+			}
+		}
+		if state.State == capabilityDenied {
+			return deniedCapability(state.Source, state.Reason, state.Verified)
+		}
+		if state.State == capabilityUnknown {
+			unknown = true
+		}
+	}
+	if unknown {
+		return unknownCapability("derived", strings.Join(reasons, "; "))
+	}
+	return allowedCapability("derived", strings.Join(reasons, "; "), true)
+}
+
+func (s *storageInstance) operationCapabilities() map[string]capabilityState {
+	caps := s.capabilities()
+	read, write, remove := caps.Read, caps.Write, caps.Delete
+	return map[string]capabilityState{
+		"list": read, "preview": read, "download": read,
+		"upload": write, "overwrite": write, "createFolder": write,
+		"copy":   combineCapabilityStates(read, write),
+		"move":   combineCapabilityStates(read, write, remove),
+		"rename": combineCapabilityStates(read, write, remove),
+		"delete": remove,
+	}
+}
+
 func (s *storageInstance) publicInfo() instanceInfo {
 	return instanceInfo{
 		ID:           s.cfg.ID,
@@ -345,20 +447,20 @@ func (s *storageInstance) publicInfo() instanceInfo {
 		Bucket:       s.cfg.Bucket,
 		Region:       s.cfg.Region,
 		RootPrefix:   s.cfg.RootPrefix,
-		TrashPrefix:  s.cfg.TrashPrefix,
 		Capabilities: s.capabilities(),
+		Operations:   s.operationCapabilities(),
 	}
 }
 
 type instanceInfo struct {
-	ID           string       `json:"id"`
-	Name         string       `json:"name"`
-	Provider     string       `json:"provider"`
-	Bucket       string       `json:"bucket"`
-	Region       string       `json:"region,omitempty"`
-	RootPrefix   string       `json:"rootPrefix,omitempty"`
-	TrashPrefix  string       `json:"trashPrefix,omitempty"`
-	Capabilities capabilities `json:"capabilities"`
+	ID           string                     `json:"id"`
+	Name         string                     `json:"name"`
+	Provider     string                     `json:"provider"`
+	Bucket       string                     `json:"bucket"`
+	Region       string                     `json:"region,omitempty"`
+	RootPrefix   string                     `json:"rootPrefix,omitempty"`
+	Capabilities capabilities               `json:"capabilities"`
+	Operations   map[string]capabilityState `json:"operations"`
 }
 
 type upstreamError struct {

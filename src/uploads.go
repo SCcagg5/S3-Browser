@@ -107,6 +107,8 @@ func (u persistentUpload) public() publicUpload {
 	}
 }
 
+const maxPersistedUploadBytes = int64(4 << 20)
+
 type uploadManager struct {
 	app     *application
 	dir     string
@@ -116,18 +118,19 @@ type uploadManager struct {
 	uplocks map[string]*sync.Mutex
 }
 
-func newUploadManager(app *application, dataDir string) (*uploadManager, error) {
-	dir := filepath.Join(dataDir, "uploads")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+func newUploadManager(app *application, dataDir string, persistent bool) (*uploadManager, error) {
+	manager := &uploadManager{app: app, uploads: make(map[string]*persistentUpload), uplocks: make(map[string]*sync.Mutex)}
+	if !persistent {
+		return manager, nil
+	}
+	if strings.TrimSpace(dataDir) == "" {
+		return nil, fmt.Errorf("persistent upload state requires a data directory")
+	}
+	manager.dir = filepath.Join(dataDir, "uploads")
+	if err := os.MkdirAll(manager.dir, 0o700); err != nil {
 		return nil, fmt.Errorf("create upload state directory: %w", err)
 	}
-	manager := &uploadManager{
-		app:     app,
-		dir:     dir,
-		uploads: make(map[string]*persistentUpload),
-		uplocks: make(map[string]*sync.Mutex),
-	}
-	entries, err := os.ReadDir(dir)
+	entries, err := os.ReadDir(manager.dir)
 	if err != nil {
 		return nil, fmt.Errorf("read upload state directory: %w", err)
 	}
@@ -135,7 +138,7 @@ func newUploadManager(app *application, dataDir string) (*uploadManager, error) 
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+		data, err := readBoundedFile(filepath.Join(manager.dir, entry.Name()), maxPersistedUploadBytes)
 		if err != nil {
 			return nil, fmt.Errorf("read upload state %q: %w", entry.Name(), err)
 		}
@@ -147,9 +150,10 @@ func newUploadManager(app *application, dataDir string) (*uploadManager, error) 
 			return nil, fmt.Errorf("upload state %q is incomplete", entry.Name())
 		}
 		if _, ok := app.instances[upload.Instance]; !ok {
-			return nil, fmt.Errorf("upload state %q references unknown instance %q", entry.Name(), upload.Instance)
+			quarantineUnknownState(manager.dir, entry.Name(), "upload", upload.Instance)
+			continue
 		}
-		copyUpload := upload
+		copyUpload := clonePersistentUpload(upload)
 		manager.uploads[upload.ID] = &copyUpload
 	}
 	return manager, nil
@@ -199,6 +203,9 @@ func (m *uploadManager) put(upload persistentUpload) error {
 }
 
 func (m *uploadManager) persist(upload persistentUpload) error {
+	if m == nil || strings.TrimSpace(m.dir) == "" {
+		return nil
+	}
 	data, err := json.MarshalIndent(upload, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode upload state: %w", err)
@@ -297,9 +304,13 @@ func (m *uploadManager) create(ctx context.Context, request createUploadRequest)
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
+	id, err := newStateID("upl")
+	if err != nil {
+		return persistentUpload{}, err
+	}
 	now := time.Now().UTC()
 	upload := persistentUpload{
-		ID:            newStateID("upl"),
+		ID:            id,
 		Instance:      instance.cfg.ID,
 		Key:           key,
 		Provider:      instance.cfg.Provider,
@@ -313,7 +324,7 @@ func (m *uploadManager) create(ctx context.Context, request createUploadRequest)
 	}
 	fullKey := instance.fullKey(key)
 	if request.Size == 0 {
-		if err := instance.backend.Put(ctx, fullKey, bytes.NewReader(nil), 0, contentType); err != nil {
+		if err := instance.Put(ctx, fullKey, bytes.NewReader(nil), 0, contentType); err != nil {
 			return persistentUpload{}, err
 		}
 		upload.Status = uploadStatusCompleted
@@ -326,21 +337,13 @@ func (m *uploadManager) create(ctx context.Context, request createUploadRequest)
 
 	switch instance.cfg.Provider {
 	case "s3":
-		backend, ok := instance.backend.(s3MultipartAPI)
-		if !ok {
-			return persistentUpload{}, fmt.Errorf("s3 backend does not support multipart uploads")
-		}
-		uploadID, err := backend.InitiateMultipart(ctx, fullKey, contentType)
+		uploadID, err := instance.InitiateMultipart(ctx, fullKey, contentType)
 		if err != nil {
 			return persistentUpload{}, err
 		}
 		upload.ProviderUploadID = uploadID
 	case "gcs":
-		backend, ok := instance.backend.(gcsResumableAPI)
-		if !ok {
-			return persistentUpload{}, fmt.Errorf("gcs backend does not support resumable uploads")
-		}
-		sessionURL, err := backend.InitiateResumable(ctx, fullKey, request.Size, contentType)
+		sessionURL, err := instance.InitiateResumable(ctx, fullKey, request.Size, contentType)
 		if err != nil {
 			return persistentUpload{}, err
 		}
@@ -359,17 +362,15 @@ func (m *uploadManager) create(ctx context.Context, request createUploadRequest)
 func (m *uploadManager) abortProvider(ctx context.Context, instance *storageInstance, upload persistentUpload) error {
 	switch upload.Provider {
 	case "s3":
-		backend, ok := instance.backend.(s3MultipartAPI)
-		if !ok || upload.ProviderUploadID == "" {
+		if upload.ProviderUploadID == "" {
 			return nil
 		}
-		return backend.AbortMultipart(ctx, instance.fullKey(upload.Key), upload.ProviderUploadID)
+		return instance.AbortMultipart(ctx, instance.fullKey(upload.Key), upload.ProviderUploadID)
 	case "gcs":
-		backend, ok := instance.backend.(gcsResumableAPI)
-		if !ok || upload.SessionURL == "" {
+		if upload.SessionURL == "" {
 			return nil
 		}
-		return backend.AbortResumable(ctx, upload.SessionURL)
+		return instance.AbortResumable(ctx, upload.SessionURL)
 	default:
 		return nil
 	}
@@ -464,8 +465,7 @@ func (m *uploadManager) uploadChunk(ctx context.Context, id string, request *htt
 		if partNumber > maximumS3Parts {
 			return persistentUpload{}, apiError{Status: http.StatusBadRequest, Code: "too_many_parts", Message: "S3 multipart uploads cannot exceed 10000 parts"}
 		}
-		backend := instance.backend.(s3MultipartAPI)
-		etag, err := backend.UploadPart(ctx, instance.fullKey(upload.Key), upload.ProviderUploadID, partNumber, body, size)
+		etag, err := instance.UploadPart(ctx, instance.fullKey(upload.Key), upload.ProviderUploadID, partNumber, body, size)
 		if err != nil {
 			upload.Error = publicStorageError(err)
 			upload.UpdatedAt = time.Now().UTC()
@@ -484,8 +484,7 @@ func (m *uploadManager) uploadChunk(ctx context.Context, id string, request *htt
 			}
 		}
 	case "gcs":
-		backend := instance.backend.(gcsResumableAPI)
-		next, complete, err := backend.UploadResumableChunk(ctx, upload.SessionURL, body, start, size, total, upload.ContentType)
+		next, complete, err := instance.UploadResumableChunk(ctx, upload.SessionURL, body, start, size, total, upload.ContentType)
 		if err != nil {
 			upload.Error = publicStorageError(err)
 			upload.UpdatedAt = time.Now().UTC()
@@ -516,8 +515,7 @@ func (m *uploadManager) completeS3(ctx context.Context, instance *storageInstanc
 	for _, part := range upload.Parts {
 		parts = append(parts, s3CompletedPart{PartNumber: part.PartNumber, ETag: part.ETag})
 	}
-	backend := instance.backend.(s3MultipartAPI)
-	if err := backend.CompleteMultipart(ctx, instance.fullKey(upload.Key), upload.ProviderUploadID, parts); err != nil {
+	if err := instance.CompleteMultipart(ctx, instance.fullKey(upload.Key), upload.ProviderUploadID, parts); err != nil {
 		upload.Error = publicStorageError(err)
 		upload.UpdatedAt = time.Now().UTC()
 		_ = m.put(*upload)
@@ -532,8 +530,7 @@ func (m *uploadManager) completeS3(ctx context.Context, instance *storageInstanc
 }
 
 func (m *uploadManager) synchronizeGCSOffset(ctx context.Context, instance *storageInstance, upload *persistentUpload) error {
-	backend := instance.backend.(gcsResumableAPI)
-	next, complete, err := backend.QueryResumable(ctx, upload.SessionURL, upload.TotalSize)
+	next, complete, err := instance.QueryResumable(ctx, upload.SessionURL, upload.TotalSize)
 	if err != nil {
 		return err
 	}
@@ -602,12 +599,12 @@ func (m *uploadManager) cancel(ctx context.Context, id string) (persistentUpload
 	return upload, nil
 }
 
-func newStateID(prefix string) string {
+func newStateID(prefix string) (string, error) {
 	var random [16]byte
 	if _, err := rand.Read(random[:]); err != nil {
-		panic(fmt.Sprintf("generate state id: %v", err))
+		return "", fmt.Errorf("generate state id: %w", err)
 	}
-	return prefix + "_" + hex.EncodeToString(random[:])
+	return prefix + "_" + hex.EncodeToString(random[:]), nil
 }
 
 func (a *application) handleUploads(w http.ResponseWriter, r *http.Request) {

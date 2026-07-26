@@ -44,8 +44,12 @@ func TestJSONRawPagesStreamWithoutWholeObjectBuffer(t *testing.T) {
 	if len(first.Text) > jsonTextPageBytes+utf8MaxRuneBytes {
 		t.Fatalf("raw page exceeded the bounded response size: %d", len(first.Text))
 	}
-	if backend.getCount != 1 || backend.getRanges[0] != "bytes=0-" {
-		t.Fatalf("unexpected first raw reads: count=%d ranges=%v", backend.getCount, backend.getRanges)
+	if backend.getCount < 1 || backend.getCount > 2 {
+		t.Fatalf("unexpected first raw read count: %d ranges=%v", backend.getCount, backend.getRanges)
+	}
+	requireExactByteRanges(t, backend.getRanges)
+	if exactRangeStart(t, backend.getRanges[0]) != 0 {
+		t.Fatalf("the first raw page did not start at byte zero: %v", backend.getRanges)
 	}
 
 	secondURL := "/api/json/raw?instance=rw&key=large.json&cursor=" + url.QueryEscape(first.NextCursor)
@@ -55,7 +59,8 @@ func TestJSONRawPagesStreamWithoutWholeObjectBuffer(t *testing.T) {
 	if second.Text == "" {
 		t.Fatal("expected a second raw page")
 	}
-	if backend.getCount != 2 || !strings.HasPrefix(backend.getRanges[1], "bytes=") || backend.getRanges[1] == "bytes=0-" {
+	requireExactByteRanges(t, backend.getRanges)
+	if exactRangeStart(t, backend.getRanges[len(backend.getRanges)-1]) <= 0 {
 		t.Fatalf("the next raw page should resume from its byte cursor: %v", backend.getRanges)
 	}
 }
@@ -76,8 +81,12 @@ func TestJSONRawPreservesTheOriginalSource(t *testing.T) {
 	if response.Text != payload {
 		t.Fatalf("raw JSON changed the source bytes:\n got %q\nwant %q", response.Text, payload)
 	}
-	if backend.getCount != 1 || backend.getRanges[0] != "bytes=0-" {
-		t.Fatalf("raw JSON should use one provider stream: %v", backend.getRanges)
+	if backend.getCount != 1 {
+		t.Fatalf("raw JSON should use one bounded provider request: %v", backend.getRanges)
+	}
+	requireExactByteRanges(t, backend.getRanges)
+	if exactRangeStart(t, backend.getRanges[0]) != 0 {
+		t.Fatalf("raw JSON should start at byte zero: %v", backend.getRanges)
 	}
 }
 
@@ -103,8 +112,9 @@ func TestJSONBeautifyUsesContinuationState(t *testing.T) {
 	if second.Text == "" {
 		t.Fatal("expected continuation text")
 	}
-	if backend.getCount != 2 || backend.getRanges[1] == "bytes=0-" {
-		t.Fatalf("beautify continuation should use one resumed range request: %v", backend.getRanges)
+	requireExactByteRanges(t, backend.getRanges)
+	if exactRangeStart(t, backend.getRanges[len(backend.getRanges)-1]) <= 0 {
+		t.Fatalf("beautify continuation should use resumed bounded ranges: %v", backend.getRanges)
 	}
 }
 
@@ -133,9 +143,14 @@ func TestJSONTreeRootIsExpandedServerSideWithBoundedPreviews(t *testing.T) {
 	if strings.Join(labels, ",") != "small,nested,large,tail" {
 		t.Fatalf("unexpected root children: %v", labels)
 	}
-	if backend.getCount != 1 || backend.getRanges[0] != "bytes=0-" {
-		t.Fatalf("the root expansion should use one provider request: %v", backend.getRanges)
+	if backend.getCount < 1 {
+		t.Fatalf("the root expansion should read bounded ranges: %v", backend.getRanges)
 	}
+	requireExactByteRanges(t, backend.getRanges)
+	if exactRangeStart(t, backend.getRanges[0]) != 0 {
+		t.Fatalf("the root expansion should start at byte zero: %v", backend.getRanges)
+	}
+	rootReadCount := backend.getCount
 
 	nestedURL := fmt.Sprintf("/api/json/tree?instance=rw&key=tree.json&type=object&start=%d&limit=50", nested.Start)
 	recorder = httptest.NewRecorder()
@@ -144,7 +159,11 @@ func TestJSONTreeRootIsExpandedServerSideWithBoundedPreviews(t *testing.T) {
 	if len(children.Children) != 2 || children.Children[0].Label != "enabled" || children.Children[1].Label != "values" {
 		t.Fatalf("unexpected nested children: %+v", children.Children)
 	}
-	if backend.getCount != 2 || backend.getRanges[1] != fmt.Sprintf("bytes=%d-", nested.Start) {
+	if backend.getCount <= rootReadCount {
+		t.Fatalf("nested expansion did not issue a bounded read: %v", backend.getRanges)
+	}
+	requireExactByteRanges(t, backend.getRanges[rootReadCount:])
+	if exactRangeStart(t, backend.getRanges[rootReadCount]) != nested.Start {
 		t.Fatalf("nested expansion should start at the node offset: %v", backend.getRanges)
 	}
 }
@@ -160,19 +179,27 @@ func TestJSONTreePaginationResumesAfterComma(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	app.routes().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/json/tree?instance=rw&key=list.json&limit=50", nil))
 	first := decodeJSONResponse[jsonTreeResponse](t, recorder)
-	if first.Done || len(first.Children) != 50 || first.Cursor <= 0 || first.NextIndex != 50 {
+	if first.Done || len(first.Children) != 50 || first.Cursor == "" || first.NextIndex != 50 {
 		t.Fatalf("unexpected first page: %+v", first)
 	}
 
-	nextURL := fmt.Sprintf("/api/json/tree?instance=rw&key=list.json&type=array&start=%d&cursor=%d&index=%d&limit=50", first.Node.Start, first.Cursor, first.NextIndex)
+	nextURL := fmt.Sprintf("/api/json/tree?instance=rw&key=list.json&type=array&start=%d&cursor=%s&index=%d&limit=50", first.Node.Start, url.QueryEscape(first.Cursor), first.NextIndex)
 	recorder = httptest.NewRecorder()
 	app.routes().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, nextURL, nil))
 	second := decodeJSONResponse[jsonTreeResponse](t, recorder)
 	if second.Done || len(second.Children) != 50 || second.Children[0].Label != "50" {
 		t.Fatalf("unexpected second page: %+v", second)
 	}
-	if backend.getCount != 2 || backend.getRanges[1] != fmt.Sprintf("bytes=%d-", first.Cursor) {
-		t.Fatalf("tree pagination should resume with one range request: %v", backend.getRanges)
+	if backend.getCount != 2 {
+		t.Fatalf("tree pagination should use one bounded request per small page: %v", backend.getRanges)
+	}
+	requireExactByteRanges(t, backend.getRanges)
+	cursor, _, err := decodeJSONTreeCursor(first.Cursor, signedCursorScope("json-tree", "rw", "list.json"))
+	if err != nil {
+		t.Fatalf("decode tree cursor: %v", err)
+	}
+	if exactRangeStart(t, backend.getRanges[1]) != cursor.Offset {
+		t.Fatalf("tree pagination should resume at the signed cursor offset: %v", backend.getRanges)
 	}
 }
 
@@ -209,8 +236,12 @@ func TestJSONSummaryMatchesPagedRawAndBeautifiedViews(t *testing.T) {
 	if len(summary.RawPage.Text) > jsonTextPageBytes+utf8MaxRuneBytes || summary.RawPage.LineStart != 1 {
 		t.Fatalf("unexpected first Raw page in summary: %+v", summary.RawPage)
 	}
-	if backend.getCount != 1 || backend.getRanges[0] != "bytes=0-" {
-		t.Fatalf("JSON summary should use one sequential provider stream: %v", backend.getRanges)
+	if backend.getCount < 1 {
+		t.Fatalf("JSON summary should use bounded provider ranges: %v", backend.getRanges)
+	}
+	requireExactByteRanges(t, backend.getRanges)
+	if exactRangeStart(t, backend.getRanges[0]) != 0 {
+		t.Fatalf("JSON summary should start at byte zero: %v", backend.getRanges)
 	}
 
 	countPages := func(endpoint string, first *jsonTextPageResponse) (int64, int64) {

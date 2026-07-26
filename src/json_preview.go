@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -25,14 +24,16 @@ const (
 )
 
 type jsonTextCursor struct {
-	Offset    int64  `json:"o"`
-	Line      int64  `json:"l"`
-	Continued bool   `json:"c,omitempty"`
-	Stack     string `json:"s,omitempty"`
-	InString  bool   `json:"q,omitempty"`
-	Escaped   bool   `json:"e,omitempty"`
-	InScalar  bool   `json:"n,omitempty"`
-	Pending   byte   `json:"p,omitempty"`
+	Offset    int64         `json:"o"`
+	Line      int64         `json:"l"`
+	Continued bool          `json:"c,omitempty"`
+	Stack     string        `json:"k,omitempty"`
+	InString  bool          `json:"q,omitempty"`
+	Escaped   bool          `json:"e,omitempty"`
+	InScalar  bool          `json:"n,omitempty"`
+	Pending   byte          `json:"p,omitempty"`
+	Scope     string        `json:"s"`
+	Version   objectVersion `json:"v,omitempty"`
 }
 
 type jsonTextPageResponse struct {
@@ -65,10 +66,19 @@ type jsonTreeNodeJSON struct {
 	CountKnown bool   `json:"countKnown,omitempty"`
 }
 
+type jsonTreeCursor struct {
+	Offset  int64         `json:"o"`
+	Index   int64         `json:"i"`
+	Start   int64         `json:"n"`
+	Type    string        `json:"t"`
+	Scope   string        `json:"s"`
+	Version objectVersion `json:"v,omitempty"`
+}
+
 type jsonTreeResponse struct {
 	Node      jsonTreeNodeJSON   `json:"node"`
 	Children  []jsonTreeNodeJSON `json:"children"`
-	Cursor    int64              `json:"cursor,omitempty"`
+	Cursor    string             `json:"cursor,omitempty"`
 	NextIndex int64              `json:"nextIndex,omitempty"`
 	Done      bool               `json:"done"`
 }
@@ -121,6 +131,18 @@ func (r *jsonStreamReader) skipWhitespace() error {
 	}
 }
 
+func decodeJSONTreeCursor(raw, expectedScope string) (jsonTreeCursor, bool, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return jsonTreeCursor{}, false, nil
+	}
+	var cursor jsonTreeCursor
+	if err := decodeSignedCursor(raw, &cursor); err != nil || cursor.Scope != expectedScope || cursor.Offset < 0 || cursor.Index < 0 || cursor.Start < 0 || (cursor.Type != "object" && cursor.Type != "array") {
+		return jsonTreeCursor{}, false, apiError{Status: http.StatusBadRequest, Code: "invalid_cursor", Message: "invalid or expired JSON tree continuation cursor"}
+	}
+	return cursor, true, nil
+}
+
 func parseNonNegativeInt64(value string, fallback int64) (int64, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -160,55 +182,26 @@ func (a *application) jsonObjectFromRequest(r *http.Request) (*storageInstance, 
 	return instance, key, strings.TrimSpace(r.URL.Query().Get("etag")), nil
 }
 
-func openJSONObjectStream(ctx context.Context, instance *storageInstance, key string, offset int64, etag string) (io.ReadCloser, error) {
-	requestHeaders := make(http.Header)
-	requestHeaders.Set("Range", fmt.Sprintf("bytes=%d-", offset))
-	if etag != "" {
-		if !strings.HasPrefix(etag, `"`) && !strings.HasPrefix(etag, `W/"`) {
-			etag = `"` + strings.Trim(etag, `"`) + `"`
-		}
-		requestHeaders.Set("If-Match", etag)
+func openJSONObjectStream(ctx context.Context, instance *storageInstance, key string, offset int64, etag string, version objectVersion) (*objectWindowReader, error) {
+	if version.empty() {
+		version.ETag = etag
 	}
-	response, err := instance.backend.Get(ctx, instance.fullKey(key), requestHeaders)
-	if err != nil {
-		return nil, err
-	}
-	if response.Body == nil {
-		return nil, apiError{Status: http.StatusBadGateway, Code: "empty_json_response", Message: "the storage provider returned an empty JSON response"}
-	}
-	if !isSuccessfulObjectReadStatus(response.StatusCode) {
-		response.Body.Close()
-		return nil, &upstreamError{StatusCode: response.StatusCode, Code: "JSONRangeReadFailed"}
-	}
-	contentRange := strings.TrimSpace(response.Header.Get("Content-Range"))
-	if offset > 0 && (response.StatusCode != http.StatusPartialContent || contentRange == "") {
-		response.Body.Close()
-		return nil, apiError{Status: http.StatusBadGateway, Code: "range_not_supported", Message: "the storage provider ignored the JSON byte-range request"}
-	}
-	if response.StatusCode == http.StatusPartialContent && contentRange == "" {
-		response.Body.Close()
-		return nil, apiError{Status: http.StatusBadGateway, Code: "range_not_supported", Message: "the storage provider omitted Content-Range for the JSON byte-range request"}
-	}
-	return response.Body, nil
+	return newObjectWindowReaderVersion(ctx, instance, key, offset, version)
 }
 
-func encodeJSONCursor(cursor jsonTextCursor) string {
-	payload, _ := json.Marshal(cursor)
-	return base64.RawURLEncoding.EncodeToString(payload)
+func encodeJSONCursor(cursor jsonTextCursor) (string, error) {
+	return encodeSignedCursor(cursor)
 }
 
-func decodeJSONCursor(raw string, fallback jsonTextCursor) (jsonTextCursor, error) {
+func decodeJSONCursor(raw string, fallback jsonTextCursor, expectedScope string) (jsonTextCursor, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
+		fallback.Scope = expectedScope
 		return fallback, nil
 	}
-	payload, err := base64.RawURLEncoding.DecodeString(raw)
-	if err != nil {
-		return jsonTextCursor{}, apiError{Status: http.StatusBadRequest, Code: "invalid_cursor", Message: "invalid JSON continuation cursor"}
-	}
 	var cursor jsonTextCursor
-	if err := json.Unmarshal(payload, &cursor); err != nil || cursor.Offset < 0 || cursor.Line < 1 {
-		return jsonTextCursor{}, apiError{Status: http.StatusBadRequest, Code: "invalid_cursor", Message: "invalid JSON continuation cursor"}
+	if err := decodeSignedCursor(raw, &cursor); err != nil || cursor.Scope != expectedScope || cursor.Offset < 0 || cursor.Line < 1 {
+		return jsonTextCursor{}, apiError{Status: http.StatusBadRequest, Code: "invalid_cursor", Message: "invalid or expired JSON continuation cursor"}
 	}
 	if len(cursor.Stack) > jsonMaxNestingDepth {
 		return jsonTextCursor{}, apiError{Status: http.StatusBadRequest, Code: "invalid_cursor", Message: "JSON continuation cursor exceeds the nesting limit"}
@@ -251,12 +244,13 @@ func (a *application) handleJSONRaw(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, err)
 		return
 	}
-	cursor, err := decodeJSONCursor(r.URL.Query().Get("cursor"), jsonTextCursor{Line: 1})
+	scope := signedCursorScope("json-raw", instance.cfg.ID, key)
+	cursor, err := decodeJSONCursor(r.URL.Query().Get("cursor"), jsonTextCursor{Line: 1}, scope)
 	if err != nil {
 		writeAPIError(w, err)
 		return
 	}
-	body, err := openJSONObjectStream(r.Context(), instance, key, cursor.Offset, etag)
+	body, err := openJSONObjectStream(r.Context(), instance, key, cursor.Offset, etag, cursor.Version)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -306,13 +300,19 @@ func (a *application) handleJSONRaw(w http.ResponseWriter, r *http.Request) {
 	next := ""
 	if !done {
 		text := output.String()
-		next = encodeJSONCursor(jsonTextCursor{
+		next, err = encodeJSONCursor(jsonTextCursor{
 			Offset:    reader.offset,
 			Line:      line,
 			Continued: !strings.HasSuffix(text, "\n"),
 			InString:  cursor.InString,
 			Escaped:   cursor.Escaped,
+			Scope:     scope,
+			Version:   body.Version(),
 		})
+		if err != nil {
+			writeAPIError(w, fmt.Errorf("create JSON continuation cursor: %w", err))
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, jsonTextPageResponse{
 		Text:          output.String(),
@@ -506,7 +506,7 @@ func (a *application) handleJSONSummary(w http.ResponseWriter, r *http.Request) 
 		writeAPIError(w, err)
 		return
 	}
-	body, err := openJSONObjectStream(r.Context(), instance, key, 0, etag)
+	body, err := openJSONObjectStream(r.Context(), instance, key, 0, etag, objectVersion{})
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -582,7 +582,13 @@ func (a *application) handleJSONSummary(w http.ResponseWriter, r *http.Request) 
 		LineEnd:   rawPageState.Line,
 	}
 	if rawPageHasMore {
-		rawPage.NextCursor = encodeJSONCursor(rawPageCursorState)
+		rawPageCursorState.Scope = signedCursorScope("json-raw", instance.cfg.ID, key)
+		rawPageCursorState.Version = body.Version()
+		rawPage.NextCursor, err = encodeJSONCursor(rawPageCursorState)
+		if err != nil {
+			writeAPIError(w, fmt.Errorf("create JSON summary cursor: %w", err))
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, jsonSummaryResponse{
 		RawLines:      rawCounter.line,
@@ -603,12 +609,13 @@ func (a *application) handleJSONBeautify(w http.ResponseWriter, r *http.Request)
 		writeAPIError(w, err)
 		return
 	}
-	cursor, err := decodeJSONCursor(r.URL.Query().Get("cursor"), jsonTextCursor{Line: 1})
+	scope := signedCursorScope("json-beautify", instance.cfg.ID, key)
+	cursor, err := decodeJSONCursor(r.URL.Query().Get("cursor"), jsonTextCursor{Line: 1}, scope)
 	if err != nil {
 		writeAPIError(w, err)
 		return
 	}
-	body, err := openJSONObjectStream(r.Context(), instance, key, cursor.Offset, etag)
+	body, err := openJSONObjectStream(r.Context(), instance, key, cursor.Offset, etag, cursor.Version)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -729,7 +736,13 @@ func (a *application) handleJSONBeautify(w http.ResponseWriter, r *http.Request)
 	state.Offset = reader.offset
 	next := ""
 	if !done {
-		next = encodeJSONCursor(state)
+		state.Scope = scope
+		state.Version = body.Version()
+		next, err = encodeJSONCursor(state)
+		if err != nil {
+			writeAPIError(w, fmt.Errorf("create JSON continuation cursor: %w", err))
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, jsonTextPageResponse{
 		Text:          output.String(),
@@ -1050,7 +1063,8 @@ func (a *application) handleJSONTree(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, err)
 		return
 	}
-	cursor, err := parseNonNegativeInt64(r.URL.Query().Get("cursor"), 0)
+	scope := signedCursorScope("json-tree", instance.cfg.ID, key)
+	cursorState, cursorProvided, err := decodeJSONTreeCursor(r.URL.Query().Get("cursor"), scope)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -1072,11 +1086,23 @@ func (a *application) handleJSONTree(w http.ResponseWriter, r *http.Request) {
 	}
 
 	streamOffset := start
-	cursorProvided := cursor > 0
+	version := objectVersion{ETag: etag}
 	if cursorProvided {
-		streamOffset = cursor
+		if start != 0 && start != cursorState.Start {
+			writeAPIError(w, apiError{Status: http.StatusBadRequest, Code: "invalid_cursor_scope", Message: "the JSON tree cursor does not belong to this node"})
+			return
+		}
+		if nodeType != "" && nodeType != cursorState.Type {
+			writeAPIError(w, apiError{Status: http.StatusBadRequest, Code: "invalid_cursor_scope", Message: "the JSON tree cursor does not belong to this node type"})
+			return
+		}
+		streamOffset = cursorState.Offset
+		start = cursorState.Start
+		nextIndex = cursorState.Index
+		nodeType = cursorState.Type
+		version = cursorState.Version
 	}
-	body, err := openJSONObjectStream(r.Context(), instance, key, streamOffset, etag)
+	body, err := openJSONObjectStream(r.Context(), instance, key, streamOffset, etag, version)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -1120,7 +1146,7 @@ func (a *application) handleJSONTree(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	children, nextCursor, nextIndex, done, err := readJSONTreePage(reader, node, cursorProvided, nextIndex, limit)
+	children, nextOffset, nextIndex, done, err := readJSONTreePage(reader, node, cursorProvided, nextIndex, limit)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -1128,6 +1154,21 @@ func (a *application) handleJSONTree(w http.ResponseWriter, r *http.Request) {
 	if done {
 		node.Count = nextIndex
 		node.CountKnown = true
+	}
+	nextCursor := ""
+	if !done && nextOffset > 0 {
+		nextCursor, err = encodeSignedCursor(jsonTreeCursor{
+			Offset:  nextOffset,
+			Index:   nextIndex,
+			Start:   node.Start,
+			Type:    node.Type,
+			Scope:   scope,
+			Version: body.Version(),
+		})
+		if err != nil {
+			writeAPIError(w, fmt.Errorf("create JSON tree continuation cursor: %w", err))
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, jsonTreeResponse{
 		Node:      node,

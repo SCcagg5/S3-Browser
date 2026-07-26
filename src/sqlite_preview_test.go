@@ -86,6 +86,66 @@ func TestEmbeddedSQLiteReaderSupportsWithoutRowIDTables(t *testing.T) {
 	}
 }
 
+func TestEmbeddedSQLiteReaderPaginatesWithoutForcingExactTotals(t *testing.T) {
+	path := writeSQLitePreviewFixture(t)
+	_, definitions, err := inspectSQLiteTables(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	database, err := openSQLiteDatabase(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.close()
+	items := definitions["items"]
+
+	first, err := querySQLiteTableDatabase(context.Background(), database, items, 0, 2, "", nil, "", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Rows) != 2 || !first.HasMore || first.TotalKnown || first.TotalRows != -1 {
+		t.Fatalf("first page = %+v", first)
+	}
+
+	second, err := querySQLiteTableDatabase(context.Background(), database, items, 1, 2, "", nil, "", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second.Rows) != 1 || second.HasMore || !second.TotalKnown || second.TotalRows != 3 {
+		t.Fatalf("second page = %+v", second)
+	}
+}
+
+func TestEmbeddedSQLiteReaderUsesSharedColumnFiltersAndSorting(t *testing.T) {
+	path := writeSQLitePreviewFixture(t)
+	_, definitions, err := inspectSQLiteTables(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	database, err := openSQLiteDatabase(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.close()
+	items := definitions["items"]
+
+	filtered, err := querySQLiteTableDatabase(context.Background(), database, items, 0, 100, "", map[string]string{"name": "beta"}, "", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(filtered.Rows) != 1 || filtered.Rows[0]["name"] != "beta" {
+		t.Fatalf("filtered page = %+v", filtered)
+	}
+
+	sorted, err := querySQLiteTableDatabase(context.Background(), database, items, 0, 2, "", nil, "name", "desc", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sorted.Rows) != 2 || sorted.Rows[0]["name"] != "gamma" || sorted.Rows[1]["name"] != "beta" {
+		t.Fatalf("sorted page = %+v", sorted)
+	}
+}
+
 func TestSQLiteVarintAndRecordSafety(t *testing.T) {
 	if value, width, ok := readSQLiteVarint([]byte{0x81, 0x00}, 0); !ok || value != 128 || width != 2 {
 		t.Fatalf("varint = %d width=%d ok=%v", value, width, ok)

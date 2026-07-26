@@ -40,6 +40,29 @@
     lock: 'plaintext'
   };
 
+
+  const LANGUAGE_DISPLAY_NAMES = Object.freeze({
+    asciidoc: 'AsciiDoc', bash: 'Shell', c: 'C', cpp: 'C++', csharp: 'C#', css: 'CSS', cue: 'CUE',
+    dart: 'Dart', diff: 'Diff', dockerfile: 'Dockerfile', dos: 'DOS batch', fsharp: 'F#', go: 'Go',
+    graphql: 'GraphQL', groovy: 'Groovy', haskell: 'Haskell', ini: 'INI', java: 'Java', javascript: 'JavaScript',
+    json: 'JSON', jsx: 'JavaScript XML', kotlin: 'Kotlin', less: 'Less', lua: 'Lua', makefile: 'Makefile',
+    markdown: 'Markdown', nginx: 'Nginx configuration', nix: 'Nix', objectivec: 'Objective-C', ocaml: 'OCaml',
+    pascal: 'Pascal', perl: 'Perl', php: 'PHP', plaintext: 'Plain text', powershell: 'PowerShell',
+    protobuf: 'Protocol Buffers', python: 'Python', r: 'R', ruby: 'Ruby', rust: 'Rust', sass: 'Sass',
+    scala: 'Scala', scss: 'SCSS', sql: 'SQL', swift: 'Swift', terraform: 'Terraform HCL', thrift: 'Apache Thrift',
+    toml: 'TOML', tsx: 'TypeScript XML', typescript: 'TypeScript', vbnet: 'Visual Basic .NET',
+    vbscript: 'VBScript', xml: 'XML', yaml: 'YAML', zig: 'Zig'
+  });
+
+  const EXTENSION_DISPLAY_NAMES = Object.freeze({
+    html: 'HTML', htm: 'HTML', xhtml: 'XHTML', svg: 'SVG', vue: 'Vue single-file component',
+    svelte: 'Svelte component', jsx: 'JavaScript XML', tsx: 'TypeScript XML', geojson: 'GeoJSON',
+    json5: 'JSON5', hjson: 'Hjson', ipynb: 'Jupyter Notebook', hbs: 'Handlebars', handlebars: 'Handlebars',
+    ejs: 'Embedded JavaScript template', njk: 'Nunjucks template', twig: 'Twig template', jinja: 'Jinja template',
+    pyi: 'Python type stub', pyw: 'Python', mts: 'TypeScript module', cts: 'TypeScript module',
+    mjs: 'JavaScript module', cjs: 'CommonJS JavaScript', adoc: 'AsciiDoc', rmd: 'R Markdown'
+  });
+
   const EXACT_CODE_NAMES = new Map([
     ['dockerfile', 'dockerfile'], ['containerfile', 'dockerfile'], ['makefile', 'makefile'], ['gnumakefile', 'makefile'],
     ['jenkinsfile', 'groovy'], ['vagrantfile', 'ruby'], ['procfile', 'plaintext'], ['gemfile', 'ruby'],
@@ -71,15 +94,20 @@
   const RAW_IMAGE_EXT = new Set(['raf', 'raw', 'dng', 'cr2', 'cr3', 'nef', 'nrw', 'arw', 'srf', 'sr2', 'orf', 'rw2', 'pef', 'x3f', 'erf', 'mef', 'mos', 'kdc', 'dcr', 'mrw', 'rwl', 'iiq', '3fr', 'fff']);
   const VIDEO_EXT = new Set(['mp4', 'mkv', 'webm', 'avi', 'mov', 'm4v', 'mpg', 'mpeg', 'flv', 'f4v', '3gp', '3g2', 'wmv', 'asf', 'ogv', 'mts', 'm2ts', 'ts', 'vob', 'mxf', 'dv', 'dvr-ms', 'm2v', 'rm', 'rmvb', 'nut', 'y4m']);
   const AUDIO_EXT = new Set(['mp3', 'flac', 'wav', 'wave', 'm4a', 'aac', 'ogg', 'oga', 'opus', 'aiff', 'aif', 'alac', 'wma', 'amr', 'midi', 'mid', 'ape', 'wv', 'tta', 'ac3', 'eac3', 'dts', 'mka', 'au', 'caf']);
-  const ARCHIVE_EXT = new Set(['zip', 'rar', '7z', 'tar', 'gz', 'tgz', 'bz2', 'tbz', 'xz', 'txz', 'zst', 'jar', 'war']);
+  const ARCHIVE_EXT = new Set(['zip', 'rar', '7z', 'tar', 'gz', 'tgz', 'bz2', 'tbz', 'xz', 'txz', 'zst', 'jar', 'war', 'ear', 'apk', 'aar', 'xpi', 'crx', 'vsix', 'epub']);
+  const CONTACT_EXT = new Set(['vcf', 'vcard']);
+  const CALENDAR_EXT = new Set(['ics', 'ifb']);
+  const EMAIL_EXT = new Set(['eml', 'mime', 'mht', 'mhtml']);
+  const CERTIFICATE_EXT = new Set(['pem', 'crt', 'cer', 'cert', 'der', 'csr', 'req', 'p7b', 'p7c', 'spc', 'pfx', 'p12', 'key', 'pub']);
   const TABULAR_EXT = new Set(['csv', 'tsv', 'tab', 'psv', 'jsonl', 'ndjson']);
   const JSON_EXT = new Set(['json', 'geojson']);
   const SQLITE_EXT = new Set(['sqlite', 'sqlite3', 'db', 'db3', 's3db', 'sl3']);
   const WORD_PREVIEW_EXT = new Set(['docx', 'dotx', 'docm', 'dotm']);
   const WORD_UNAVAILABLE_EXT = new Set(['doc', 'dot', 'odt', 'rtf', 'pages']);
-  const SPREADSHEET_PREVIEW_EXT = new Set(['xls', 'xlsx', 'xlsm']);
-  const SHEET_EXT = new Set(['xls', 'xlsx', 'xlsm', 'xlsb', 'xlt', 'xltx', 'ods', 'numbers']);
-  const SLIDE_EXT = new Set(['ppt', 'pptx', 'pps', 'ppsx', 'odp', 'key']);
+  const SPREADSHEET_PREVIEW_EXT = new Set(['xls', 'xlsx', 'xlsm', 'xltx', 'xltm', 'xlam']);
+  const SHEET_EXT = new Set(['xls', 'xlsx', 'xlsm', 'xlsb', 'xlt', 'xltx', 'xltm', 'xlam', 'ods', 'numbers']);
+  const SLIDE_EXT = new Set(['ppt', 'pptx', 'pptm', 'potx', 'potm', 'pps', 'ppsx', 'ppsm', 'ppam', 'sldx', 'sldm', 'odp']);
+  const VISIO_EXT = new Set(['vsdx', 'vsdm', 'vssx', 'vssm', 'vstx', 'vstm']);
   const MARKDOWN_EXT = new Set(['md', 'markdown', 'mdown', 'mkd', 'rmd']);
   const VIDEO_QUALITY_PATTERN = /(^|[._\s-])((?:[1-9]\d{2,3})p|(?:[1-9]\d{2,3})x(?:[1-9]\d{2,3})|4k|uhd|qhd|fhd|hd|sd)(?=$|[._\s-])/ig;
 
@@ -161,6 +189,13 @@
     return 'plaintext';
   }
 
+  function languageDisplayNameForName(value, mime = '') {
+    const extension = extOf(value);
+    if (EXTENSION_DISPLAY_NAMES[extension]) return EXTENSION_DISPLAY_NAMES[extension];
+    const language = resolveLang(value, mime);
+    return LANGUAGE_DISPLAY_NAMES[language] || (language ? language : 'Plain text');
+  }
+
   function isTextualMime(mime = '') {
     return /^text\//i.test(mime) || /(json|xml|yaml|toml|javascript|typescript|shell|graphql|sql|protobuf)/i.test(mime);
   }
@@ -184,7 +219,12 @@
       word: 'file-word-outline',
       'sheet-unavailable': 'file-excel-outline',
       'slide-unavailable': 'file-powerpoint-outline',
-      'word-unavailable': 'file-word-outline'
+      'diagram-unavailable': 'file-document-outline',
+      'word-unavailable': 'file-word-outline',
+      contact: 'file-document-outline',
+      calendar: 'clock-outline',
+      email: 'file-document-outline',
+      certificate: 'shield-lock-outline'
     };
     return icons[String(type || '')] || 'file-outline';
   }
@@ -194,13 +234,14 @@
     const contentType = String(mime || '').toLowerCase();
 
     // Binary office/container formats must be classified before generic MIME
-    // fallbacks so a DOCX never reaches the text renderer as ZIP bytes.
+    // classification rules so a DOCX never reaches the text renderer as ZIP bytes.
     if (WORD_PREVIEW_EXT.has(extension) || /wordprocessingml/i.test(contentType)) return 'word';
     if (WORD_UNAVAILABLE_EXT.has(extension) || /(msword|opendocument\.text|rtf)/i.test(contentType)) return 'word-unavailable';
     if (SPREADSHEET_PREVIEW_EXT.has(extension)) return 'spreadsheet';
     if (SHEET_EXT.has(extension) || /opendocument\.spreadsheet/i.test(contentType)) return 'sheet-unavailable';
     if (/(spreadsheetml|ms-excel)/i.test(contentType)) return 'spreadsheet';
     if (SLIDE_EXT.has(extension) || /(presentationml|ms-powerpoint|opendocument\.presentation)/i.test(contentType)) return 'slide-unavailable';
+    if (VISIO_EXT.has(extension) || /visio/i.test(contentType)) return 'diagram-unavailable';
     if (extension === 'parquet' || /parquet/i.test(contentType)) return 'parquet';
     if (TABULAR_EXT.has(extension) || /(?:text\/(?:csv|tsv)|tab-separated-values|ndjson|json-seq)/i.test(contentType)) return 'tabular';
     if (JSON_EXT.has(extension) || /(?:application|text)\/(?:[a-z0-9.+-]+\+)?json(?:\s*;|$)/i.test(contentType)) return 'json';
@@ -211,6 +252,10 @@
     if (VIDEO_EXT.has(extension) || /^video\//i.test(contentType)) return 'video';
     if (AUDIO_EXT.has(extension) || /^audio\//i.test(contentType)) return 'audio';
     if (extension === 'pdf' || /application\/pdf/i.test(contentType)) return 'pdf';
+    if (CONTACT_EXT.has(extension) || /text\/(?:x-)?vcard/i.test(contentType)) return 'contact';
+    if (CALENDAR_EXT.has(extension) || /text\/calendar/i.test(contentType)) return 'calendar';
+    if (EMAIL_EXT.has(extension) || /message\/rfc822|multipart\/related/i.test(contentType)) return 'email';
+    if (CERTIFICATE_EXT.has(extension) || /(?:x-pem|x-x509|pkcs|certificate)/i.test(contentType)) return 'certificate';
     if (MARKDOWN_EXT.has(extension) || /markdown/i.test(contentType)) return 'markdown';
     if (ARCHIVE_EXT.has(extension) || /(zip|rar|7z|tar|gzip|bzip|xz|zstd)/i.test(contentType)) return 'archive';
     if (codeLanguageForName(key)) return 'code';
@@ -224,11 +269,18 @@
     resolveLang,
     resolveType,
     codeLanguageForName,
+    languageDisplayNameForName,
     isTextualMime,
     videoVariantDescriptor,
     iconForType,
     EXT_TO_LANG,
+    LANGUAGE_DISPLAY_NAMES,
+    EXTENSION_DISPLAY_NAMES,
     RAW_IMAGE_EXT,
-    CONVERT_IMAGE_EXT
+    CONVERT_IMAGE_EXT,
+    CONTACT_EXT,
+    CALENDAR_EXT,
+    EMAIL_EXT,
+    CERTIFICATE_EXT
   };
 })();

@@ -101,6 +101,29 @@ func TestFolderStatisticsKeepDistributionsAndLargestObjects(t *testing.T) {
 	if largest.MIME != "image/jpeg" || largest.ETag == "" || largest.LastModified == "" {
 		t.Fatalf("largest object metadata = %+v", largest)
 	}
+	if len(public.Stats.Recent) != 5 {
+		t.Fatalf("recent = %+v, want five objects", public.Stats.Recent)
+	}
+	for index := 1; index < len(public.Stats.Recent); index++ {
+		if public.Stats.Recent[index-1].LastModified < public.Stats.Recent[index].LastModified {
+			t.Fatalf("recent entries are not newest-first at index %d: %+v", index, public.Stats.Recent)
+		}
+	}
+	if public.Stats.Recent[0].Type == "" || public.Stats.Recent[0].LastModified == "" {
+		t.Fatalf("recent object metadata = %+v", public.Stats.Recent[0])
+	}
+}
+
+func TestJobCollectionRouteIsNotExposed(t *testing.T) {
+	app, _, _ := testApplication(t)
+	for _, path := range []string{"/api/jobs", "/api/jobs/"} {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		app.routes().ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusNotFound {
+			t.Fatalf("GET %s status = %d, body = %s", path, recorder.Code, recorder.Body.String())
+		}
+	}
 }
 
 func TestRunningJobResumesFromPersistedCheckpoint(t *testing.T) {
@@ -125,7 +148,7 @@ func TestRunningJobResumesFromPersistedCheckpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	app.jobs.close()
-	manager, err := newJobManager(app, app.config.DataDir)
+	manager, err := newJobManager(app, app.config.DataDir, 100, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,5 +265,141 @@ func TestJobManagerPrunesOnlyOldTerminalHistory(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "completed-old.json")); !os.IsNotExist(err) {
 		t.Fatalf("pruned job state still exists: %v", err)
+	}
+}
+
+func TestPersistentStateForRemovedBucketIsQuarantined(t *testing.T) {
+	dataDir := t.TempDir()
+	jobsDir := filepath.Join(dataDir, "jobs")
+	uploadsDir := filepath.Join(dataDir, "uploads")
+	if err := os.MkdirAll(jobsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(uploadsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	job := persistentJob{
+		ID:        "job-removed-bucket",
+		Type:      jobTypeStatsPrefix,
+		Instance:  "garage-archive",
+		Status:    jobStatusCompleted,
+		CreatedAt: now,
+		UpdatedAt: now,
+		EndedAt:   &now,
+	}
+	jobData, err := json.Marshal(job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobName := job.ID + ".json"
+	if err := os.WriteFile(filepath.Join(jobsDir, jobName), jobData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	upload := persistentUpload{
+		ID:        "upload-removed-bucket",
+		Instance:  "garage-archive",
+		Key:       "file.bin",
+		Provider:  "s3",
+		Status:    uploadStatusCanceled,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	uploadData, err := json.Marshal(upload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uploadName := upload.ID + ".json"
+	if err := os.WriteFile(filepath.Join(uploadsDir, uploadName), uploadData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	app := &application{instances: map[string]*storageInstance{"current": {cfg: bucketConfig{ID: "current"}}}}
+	jobs, err := newJobManager(app, dataDir, 100, true)
+	if err != nil {
+		t.Fatalf("newJobManager() error = %v", err)
+	}
+	defer jobs.close()
+	uploads, err := newUploadManager(app, dataDir, true)
+	if err != nil {
+		t.Fatalf("newUploadManager() error = %v", err)
+	}
+	_ = uploads
+
+	for _, state := range []struct {
+		directory string
+		filename  string
+	}{
+		{directory: jobsDir, filename: jobName},
+		{directory: uploadsDir, filename: uploadName},
+	} {
+		if _, err := os.Stat(filepath.Join(state.directory, state.filename)); !os.IsNotExist(err) {
+			t.Fatalf("original state still exists at %s: %v", filepath.Join(state.directory, state.filename), err)
+		}
+		if _, err := os.Stat(filepath.Join(state.directory, "orphaned", state.filename)); err != nil {
+			t.Fatalf("quarantined state is missing: %v", err)
+		}
+	}
+}
+
+func TestInsightsReturnInlineAndReuseFreshCompletedResult(t *testing.T) {
+	app, _, backend := testApplication(t)
+	backend.mu.Lock()
+	backend.listCalls = 0
+	backend.mu.Unlock()
+
+	request := func() (int, publicJob) {
+		recorder := httptest.NewRecorder()
+		app.routes().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/stats?instance=rw&prefix=folder%2F", nil))
+		var job publicJob
+		if err := json.Unmarshal(recorder.Body.Bytes(), &job); err != nil {
+			t.Fatalf("decode response: %v; body=%s", err, recorder.Body.String())
+		}
+		return recorder.Code, job
+	}
+
+	status, first := request()
+	if status != http.StatusOK || first.Status != jobStatusCompleted || first.Stats == nil {
+		t.Fatalf("first response status=%d job=%+v", status, first)
+	}
+	backend.mu.Lock()
+	callsAfterFirst := backend.listCalls
+	backend.mu.Unlock()
+
+	status, second := request()
+	if status != http.StatusOK || second.Status != jobStatusCompleted || second.ID != first.ID {
+		t.Fatalf("second response status=%d job=%+v", status, second)
+	}
+	backend.mu.Lock()
+	callsAfterSecond := backend.listCalls
+	backend.mu.Unlock()
+	if callsAfterSecond != callsAfterFirst {
+		t.Fatalf("fresh cached insights triggered another listing: first=%d second=%d", callsAfterFirst, callsAfterSecond)
+	}
+}
+
+func TestInsightsMoveToBackgroundAfterInlineDeadline(t *testing.T) {
+	app, _, backend := testApplication(t)
+	backend.mu.Lock()
+	backend.listDelay = 200 * time.Millisecond
+	backend.mu.Unlock()
+
+	started := time.Now()
+	recorder := httptest.NewRecorder()
+	app.routes().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/stats?instance=rw&prefix=folder%2F", nil))
+	elapsed := time.Since(started)
+	if recorder.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if elapsed < 80*time.Millisecond || elapsed > 180*time.Millisecond {
+		t.Fatalf("inline wait = %s, want approximately 100ms", elapsed)
+	}
+	var created publicJob
+	if err := json.Unmarshal(recorder.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	completed := waitForJobStatus(t, app.jobs, created.ID, jobStatusCompleted)
+	if completed.Stats == nil {
+		t.Fatal("background insights completed without statistics")
 	}
 }

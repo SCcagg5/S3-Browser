@@ -5,7 +5,8 @@ const config = {
   keyExcludePatterns: [/^index\.html$/],
   instanceId: '',
   capabilities: {},
-  trashPrefix: '_trash/'
+  operations: {},
+  runtime: { browserPersistence: false },
 };
 window.BB = window.BB || {};
 BB.cfg = config;
@@ -69,27 +70,27 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
       .join('/');
   }
 
-  function readLegacyDirectoryBatch(reader) {
+  function readWebkitDirectoryBatch(reader) {
     return new Promise((resolve, reject) => reader.readEntries(resolve, reject));
   }
 
-  function readLegacyFile(entry) {
+  function readWebkitFile(entry) {
     return new Promise((resolve, reject) => entry.file(resolve, reject));
   }
 
-  async function walkLegacyEntry(entry, parent, output) {
+  async function walkWebkitEntry(entry, parent, output) {
     if (!entry) return;
     const relative = cleanDroppedPath(parent ? `${parent}/${entry.name}` : entry.name);
     if (entry.isFile) {
-      output.push({ file: await readLegacyFile(entry), relative });
+      output.push({ file: await readWebkitFile(entry), relative });
       return;
     }
     if (!entry.isDirectory) return;
     const reader = entry.createReader();
     for (;;) {
-      const batch = await readLegacyDirectoryBatch(reader);
+      const batch = await readWebkitDirectoryBatch(reader);
       if (!batch.length) break;
-      for (const child of batch) await walkLegacyEntry(child, relative, output);
+      for (const child of batch) await walkWebkitEntry(child, relative, output);
     }
   }
 
@@ -104,7 +105,7 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
         const entry = item.webkitGetAsEntry();
         if (entry) {
           usedStructuredEntries = true;
-          await walkLegacyEntry(entry, '', output);
+          await walkWebkitEntry(entry, '', output);
         }
       } catch (error) {
         console.warn('Unable to read a dropped directory entry', error);
@@ -125,40 +126,8 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
     return Array.from(unique.values());
   }
 
-  function safeArchivePath(key, basePrefix = '') {
-    const rawKey = String(key || '');
-    const rawPrefix = String(basePrefix || '');
-    const relative = rawPrefix && rawKey.startsWith(rawPrefix) ? rawKey.slice(rawPrefix.length) : rawKey;
-    return cleanDroppedPath(relative) || 'object';
-  }
-
-  function uniqueArchivePath(path, usedPaths) {
-    const clean = safeArchivePath(path);
-    if (!usedPaths.has(clean)) {
-      usedPaths.add(clean);
-      return clean;
-    }
-    const slash = clean.lastIndexOf('/');
-    const directory = slash >= 0 ? clean.slice(0, slash + 1) : '';
-    const filename = slash >= 0 ? clean.slice(slash + 1) : clean;
-    const dot = filename.lastIndexOf('.');
-    const stem = dot > 0 ? filename.slice(0, dot) : filename;
-    const extension = dot > 0 ? filename.slice(dot) : '';
-    let index = 2;
-    for (;;) {
-      const candidate = `${directory}${stem} (${index})${extension}`;
-      if (!usedPaths.has(candidate)) {
-        usedPaths.add(candidate);
-        return candidate;
-      }
-      index++;
-    }
-  }
-
-
   let uploadManager = null;
   let uploadSequence = 0;
-  let archiveSequence = 0;
 
   function createUploadManager(browser) {
     const entries = new Map();
@@ -401,6 +370,12 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
         previousContinuationTokens: [],
         continuationToken: '',
         nextContinuationToken: '',
+        scanOffset: 0,
+        localPage: 0,
+        scanComplete: false,
+        navigationSortAvailable: false,
+        navigationSortField: '',
+        navigationSortDirection: '',
         isRefreshing: false,
         isInitializing: true,
         pageSize: config.pageSize,
@@ -418,17 +393,46 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
       currentInstance() { return this.instances.find(instance => instance.id === this.instanceId) || null; },
       otherInstances() { return this.instances.filter(instance => instance.id !== this.instanceId); },
       capabilities() { return this.currentInstance?.capabilities || {}; },
-      canRead() { return !!this.capabilities.read?.allowed; },
-      canWrite() { return !!this.capabilities.write?.allowed; },
-      canDelete() { return !!this.capabilities.delete?.allowed; },
-      canCopy() { return this.canRead && this.canWrite; },
-      canRename() { return this.canRead && this.canWrite && this.canDelete; },
+      operations() { return this.currentInstance?.operations || {}; },
+      canRead() { return this.can('list'); },
+      canWrite() { return this.can('upload'); },
+      canDelete() { return this.can('delete'); },
+      canCopy() { return this.can('copy'); },
+      canRename() { return this.can('rename'); },
       canDownloadAll() {
         return this.canRead && this.config.allowDownloadAll && this.pathContentTableData.length > 0;
       },
-      currentPage() { return this.previousContinuationTokens.length + 1; },
-      rangeStart() { return this.pathContentTableData.length ? (this.currentPage - 1) * this.pageSize + 1 : 0; },
-      rangeEnd() { return (this.currentPage - 1) * this.pageSize + this.pathContentTableData.length; },
+      orderedPathContentTableData() {
+        const rows = Array.from(this.pathContentTableData || []);
+        if (!this.navigationSortAvailable || !this.navigationSortField || !this.navigationSortDirection) return rows;
+        const field = this.navigationSortField;
+        const direction = this.navigationSortDirection === 'desc' ? -1 : 1;
+        const nameOf = row => String(row?.name || '').toLocaleLowerCase();
+        rows.sort((left, right) => {
+          let comparison = 0;
+          if (field === 'size') {
+            comparison = Number(left?.type === 'content' ? left.size : 0) - Number(right?.type === 'content' ? right.size : 0);
+          } else if (field === 'dateModified') {
+            comparison = Number(left?.dateModified instanceof Date ? left.dateModified.getTime() : 0) - Number(right?.dateModified instanceof Date ? right.dateModified.getTime() : 0);
+          } else {
+            comparison = nameOf(left).localeCompare(nameOf(right));
+          }
+          if (comparison === 0) comparison = nameOf(left).localeCompare(nameOf(right));
+          return comparison * direction;
+        });
+        return rows;
+      },
+      localPageCount() { return Math.max(1, Math.ceil(this.orderedPathContentTableData.length / this.pageSize)); },
+      visiblePathContentTableData() {
+        const start = this.localPage * this.pageSize;
+        return this.orderedPathContentTableData.slice(start, start + this.pageSize);
+      },
+      rangeStart() { return this.visiblePathContentTableData.length ? this.scanOffset + this.localPage * this.pageSize + 1 : 0; },
+      rangeEnd() { return this.scanOffset + this.localPage * this.pageSize + this.visiblePathContentTableData.length; },
+      hasRows() { return this.pathContentTableData.length > 0; },
+      hasPreviousPage() { return this.localPage > 0 || this.previousContinuationTokens.length > 0; },
+      hasNextPage() { return this.localPage + 1 < this.localPageCount || !!this.nextContinuationToken; },
+      hasPagination() { return this.hasPreviousPage || this.hasNextPage; },
       breadcrumbs() {
         const parts = String(this.pathPrefix || '').replace(/\/+$/, '').split('/').filter(Boolean);
         let prefix = '';
@@ -452,7 +456,7 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
       },
       permissionSummaryTitle() {
         return this.permissionStates
-          .map(item => `${item.label}: ${item.state.allowed ? 'allowed' : 'denied'}`)
+          .map(item => `${item.label}: ${this.capabilityLabel(item.state)}`)
           .join(' · ');
       },
       currentInsightsLabel() {
@@ -463,8 +467,7 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
     watch: {
       pageSize() {
         this.config.pageSize = Number(this.pageSize) || 50;
-        this.resetPagination();
-        if (!this.isInitializing) this.refresh();
+        this.localPage = 0;
       },
       pathPrefix() {
         this.closeBreadcrumbOverflow();
@@ -478,6 +481,24 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
     },
 
     methods: {
+      can(operation, instance = this.currentInstance) {
+        if (BB.capabilities?.actionable) return BB.capabilities.actionable(instance, operation);
+        const state = instance?.operations?.[operation];
+        return state ? state.allowed !== false : true;
+      },
+
+      capabilityName(state) {
+        return BB.capabilities?.normalizeState ? BB.capabilities.normalizeState(state) : (state?.allowed === false ? 'denied' : 'unknown');
+      },
+
+      capabilityLabel(state) {
+        return BB.capabilities?.stateLabel ? BB.capabilities.stateLabel(state) : (state?.allowed === false ? 'Denied' : 'On use');
+      },
+
+      capabilityClass(state) {
+        return BB.capabilities?.stateClass ? BB.capabilities.stateClass(state) : (state?.allowed === false ? 'is-denied' : 'is-unknown');
+      },
+
       permissionStatesFor(instance) {
         const capabilities = instance?.capabilities || {};
         return [
@@ -603,9 +624,10 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
           const response = await BB.api.instances();
           this.instances = response.instances || [];
           this.build = response.build || {};
+          this.config.runtime = BB.runtime?.configure(response.runtime || {}) || (response.runtime || {});
           this.defaultInstanceId = response.default || this.instances[0]?.id || '';
           const queryInstance = new URLSearchParams(location.search).get('instance');
-          const storedInstance = localStorage.getItem('object-browser-instance');
+          const storedInstance = BB.runtime?.readState('object-browser-instance') || '';
           const candidate = [queryInstance, storedInstance, this.defaultInstanceId]
             .find(id => id && this.instances.some(instance => instance.id === id));
           this.instanceId = candidate || this.instances[0]?.id || '';
@@ -626,12 +648,12 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
         if (!instance) return;
         BB.api.setInstance(instance.id);
         this.config.capabilities = instance.capabilities || {};
-        this.config.trashPrefix = instance.trashPrefix || '';
-        localStorage.setItem('object-browser-instance', instance.id);
+        this.config.operations = instance.operations || {};
+        BB.runtime?.writeState('object-browser-instance', instance.id);
         const url = new URL(location.href);
         url.searchParams.set('instance', instance.id);
         history.replaceState(null, '', url.pathname + url.search + url.hash);
-        document.title = `${instance.name} — Object Storage Browser`;
+        document.title = `${instance.name} - Object Storage Browser`;
       },
 
       async changeInstance() {
@@ -652,19 +674,25 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
       async showPermissionDetails() {
         const instance = this.currentInstance;
         if (!instance) return;
-        const providerPermissions = (instance.capabilities?.permissions || [])
-          .map(value => `<code>${escapeHTML(value)}</code>`)
-          .join(', ') || 'None reported';
+        const reportedPermissions = Array.from(instance.capabilities?.permissions || []).map(String);
+        const providerPermissions = reportedPermissions.length ? reportedPermissions.join(', ') : 'Not reported';
         const permissionRows = this.permissionStates.map(item => {
           const state = item.state || {};
-          const allowed = state.allowed ? 'Allowed' : 'Denied';
-          const verification = state.verified ? 'Provider verified' : 'Declared';
-          return `<div class="bb-permission-summary-row">
-            <span class="bb-permission-summary-icon ${state.allowed ? 'is-allowed' : 'is-denied'}"><i class="mdi mdi-${escapeHTML(item.icon)}"></i></span>
-            <span class="bb-permission-summary-copy"><strong>${escapeHTML(item.label)}</strong><small>${escapeHTML(verification)}${state.reason ? ` · ${escapeHTML(state.reason)}` : ''}</small></span>
-            <span class="bb-permission-result ${state.allowed ? 'is-allowed' : 'is-denied'}">${escapeHTML(allowed)}</span>
+          const stateName = this.capabilityName(state);
+          const result = stateName === 'allowed' ? 'Allowed' : (stateName === 'denied' ? 'Denied' : 'On use');
+          const verification = stateName === 'unknown'
+            ? 'The provider will verify this permission when the operation is used.'
+            : (state.verified ? (stateName === 'allowed' ? 'Verified by a real provider operation.' : 'Denied by the provider.') : 'Defined by the connection configuration.');
+          const explanation = String(state.reason || verification);
+          return `<div class="bb-permission-summary-row" title="${escapeHTML(explanation)}">
+            <span class="bb-permission-summary-icon is-${escapeHTML(stateName)}"><i class="mdi mdi-${escapeHTML(item.icon)}"></i></span>
+            <span class="bb-permission-summary-copy"><strong>${escapeHTML(item.label)}</strong></span>
+            <span class="bb-permission-result is-${escapeHTML(stateName)}">${escapeHTML(result)}</span>
           </div>`;
         }).join('');
+        const discoveryError = instance.capabilities?.error
+          ? `<div class="bb-permission-provider is-error"><strong>Discovery</strong><span title="${escapeHTML(instance.capabilities.error)}">Unavailable</span></div>`
+          : '';
         await BB.ui.alert({
           html: `<div class="bb-details bb-permission-details">
             <div class="bb-details-head">
@@ -676,10 +704,8 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
             </div>
             <div class="bb-details-body">
               <div class="bb-permission-summary">${permissionRows}</div>
-              <div class="bb-section bb-kv">
-                <div class="kv-row"><div class="kv-k">Provider permissions</div><div class="kv-v mono">${providerPermissions}</div></div>
-                ${instance.capabilities?.error ? `<div class="kv-row"><div class="kv-k">Discovery error</div><div class="kv-v">${escapeHTML(instance.capabilities.error)}</div></div>` : ''}
-              </div>
+              <div class="bb-permission-provider"><strong>Provider permissions</strong><span class="mono" title="${escapeHTML(providerPermissions)}">${escapeHTML(providerPermissions)}</span></div>
+              ${discoveryError}
             </div>
           </div>`
         });
@@ -689,6 +715,39 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
         this.previousContinuationTokens = [];
         this.continuationToken = '';
         this.nextContinuationToken = '';
+        this.scanOffset = 0;
+        this.localPage = 0;
+        this.scanComplete = false;
+        this.navigationSortAvailable = false;
+        this.navigationSortField = '';
+        this.navigationSortDirection = '';
+      },
+
+      navigationSortIcon(field) {
+        if (!this.navigationSortAvailable) return '';
+        if (this.navigationSortField !== field) return 'unfold-more-horizontal';
+        return this.navigationSortDirection === 'desc' ? 'arrow-down' : 'arrow-up';
+      },
+
+      navigationSortAria(field) {
+        if (!this.navigationSortAvailable || this.navigationSortField !== field) return 'none';
+        return this.navigationSortDirection === 'desc' ? 'descending' : 'ascending';
+      },
+
+      toggleNavigationSort(field) {
+        if (!this.navigationSortAvailable) return;
+        const initialDirection = field === 'name' ? 'asc' : 'desc';
+        const reverseDirection = initialDirection === 'desc' ? 'asc' : 'desc';
+        if (this.navigationSortField !== field) {
+          this.navigationSortField = field;
+          this.navigationSortDirection = initialDirection;
+        } else if (this.navigationSortDirection === initialDirection) {
+          this.navigationSortDirection = reverseDirection;
+        } else {
+          this.navigationSortField = '';
+          this.navigationSortDirection = '';
+        }
+        this.localPage = 0;
       },
 
       updatePathFromHash() {
@@ -726,16 +785,29 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
       },
 
       async nextPage() {
+        if (this.localPage + 1 < this.localPageCount) {
+          this.localPage += 1;
+          return;
+        }
         if (!this.nextContinuationToken) return;
-        this.previousContinuationTokens.push(this.continuationToken || '');
+        this.previousContinuationTokens.push({ token: this.continuationToken || '', offset: this.scanOffset });
+        this.scanOffset += this.pathContentTableData.length;
         this.continuationToken = this.nextContinuationToken;
+        this.localPage = 0;
         await this.refresh();
       },
 
       async previousPage() {
+        if (this.localPage > 0) {
+          this.localPage -= 1;
+          return;
+        }
         if (!this.previousContinuationTokens.length) return;
-        this.continuationToken = this.previousContinuationTokens.pop() || '';
+        const previous = this.previousContinuationTokens.pop();
+        this.continuationToken = previous?.token || '';
+        this.scanOffset = Number(previous?.offset || 0);
         await this.refresh();
+        this.localPage = Math.max(0, this.localPageCount - 1);
       },
 
       async refresh() {
@@ -750,11 +822,15 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
           const data = await BB.api.list({
             prefix: this.pathPrefix,
             delimiter: '/',
-            max: this.pageSize,
-            continuationToken: this.continuationToken,
-            exclude: this.currentInstance.trashPrefix || ''
+            continuationToken: this.continuationToken
           });
           this.nextContinuationToken = data.nextContinuationToken || '';
+          this.scanComplete = data.scanComplete === true;
+          this.navigationSortAvailable = data.sortAvailable === true;
+          if (!this.navigationSortAvailable) {
+            this.navigationSortField = '';
+            this.navigationSortDirection = '';
+          }
           const rows = (data.items || []).map(item => {
             if (item.type === 'prefix') {
               return { type: 'prefix', name: item.name, prefix: item.prefix, size: 0, dateModified: null };
@@ -774,6 +850,7 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
             return !this.config.keyExcludePatterns.some(pattern => pattern.test(String(key || '')));
           });
           this.pathContentTableData = rows;
+          this.localPage = Math.max(0, Math.min(this.localPage, Math.max(0, Math.ceil(rows.length / this.pageSize) - 1)));
         } catch (error) {
           this.pathContentTableData = [];
           BB.ui.toast(String(error.message || error));
@@ -822,7 +899,6 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
       async onPrefixRename(row) { if (await BB.actions.renamePrefix(row.prefix)) await this.refresh(); },
       async onPrefixDelete(row) { if (await BB.actions.deletePrefix(row.prefix)) await this.refresh(); },
       onCurrentInsights() { BB.actions.showPrefixInsights(this.pathPrefix); },
-      showJobs() { BB.actions.showJobs(); },
 
       onRowContextMenu(event) {
         const row = event.target?.closest?.('.browser-card tbody tr');
@@ -993,296 +1069,53 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
       },
 
       async downloadAllFiles() {
-        if (!this.canDownloadAll) return;
-        const instanceId = this.instanceId;
+        if (!this.canDownloadAll) return false;
         const basePrefix = this.pathPrefix;
         const archiveName = `${basePrefix.split('/').filter(Boolean).pop() || this.currentInstance.name || 'archive'}.zip`;
         return this.downloadArchive({
           archiveName,
           basePrefix,
-          instanceId,
-          resolveFiles: async ({ signal, onScan }) => BB.api.listAllItems(basePrefix, {
-            instance: instanceId,
-            signal,
-            onPage(state) { onScan(state); }
-          })
+          instanceId: this.instanceId
         });
       },
 
       async onPrefixDownload(row) {
         if (!this.canRead || !row?.prefix) return false;
         const prefix = normalizePrefix(row.prefix);
-        const instanceId = this.instanceId;
         const folderName = prefix.split('/').filter(Boolean).pop() || 'folder';
         return this.downloadArchive({
           archiveName: `${folderName}.zip`,
           basePrefix: prefix,
-          instanceId,
-          resolveFiles: async ({ signal, onScan }) => BB.api.listAllItems(prefix, {
-            instance: instanceId,
-            signal,
-            onPage(state) { onScan(state); }
-          })
+          instanceId: this.instanceId
         });
       },
 
-      async downloadArchive({ archiveName, basePrefix = '', instanceId = '', resolveFiles }) {
-        if (!this.canRead || !window.fflate?.zip || typeof resolveFiles !== 'function') return false;
-        const target = await BB.actions.pickSaveTarget(archiveName);
-        if (target.canceled) return false;
-
-        const group = BB.ui.transferGroup('download');
-        const id = `archive-${Date.now().toString(36)}-${++archiveSequence}`;
-        let controller = null;
-        let running = false;
-        let pauseRequested = false;
-        let cancelRequested = false;
-        let settled = false;
-        let files = null;
-        let currentIndex = 0;
-        let currentResumeState = null;
-        let totalBytes = 0;
-        const receivedByFile = new Map();
-        const archiveInput = {};
-        let resolveCompletion;
-        const completion = new Promise(resolve => { resolveCompletion = resolve; });
-
-        const item = group.add({
-          id,
+      async downloadArchive({ archiveName, basePrefix = '', instanceId = '' }) {
+        if (!this.canRead) return false;
+        const url = BB.api.archiveURL({
+          prefix: basePrefix,
           name: archiveName,
-          status: 'preparing',
-          progress: null,
-          indeterminate: true,
-          detail: 'Scanning objects...',
-          onPause: pause,
-          onResume: resume,
-          onCancel: cancel
+          instance: instanceId
         });
-
-        function finish(value) {
-          if (settled) return;
-          settled = true;
-          resolveCompletion(value);
-        }
-
-        function receivedBytes() {
-          return Array.from(receivedByFile.values()).reduce((sum, value) => sum + Math.max(0, Number(value || 0)), 0);
-        }
-
-        function sourceProgress() {
-          if (!files) return null;
-          const received = receivedBytes();
-          if (totalBytes > 0) return Math.min(1, received / totalBytes);
-          return files.length ? Math.min(1, currentIndex / files.length) : 1;
-        }
-
-        function transferDetail(progress = {}, suffix = '') {
-          return BB.actions.formatTransferDetail({
-            ...progress,
-            transferredBytes: receivedBytes(),
-            totalBytes
-          }, suffix);
-        }
-
-        function pause() {
-          if (settled || !running || pauseRequested) return;
-          pauseRequested = true;
-          cancelRequested = false;
-          item.update({
-            status: 'preparing',
-            progress: sourceProgress() == null ? null : sourceProgress() * 0.9,
-            indeterminate: sourceProgress() == null,
-            detail: 'Pausing archive download...',
-            onPause: pause,
-            onResume: resume,
-            onCancel: cancel
-          });
-          controller?.abort();
-        }
-
-        function resume() {
-          if (settled || running) return;
-          pauseRequested = false;
-          cancelRequested = false;
-          void run();
-        }
-
-        function cancel() {
-          if (settled || cancelRequested) return;
-          cancelRequested = true;
-          pauseRequested = false;
-          if (running) {
-            item.update({
-              status: 'preparing',
-              progress: sourceProgress() == null ? null : sourceProgress() * 0.9,
-              indeterminate: sourceProgress() == null,
-              detail: 'Canceling archive download...',
-              onPause: null,
-              onResume: null,
-              onCancel: cancel
-            });
-            controller?.abort();
-          } else {
-            item.canceled({ detail: archiveName });
-            finish(false);
-          }
-        }
-
-        async function run() {
-          if (running || settled) return;
-          running = true;
-          controller = new AbortController();
-          const activeController = controller;
-          item.update({
-            status: 'running',
-            progress: sourceProgress() == null ? null : sourceProgress() * 0.9,
-            indeterminate: sourceProgress() == null,
-            detail: files ? 'Resuming archive download...' : 'Scanning objects...',
-            onPause: pause,
-            onResume: resume,
-            onCancel: cancel
-          });
-
-          try {
-            if (!files) {
-              const sourceItems = await resolveFiles({
-                signal: activeController.signal,
-                onScan: state => {
-                  const count = Number(state?.count || state?.itemsCount || 0);
-                  item.update({
-                    status: 'running',
-                    progress: null,
-                    indeterminate: true,
-                    detail: `${count.toLocaleString()} object(s) discovered`,
-                    onPause: pause,
-                    onResume: resume,
-                    onCancel: cancel
-                  });
-                }
-              });
-              if (activeController.signal.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
-
-              const usedPaths = new Set();
-              files = Array.from(sourceItems || [])
-                .filter(source => source?.key && source.key !== basePrefix)
-                .map(source => ({
-                  key: source.key,
-                  size: Math.max(0, Number(source.size || 0)),
-                  url: BB.api.urlForKey(source.key, instanceId),
-                  archivePath: uniqueArchivePath(source.archivePath || safeArchivePath(source.key, basePrefix), usedPaths)
-                }));
-              totalBytes = files.reduce((sum, source) => sum + source.size, 0);
-              files.forEach(source => receivedByFile.set(source.key, 0));
-            }
-
-            for (; currentIndex < files.length; currentIndex++) {
-              if (activeController.signal.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
-              const source = files[currentIndex];
-              const result = await BB.actions.streamURL(source.url, {
-                signal: activeController.signal,
-                totalBytes: source.size,
-                resumeState: currentResumeState,
-                onCheckpoint(state) {
-                  currentResumeState = state;
-                  receivedByFile.set(source.key, Number(state.receivedBytes || 0));
-                },
-                onProgress(progress) {
-                  receivedByFile.set(source.key, Number(progress.receivedBytes || 0));
-                  const progressValue = sourceProgress();
-                  item.update({
-                    status: 'running',
-                    progress: progressValue == null ? null : Math.min(0.9, progressValue * 0.9),
-                    indeterminate: progressValue == null,
-                    detail: transferDetail(progress, `${currentIndex}/${files.length} file(s) complete · ${source.archivePath}`),
-                    onPause: pause,
-                    onResume: resume,
-                    onCancel: cancel
-                  });
-                }
-              });
-              const bytes = new Uint8Array(await result.blob.arrayBuffer());
-              archiveInput[source.archivePath] = bytes;
-              receivedByFile.set(source.key, source.size || bytes.byteLength);
-              currentResumeState = null;
-            }
-
-            item.update({
-              status: 'running',
-              progress: 0.94,
-              indeterminate: false,
-              detail: `${files.length}/${files.length} file(s) downloaded · creating ZIP`,
-              onPause: null,
-              onResume: null,
-              onCancel: cancel
-            });
-            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-            const zip = await new Promise((resolve, reject) => {
-              let completed = false;
-              const abort = () => {
-                if (completed) return;
-                completed = true;
-                reject(new DOMException('The operation was aborted.', 'AbortError'));
-              };
-              activeController.signal.addEventListener('abort', abort, { once: true });
-              window.fflate.zip(archiveInput, { level: 0 }, (error, data) => {
-                activeController.signal.removeEventListener('abort', abort);
-                if (completed) return;
-                completed = true;
-                if (error) reject(error);
-                else resolve(data);
-              });
-            });
-            if (activeController.signal.aborted || cancelRequested) throw new DOMException('The operation was aborted.', 'AbortError');
-            const blob = new Blob([zip], { type: 'application/zip' });
-            await BB.actions.saveBlob(blob, archiveName, target.handle);
-            item.complete({
-              detail: `${files.length} file(s) · ${BB.actions.formatBytes(blob.size)}`,
-              duration: 6000
-            });
-            finish(true);
-          } catch (error) {
-            if (error?.transferState) currentResumeState = error.transferState;
-            if (BB.actions.isAbortError(error) || activeController.signal.aborted) {
-              if (cancelRequested) {
-                item.canceled({ detail: archiveName });
-                finish(false);
-              } else {
-                item.update({
-                  status: 'paused',
-                  progress: sourceProgress() == null ? null : sourceProgress() * 0.9,
-                  indeterminate: false,
-                  detail: files
-                    ? `${transferDetail(currentResumeState || {}, `${currentIndex}/${files.length} file(s) complete`)} · Resume continues from the last received byte.`
-                    : 'Archive scan paused. Resume will restart the scan.',
-                  onPause: pause,
-                  onResume: resume,
-                  onCancel: cancel
-                });
-              }
-            } else {
-              item.fail({
-                progress: sourceProgress() == null ? null : sourceProgress() * 0.9,
-                detail: String(error?.message || error || 'Archive download failed'),
-                onResume: resume,
-                onCancel: cancel
-              });
-            }
-          } finally {
-            if (controller === activeController) controller = null;
-            running = false;
-          }
-        }
-
-        void run();
-        return completion;
+        BB.actions.triggerBrowserDownload(url, archiveName);
+        BB.ui.toast('Archive download started in the browser.', {
+          type: 'info',
+          duration: 5000
+        });
+        return true;
       },
 
+      formatByteParts(size) {
+        const value = Math.max(0, Number(size) || 0);
+        if (value < 1024) return { value: Math.round(value).toLocaleString('en-US'), unit: 'B' };
+        if (value < 1024 ** 2) return { value: Math.round(value / 1024).toLocaleString('en-US'), unit: 'KB' };
+        if (value < 1024 ** 3) return { value: (value / 1024 ** 2).toFixed(2), unit: 'MB' };
+        if (value < 1024 ** 4) return { value: (value / 1024 ** 3).toFixed(2), unit: 'GB' };
+        return { value: (value / 1024 ** 4).toFixed(2), unit: 'TB' };
+      },
       formatBytes(size) {
-        const value = Number(size || 0);
-        if (value < 1024) return `${value} B`;
-        if (value < 1024 ** 2) return `${(value / 1024).toFixed(0)} KB`;
-        if (value < 1024 ** 3) return `${(value / 1024 ** 2).toFixed(2)} MB`;
-        return `${(value / 1024 ** 3).toFixed(2)} GB`;
+        const parts = this.formatByteParts(size);
+        return `${parts.value} ${parts.unit}`;
       },
       formatDateTime_relative(date) {
         if (!date) return '—';

@@ -43,13 +43,11 @@ class FakeElement {
     this.disabled = false;
     this.hidden = false;
     this.clientHeight = 200;
+    this.scrollLeft = 0;
   }
   set className(value) { this._className = String(value || ''); }
   get className() { return this._className; }
-  get childElementCount() { return this.children.filter(child => child instanceof FakeElement).length; }
-  append(...nodes) {
-    for (const node of nodes) this.appendChild(typeof node === 'string' ? new FakeText(node) : node);
-  }
+  append(...nodes) { for (const node of nodes) this.appendChild(typeof node === 'string' ? new FakeText(node) : node); }
   appendChild(node) {
     if (node == null) return node;
     if (node.parentNode) node.remove();
@@ -69,7 +67,7 @@ class FakeElement {
     this.parentNode = null;
   }
   setAttribute(name, value) { this.attributes.set(String(name), String(value)); }
-  getAttribute(name) { return this.attributes.get(String(name)); }
+  removeAttribute(name) { this.attributes.delete(String(name)); }
   addEventListener(type, listener) {
     const list = this.listeners.get(type) || [];
     list.push(listener);
@@ -81,10 +79,11 @@ class FakeElement {
   }
   click() { this.dispatchEvent({ type: 'click', target: this, preventDefault() {}, stopPropagation() {} }); }
   focus() { this.focused = true; }
+  setSelectionRange() {}
   querySelector(selector) {
-    const direct = selector.match(/^:scope > \.([A-Za-z0-9_-]+)$/);
-    if (direct) return this.children.find(child => child instanceof FakeElement && child.classList.contains(direct[1])) || null;
-    const classMatch = selector.match(/^\.([A-Za-z0-9_-]+)(?:\s+.*)?$/);
+    const dataFilter = selector.match(/^\[data-filter-column="(\d+)"\]$/);
+    if (dataFilter) return this.find(node => node.dataset.filterColumn === dataFilter[1]);
+    const classMatch = selector.match(/^\.([A-Za-z0-9_-]+)/);
     if (classMatch) return this.find(node => node.classList.contains(classMatch[1]));
     return null;
   }
@@ -133,7 +132,7 @@ const document = {
   documentElement: scrollingElement
 };
 
-let callCount = 0;
+const calls = [];
 let pending = null;
 const rendered = [];
 const BB = {
@@ -147,16 +146,18 @@ const BB = {
         ]
       };
     },
-    sqliteTable() {
-      callCount += 1;
-      if (callCount === 1) {
+    sqliteTable(options) {
+      calls.push(options);
+      if (calls.length === 1) {
         return Promise.resolve({
           columns: [{ name: 'id' }, { name: 'name' }],
           rows: [{ id: 1, name: 'alpha' }],
           page: 0,
           pageSize: 100,
-          totalRows: 1250,
-          sourceTotalRows: 1250,
+          totalRows: -1,
+          sourceTotalRows: -1,
+          totalKnown: false,
+          sourceTotalKnown: false,
           hasMore: true
         });
       }
@@ -169,7 +170,8 @@ const BB = {
     renderTable(options) {
       rendered.push(options);
       const table = new FakeElement('section');
-      table.className = 'data-preview';
+      table.className = 'data-preview bb-data-grid';
+      if (options.beforeTable) table.appendChild(options.beforeTable);
       const scroller = new FakeElement('div');
       scroller.className = 'data-table-scroll';
       table.appendChild(scroller);
@@ -200,16 +202,14 @@ vm.runInContext(source, context, { filename: 'sqlite-viewer.js' });
 
 (async () => {
   const root = await BB.sqliteViewer.render({ key: 'fixture.sqlite', size: 1024, instance: 'main' });
-  const tabs = root.find(node => node.classList.contains('sqlite-table-controls'));
-  const toolbar = root.find(node => node.classList.contains('sqlite-query-toolbar'));
-  const host = root.find(node => node.classList.contains('sqlite-table-host'));
-  assert.ok(tabs, 'table tabs must remain outside the replaceable table area');
-  assert.ok(toolbar, 'search controls must remain outside the replaceable table area');
-  assert.ok(host, 'SQLite viewer must have a dedicated table host');
-  assert.equal(rendered[0].totalRows, 1250, 'the table must receive the exact total row count');
-  assert.equal(rendered[0].sourceTotalRows, 1250, 'the unfiltered source total must be preserved');
+  assert.ok(Number.isNaN(rendered[0].totalRows), 'an unknown SQLite total must not be converted to zero');
+  assert.ok(Number.isNaN(rendered[0].sourceTotalRows), 'an unknown source total must stay unknown');
+  assert.equal(rendered[0].hasNext, true, 'the next page must remain available when the backend reports more rows');
+  assert.ok(rendered[0].queryTools, 'SQLite must use the shared DataGrid filtering tools');
+  assert.equal(root.find(node => node.classList.contains('sqlite-query-toolbar')), null, 'SQLite must not render a separate global search bar');
+  assert.ok(root.find(node => node.classList.contains('sqlite-table-controls')), 'SQLite tables must use the shared worksheet tab style');
 
-  const scroller = host.querySelector('.data-table-scroll');
+  const scroller = root.querySelector('.data-table-scroll');
   let prevented = false;
   scroller.dispatchEvent({
     type: 'wheel', deltaY: 120, deltaX: 0, deltaMode: 0, ctrlKey: false, shiftKey: false,
@@ -218,26 +218,26 @@ vm.runInContext(source, context, { filename: 'sqlite-viewer.js' });
   assert.equal(scrollingElement.scrollTop, 120, 'vertical wheel input over the SQLite table must scroll the page');
   assert.equal(prevented, true);
 
-  const tableButtons = tabs.findAll(node => node.classList.contains('spreadsheet-tab'));
-  assert.equal(tableButtons.length, 2);
-  tableButtons[1].click();
-  assert.ok(host.querySelector(':scope > .sqlite-table-loader'), 'only the table host must show a loader while changing tables');
-  assert.ok(root.find(node => node.classList.contains('sqlite-table-controls')), 'tabs must remain visible while loading');
-  assert.ok(root.find(node => node.classList.contains('sqlite-query-toolbar')), 'search controls must remain visible while loading');
-
+  rendered[0].onPage(1);
+  assert.equal(calls.at(-1).page, 1, 'SQLite pagination must request the selected page');
   pending.resolve({
-    columns: [{ name: 'message' }],
-    rows: [{ message: 'ready' }],
-    page: 0,
+    columns: [{ name: 'id' }, { name: 'name' }],
+    rows: [{ id: 101, name: 'next' }],
+    page: 1,
     pageSize: 100,
-    totalRows: 42,
-    sourceTotalRows: 42,
+    totalRows: 101,
+    sourceTotalRows: 101,
+    totalKnown: true,
+    sourceTotalKnown: true,
     hasMore: false
   });
   await new Promise(resolve => setImmediate(resolve));
-  assert.equal(rendered.at(-1).totalRows, 42);
-  assert.equal(host.querySelector(':scope > .sqlite-table-loader'), null, 'the table-local loader must be removed after the response');
-  assert.ok(root.find(node => node.classList.contains('sqlite-table-controls')), 'table tabs must survive redraws');
+  assert.equal(rendered.at(-1).totalRows, 101);
+  assert.equal(rendered.at(-1).page, 1);
+
+  assert.match(source, /filters: activeFilters\(\)/);
+  assert.match(source, /sortColumn: state\.sortColumn/);
+  assert.doesNotMatch(source, /Search the complete table|sqlite-query-toolbar/);
 
   root.cleanup();
   console.log('SQLite viewer behavior tests passed');

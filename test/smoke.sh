@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-BASE_URL="${BASE_URL:-http://127.0.0.1:8080}"
+BASE_URL="${1:-http://127.0.0.1:8080/s3-browser}"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT INT TERM
 
@@ -68,7 +68,7 @@ for instance in garage-main garage-archive; do
   [ "$(cat "$TMP_DIR/get.txt")" = "$payload" ]
 
   request 200 "$TMP_DIR/list.json" \
-    "$BASE_URL/api/list?instance=$instance&prefix=smoke%2F&delimiter=%2F&max=50"
+    "$BASE_URL/api/list?instance=$instance&prefix=smoke%2F&delimiter=%2F"
   grep -q "${instance}.txt" "$TMP_DIR/list.json"
 
   request 200 "$TMP_DIR/permissions.json" -X POST \

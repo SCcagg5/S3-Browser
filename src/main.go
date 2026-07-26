@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -30,13 +31,16 @@ func main() {
 
 	flags := flag.NewFlagSet("s3-browser", flag.ExitOnError)
 	var configPath string
-	flags.StringVar(&configPath, "c", "", "path to the HCL configuration file")
-	flags.StringVar(&configPath, "config", "", "path to the HCL configuration file")
+	flags.StringVar(&configPath, "c", "config.hcl", "path to the HCL configuration file")
+	flags.StringVar(&configPath, "config", "config.hcl", "path to the HCL configuration file")
 	_ = flags.Parse(os.Args[1:])
 
 	cfg, err := loadRuntimeConfig(configPath)
 	if err != nil {
 		log.Fatal(err)
+	}
+	if cfg.Runtime.MemoryLimitBytes > 0 {
+		debug.SetMemoryLimit(cfg.Runtime.MemoryLimitBytes)
 	}
 	app, err := newApplication(cfg)
 	if err != nil {
@@ -51,8 +55,10 @@ func main() {
 		IdleTimeout:       2 * time.Minute,
 		MaxHeaderBytes:    1 << 20,
 	}
-	log.Printf("loaded configuration from %s", cfg.SourceName)
-	log.Printf("object browser listening on %s with %d storage instance(s)", cfg.Listen, len(cfg.Storages))
+	if cfg.Runtime.LogMode == logModeDetailed {
+		log.Printf("loaded configuration from %s", cfg.SourceName)
+	}
+	log.Printf("object browser listening on %s with %d bucket(s) using %d auth configuration(s); state=%s access=%s", cfg.Listen, len(cfg.Buckets), len(cfg.Authentications), cfg.Runtime.StateMode, cfg.Runtime.AccessMode)
 	serverErrors := make(chan error, 1)
 	go func() {
 		serverErrors <- server.ListenAndServe()
@@ -79,12 +85,12 @@ func main() {
 func runHealthcheck(args []string) {
 	flags := flag.NewFlagSet("healthcheck", flag.ExitOnError)
 	var configPath string
-	flags.StringVar(&configPath, "c", "", "optional HCL configuration used to derive the listen address")
-	flags.StringVar(&configPath, "config", "", "optional HCL configuration used to derive the listen address")
-	checkURL := flags.String("url", strings.TrimSpace(os.Getenv("HEALTHCHECK_URL")), "health endpoint URL")
+	flags.StringVar(&configPath, "c", "", "optional HCL configuration used to derive the health endpoint")
+	flags.StringVar(&configPath, "config", "", "optional HCL configuration used to derive the health endpoint")
+	checkURL := flags.String("url", "", "health endpoint URL")
 	_ = flags.Parse(args)
 
-	if *checkURL == "" && configSourceConfigured(configPath) {
+	if *checkURL == "" && strings.TrimSpace(configPath) != "" {
 		cfg, err := loadRuntimeConfig(configPath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "healthcheck config: %v\n", err)
@@ -103,7 +109,9 @@ func runHealthcheck(args []string) {
 		fmt.Fprintf(os.Stderr, "healthcheck request: %v\n", err)
 		os.Exit(1)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	client := newStorageHTTPClient(false)
+	defer closeHTTPClient(client)
+	resp, err := client.Do(req)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "healthcheck failed: %v\n", err)
 		os.Exit(1)
@@ -117,9 +125,6 @@ func runHealthcheck(args []string) {
 
 func healthURLFromListen(listen string) string {
 	listen = strings.TrimSpace(listen)
-	if strings.HasPrefix(listen, "http://") || strings.HasPrefix(listen, "https://") {
-		return strings.TrimRight(listen, "/") + "/healthz"
-	}
 	host, port, err := net.SplitHostPort(listen)
 	if err != nil {
 		if strings.HasPrefix(listen, ":") {

@@ -20,11 +20,58 @@ import (
 	"time"
 )
 
+func requireExactByteRanges(t *testing.T, ranges []string) {
+	t.Helper()
+	if len(ranges) == 0 {
+		t.Fatal("expected at least one byte-range request")
+	}
+	for _, value := range ranges {
+		if !strings.HasPrefix(value, "bytes=") {
+			t.Fatalf("range %q is not an exact byte range", value)
+		}
+		parts := strings.SplitN(strings.TrimPrefix(value, "bytes="), "-", 2)
+		if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+			t.Fatalf("range %q is open-ended or malformed", value)
+		}
+		start, startErr := strconv.ParseInt(parts[0], 10, 64)
+		end, endErr := strconv.ParseInt(parts[1], 10, 64)
+		if startErr != nil || endErr != nil || start < 0 || end < start {
+			t.Fatalf("range %q is invalid", value)
+		}
+	}
+}
+
+func exactRangeStart(t *testing.T, value string) int64 {
+	t.Helper()
+	requireExactByteRanges(t, []string{value})
+	parts := strings.SplitN(strings.TrimPrefix(value, "bytes="), "-", 2)
+	start, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		t.Fatalf("parse range start %q: %v", value, err)
+	}
+	return start
+}
+
 type memoryObject struct {
 	data        []byte
 	contentType string
 	modified    time.Time
 }
+
+type memoryReadCloser struct {
+	backend *memoryBackend
+	reader  *bytes.Reader
+}
+
+func (r *memoryReadCloser) Read(buffer []byte) (int, error) {
+	read, err := r.reader.Read(buffer)
+	r.backend.mu.Lock()
+	r.backend.getBytesRead += int64(read)
+	r.backend.mu.Unlock()
+	return read, err
+}
+
+func (r *memoryReadCloser) Close() error { return nil }
 
 type memoryMultipart struct {
 	key         string
@@ -39,10 +86,16 @@ type memoryBackend struct {
 	lastGetHeaders http.Header
 	getRanges      []string
 	getCount       int
+	getBytesRead   int64
 	headCount      int
 	ignoreRanges   bool
+	rangeStatusOK  bool
+	rangeBodyFull  bool
 	multipart      map[string]*memoryMultipart
 	nextUpload     int
+	listPages      []listPage
+	listCalls      int
+	listDelay      time.Duration
 }
 
 func newMemoryBackend(objects map[string]string) *memoryBackend {
@@ -57,6 +110,24 @@ func (m *memoryBackend) List(_ context.Context, options listOptions) (listPage, 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.last = options
+	m.listCalls++
+	if m.listDelay > 0 {
+		time.Sleep(m.listDelay)
+	}
+	if len(m.listPages) > 0 {
+		index := 0
+		if options.PageToken != "" {
+			parsed, err := strconv.Atoi(strings.TrimPrefix(options.PageToken, "page-"))
+			if err != nil || parsed < 0 || parsed >= len(m.listPages) {
+				return listPage{}, fmt.Errorf("invalid test page token %q", options.PageToken)
+			}
+			index = parsed
+		}
+		page := m.listPages[index]
+		page.Objects = append([]objectInfo(nil), page.Objects...)
+		page.Prefixes = append([]string(nil), page.Prefixes...)
+		return page, nil
+	}
 	keys := make([]string, 0, len(m.objects))
 	for key := range m.objects {
 		if strings.HasPrefix(key, options.Prefix) && (options.StartAfter == "" || key > options.StartAfter) {
@@ -116,6 +187,7 @@ func (m *memoryBackend) Get(_ context.Context, key string, requestHeaders http.H
 	m.getCount++
 	m.getRanges = append(m.getRanges, requestHeaders.Get("Range"))
 	data := object.data
+	fullData := object.data
 	status := http.StatusOK
 	contentRange := ""
 	if value := strings.TrimSpace(requestHeaders.Get("Range")); !m.ignoreRanges && strings.HasPrefix(value, "bytes=") {
@@ -157,10 +229,17 @@ func (m *memoryBackend) Get(_ context.Context, key string, requestHeaders http.H
 	headers.Set("Last-Modified", object.modified.UTC().Format(http.TimeFormat))
 	if contentRange != "" {
 		headers.Set("Content-Range", contentRange)
+		if m.rangeStatusOK {
+			status = http.StatusOK
+		}
+		if m.rangeBodyFull {
+			data = fullData
+			headers.Set("Content-Length", strconv.Itoa(len(data)))
+		}
 	}
 	headers.Set("Set-Cookie", "should-not-leak=1")
 	headers.Set("x-amz-meta-test", "visible")
-	return objectResponse{StatusCode: status, Header: headers, Body: io.NopCloser(bytes.NewReader(data))}, nil
+	return objectResponse{StatusCode: status, Header: headers, Body: &memoryReadCloser{backend: m, reader: bytes.NewReader(data)}}, nil
 }
 
 func (m *memoryBackend) Put(_ context.Context, key string, body io.Reader, _ int64, contentType string) error {
@@ -253,7 +332,7 @@ func testApplication(t *testing.T) (*application, *memoryBackend, *memoryBackend
 		"tenant/a//./../b\\c":           "opaque",
 	})
 	makeInstance := func(id string, backend *memoryBackend, root string, permissions ...string) *storageInstance {
-		cfg := storageConfig{ID: id, Name: id, Provider: "s3", Bucket: id + "-bucket", Endpoint: "http://internal.invalid", Region: "test", RootPrefix: root, PermissionsDefined: true, Permissions: permissions}
+		cfg := bucketConfig{ID: id, Name: id, Provider: "s3", Bucket: id + "-bucket", Region: "test", RootPrefix: root, PermissionsDefined: true, Permissions: permissions}
 		return &storageInstance{cfg: cfg, backend: backend, caps: initialCapabilities(cfg)}
 	}
 	publicFS := fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok"), Mode: fs.FileMode(0o444)}}
@@ -267,11 +346,11 @@ func testApplication(t *testing.T) (*application, *memoryBackend, *memoryBackend
 		publicFS: publicFS,
 	}
 	var err error
-	app.jobs, err = newJobManager(app, app.config.DataDir)
+	app.jobs, err = newJobManager(app, app.config.DataDir, 100, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	app.uploads, err = newUploadManager(app, app.config.DataDir)
+	app.uploads, err = newUploadManager(app, app.config.DataDir, true)
 	if err != nil {
 		app.jobs.close()
 		t.Fatal(err)
@@ -288,7 +367,7 @@ func TestEmbeddedFrontendKeepsFlatOriginalStyleTable(t *testing.T) {
 	}
 	html := string(data)
 	for _, required := range []string{
-		"assets/vendor/mdi/7.4.47/css/materialdesignicons.min.css",
+		"assets/css/icons.css",
 		"class=\"storage-switcher\"",
 		"icon=\"folder\"",
 	} {
@@ -334,13 +413,85 @@ func TestInstancesResponseDoesNotExposeCredentialsOrEndpoint(t *testing.T) {
 	}
 }
 
+func TestListScansConfiguredProviderPagesAndEnablesGlobalSortOnlyWhenComplete(t *testing.T) {
+	app, _, backend := testApplication(t)
+	backend.mu.Lock()
+	backend.listPages = []listPage{
+		{Objects: []objectInfo{{Key: "tenant/a.txt", Size: 1}}, NextPageToken: "page-1"},
+		{Objects: []objectInfo{{Key: "tenant/b.txt", Size: 2}}, NextPageToken: "page-2"},
+		{Objects: []objectInfo{{Key: "tenant/c.txt", Size: 3}}},
+	}
+	backend.listCalls = 0
+	backend.mu.Unlock()
+	app.instances["rw"].cfg.MaxScanPages = 2
+
+	recorder := httptest.NewRecorder()
+	app.routes().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/list?instance=rw&delimiter=/", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var limited listResponseJSON
+	if err := json.Unmarshal(recorder.Body.Bytes(), &limited); err != nil {
+		t.Fatal(err)
+	}
+	if limited.ScanComplete || limited.SortAvailable || limited.NextContinuationToken != "page-2" || len(limited.Items) != 2 {
+		t.Fatalf("limited scan = %+v", limited)
+	}
+	backend.mu.Lock()
+	if backend.listCalls != 2 || backend.last.MaxResults != providerListPageSize {
+		t.Fatalf("provider calls = %d, max results = %d", backend.listCalls, backend.last.MaxResults)
+	}
+	backend.listCalls = 0
+	backend.mu.Unlock()
+
+	app.instances["rw"].cfg.MaxScanPages = 3
+	recorder = httptest.NewRecorder()
+	app.routes().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/list?instance=rw&delimiter=/", nil))
+	var complete listResponseJSON
+	if err := json.Unmarshal(recorder.Body.Bytes(), &complete); err != nil {
+		t.Fatal(err)
+	}
+	if !complete.ScanComplete || !complete.SortAvailable || complete.NextContinuationToken != "" || len(complete.Items) != 3 {
+		t.Fatalf("complete scan = %+v", complete)
+	}
+
+	backend.mu.Lock()
+	backend.listCalls = 0
+	backend.mu.Unlock()
+	app.instances["rw"].cfg.MaxScanPages = 0
+	recorder = httptest.NewRecorder()
+	app.routes().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/list?instance=rw&delimiter=/", nil))
+	var unlimited listResponseJSON
+	if err := json.Unmarshal(recorder.Body.Bytes(), &unlimited); err != nil {
+		t.Fatal(err)
+	}
+	if !unlimited.ScanComplete || !unlimited.SortAvailable || unlimited.NextContinuationToken != "" || len(unlimited.Items) != 3 {
+		t.Fatalf("unlimited scan = %+v", unlimited)
+	}
+	backend.mu.Lock()
+	if backend.listCalls != 3 {
+		t.Fatalf("unlimited provider calls = %d, want 3", backend.listCalls)
+	}
+	backend.mu.Unlock()
+
+	recorder = httptest.NewRecorder()
+	app.routes().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/list?instance=rw&delimiter=/&continuationToken=page-2", nil))
+	var continued listResponseJSON
+	if err := json.Unmarshal(recorder.Body.Bytes(), &continued); err != nil {
+		t.Fatal(err)
+	}
+	if !continued.ScanComplete || continued.SortAvailable || len(continued.Items) != 1 {
+		t.Fatalf("continued scan = %+v", continued)
+	}
+}
+
 func TestPermissionEnforcementAndNativeRename(t *testing.T) {
 	t.Parallel()
 	app, readOnly, readWrite := testApplication(t)
 	handler := app.routes()
 
 	forbidden := httptest.NewRecorder()
-	handler.ServeHTTP(forbidden, httptest.NewRequest(http.MethodPut, "/s3/new.txt?instance=readonly", strings.NewReader("blocked")))
+	handler.ServeHTTP(forbidden, httptest.NewRequest(http.MethodPut, "/s3?instance=readonly&key=new.txt", strings.NewReader("blocked")))
 	if forbidden.Code != http.StatusForbidden {
 		t.Fatalf("readonly PUT status = %d", forbidden.Code)
 	}
@@ -455,31 +606,100 @@ func TestPreviewGatewayInfersMediaTypeAndForcesInline(t *testing.T) {
 	}
 }
 
-func TestPreviewGatewayRejectsIgnoredRangeWithoutStreamingObject(t *testing.T) {
+func TestPreviewGatewayRejectsIgnoredRangeWithoutReadingTheObject(t *testing.T) {
 	t.Parallel()
 	app, _, backend := testApplication(t)
 	backend.mu.Lock()
 	backend.ignoreRanges = true
-	backend.objects["tenant/video.mp4"] = memoryObject{
-		data:        bytes.Repeat([]byte("x"), 1024),
-		contentType: "video/mp4",
+	backend.objects["tenant/document.pdf"] = memoryObject{
+		data:        bytes.Repeat([]byte("x"), 1024*1024),
+		contentType: "application/pdf",
 		modified:    time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
 	}
 	backend.mu.Unlock()
 
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/s3?instance=rw&preview=1&key=video.mp4", nil)
-	request.Header.Set("Range", "bytes=0-31")
+	request := httptest.NewRequest(http.MethodGet, "/s3?instance=rw&preview=1&key=document.pdf", nil)
+	request.Header.Set("Range", "bytes=900000-900031")
 	app.routes().ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
-	if strings.Contains(recorder.Body.String(), strings.Repeat("x", 64)) {
-		t.Fatal("gateway streamed the ignored full-object response")
+	if !strings.Contains(recorder.Body.String(), "refused to scan or buffer the complete object") {
+		t.Fatalf("body = %s", recorder.Body.String())
 	}
-	if !strings.Contains(recorder.Body.String(), "did not honor the byte-range request") {
-		t.Fatalf("body = %q", recorder.Body.String())
+	backend.mu.Lock()
+	defer backend.mu.Unlock()
+	if backend.getBytesRead != 0 {
+		t.Fatalf("ignored range read %d bytes from the complete object", backend.getBytesRead)
+	}
+	if backend.headCount != 0 {
+		t.Fatalf("ignored range performed %d unnecessary HEAD requests", backend.headCount)
+	}
+}
+
+func TestPreviewGatewayRejectsFullBodyWithMisleadingContentRange(t *testing.T) {
+	t.Parallel()
+	app, _, backend := testApplication(t)
+	backend.mu.Lock()
+	backend.rangeStatusOK = true
+	backend.rangeBodyFull = true
+	backend.objects["tenant/document.pdf"] = memoryObject{
+		data:        bytes.Repeat([]byte("x"), 1024*1024),
+		contentType: "application/pdf",
+		modified:    time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
+	}
+	backend.mu.Unlock()
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/s3?instance=rw&preview=1&key=document.pdf", nil)
+	request.Header.Set("Range", "bytes=900000-900031")
+	app.routes().ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), "invalid byte count") {
+		t.Fatalf("body = %s", recorder.Body.String())
+	}
+	backend.mu.Lock()
+	defer backend.mu.Unlock()
+	if backend.getBytesRead != 0 {
+		t.Fatalf("misleading range read %d bytes from the complete object", backend.getBytesRead)
+	}
+}
+
+func TestPreviewGatewayNormalizesStatus200WithContentRange(t *testing.T) {
+	t.Parallel()
+	app, _, backend := testApplication(t)
+	backend.mu.Lock()
+	backend.rangeStatusOK = true
+	backend.objects["tenant/document.pdf"] = memoryObject{
+		data:        []byte("0123456789"),
+		contentType: "application/pdf",
+		modified:    time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
+	}
+	backend.mu.Unlock()
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/s3?instance=rw&preview=1&key=document.pdf", nil)
+	request.Header.Set("Range", "bytes=3-6")
+	app.routes().ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusPartialContent {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if got := recorder.Header().Get("Content-Range"); got != "bytes 3-6/10" {
+		t.Fatalf("Content-Range = %q", got)
+	}
+	if got := recorder.Body.String(); got != "3456" {
+		t.Fatalf("body = %q", got)
+	}
+	backend.mu.Lock()
+	defer backend.mu.Unlock()
+	if backend.getBytesRead != 4 {
+		t.Fatalf("normalized range read %d bytes, want 4", backend.getBytesRead)
 	}
 }
 
@@ -542,5 +762,214 @@ func TestFolderListingDoesNotProbeObjectHeaders(t *testing.T) {
 	defer backend.mu.Unlock()
 	if backend.getCount != 0 || backend.headCount != 0 {
 		t.Fatalf("listing performed %d GET and %d HEAD object probes", backend.getCount, backend.headCount)
+	}
+}
+
+func TestApplicationCSPAllowsOnlySameOriginEmbeddedPDFs(t *testing.T) {
+	t.Parallel()
+	app, _, _ := testApplication(t)
+	recorder := httptest.NewRecorder()
+	app.routes().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/", nil))
+	policy := recorder.Header().Get("Content-Security-Policy")
+	if !strings.Contains(policy, "object-src 'none'") {
+		t.Fatalf("CSP = %q, want browser plugins disabled", policy)
+	}
+	if strings.Contains(policy, "object-src *") || strings.Contains(policy, "object-src https:") || strings.Contains(policy, "object-src 'self'") {
+		t.Fatalf("CSP is too broad: %q", policy)
+	}
+}
+
+func TestBoundedPDFPreviewRangeRequiresExplicitFiniteRange(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{name: "exact range", input: "bytes=2-5", want: true},
+		{name: "maximum range", input: "bytes=0-16777215", want: true},
+		{name: "missing range", input: "", want: false},
+		{name: "open ended range", input: "bytes=1048576-", want: false},
+		{name: "oversized range", input: "bytes=0-16777216", want: false},
+		{name: "suffix range", input: "bytes=-65536", want: false},
+		{name: "multiple ranges", input: "bytes=0-1,4-5", want: false},
+		{name: "malformed", input: "bytes=nope", want: false},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			if got := isBoundedPreviewRange(test.input, 16<<20); got != test.want {
+				t.Fatalf("isBoundedPreviewRange(%q) = %t, want %t", test.input, got, test.want)
+			}
+		})
+	}
+}
+
+func TestNativePDFPreviewPlainGetIsNotForcedPartial(t *testing.T) {
+	t.Parallel()
+	app, _, backend := testApplication(t)
+	backend.mu.Lock()
+	backend.objects["tenant/document.pdf"] = memoryObject{
+		data:        []byte("%PDF-1.7\nsmall test document"),
+		contentType: "application/pdf",
+		modified:    time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
+	}
+	backend.mu.Unlock()
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/s3?instance=rw&preview=1&key=document.pdf", nil)
+	app.routes().ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if got := recorder.Header().Get("Content-Range"); got != "" {
+		t.Fatalf("native preview was forced partial: Content-Range = %q", got)
+	}
+	backend.mu.Lock()
+	defer backend.mu.Unlock()
+	if len(backend.getRanges) != 1 || backend.getRanges[0] != "" {
+		t.Fatalf("native preview unexpectedly sent a provider range: %#v", backend.getRanges)
+	}
+}
+
+func TestRangeOnlyPreviewRejectsUnboundedRequestsBeforeStorageRead(t *testing.T) {
+	t.Parallel()
+	for _, rangeHeader := range []string{"", "bytes=0-", "bytes=-99999999", "bytes=0-99999999"} {
+		rangeHeader := rangeHeader
+		t.Run(rangeHeader, func(t *testing.T) {
+			app, _, backend := testApplication(t)
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodGet, "/s3?instance=rw&preview=1&range_only=1&key=document.pdf", nil)
+			if rangeHeader != "" {
+				request.Header.Set("Range", rangeHeader)
+			}
+			app.routes().ServeHTTP(recorder, request)
+
+			if recorder.Code != http.StatusRequestedRangeNotSatisfiable {
+				t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+			}
+			backend.mu.Lock()
+			defer backend.mu.Unlock()
+			if backend.getCount != 0 || backend.getBytesRead != 0 {
+				t.Fatalf("unbounded preview reached storage: gets=%d bytes=%d", backend.getCount, backend.getBytesRead)
+			}
+		})
+	}
+}
+
+func TestRangeOnlyPreviewRejectsMultipleRangesBeforeStorageRead(t *testing.T) {
+	t.Parallel()
+	app, _, backend := testApplication(t)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/s3?instance=rw&preview=1&range_only=1&key=document.pdf", nil)
+	request.Header.Set("Range", "bytes=0-1,4-5")
+	app.routes().ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusRequestedRangeNotSatisfiable {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	backend.mu.Lock()
+	defer backend.mu.Unlock()
+	if backend.getCount != 0 || backend.getBytesRead != 0 {
+		t.Fatalf("storage read occurred: gets=%d bytes=%d", backend.getCount, backend.getBytesRead)
+	}
+}
+
+func TestRangeOnlyPreviewAllowsExactBoundedRange(t *testing.T) {
+	t.Parallel()
+	app, _, backend := testApplication(t)
+	backend.mu.Lock()
+	backend.objects["tenant/document.pdf"] = memoryObject{
+		data:        []byte("0123456789"),
+		contentType: "application/pdf",
+		modified:    time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
+	}
+	backend.mu.Unlock()
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/s3?instance=rw&preview=1&range_only=1&key=document.pdf", nil)
+	request.Header.Set("Range", "bytes=2-5")
+	app.routes().ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusPartialContent || recorder.Body.String() != "2345" {
+		t.Fatalf("status=%d body=%q", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestRoutesAreMountedAtRootForReverseProxyPrefixStripping(t *testing.T) {
+	app, _, _ := testApplication(t)
+	handler := app.routes()
+
+	for _, requestPath := range []string{"/", "/api/instances", "/healthz"} {
+		t.Run(requestPath, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, requestPath, nil))
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("GET %s status = %d; body=%s", requestPath, recorder.Code, recorder.Body.String())
+			}
+			if recorder.Header().Get("X-Content-Type-Options") != "nosniff" {
+				t.Fatalf("GET %s did not receive security headers", requestPath)
+			}
+		})
+	}
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/instances", nil))
+	if strings.Contains(recorder.Body.String(), "maxScanPages") {
+		t.Fatalf("instances response exposes the internal listing scan limit: %s", recorder.Body.String())
+	}
+}
+
+func TestApplicationReusesAuthenticationAcrossBuckets(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer server.Close()
+	cfg, err := decodeConfig(`
+server { state_mode = "ephemeral" }
+
+auth "shared" {
+  provider = "s3"
+  mode     = "anonymous"
+  endpoint = "`+server.URL+`"
+  region   = "test"
+}
+
+bucket "one" {
+  auth        = "shared"
+  bucket      = "one"
+  permissions = ["read"]
+}
+
+bucket "two" {
+  auth        = "shared"
+  bucket      = "two"
+  permissions = ["read", "write"]
+}
+`, "test.hcl", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	app, err := newApplication(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.close()
+
+	one, ok := app.instances["one"].backend.(*s3Backend)
+	if !ok {
+		t.Fatalf("bucket one backend = %T", app.instances["one"].backend)
+	}
+	two, ok := app.instances["two"].backend.(*s3Backend)
+	if !ok {
+		t.Fatalf("bucket two backend = %T", app.instances["two"].backend)
+	}
+	if one.client != two.client || one.endpoint != two.endpoint {
+		t.Fatal("buckets referencing the same auth do not share their HTTP client and endpoint")
+	}
+	if len(app.authentications) != 1 {
+		t.Fatalf("authentication count = %d, want 1", len(app.authentications))
+	}
+	if app.instances["one"].capabilities().Write.State != capabilityDenied {
+		t.Fatal("bucket-specific permission ceiling was not applied to bucket one")
+	}
+	if app.instances["two"].capabilities().Write.State != capabilityUnknown {
+		t.Fatal("bucket-specific permission ceiling was not applied independently to bucket two")
 	}
 }

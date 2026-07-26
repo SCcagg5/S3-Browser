@@ -235,18 +235,18 @@ func TestMediaInfoUsesListedMIMEHintForExtensionlessImage(t *testing.T) {
 	}
 }
 
-func TestTextDetailsStreamsObjectOnceAndCountsLines(t *testing.T) {
+func TestTextDetailsUsesHeadAndLeavesLineCountExplicit(t *testing.T) {
 	app, _, backend := testApplication(t)
 	backend.mu.Lock()
 	backend.objects["tenant/file.txt"] = memoryObject{data: []byte("hello\nworld"), contentType: "text/plain", modified: time.Now().UTC()}
 	backend.mu.Unlock()
 
 	response := requestMediaInfo(t, app, "file.txt")
-	if response.Size != 11 || response.MIME != "text/plain" || response.Properties["Lines"] != "2" {
+	if response.Size != 11 || response.MIME != "text/plain" || response.Container != "Plain text" || len(response.Properties) != 0 {
 		t.Fatalf("response = %+v", response)
 	}
 	gets, heads, ranges := backendReadCounts(backend)
-	if gets != 1 || heads != 0 || len(ranges) != 1 || ranges[0] != "" {
+	if gets != 0 || heads != 1 || len(ranges) != 0 {
 		t.Fatalf("GETs = %d, HEADs = %d, ranges = %#v", gets, heads, ranges)
 	}
 }

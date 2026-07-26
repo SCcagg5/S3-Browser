@@ -8,15 +8,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 	"time"
 )
 
 const (
-	maxSQLitePreviewBytes = int64(4 << 30)
-	sqliteSessionTTL      = 20 * time.Minute
+	maxSQLitePreviewBytes = int64(16 << 40)
 )
 
 type sqliteColumnInfo struct {
@@ -35,8 +33,9 @@ type sqliteSession struct {
 	ID          string
 	Instance    string
 	Key         string
-	Path        string
 	Size        int64
+	Source      *objectRangeSource
+	Warning     string
 	Tables      []sqliteTableInfo
 	Definitions map[string]sqliteTableDefinition
 	CreatedAt   time.Time
@@ -64,19 +63,28 @@ type sqliteSessionResponse struct {
 	Key      string            `json:"key"`
 	Size     int64             `json:"size"`
 	Tables   []sqliteTableInfo `json:"tables"`
+	Warning  string            `json:"warning,omitempty"`
 }
 
 type sqlitePageResponse struct {
-	ID              string             `json:"id"`
-	Table           sqliteTableInfo    `json:"table"`
-	Rows            []map[string]any   `json:"rows"`
-	Page            int                `json:"page"`
-	PageSize        int                `json:"pageSize"`
-	HasMore         bool               `json:"hasMore"`
-	TotalRows       int64              `json:"totalRows"`
-	SourceTotalRows int64              `json:"sourceTotalRows"`
-	Query           string             `json:"query,omitempty"`
-	Columns         []sqliteColumnInfo `json:"columns"`
+	ID               string             `json:"id"`
+	Table            sqliteTableInfo    `json:"table"`
+	Rows             []map[string]any   `json:"rows"`
+	Page             int                `json:"page"`
+	PageSize         int                `json:"pageSize"`
+	HasMore          bool               `json:"hasMore"`
+	TotalRows        int64              `json:"totalRows"`
+	SourceTotalRows  int64              `json:"sourceTotalRows"`
+	Query            string             `json:"query,omitempty"`
+	Columns          []sqliteColumnInfo `json:"columns"`
+	TotalKnown       bool               `json:"totalKnown"`
+	SourceTotalKnown bool               `json:"sourceTotalKnown"`
+	ScannedRows      int64              `json:"scannedRows"`
+}
+type sqliteTableQuery struct {
+	Filters       map[string]string
+	SortColumn    string
+	SortDirection string
 }
 
 func newSQLiteSessionManager(app *application) *sqliteSessionManager {
@@ -101,7 +109,9 @@ func (m *sqliteSessionManager) close() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for id, session := range m.sessions {
-		_ = os.Remove(session.Path)
+		if session.Source != nil {
+			session.Source.clearCache()
+		}
 		delete(m.sessions, id)
 	}
 }
@@ -124,10 +134,12 @@ func (m *sqliteSessionManager) cleanupExpired(now time.Time) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for id, session := range m.sessions {
-		if now.Sub(session.LastAccess) < sqliteSessionTTL {
+		if now.Sub(session.LastAccess) < m.app.config.Runtime.sessionTTL() {
 			continue
 		}
-		_ = os.Remove(session.Path)
+		if session.Source != nil {
+			session.Source.clearCache()
+		}
 		delete(m.sessions, id)
 	}
 }
@@ -139,6 +151,7 @@ func (m *sqliteSessionManager) public(session *sqliteSession) sqliteSessionRespo
 		Key:      session.Key,
 		Size:     session.Size,
 		Tables:   append([]sqliteTableInfo(nil), session.Tables...),
+		Warning:  session.Warning,
 	}
 }
 
@@ -168,6 +181,7 @@ func (m *sqliteSessionManager) get(id string) (*sqliteSession, bool) {
 	copySession := *session
 	copySession.Tables = append([]sqliteTableInfo(nil), session.Tables...)
 	copySession.Definitions = cloneSQLiteDefinitions(session.Definitions)
+	copySession.Source = session.Source
 	return &copySession, true
 }
 
@@ -178,8 +192,8 @@ func (m *sqliteSessionManager) remove(id string) bool {
 		delete(m.sessions, id)
 	}
 	m.mu.Unlock()
-	if ok {
-		_ = os.Remove(session.Path)
+	if ok && session.Source != nil {
+		session.Source.clearCache()
 	}
 	return ok
 }
@@ -203,60 +217,34 @@ func (m *sqliteSessionManager) create(ctx context.Context, request sqliteSession
 		return nil, apiError{Status: http.StatusRequestEntityTooLarge, Code: "sqlite_too_large", Message: fmt.Sprintf("SQLite previews are limited to %d GiB", maxSQLitePreviewBytes>>30)}
 	}
 
-	temporary, err := os.CreateTemp("", "object-browser-sqlite-*.db")
+	source, err := openObjectRangeSource(ctx, instance, key)
 	if err != nil {
-		return nil, fmt.Errorf("create SQLite preview file: %w", err)
-	}
-	path := temporary.Name()
-	cleanup := func() {
-		_ = temporary.Close()
-		_ = os.Remove(path)
-	}
-	if err := temporary.Chmod(0o600); err != nil {
-		cleanup()
-		return nil, fmt.Errorf("protect SQLite preview file: %w", err)
-	}
-	response, err := instance.backend.Get(ctx, instance.fullKey(key), nil)
-	if err != nil {
-		cleanup()
 		return nil, err
 	}
-	if response.Body == nil {
-		cleanup()
-		return nil, apiError{Status: http.StatusBadGateway, Code: "empty_sqlite_object", Message: "the storage provider returned an empty SQLite object"}
+	if request.Size > 0 {
+		source.SetKnownSize(request.Size)
 	}
-	defer response.Body.Close()
-	if !isSuccessfulObjectReadStatus(response.StatusCode) {
-		cleanup()
-		return nil, fmt.Errorf("read SQLite object: HTTP %d", response.StatusCode)
-	}
-	limit := &io.LimitedReader{R: response.Body, N: maxSQLitePreviewBytes + 1}
-	written, err := io.CopyBuffer(temporary, limit, make([]byte, 256<<10))
-	if err != nil {
-		cleanup()
-		return nil, fmt.Errorf("copy SQLite object: %w", err)
-	}
-	if written > maxSQLitePreviewBytes {
-		cleanup()
-		return nil, apiError{Status: http.StatusRequestEntityTooLarge, Code: "sqlite_too_large", Message: fmt.Sprintf("SQLite previews are limited to %d GiB", maxSQLitePreviewBytes>>30)}
-	}
-	if err := temporary.Sync(); err != nil {
-		cleanup()
-		return nil, fmt.Errorf("flush SQLite preview file: %w", err)
-	}
-	if err := temporary.Close(); err != nil {
-		_ = os.Remove(path)
+	header, err := source.ReadPrefix(100)
+	if err != nil && err != io.EOF {
 		return nil, err
 	}
-
-	tables, definitions, err := inspectSQLiteTables(ctx, path)
+	size := source.Size()
+	if size < 100 {
+		return nil, apiError{Status: 422, Code: "invalid_sqlite", Message: "the object is too small to be a SQLite 3 database"}
+	}
+	if size > maxSQLitePreviewBytes {
+		return nil, apiError{Status: http.StatusRequestEntityTooLarge, Code: "sqlite_too_large", Message: "the SQLite object exceeds the remote preview safety limit"}
+	}
+	warning := ""
+	if len(header) >= 20 && (header[18] == 2 || header[19] == 2) {
+		warning = "This database uses WAL journaling. The preview reads the main database object only and may not include uncheckpointed WAL changes."
+	}
+	tables, definitions, err := inspectSQLiteTablesReader(ctx, source, size)
 	if err != nil {
-		_ = os.Remove(path)
 		return nil, err
 	}
 	id, err := randomSQLiteID()
 	if err != nil {
-		_ = os.Remove(path)
 		return nil, err
 	}
 	now := time.Now().UTC()
@@ -264,8 +252,9 @@ func (m *sqliteSessionManager) create(ctx context.Context, request sqliteSession
 		ID:          id,
 		Instance:    instance.cfg.ID,
 		Key:         key,
-		Path:        path,
-		Size:        written,
+		Size:        size,
+		Source:      source,
+		Warning:     warning,
 		Tables:      tables,
 		Definitions: definitions,
 		CreatedAt:   now,
@@ -285,12 +274,36 @@ func randomSQLiteID() (string, error) {
 	return hex.EncodeToString(buffer), nil
 }
 
-func (m *sqliteSessionManager) tablePage(ctx context.Context, session *sqliteSession, tableName string, page, pageSize int, search string) (sqlitePageResponse, error) {
+func (m *sqliteSessionManager) tablePage(ctx context.Context, session *sqliteSession, tableName string, page, pageSize int, search string, query sqliteTableQuery, exactTotals bool) (sqlitePageResponse, error) {
 	definition, ok := session.Definitions[tableName]
 	if !ok {
 		return sqlitePageResponse{}, apiError{Status: http.StatusBadRequest, Code: "unknown_sqlite_table", Message: "the selected table does not exist in this preview session"}
 	}
-	result, err := querySQLiteTable(ctx, session.Path, definition, page, pageSize, search)
+	if session.Source == nil {
+		return sqlitePageResponse{}, apiError{Status: http.StatusGone, Code: "sqlite_session_expired", Message: "the SQLite preview source is no longer available"}
+	}
+	validColumns := make(map[string]struct{}, len(definition.Info.Columns))
+	for _, column := range definition.Info.Columns {
+		validColumns[column.Name] = struct{}{}
+	}
+	for column, filter := range query.Filters {
+		if _, ok := validColumns[column]; !ok {
+			return sqlitePageResponse{}, apiError{Status: http.StatusBadRequest, Code: "invalid_filter_column", Message: fmt.Sprintf("unknown SQLite filter column %q", column)}
+		}
+		if len(filter) > 1024 {
+			return sqlitePageResponse{}, apiError{Status: http.StatusBadRequest, Code: "filter_too_long", Message: "SQLite column filters are limited to 1024 characters"}
+		}
+	}
+	if query.SortColumn != "" {
+		if _, ok := validColumns[query.SortColumn]; !ok {
+			return sqlitePageResponse{}, apiError{Status: http.StatusBadRequest, Code: "invalid_sort_column", Message: "sortColumn must name a visible SQLite column"}
+		}
+		if query.SortDirection != "asc" && query.SortDirection != "desc" {
+			return sqlitePageResponse{}, apiError{Status: http.StatusBadRequest, Code: "invalid_sort_direction", Message: "sortDirection must be asc or desc"}
+		}
+	}
+	reader := session.Source.withContext(ctx)
+	result, err := querySQLiteTableReader(ctx, reader, session.Size, definition, page, pageSize, search, query.Filters, query.SortColumn, query.SortDirection, exactTotals)
 	if err != nil {
 		return sqlitePageResponse{}, err
 	}
@@ -319,6 +332,29 @@ func (a *application) handleSQLiteSessions(w http.ResponseWriter, r *http.Reques
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusCreated, a.sqlite.public(session))
+}
+
+func parseSQLiteTableQuery(r *http.Request) (sqliteTableQuery, error) {
+	query := sqliteTableQuery{Filters: make(map[string]string)}
+	if raw := strings.TrimSpace(r.URL.Query().Get("filters")); raw != "" {
+		if len(raw) > 64<<10 {
+			return sqliteTableQuery{}, apiError{Status: http.StatusBadRequest, Code: "filters_too_large", Message: "SQLite filters are too large"}
+		}
+		if err := json.Unmarshal([]byte(raw), &query.Filters); err != nil {
+			return sqliteTableQuery{}, apiError{Status: http.StatusBadRequest, Code: "invalid_filters", Message: "filters must be a JSON object keyed by SQLite column name"}
+		}
+		for column, value := range query.Filters {
+			if strings.TrimSpace(value) == "" {
+				delete(query.Filters, column)
+			}
+		}
+	}
+	query.SortColumn = strings.TrimSpace(r.URL.Query().Get("sortColumn"))
+	query.SortDirection = strings.ToLower(strings.TrimSpace(r.URL.Query().Get("sortDirection")))
+	if query.SortColumn == "" {
+		query.SortDirection = ""
+	}
+	return query, nil
 }
 
 func (a *application) handleSQLiteSessionResource(w http.ResponseWriter, r *http.Request) {
@@ -350,7 +386,13 @@ func (a *application) handleSQLiteSessionResource(w http.ResponseWriter, r *http
 	if r.Method == http.MethodGet && len(parts) == 2 && parts[1] == "table" {
 		page := parseBoundedInt(r.URL.Query().Get("page"), 0, 0, 1<<30)
 		pageSize := parseBoundedInt(r.URL.Query().Get("pageSize"), 100, 1, 1000)
-		result, err := a.sqlite.tablePage(r.Context(), session, r.URL.Query().Get("table"), page, pageSize, r.URL.Query().Get("q"))
+		exactTotals := r.URL.Query().Get("count") == "1"
+		query, err := parseSQLiteTableQuery(r)
+		if err != nil {
+			writeAPIError(w, err)
+			return
+		}
+		result, err := a.sqlite.tablePage(r.Context(), session, r.URL.Query().Get("table"), page, pageSize, r.URL.Query().Get("q"), query, exactTotals)
 		if err != nil {
 			writeAPIError(w, err)
 			return

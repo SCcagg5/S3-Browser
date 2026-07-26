@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -10,38 +12,47 @@ import (
 	"unicode"
 )
 
-const (
-	configFileEnvironment = "S3_BROWSER_CONFIG_FILE"
-	configHCLEnvironment  = "S3_BROWSER_CONFIG_HCL"
-)
-
 type appConfig struct {
 	Listen          string
 	DataDir         string
 	JobHistoryLimit int
-	Storages        []storageConfig
+	Runtime         runtimePolicy
+	Authentications []authConfig
+	Buckets         []bucketConfig
 	SourceDir       string
 	SourceName      string
 }
 
-type storageConfig struct {
+type authConfig struct {
 	ID                 string
-	Name               string
 	Provider           string
-	Bucket             string
+	Mode               string
 	Endpoint           string
 	Region             string
-	Auth               string
 	AccessKeyID        string
 	SecretAccessKey    string
 	SessionToken       string
 	CredentialsFile    string
+	InsecureSkipVerify bool
+}
+
+type bucketConfig struct {
+	ID                 string
+	Name               string
+	AuthID             string
+	Provider           string
+	Bucket             string
+	Region             string
 	Permissions        []string
 	PermissionsDefined bool
 	RootPrefix         string
-	TrashPrefix        string
-	InsecureSkipVerify bool
+	MaxScanPages       int
 }
+
+const (
+	maxConfigurationBytes = int64(4 << 20)
+	maxSecretFileBytes    = int64(1 << 20)
+)
 
 func loadConfig(filename string) (appConfig, error) {
 	filename = strings.TrimSpace(filename)
@@ -50,61 +61,67 @@ func loadConfig(filename string) (appConfig, error) {
 	}
 	abs, err := filepath.Abs(filename)
 	if err != nil {
-		return appConfig{}, fmt.Errorf("resolve config path: %w", err)
+		return appConfig{}, fmt.Errorf("resolve configuration path: %w", err)
 	}
-	data, err := os.ReadFile(abs)
+	data, err := readBoundedFile(abs, maxConfigurationBytes)
 	if err != nil {
-		return appConfig{}, fmt.Errorf("read config %q: %w", abs, err)
+		return appConfig{}, fmt.Errorf("read configuration %q: %w", abs, err)
 	}
 	return decodeConfig(string(data), abs, filepath.Dir(abs))
+}
+
+func readBoundedFile(filename string, maximum int64) ([]byte, error) {
+	if maximum < 1 {
+		return nil, fmt.Errorf("file size limit must be positive")
+	}
+	file, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, maximum+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maximum {
+		return nil, fmt.Errorf("file exceeds the %d-byte limit", maximum)
+	}
+	return data, nil
 }
 
 func loadRuntimeConfig(configPath string) (appConfig, error) {
 	configPath = strings.TrimSpace(configPath)
 	if configPath == "" {
-		configPath = strings.TrimSpace(os.Getenv(configFileEnvironment))
+		return appConfig{}, fmt.Errorf("configuration path is required; use -c <path> or --config <path>")
 	}
-	if configPath != "" {
-		return loadConfig(configPath)
-	}
-
-	source := strings.TrimSpace(os.Getenv(configHCLEnvironment))
-	if source == "" {
-		return appConfig{}, fmt.Errorf(
-			"configuration is required: pass -c <path>, set %s, or set %s",
-			configFileEnvironment,
-			configHCLEnvironment,
-		)
-	}
-	workingDirectory, err := os.Getwd()
-	if err != nil {
-		return appConfig{}, fmt.Errorf("resolve working directory for inline HCL: %w", err)
-	}
-	return decodeConfig(source, configHCLEnvironment, workingDirectory)
-}
-
-func configSourceConfigured(configPath string) bool {
-	return strings.TrimSpace(configPath) != "" ||
-		strings.TrimSpace(os.Getenv(configFileEnvironment)) != "" ||
-		strings.TrimSpace(os.Getenv(configHCLEnvironment)) != ""
+	return loadConfig(configPath)
 }
 
 func decodeConfig(data, sourceName, sourceDir string) (appConfig, error) {
 	root, err := parseHCLSubset(data)
 	if err != nil {
-		return appConfig{}, fmt.Errorf("parse config %q: %w", sourceName, err)
+		return appConfig{}, fmt.Errorf("parse configuration %q: %w", sourceName, err)
 	}
 
 	cfg := appConfig{
 		Listen:          ":8080",
-		DataDir:         filepath.Join(sourceDir, ".s3-browser-data"),
 		JobHistoryLimit: 100,
+		Runtime:         defaultRuntimePolicy(),
 		SourceDir:       sourceDir,
 		SourceName:      sourceName,
 	}
 
+	if len(root.Attrs) != 0 {
+		for name, attr := range root.Attrs {
+			return appConfig{}, fmt.Errorf("line %d:%d: root attribute %q is not supported; use a block", attr.Line, attr.Column, name)
+		}
+	}
+
 	var serverSeen bool
-	ids := make(map[string]struct{})
+	authByID := make(map[string]authConfig)
+	bucketIDs := make(map[string]struct{})
+	bucketBlocks := make([]hclBlock, 0)
+
 	for _, block := range root.Blocks {
 		switch block.Type {
 		case "server":
@@ -112,288 +129,472 @@ func decodeConfig(data, sourceName, sourceDir string) (appConfig, error) {
 				return appConfig{}, fmt.Errorf("only one server block is allowed")
 			}
 			serverSeen = true
-			if len(block.Labels) != 0 {
-				return appConfig{}, block.errorf("server block does not accept labels")
-			}
-			if err := rejectUnknownAttrs(block, "listen", "data_dir", "job_history_limit"); err != nil {
+			if err := decodeServerBlock(block, &cfg); err != nil {
 				return appConfig{}, err
 			}
-			if err := requireAttrKinds(block, map[string]hclValueKind{"listen": hclString, "data_dir": hclString, "job_history_limit": hclNumber}); err != nil {
-				return appConfig{}, err
-			}
-			if value, ok := block.stringAttr("listen"); ok {
-				cfg.Listen = strings.TrimSpace(value)
-			}
-			if value, ok := block.stringAttr("data_dir"); ok {
-				value = strings.TrimSpace(value)
-				if value == "" {
-					return appConfig{}, block.errorf("server.data_dir cannot be empty")
-				}
-				if !filepath.IsAbs(value) {
-					value = filepath.Join(sourceDir, value)
-				}
-				cfg.DataDir = filepath.Clean(value)
-			}
-			if value, ok := block.intAttr("job_history_limit"); ok {
-				if value < 1 || value > 10000 {
-					return appConfig{}, block.errorf("server.job_history_limit must be between 1 and 10000")
-				}
-				cfg.JobHistoryLimit = int(value)
-			}
-		case "storage":
-			if len(block.Labels) != 1 {
-				return appConfig{}, block.errorf("storage block requires exactly one quoted identifier")
-			}
-			storage, err := decodeStorageBlock(block, cfg.SourceDir)
+		case "auth":
+			auth, err := decodeAuthBlock(block, sourceDir)
 			if err != nil {
 				return appConfig{}, err
 			}
-			if _, exists := ids[storage.ID]; exists {
-				return appConfig{}, block.errorf("duplicate storage id %q", storage.ID)
+			if _, exists := authByID[auth.ID]; exists {
+				return appConfig{}, block.errorf("duplicate auth id %q", auth.ID)
 			}
-			ids[storage.ID] = struct{}{}
-			cfg.Storages = append(cfg.Storages, storage)
+			authByID[auth.ID] = auth
+			cfg.Authentications = append(cfg.Authentications, auth)
+		case "bucket":
+			if len(block.Labels) != 1 {
+				return appConfig{}, block.errorf("bucket block requires exactly one quoted identifier")
+			}
+			id := strings.TrimSpace(block.Labels[0])
+			if _, exists := bucketIDs[id]; exists {
+				return appConfig{}, block.errorf("duplicate bucket id %q", id)
+			}
+			bucketIDs[id] = struct{}{}
+			bucketBlocks = append(bucketBlocks, block)
 		default:
-			return appConfig{}, block.errorf("unknown block type %q", block.Type)
+			return appConfig{}, block.errorf("unknown block type %q; supported blocks are server, auth, and bucket", block.Type)
 		}
 	}
-	if len(root.Attrs) != 0 {
-		for name, attr := range root.Attrs {
-			return appConfig{}, fmt.Errorf("line %d:%d: root attribute %q is not supported; use a server block", attr.Line, attr.Column, name)
+
+	if len(authByID) == 0 {
+		return appConfig{}, fmt.Errorf("at least one auth block is required")
+	}
+	if len(bucketBlocks) == 0 {
+		return appConfig{}, fmt.Errorf("at least one bucket block is required")
+	}
+	for _, block := range bucketBlocks {
+		bucket, err := decodeBucketBlock(block, authByID)
+		if err != nil {
+			return appConfig{}, err
 		}
+		cfg.Buckets = append(cfg.Buckets, bucket)
 	}
-	if len(cfg.Storages) == 0 {
-		return appConfig{}, fmt.Errorf("at least one storage block is required")
-	}
-	if cfg.Listen == "" {
-		return appConfig{}, fmt.Errorf("server.listen cannot be empty")
+
+	if err := validateRuntimePolicy(&cfg); err != nil {
+		return appConfig{}, err
 	}
 	return cfg, nil
 }
 
-var storageIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
-
-func decodeStorageBlock(block hclBlock, baseDir string) (storageConfig, error) {
-	allowed := []string{
-		"name", "provider", "bucket", "endpoint", "region", "auth",
-		"access_key_id", "access_key_id_env", "access_key_id_file",
-		"secret_access_key", "secret_access_key_env", "secret_access_key_file",
-		"secret_key", "secret_key_env", "secret_key_file",
-		"session_token", "session_token_env", "session_token_file",
-		"credentials_file", "permissions", "root_prefix", "trash_prefix", "insecure_skip_verify",
+func decodeServerBlock(block hclBlock, cfg *appConfig) error {
+	if cfg == nil {
+		return fmt.Errorf("configuration is nil")
+	}
+	if len(block.Labels) != 0 {
+		return block.errorf("server block does not accept labels")
+	}
+	if len(block.Blocks) != 0 {
+		return block.errorf("nested blocks are not supported inside server")
+	}
+	serverKinds := map[string]hclValueKind{
+		"listen": hclString, "data_dir": hclString, "job_history_limit": hclNumber,
+		"access_mode": hclString, "state_mode": hclString, "log_mode": hclString,
+		"browser_persistence": hclBool, "allow_full_object_fallback": hclBool,
+		"memory_limit_bytes": hclNumber, "max_storage_bytes_per_request": hclNumber,
+		"max_storage_requests_per_request": hclNumber, "max_temp_bytes_per_session": hclNumber,
+		"max_range_cache_bytes": hclNumber, "max_concurrent_storage_requests": hclNumber,
+		"max_concurrent_requests_per_storage": hclNumber, "session_ttl_seconds": hclNumber,
+		"max_stats_folders": hclNumber, "max_archive_entries": hclNumber,
+	}
+	allowed := make([]string, 0, len(serverKinds))
+	for name := range serverKinds {
+		allowed = append(allowed, name)
 	}
 	if err := rejectUnknownAttrs(block, allowed...); err != nil {
-		return storageConfig{}, err
+		return err
+	}
+	if err := requireAttrKinds(block, serverKinds); err != nil {
+		return err
+	}
+	if value, ok := block.stringAttr("listen"); ok {
+		listen, err := normalizeListenAddress(value)
+		if err != nil {
+			return block.errorf("server.listen: %v", err)
+		}
+		cfg.Listen = listen
+	}
+	if value, ok := block.stringAttr("data_dir"); ok {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return block.errorf("server.data_dir cannot be empty")
+		}
+		if !filepath.IsAbs(value) {
+			value = filepath.Join(cfg.SourceDir, value)
+		}
+		cfg.DataDir = filepath.Clean(value)
+	}
+	if value, ok := block.intAttr("job_history_limit"); ok {
+		if value < 1 || value > 10000 {
+			return block.errorf("server.job_history_limit must be between 1 and 10000")
+		}
+		cfg.JobHistoryLimit = int(value)
+	}
+	if value, ok := block.stringAttr("access_mode"); ok {
+		cfg.Runtime.AccessMode = strings.ToLower(strings.TrimSpace(value))
+	}
+	if value, ok := block.stringAttr("state_mode"); ok {
+		cfg.Runtime.StateMode = strings.ToLower(strings.TrimSpace(value))
+	}
+	if value, ok := block.stringAttr("log_mode"); ok {
+		cfg.Runtime.LogMode = strings.ToLower(strings.TrimSpace(value))
+	}
+	if value, ok := block.boolAttr("browser_persistence"); ok {
+		cfg.Runtime.BrowserPersistence = value
+	}
+	if value, ok := block.boolAttr("allow_full_object_fallback"); ok {
+		cfg.Runtime.AllowFullObjectFallback = value
+	}
+	integerSettings := []struct {
+		name        string
+		destination *int64
+	}{
+		{"memory_limit_bytes", &cfg.Runtime.MemoryLimitBytes},
+		{"max_storage_bytes_per_request", &cfg.Runtime.MaxStorageBytesPerRequest},
+		{"max_storage_requests_per_request", &cfg.Runtime.MaxStorageRequestsPerRequest},
+		{"max_temp_bytes_per_session", &cfg.Runtime.MaxTempBytesPerSession},
+		{"max_range_cache_bytes", &cfg.Runtime.MaxRangeCacheBytes},
+	}
+	for _, setting := range integerSettings {
+		if value, ok := block.intAttr(setting.name); ok {
+			*setting.destination = value
+		}
+	}
+	if value, ok := block.intAttr("max_concurrent_storage_requests"); ok {
+		cfg.Runtime.MaxConcurrentStorageRequests = int(value)
+	}
+	if value, ok := block.intAttr("max_concurrent_requests_per_storage"); ok {
+		cfg.Runtime.MaxConcurrentRequestsPerStore = int(value)
+	}
+	if value, ok := block.intAttr("session_ttl_seconds"); ok {
+		cfg.Runtime.SessionTTLSeconds = int(value)
+	}
+	if value, ok := block.intAttr("max_stats_folders"); ok {
+		cfg.Runtime.MaxStatsFolders = int(value)
+	}
+	if value, ok := block.intAttr("max_archive_entries"); ok {
+		cfg.Runtime.MaxArchiveEntries = int(value)
+	}
+	return nil
+}
+
+func validateRuntimePolicy(cfg *appConfig) error {
+	if cfg == nil {
+		return fmt.Errorf("configuration is nil")
+	}
+	listen, err := normalizeListenAddress(cfg.Listen)
+	if err != nil {
+		return fmt.Errorf("server.listen: %w", err)
+	}
+	cfg.Listen = listen
+	switch cfg.Runtime.AccessMode {
+	case accessModeInheritCredentials, accessModeForceReadOnly:
+	default:
+		return fmt.Errorf("server.access_mode must be %q or %q", accessModeInheritCredentials, accessModeForceReadOnly)
+	}
+	switch cfg.Runtime.StateMode {
+	case stateModeEphemeral:
+		if strings.TrimSpace(cfg.DataDir) != "" {
+			return fmt.Errorf("server.data_dir requires state_mode = %q", stateModePersistent)
+		}
+		cfg.DataDir = ""
+	case stateModePersistent:
+		if strings.TrimSpace(cfg.DataDir) == "" {
+			return fmt.Errorf("server.data_dir is required when state_mode = %q", stateModePersistent)
+		}
+		cfg.DataDir = filepath.Clean(cfg.DataDir)
+	default:
+		return fmt.Errorf("server.state_mode must be %q or %q", stateModeEphemeral, stateModePersistent)
+	}
+	switch cfg.Runtime.LogMode {
+	case logModeAnonymous, logModeDetailed:
+	default:
+		return fmt.Errorf("server.log_mode must be %q or %q", logModeAnonymous, logModeDetailed)
+	}
+	if cfg.Runtime.BrowserPersistence && cfg.Runtime.StateMode != stateModePersistent {
+		return fmt.Errorf("server.browser_persistence requires state_mode = %q", stateModePersistent)
+	}
+	validateRange := func(name string, value, minimum, maximum int64) error {
+		if value < minimum || value > maximum {
+			return fmt.Errorf("server.%s must be between %d and %d", name, minimum, maximum)
+		}
+		return nil
+	}
+	if cfg.Runtime.MemoryLimitBytes != 0 {
+		if err := validateRange("memory_limit_bytes", cfg.Runtime.MemoryLimitBytes, 32<<20, 1<<50); err != nil {
+			return err
+		}
+	}
+	for _, setting := range []struct {
+		name            string
+		value, min, max int64
+	}{
+		{"max_storage_bytes_per_request", cfg.Runtime.MaxStorageBytesPerRequest, 1 << 20, 1 << 50},
+		{"max_storage_requests_per_request", cfg.Runtime.MaxStorageRequestsPerRequest, 1, 10_000_000},
+		{"max_temp_bytes_per_session", cfg.Runtime.MaxTempBytesPerSession, 0, 1 << 50},
+		{"max_range_cache_bytes", cfg.Runtime.MaxRangeCacheBytes, 1 << 20, 4 << 30},
+	} {
+		if err := validateRange(setting.name, setting.value, setting.min, setting.max); err != nil {
+			return err
+		}
+	}
+	if cfg.Runtime.MaxConcurrentStorageRequests < 1 || cfg.Runtime.MaxConcurrentStorageRequests > 1024 {
+		return fmt.Errorf("server.max_concurrent_storage_requests must be between 1 and 1024")
+	}
+	if cfg.Runtime.MaxConcurrentRequestsPerStore < 1 || cfg.Runtime.MaxConcurrentRequestsPerStore > 256 {
+		return fmt.Errorf("server.max_concurrent_requests_per_storage must be between 1 and 256")
+	}
+	if cfg.Runtime.MaxConcurrentRequestsPerStore > cfg.Runtime.MaxConcurrentStorageRequests {
+		return fmt.Errorf("server.max_concurrent_requests_per_storage cannot exceed max_concurrent_storage_requests")
+	}
+	if cfg.Runtime.SessionTTLSeconds < 30 || cfg.Runtime.SessionTTLSeconds > 7*24*60*60 {
+		return fmt.Errorf("server.session_ttl_seconds must be between 30 and 604800")
+	}
+	if cfg.Runtime.MaxStatsFolders < 100 || cfg.Runtime.MaxStatsFolders > 1_000_000 {
+		return fmt.Errorf("server.max_stats_folders must be between 100 and 1000000")
+	}
+	if cfg.Runtime.MaxArchiveEntries < 1 || cfg.Runtime.MaxArchiveEntries > 1_000_000 {
+		return fmt.Errorf("server.max_archive_entries must be between 1 and 1000000")
+	}
+	return nil
+}
+
+var configIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
+func decodeAuthBlock(block hclBlock, baseDir string) (authConfig, error) {
+	if len(block.Labels) != 1 {
+		return authConfig{}, block.errorf("auth block requires exactly one quoted identifier")
+	}
+	allowed := []string{
+		"provider", "mode", "endpoint", "region",
+		"access_key_id", "access_key_id_file",
+		"secret_access_key", "secret_access_key_file",
+		"session_token", "session_token_file",
+		"credentials_file", "insecure_skip_verify",
+	}
+	if err := rejectUnknownAttrs(block, allowed...); err != nil {
+		return authConfig{}, err
 	}
 	kinds := make(map[string]hclValueKind, len(allowed))
 	for _, name := range allowed {
 		kinds[name] = hclString
 	}
-	kinds["permissions"] = hclList
 	kinds["insecure_skip_verify"] = hclBool
 	if err := requireAttrKinds(block, kinds); err != nil {
-		return storageConfig{}, err
+		return authConfig{}, err
 	}
 	if len(block.Blocks) != 0 {
-		return storageConfig{}, block.errorf("nested blocks are not supported inside storage")
+		return authConfig{}, block.errorf("nested blocks are not supported inside auth")
 	}
 
-	storage := storageConfig{
-		ID:          strings.TrimSpace(block.Labels[0]),
-		Name:        strings.TrimSpace(block.Labels[0]),
-		TrashPrefix: "_trash/",
+	auth := authConfig{ID: strings.TrimSpace(block.Labels[0])}
+	if !configIDPattern.MatchString(auth.ID) {
+		return authConfig{}, block.errorf("auth id %q must match %s", auth.ID, configIDPattern.String())
 	}
-	if !storageIDPattern.MatchString(storage.ID) {
-		return storageConfig{}, block.errorf("storage id %q must match %s", storage.ID, storageIDPattern.String())
-	}
-
 	for _, field := range []struct {
 		name string
 		dst  *string
 	}{
-		{"name", &storage.Name},
-		{"provider", &storage.Provider},
-		{"bucket", &storage.Bucket},
-		{"endpoint", &storage.Endpoint},
-		{"region", &storage.Region},
-		{"auth", &storage.Auth},
-		{"credentials_file", &storage.CredentialsFile},
-		{"root_prefix", &storage.RootPrefix},
-		{"trash_prefix", &storage.TrashPrefix},
+		{"provider", &auth.Provider},
+		{"mode", &auth.Mode},
+		{"endpoint", &auth.Endpoint},
+		{"region", &auth.Region},
+		{"credentials_file", &auth.CredentialsFile},
 	} {
 		if value, ok := block.stringAttr(field.name); ok {
 			*field.dst = value
 		}
 	}
 	if value, ok := block.boolAttr("insecure_skip_verify"); ok {
-		storage.InsecureSkipVerify = value
+		auth.InsecureSkipVerify = value
+	}
+	auth.Provider = strings.ToLower(strings.TrimSpace(auth.Provider))
+	auth.Mode = strings.ToLower(strings.TrimSpace(auth.Mode))
+	auth.Endpoint = strings.TrimRight(strings.TrimSpace(auth.Endpoint), "/")
+	auth.Region = strings.TrimSpace(auth.Region)
+
+	accessKey, accessDefined, err := resolveSecretSource(block, "access_key_id", baseDir)
+	if err != nil {
+		return authConfig{}, err
+	}
+	secretAccessKey, secretDefined, err := resolveSecretSource(block, "secret_access_key", baseDir)
+	if err != nil {
+		return authConfig{}, err
+	}
+	sessionToken, sessionDefined, err := resolveSecretSource(block, "session_token", baseDir)
+	if err != nil {
+		return authConfig{}, err
+	}
+	auth.AccessKeyID = accessKey
+	auth.SecretAccessKey = secretAccessKey
+	auth.SessionToken = sessionToken
+
+	if auth.Provider == "" {
+		return authConfig{}, block.errorf("provider is required")
+	}
+	switch auth.Provider {
+	case "s3":
+		if strings.TrimSpace(auth.CredentialsFile) != "" {
+			return authConfig{}, block.errorf("credentials_file is only supported for provider gcs")
+		}
+		if auth.Endpoint == "" {
+			return authConfig{}, block.errorf("endpoint is required for provider s3")
+		}
+		if auth.Region == "" {
+			return authConfig{}, block.errorf("region is required for provider s3")
+		}
+		if auth.Mode == "" {
+			if accessDefined || secretDefined || sessionDefined {
+				auth.Mode = "access_key"
+			} else {
+				auth.Mode = "anonymous"
+			}
+		}
+		switch auth.Mode {
+		case "access_key":
+			if !accessDefined || !secretDefined {
+				return authConfig{}, block.errorf("s3 access_key mode requires access_key_id and secret_access_key")
+			}
+		case "anonymous":
+			if accessDefined || secretDefined || sessionDefined {
+				return authConfig{}, block.errorf("s3 anonymous mode cannot define access credentials")
+			}
+		default:
+			return authConfig{}, block.errorf("s3 mode must be access_key or anonymous")
+		}
+	case "gcs":
+		if accessDefined || secretDefined || sessionDefined {
+			return authConfig{}, block.errorf("S3 credential attributes are only supported for provider s3")
+		}
+		if auth.Endpoint == "" {
+			auth.Endpoint = "https://storage.googleapis.com"
+		}
+		if auth.Mode == "" {
+			if strings.TrimSpace(auth.CredentialsFile) != "" {
+				auth.Mode = "service_account"
+			} else {
+				auth.Mode = "anonymous"
+			}
+		}
+		switch auth.Mode {
+		case "service_account":
+			if strings.TrimSpace(auth.CredentialsFile) == "" {
+				return authConfig{}, block.errorf("gcs service_account mode requires credentials_file")
+			}
+		case "anonymous":
+			if strings.TrimSpace(auth.CredentialsFile) != "" {
+				return authConfig{}, block.errorf("gcs anonymous mode cannot define credentials_file")
+			}
+		default:
+			return authConfig{}, block.errorf("gcs mode must be service_account or anonymous")
+		}
+	default:
+		return authConfig{}, block.errorf("provider must be s3 or gcs, got %q", auth.Provider)
+	}
+	if auth.CredentialsFile != "" && !filepath.IsAbs(auth.CredentialsFile) {
+		auth.CredentialsFile = filepath.Join(baseDir, auth.CredentialsFile)
+	}
+	if auth.CredentialsFile != "" {
+		auth.CredentialsFile = filepath.Clean(auth.CredentialsFile)
+	}
+	if _, err := parseStorageEndpoint(auth.Provider, auth.Endpoint); err != nil {
+		return authConfig{}, block.errorf("%v", err)
+	}
+	return auth, nil
+}
+
+func decodeBucketBlock(block hclBlock, authByID map[string]authConfig) (bucketConfig, error) {
+	if len(block.Labels) != 1 {
+		return bucketConfig{}, block.errorf("bucket block requires exactly one quoted identifier")
+	}
+	allowed := []string{"name", "auth", "bucket", "permissions", "root_prefix", "max_scan_pages"}
+	if err := rejectUnknownAttrs(block, allowed...); err != nil {
+		return bucketConfig{}, err
+	}
+	kinds := map[string]hclValueKind{
+		"name": hclString, "auth": hclString, "bucket": hclString,
+		"permissions": hclList, "root_prefix": hclString, "max_scan_pages": hclNumber,
+	}
+	if err := requireAttrKinds(block, kinds); err != nil {
+		return bucketConfig{}, err
+	}
+	if len(block.Blocks) != 0 {
+		return bucketConfig{}, block.errorf("nested blocks are not supported inside bucket")
+	}
+
+	bucket := bucketConfig{
+		ID:           strings.TrimSpace(block.Labels[0]),
+		Name:         strings.TrimSpace(block.Labels[0]),
+		MaxScanPages: 1,
+	}
+	if !configIDPattern.MatchString(bucket.ID) {
+		return bucketConfig{}, block.errorf("bucket id %q must match %s", bucket.ID, configIDPattern.String())
+	}
+	if value, ok := block.stringAttr("name"); ok {
+		bucket.Name = strings.TrimSpace(value)
+	}
+	if value, ok := block.stringAttr("auth"); ok {
+		bucket.AuthID = strings.TrimSpace(value)
+	}
+	if value, ok := block.stringAttr("bucket"); ok {
+		bucket.Bucket = strings.TrimSpace(value)
+	}
+	if value, ok := block.stringAttr("root_prefix"); ok {
+		bucket.RootPrefix = normalizePrefix(strings.TrimSpace(value))
+	}
+	if value, ok := block.intAttr("max_scan_pages"); ok {
+		if value < 0 || value > 1_000_000 {
+			return bucketConfig{}, block.errorf("max_scan_pages must be between 0 and 1000000")
+		}
+		bucket.MaxScanPages = int(value)
 	}
 	if values, ok := block.stringListAttr("permissions"); ok {
-		storage.PermissionsDefined = true
+		bucket.PermissionsDefined = true
 		for _, value := range values {
 			value = strings.ToLower(strings.TrimSpace(value))
 			switch value {
 			case permissionRead, permissionWrite, permissionDelete:
-				if !containsString(storage.Permissions, value) {
-					storage.Permissions = append(storage.Permissions, value)
+				if !containsString(bucket.Permissions, value) {
+					bucket.Permissions = append(bucket.Permissions, value)
 				}
 			default:
-				return storageConfig{}, block.errorf("permissions contains unsupported value %q", value)
+				return bucketConfig{}, block.errorf("permissions contains unsupported value %q", value)
 			}
 		}
 	}
-
-	storage.Name = strings.TrimSpace(storage.Name)
-	storage.Provider = strings.ToLower(strings.TrimSpace(storage.Provider))
-	storage.Bucket = strings.TrimSpace(storage.Bucket)
-	storage.Endpoint = strings.TrimRight(strings.TrimSpace(storage.Endpoint), "/")
-	storage.Region = strings.TrimSpace(storage.Region)
-	storage.Auth = strings.ToLower(strings.TrimSpace(storage.Auth))
-	storage.RootPrefix = normalizePrefix(strings.TrimSpace(storage.RootPrefix))
-	storage.TrashPrefix = normalizePrefix(strings.TrimSpace(storage.TrashPrefix))
-
-	if storage.Name == "" {
-		storage.Name = storage.ID
+	if bucket.Name == "" {
+		bucket.Name = bucket.ID
 	}
-	if storage.Provider == "" {
-		return storageConfig{}, block.errorf("provider is required")
+	if bucket.AuthID == "" {
+		return bucketConfig{}, block.errorf("auth is required")
 	}
-	if storage.Bucket == "" {
-		return storageConfig{}, block.errorf("bucket is required")
+	if bucket.Bucket == "" {
+		return bucketConfig{}, block.errorf("bucket is required")
 	}
-
-	switch storage.Provider {
-	case "s3":
-		if storage.CredentialsFile != "" {
-			return storageConfig{}, block.errorf("credentials_file is only supported for provider gcs")
-		}
-		if storage.Endpoint == "" {
-			return storageConfig{}, block.errorf("endpoint is required for provider s3")
-		}
-		if storage.Region == "" {
-			return storageConfig{}, block.errorf("region is required for provider s3")
-		}
-
-		accessKey, accessDefined, err := resolveSecretSource(block, "access_key_id", baseDir)
-		if err != nil {
-			return storageConfig{}, err
-		}
-		secretAccessKey, secretDefined, err := resolveSecretAliases(block, "secret_access_key", "secret_key", baseDir)
-		if err != nil {
-			return storageConfig{}, err
-		}
-		sessionToken, sessionDefined, err := resolveSecretSource(block, "session_token", baseDir)
-		if err != nil {
-			return storageConfig{}, err
-		}
-		storage.AccessKeyID = accessKey
-		storage.SecretAccessKey = secretAccessKey
-		storage.SessionToken = sessionToken
-
-		if storage.Auth == "" {
-			if accessDefined || secretDefined || sessionDefined {
-				storage.Auth = "access_key"
-			} else {
-				storage.Auth = "anonymous"
-			}
-		}
-		if storage.Auth != "access_key" && storage.Auth != "anonymous" {
-			return storageConfig{}, block.errorf("s3 auth must be access_key or anonymous")
-		}
-		if storage.Auth == "access_key" {
-			if !accessDefined || !secretDefined {
-				return storageConfig{}, block.errorf("s3 access_key auth requires exactly one source for access_key_id and secret_access_key")
-			}
-		} else if accessDefined || secretDefined || sessionDefined {
-			return storageConfig{}, block.errorf("s3 anonymous auth cannot define access credentials")
-		}
-		if !storage.PermissionsDefined {
-			storage.PermissionsDefined = true
-			storage.Permissions = []string{permissionRead}
-		}
-	case "gcs":
-		if hasAnyS3SecretAttribute(block) {
-			return storageConfig{}, block.errorf("S3 credential attributes are only supported for provider s3")
-		}
-		if storage.Endpoint == "" {
-			storage.Endpoint = "https://storage.googleapis.com"
-		}
-		if storage.Auth == "" {
-			if storage.CredentialsFile != "" {
-				storage.Auth = "service_account"
-			} else {
-				storage.Auth = "anonymous"
-			}
-		}
-		if storage.Auth != "service_account" && storage.Auth != "anonymous" {
-			return storageConfig{}, block.errorf("gcs auth must be service_account or anonymous")
-		}
-		if storage.Auth == "service_account" && storage.CredentialsFile == "" {
-			return storageConfig{}, block.errorf("gcs service_account auth requires credentials_file")
-		}
-		if storage.Auth == "anonymous" && storage.CredentialsFile != "" {
-			return storageConfig{}, block.errorf("gcs anonymous auth cannot define credentials_file")
-		}
-	default:
-		return storageConfig{}, block.errorf("provider must be s3 or gcs, got %q", storage.Provider)
+	auth, ok := authByID[bucket.AuthID]
+	if !ok {
+		return bucketConfig{}, block.errorf("auth %q is not defined", bucket.AuthID)
 	}
-
-	if storage.CredentialsFile != "" && !filepath.IsAbs(storage.CredentialsFile) {
-		storage.CredentialsFile = filepath.Join(baseDir, storage.CredentialsFile)
-	}
-	if storage.CredentialsFile != "" {
-		storage.CredentialsFile = filepath.Clean(storage.CredentialsFile)
-	}
-	return storage, nil
-}
-
-func resolveSecretAliases(block hclBlock, primary, alias, baseDir string) (string, bool, error) {
-	primaryCount := secretSourceCount(block, primary)
-	aliasCount := secretSourceCount(block, alias)
-	if primaryCount > 0 && aliasCount > 0 {
-		return "", false, block.errorf("use either %s or %s credential fields, not both", primary, alias)
-	}
-	if aliasCount > 0 {
-		return resolveSecretSource(block, alias, baseDir)
-	}
-	return resolveSecretSource(block, primary, baseDir)
+	bucket.Provider = auth.Provider
+	bucket.Region = auth.Region
+	return bucket, nil
 }
 
 func resolveSecretSource(block hclBlock, name, baseDir string) (string, bool, error) {
 	direct, directOK := block.stringAttr(name)
-	envName, envOK := block.stringAttr(name + "_env")
 	fileName, fileOK := block.stringAttr(name + "_file")
-	count := 0
-	for _, defined := range []bool{directOK, envOK, fileOK} {
-		if defined {
-			count++
-		}
-	}
-	if count == 0 {
+	if !directOK && !fileOK {
 		return "", false, nil
 	}
-	if count != 1 {
-		return "", false, block.errorf("only one of %s, %s_env, or %s_file may be defined", name, name, name)
+	if directOK && fileOK {
+		return "", false, block.errorf("only one of %s or %s_file may be defined", name, name)
 	}
-
 	var value string
 	var source string
-	switch {
-	case directOK:
+	if directOK {
 		value = direct
 		source = name
-	case envOK:
-		envName = strings.TrimSpace(envName)
-		if envName == "" {
-			return "", false, block.errorf("%s_env cannot be empty", name)
-		}
-		var exists bool
-		value, exists = os.LookupEnv(envName)
-		if !exists {
-			return "", false, block.errorf("environment variable %q referenced by %s_env is not set", envName, name)
-		}
-		source = name + "_env"
-	case fileOK:
+	} else {
 		fileName = strings.TrimSpace(fileName)
 		if fileName == "" {
 			return "", false, block.errorf("%s_file cannot be empty", name)
@@ -401,9 +602,10 @@ func resolveSecretSource(block hclBlock, name, baseDir string) (string, bool, er
 		if !filepath.IsAbs(fileName) {
 			fileName = filepath.Join(baseDir, fileName)
 		}
-		data, err := os.ReadFile(filepath.Clean(fileName))
+		cleaned := filepath.Clean(fileName)
+		data, err := readBoundedFile(cleaned, maxSecretFileBytes)
 		if err != nil {
-			return "", false, block.errorf("read %s_file %q: %v", name, filepath.Clean(fileName), err)
+			return "", false, block.errorf("read %s_file %q: %v", name, cleaned, err)
 		}
 		value = string(data)
 		source = name + "_file"
@@ -413,25 +615,6 @@ func resolveSecretSource(block hclBlock, name, baseDir string) (string, bool, er
 		return "", false, block.errorf("%s resolved from %s is empty", name, source)
 	}
 	return value, true, nil
-}
-
-func secretSourceCount(block hclBlock, name string) int {
-	count := 0
-	for _, candidate := range []string{name, name + "_env", name + "_file"} {
-		if _, ok := block.Attrs[candidate]; ok {
-			count++
-		}
-	}
-	return count
-}
-
-func hasAnyS3SecretAttribute(block hclBlock) bool {
-	for _, base := range []string{"access_key_id", "secret_access_key", "secret_key", "session_token"} {
-		if secretSourceCount(block, base) > 0 {
-			return true
-		}
-	}
-	return false
 }
 
 func rejectUnknownAttrs(block hclBlock, allowed ...string) error {
@@ -457,6 +640,25 @@ func requireAttrKinds(block hclBlock, kinds map[string]hclValueKind) error {
 		return fmt.Errorf("line %d:%d: attribute %q must be %s", attr.Line, attr.Column, name, want)
 	}
 	return nil
+}
+
+func normalizeListenAddress(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", fmt.Errorf("cannot be empty")
+	}
+	if strings.Contains(value, "://") {
+		return "", fmt.Errorf("must be a host:port address, not a URL")
+	}
+	_, port, err := net.SplitHostPort(value)
+	if err != nil {
+		return "", fmt.Errorf("must be a valid host:port address: %w", err)
+	}
+	portNumber, err := strconv.Atoi(port)
+	if err != nil || portNumber < 1 || portNumber > 65535 {
+		return "", fmt.Errorf("port must be an integer between 1 and 65535")
+	}
+	return value, nil
 }
 
 func normalizePrefix(value string) string {

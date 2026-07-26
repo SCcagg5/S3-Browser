@@ -54,7 +54,7 @@ func TestCapabilityErrorsArePublicSafe(t *testing.T) {
 		URL: "https://internal.example.test/storage/v1/b/private",
 		Err: errors.New("connection refused"),
 	})
-	caps := mergeCapabilities(storageConfig{
+	caps := mergeCapabilities(bucketConfig{
 		Provider:           "gcs",
 		PermissionsDefined: true,
 		Permissions:        []string{permissionRead},
@@ -68,7 +68,7 @@ func TestCapabilityErrorsArePublicSafe(t *testing.T) {
 
 func TestInitialCapabilitiesUseConfigurationWithoutProviderProbe(t *testing.T) {
 	t.Parallel()
-	caps := initialCapabilities(storageConfig{
+	caps := initialCapabilities(bucketConfig{
 		PermissionsDefined: true,
 		Permissions:        []string{permissionRead, permissionWrite},
 	})
@@ -78,10 +78,13 @@ func TestInitialCapabilitiesUseConfigurationWithoutProviderProbe(t *testing.T) {
 	if caps.CheckedAt != nil {
 		t.Fatalf("initial capabilities unexpectedly report provider verification at %v", caps.CheckedAt)
 	}
-	if caps.Read.Verified || caps.Write.Verified || caps.Delete.Verified {
-		t.Fatalf("initial capabilities unexpectedly verified provider permissions: %#v", caps)
+	if caps.Read.Verified || caps.Write.Verified {
+		t.Fatalf("configured read/write ceilings must remain tentable until a real provider operation: %#v", caps)
 	}
-	if !strings.Contains(caps.Read.Reason, "not performed automatically") {
-		t.Fatalf("read reason = %q", caps.Read.Reason)
+	if !caps.Delete.Verified || caps.Delete.State != capabilityDenied || caps.Delete.Source != "configuration" {
+		t.Fatalf("the configured delete ceiling must be an explicit verified denial: %#v", caps.Delete)
+	}
+	if caps.Read.State != capabilityUnknown || !strings.Contains(caps.Read.Reason, "verified when used") {
+		t.Fatalf("read reason/state = %#v", caps.Read)
 	}
 }
