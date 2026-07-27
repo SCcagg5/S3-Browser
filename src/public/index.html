@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="light" />
+  <base href="{{APP_BASE}}" />
   <link rel="icon" type="image/svg+xml" href="favicon.svg?v=2" />
   <title>Object Storage Browser</title>
 
@@ -238,7 +239,7 @@
               @click="manualRefresh">
             </b-button>
 
-            <b-dropdown position="is-bottom-left" :mobile-modal="false" append-to-body aria-role="menu">
+            <b-dropdown position="is-bottom-left" :mobile-modal="false" aria-role="menu">
               <template #trigger>
                 <b-button type="is-light" class="has-bb-chevron" icon-pack="mdi" icon-left="cogs">
                   Actions
@@ -254,7 +255,7 @@
               </b-dropdown-item>
             </b-dropdown>
 
-            <b-dropdown v-if="canWrite" position="is-bottom-left" :mobile-modal="false" append-to-body aria-role="menu">
+            <b-dropdown v-if="canWrite" position="is-bottom-left" :mobile-modal="false" aria-role="menu">
               <template #trigger>
                 <b-button type="is-primary" class="has-bb-chevron" icon-pack="mdi" icon-left="plus">
                   New

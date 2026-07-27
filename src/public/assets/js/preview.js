@@ -51,9 +51,9 @@
       const content = byId('viewer');
       if (!shell || !bar || !content) return;
 
-      const headerHeight = Math.ceil(bar.getBoundingClientRect().height);
+      const headerHeight = Math.ceil((BB.viewport?.rect(bar) || bar.getBoundingClientRect()).height);
       shell.style.setProperty('--preview-header-height', `${headerHeight}px`);
-      const contentHeight = Math.max(content.scrollHeight, content.getBoundingClientRect().height);
+      const contentHeight = Math.max(content.scrollHeight, (BB.viewport?.rect(content) || content.getBoundingClientRect()).height);
       shell.classList.toggle('is-content-tall', contentHeight > shell.clientHeight + 1);
     });
   }
@@ -101,7 +101,24 @@
   }
 
   function currentKey() {
+    const route = BB.runtime?.storageRoute?.();
+    if (route?.view === 'preview') return String(route.path || '').replace(/^\/+/, '');
     return String(new URLSearchParams(location.search).get('path') || '').replace(/^\/+/, '');
+  }
+
+  function previewLocation(key) {
+    const url = new URL(BB.api.previewPageURL(key, {
+      instance: config.instanceId,
+      version: currentVersion(),
+      entry: currentArchiveEntry()
+    }));
+    return url.pathname + url.search + url.hash;
+  }
+
+  function replacePreviewLocation(key) {
+    const target = previewLocation(key);
+    const current = location.pathname + location.search;
+    if (target !== current) history.replaceState(null, '', target);
   }
 
   function parentPrefix(key) {
@@ -229,11 +246,7 @@
       });
       return;
     }
-    const url = new URL('index.html', location.href);
-    if (config.instanceId) url.searchParams.set('instance', config.instanceId);
-    const prefix = parentPrefix(key);
-    if (prefix) url.hash = encodeURIComponent(prefix).replace(/%2F/gi, '/');
-    byId('backBtn').href = url.pathname + url.search + url.hash;
+    byId('backBtn').href = BB.api.browserPageURL(parentPrefix(key), { instance: config.instanceId });
   }
 
   function renderImage(url) {
@@ -1375,7 +1388,10 @@
         buildBadge.querySelector('span').textContent = build.display;
         buildBadge.title = `Release ${build.version || 'dev'}${build.commit && build.commit !== 'unknown' ? ` · source ${build.commit}` : ''}${build.date ? ` · built ${build.date}` : ''}`;
       }
-      const requested = new URLSearchParams(location.search).get('instance');
+      const route = BB.runtime?.storageRoute?.();
+      const requested = route?.view === 'preview'
+        ? route.instance
+        : new URLSearchParams(location.search).get('instance');
       currentInstance = instances.find(item => item.id === requested)
         || instances.find(item => item.id === response.default)
         || instances[0]
@@ -1387,6 +1403,7 @@
       config.operations = currentInstance.operations || {};
       config.versioningSupported = currentInstance.versioningSupported === true;
       BB.api.setInstance(currentInstance.id);
+      replacePreviewLocation(currentKey());
       applyCapabilities();
       await configureVersionSelector(currentKey());
       await render();
@@ -1418,9 +1435,7 @@
   byId('pv-rename').addEventListener('click', async () => {
     const destination = await BB.actions.renameObject(currentKey());
     if (destination) {
-      const url = new URL(location.href);
-      url.searchParams.set('path', destination);
-      history.replaceState(null, '', url.pathname + url.search);
+      replacePreviewLocation(destination);
       await configureVersionSelector(destination);
       await render();
     }

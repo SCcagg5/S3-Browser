@@ -857,7 +857,7 @@ ${escapeHTML(probe.ascii)}</pre></section>`).join('');
       const label = node.querySelector('.folder-treemap-label');
       if (!label) return;
       const meta = label.querySelector('.folder-treemap-meta');
-      const rect = node.getBoundingClientRect();
+      const rect = BB.viewport?.rect(node) || node.getBoundingClientRect();
       const headerHeight = Math.max(0, Number(node.dataset.headerHeight || 0));
       const labelHeight = node.classList.contains('is-branch') && headerHeight > 0 ? headerHeight : rect.height;
       const isOther = node.dataset.kind === 'other';
@@ -910,7 +910,7 @@ ${escapeHTML(probe.ascii)}</pre></section>`).join('');
 
   function renderTreemap(map, nodes) {
     if (!map) return;
-    const bounds = map.getBoundingClientRect();
+    const bounds = BB.viewport?.rect(map) || map.getBoundingClientRect();
     const width = Math.max(0, Math.floor(bounds.width));
     const height = Math.max(0, Math.floor(bounds.height));
     if (!(width > 0) || !(height > 0)) return;
@@ -935,7 +935,7 @@ ${escapeHTML(probe.ascii)}</pre></section>`).join('');
     const kind = String(metadata?.kind || '');
     if (!clean) return;
     if (kind === 'folder') {
-      location.hash = encodeURIComponent(ensurePrefix(clean)).replace(/%2F/gi, '/');
+      location.href = BB.api.browserPageURL(ensurePrefix(clean), { instance: BB.api.getInstance() });
       return;
     }
     location.href = BB.api.previewPageURL(clean, { instance: BB.api.getInstance() });
@@ -1023,11 +1023,17 @@ ${escapeHTML(probe.ascii)}</pre></section>`).join('');
           if (metaHost) metaHost.textContent = `${formatBytes(Number(node.dataset.size || 0))} · ${treemapObjectCount(node.dataset.count || 0)}`;
           treemapTooltip.hidden = false;
 
-          const panelRect = treemapPanel.getBoundingClientRect();
-          const nodeRect = node.getBoundingClientRect();
-          const tooltipRect = treemapTooltip.getBoundingClientRect();
-          const anchorX = Number.isFinite(clientX) ? clientX : nodeRect.left + Math.min(nodeRect.width, 24);
-          const anchorY = Number.isFinite(clientY) ? clientY : nodeRect.top + Math.min(nodeRect.height, 24);
+          const panelRect = BB.viewport?.rect(treemapPanel) || treemapPanel.getBoundingClientRect();
+          const nodeRect = BB.viewport?.rect(node) || node.getBoundingClientRect();
+          const tooltipRect = BB.viewport?.rect(treemapTooltip) || treemapTooltip.getBoundingClientRect();
+          const pointerX = Number.isFinite(clientX)
+            ? (BB.viewport?.toLayoutPixels(clientX) ?? clientX)
+            : null;
+          const pointerY = Number.isFinite(clientY)
+            ? (BB.viewport?.toLayoutPixels(clientY) ?? clientY)
+            : null;
+          const anchorX = pointerX ?? nodeRect.left + Math.min(nodeRect.width, 24);
+          const anchorY = pointerY ?? nodeRect.top + Math.min(nodeRect.height, 24);
           const maximumLeft = Math.max(8, panelRect.width - tooltipRect.width - 8);
           const maximumTop = Math.max(8, panelRect.height - tooltipRect.height - 8);
           const left = Math.min(maximumLeft, Math.max(8, anchorX - panelRect.left + 12));

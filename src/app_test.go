@@ -1002,3 +1002,78 @@ bucket "two" {
 		t.Fatal("bucket-specific permission ceiling was not applied independently to bucket two")
 	}
 }
+
+func TestFrontendBaseHrefForFriendlyRoutes(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		path string
+		want string
+	}{
+		{path: "/", want: "./"},
+		{path: "/index.html", want: "./"},
+		{path: "/preview.html", want: "./"},
+		{path: "/-/api/", want: "../../"},
+		{path: "/-/api/folder/", want: "../../../"},
+		{path: "/-/api/file.pdf", want: "../../"},
+		{path: "/-/api/folder/file.pdf", want: "../../../"},
+	} {
+		t.Run(test.path, func(t *testing.T) {
+			t.Parallel()
+			if got := frontendBaseHref(test.path); got != test.want {
+				t.Fatalf("frontendBaseHref(%q) = %q; want %q", test.path, got, test.want)
+			}
+		})
+	}
+}
+
+func TestFriendlyStorageFrontendRoutes(t *testing.T) {
+	t.Parallel()
+	publicFS, err := fs.Sub(embeddedPublic, "public")
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := &application{
+		config:    appConfig{Runtime: defaultRuntimePolicy()},
+		instances: map[string]*storageInstance{"api": nil, "-": nil},
+		publicFS:  publicFS,
+	}
+	handler := app.routes()
+
+	for _, test := range []struct {
+		path        string
+		status      int
+		content     string
+		base        string
+		location    string
+		contentType string
+	}{
+		{path: "/", status: http.StatusOK, content: `id="root"`, base: `<base href="./" />`, contentType: "text/html"},
+		{path: "/-/api", status: http.StatusPermanentRedirect, location: "api/"},
+		{path: "/-/api/", status: http.StatusOK, content: `id="root"`, base: `<base href="../../" />`, contentType: "text/html"},
+		{path: "/-/-/", status: http.StatusOK, content: `id="root"`, base: `<base href="../../" />`, contentType: "text/html"},
+		{path: "/-/api/folder/", status: http.StatusOK, content: `id="root"`, base: `<base href="../../../" />`, contentType: "text/html"},
+		{path: "/-/api/document.pdf", status: http.StatusOK, content: `class="preview-root"`, base: `<base href="../../" />`, contentType: "text/html"},
+		{path: "/-/api/folder/document.pdf", status: http.StatusOK, content: `class="preview-root"`, base: `<base href="../../../" />`, contentType: "text/html"},
+		{path: "/-/missing/", status: http.StatusNotFound},
+	} {
+		t.Run(test.path, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, test.path, nil))
+			if recorder.Code != test.status {
+				t.Fatalf("GET %s status = %d; want %d; body=%s", test.path, recorder.Code, test.status, recorder.Body.String())
+			}
+			if test.location != "" && recorder.Header().Get("Location") != test.location {
+				t.Fatalf("GET %s Location = %q; want %q", test.path, recorder.Header().Get("Location"), test.location)
+			}
+			if test.content != "" && !strings.Contains(recorder.Body.String(), test.content) {
+				t.Fatalf("GET %s did not serve expected document marker %q", test.path, test.content)
+			}
+			if test.base != "" && !strings.Contains(recorder.Body.String(), test.base) {
+				t.Fatalf("GET %s did not inject base %q", test.path, test.base)
+			}
+			if test.contentType != "" && !strings.Contains(recorder.Header().Get("Content-Type"), test.contentType) {
+				t.Fatalf("GET %s Content-Type = %q", test.path, recorder.Header().Get("Content-Type"))
+			}
+		})
+	}
+}

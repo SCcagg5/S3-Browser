@@ -53,8 +53,8 @@
 .dropdown-menu { padding-top: 6px; }
 .dropdown-content {
   min-width: 220px;
-  max-width: min(360px, calc(100vw - 16px));
-  max-height: calc(100vh - 16px);
+  max-width: min(360px, calc(calc(100vw / var(--browser-ui-scale-active)) - 16px));
+  max-height: calc(calc(100vh / var(--browser-ui-scale-active)) - 16px);
   padding: 6px;
   overflow: auto;
 }
@@ -275,10 +275,10 @@ td.size-column {
 
 /* Navigation metadata columns: stable numeric rhythm and responsive alignment. */
 .browser-card {
-  --navigation-size-column: clamp(7rem, 10vw, 8.75rem);
-  --navigation-modified-column: clamp(9rem, 14vw, 11.25rem);
+  --navigation-size-column: clamp(7rem, calc(10vw / var(--browser-ui-scale-active)), 8.75rem);
+  --navigation-modified-column: clamp(11.75rem, calc(15vw / var(--browser-ui-scale-active)), 13.25rem);
   --navigation-actions-column: 2.875rem;
-  --navigation-meta-right-pad: clamp(.85rem, 1.55vw, 1.65rem);
+  --navigation-meta-right-pad: clamp(.85rem, calc(1.55vw / var(--browser-ui-scale-active)), 1.65rem);
 }
 .browser-card .b-table table.table {
   width: 100%;
@@ -329,8 +329,8 @@ td.size-column {
 .object-modified-empty { color: var(--bb-text-muted, #78869b); }
 @media (max-width: 920px) {
   .browser-card {
-    --navigation-size-column: clamp(6.5rem, 14vw, 7.75rem);
-    --navigation-modified-column: clamp(8.25rem, 22vw, 10rem);
+    --navigation-size-column: clamp(6.5rem, calc(14vw / var(--browser-ui-scale-active)), 7.75rem);
+    --navigation-modified-column: clamp(11rem, calc(24vw / var(--browser-ui-scale-active)), 12.25rem);
     --navigation-meta-right-pad: .85rem;
   }
   .browser-card .table th.modified-column-header,
@@ -341,7 +341,7 @@ td.size-column {
 @media (max-width: 700px) {
   .browser-card {
     --navigation-size-column: 6.75rem;
-    --navigation-modified-column: 8.75rem;
+    --navigation-modified-column: 10.75rem;
     --navigation-meta-right-pad: .65rem;
   }
   .browser-card .table th.modified-column-header .th-wrap {
@@ -461,7 +461,7 @@ body.is-viewport-pdf .pdf-custom-stage { min-height: 0; }
 .structured-preview-tabs { flex: 0 0 auto; }
 .structured-preview-host {
   min-width: 0;
-  padding: clamp(.8rem, 2vw, 1.35rem);
+  padding: clamp(.8rem, calc(2vw / var(--browser-ui-scale-active)), 1.35rem);
 }
 .structured-preview-panel[hidden] { display: none !important; }
 .structured-preview-panel {
@@ -622,7 +622,7 @@ body.is-viewport-pdf .pdf-custom-stage { min-height: 0; }
 .archive-summary h2,
 .epub-preview h2 { font-size: .92rem; }
 .email-preview-body {
-  max-height: 52vh;
+  max-height: calc(52vh / var(--browser-ui-scale-active));
   margin: 0;
   padding: .9rem;
   overflow: auto;
@@ -672,7 +672,7 @@ body.is-viewport-pdf .pdf-custom-stage { min-height: 0; }
 }
 .archive-page-size { flex: 0 0 auto; }
 .archive-entry-scroll {
-  max-height: min(62vh, 720px);
+  max-height: min(calc(62vh / var(--browser-ui-scale-active)), 720px);
   border: 1px solid var(--color-border, #e4e7ec);
   border-radius: var(--radius-md, 8px);
 }
@@ -725,9 +725,9 @@ body.is-viewport-pdf .pdf-custom-stage { min-height: 0; }
 html.is-viewport-pdf,
 body.is-viewport-pdf {
   width: 100%;
-  height: 100dvh !important;
-  min-height: 100dvh !important;
-  max-height: 100dvh !important;
+  height: calc(100dvh / var(--browser-ui-scale-active)) !important;
+  min-height: calc(100dvh / var(--browser-ui-scale-active)) !important;
+  max-height: calc(100dvh / var(--browser-ui-scale-active)) !important;
   overflow: hidden !important;
 }
 body.is-viewport-pdf {
@@ -773,7 +773,7 @@ body.is-viewport-pdf .pdf-custom-preview {
 }
 body.is-viewport-pdf .pdf-custom-toolbar {
   flex: 0 0 auto;
-  max-height: min(38dvh, 11rem);
+  max-height: min(calc(38dvh / var(--browser-ui-scale-active)), 11rem);
   overflow: auto;
 }
 body.is-viewport-pdf .pdf-custom-stage {
@@ -799,7 +799,7 @@ body.is-viewport-pdf .pdf-custom-stage {
   width: 100%;
   min-width: 0;
   gap: 1rem;
-  padding: clamp(.8rem, 2vw, 1.35rem);
+  padding: clamp(.8rem, calc(2vw / var(--browser-ui-scale-active)), 1.35rem);
 }
 .archive-preview-section {
   display: grid;
@@ -847,7 +847,7 @@ body.is-viewport-pdf .pdf-custom-stage {
   color: #98a2b3;
 }
 .navigation-sort-icon .mdi {
-  transform: translateY(1px);
+  transform: translateY(1.5px);
 }
 .navigation-sort-button.is-active .navigation-sort-icon { color: var(--primary-color); }
 .navigation-sort-icon.is-placeholder { visibility: hidden; }
@@ -859,7 +859,7 @@ body.is-viewport-pdf .pdf-custom-stage {
 }
 .browser-card .table th.size-column-header .th-wrap,
 .browser-card .table th.modified-column-header .th-wrap {
-  padding-right: var(--navigation-meta-right-pad) !important;
+  padding-right: 0 !important;
 }
 
 /* Data grids occupy the full preview width. A permanently reserved scrollbar
@@ -1075,7 +1075,7 @@ body.is-viewport-pdf .pdf-custom-stage {
 }
 
 .preview-version-control select {
-  width: clamp(10rem, 24vw, 22rem);
+  width: clamp(10rem, calc(24vw / var(--browser-ui-scale-active)), 22rem);
 }
 
 .bb-details-version-control {
@@ -1084,7 +1084,7 @@ body.is-viewport-pdf .pdf-custom-stage {
 }
 
 .bb-details-version-control select {
-  width: clamp(11rem, 30vw, 28rem);
+  width: clamp(11rem, calc(30vw / var(--browser-ui-scale-active)), 28rem);
 }
 
 
@@ -1111,7 +1111,7 @@ body.is-viewport-pdf .pdf-custom-stage {
     display: none;
   }
   .preview-version-control select {
-    width: clamp(8rem, 38vw, 15rem);
+    width: clamp(8rem, calc(38vw / var(--browser-ui-scale-active)), 15rem);
   }
   .bb-details-head {
     flex-wrap: wrap;
@@ -1129,13 +1129,13 @@ body.is-viewport-pdf .pdf-custom-stage {
 
 /* File Details stays compact while keeping the same bounded working height as Insights. */
 .bb-modal.bb-modal--details {
-  width: min(900px, calc(100vw - 2rem));
-  max-width: min(900px, calc(100vw - 2rem));
+  width: min(900px, calc(calc(100vw / var(--browser-ui-scale-active)) - 2rem));
+  max-width: min(900px, calc(calc(100vw / var(--browser-ui-scale-active)) - 2rem));
 }
 .bb-details--file .bb-details-body {
   box-sizing: border-box;
   width: 100%;
-  height: min(68vh, 680px);
+  height: min(calc(68vh / var(--browser-ui-scale-active)), 680px);
   min-height: 380px;
   padding: 0 .15rem .15rem;
   overflow: auto;
@@ -1208,16 +1208,16 @@ body.is-viewport-pdf .pdf-custom-stage {
 .bb-overlay.bb-overlay--top-anchored {
   box-sizing: border-box;
   align-items: flex-start;
-  padding: clamp(1rem, 6vh, 3.5rem) 1rem 1rem;
+  padding: clamp(1rem, calc(6vh / var(--browser-ui-scale-active)), 3.5rem) 1rem 1rem;
   overflow: auto;
 }
 .bb-overlay--top-anchored .bb-modal.bb-modal--details {
-  max-height: calc(100dvh - clamp(2rem, 12vh, 7rem));
+  max-height: calc(calc(100dvh / var(--browser-ui-scale-active)) - clamp(2rem, calc(12vh / var(--browser-ui-scale-active)), 7rem));
 }
 .bb-details--file .bb-details-body {
   height: auto;
   min-height: 0;
-  max-height: min(68vh, 680px);
+  max-height: min(calc(68vh / var(--browser-ui-scale-active)), 680px);
   overflow: auto;
 }
 .bb-details--file .bb-details-panel {
@@ -1236,31 +1236,40 @@ body.is-viewport-pdf .pdf-custom-stage {
 
 /* Last-modified display mode and sorting are independent controls. */
 .modified-header-controls {
-  display: flex;
+  display: grid;
   width: 100%;
   min-width: 0;
+  grid-template-columns: 1.5rem minmax(max-content, 1fr);
   align-items: center;
   gap: .2rem;
 }
 .modified-header-controls .navigation-sort-button {
   min-width: 0;
-  flex: 1 1 auto;
+  width: 100%;
+}
+.modified-header-controls .navigation-sort-button > span:first-child {
+  min-width: max-content;
+  justify-self: end;
+  overflow: visible;
+  text-align: right;
+  text-overflow: clip;
+  white-space: nowrap;
 }
 .modified-time-toggle {
   appearance: none;
   display: inline-flex;
-  width: 1.75rem;
-  height: 1.75rem;
-  flex: 0 0 1.75rem;
+  width: 1.5rem;
+  height: 1.5rem;
+  min-width: 1.5rem;
   align-items: center;
   justify-content: center;
   padding: 0;
+  margin: 0;
   color: #667085;
   background: transparent;
   border: 0;
   border-radius: 0;
   cursor: pointer;
-  margin-top: -2.5px;
 }
 .modified-time-toggle:hover,
 .modified-time-toggle:focus-visible,
@@ -1274,13 +1283,13 @@ body.is-viewport-pdf .pdf-custom-stage {
   width: 1rem;
   height: 1rem;
   font-size: 1rem;
-  transform: translateY(1px);
+  transform: translateY(1.5px);
   transition: color .14s ease, transform .14s ease;
 }
 .modified-time-toggle:hover .mdi,
 .modified-time-toggle:focus-visible .mdi,
 .modified-time-toggle.is-absolute .mdi {
-  transform: translateY(1px) scale(1.06);
+  transform: translateY(1.5px) scale(1.06);
 }
 
 /* Archive inventories contain regular files only. Header and body share this

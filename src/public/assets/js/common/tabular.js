@@ -363,12 +363,13 @@
     handle.addEventListener('pointerdown', event => {
       event.preventDefault();
       const header = handle.parentElement;
-      const startX = event.clientX;
-      const startWidth = Math.max(64, header.getBoundingClientRect().width);
+      const startX = BB.viewport?.toLayoutPixels(event.clientX) ?? event.clientX;
+      const startWidth = Math.max(64, (BB.viewport?.rect(header) || header.getBoundingClientRect()).width);
       handle.setPointerCapture?.(event.pointerId);
       document.body.classList.add('is-resizing-data-column');
       const move = moveEvent => {
-        const width = Math.max(64, Math.min(720, startWidth + moveEvent.clientX - startX));
+        const currentX = BB.viewport?.toLayoutPixels(moveEvent.clientX) ?? moveEvent.clientX;
+        const width = Math.max(64, Math.min(720, startWidth + currentX - startX));
         for (const row of table.rows) {
           const cell = row.cells[columnIndex];
           if (cell) {

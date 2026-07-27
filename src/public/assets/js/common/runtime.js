@@ -7,6 +7,71 @@
 
   const applicationRoot = new URL('.', document.baseURI);
 
+  function encodeRouteSegment(value) {
+    const text = String(value == null ? '' : value);
+    const encoded = encodeURIComponent(text).replace(/[!'()*]/g, character =>
+      `%${character.charCodeAt(0).toString(16).toUpperCase()}`
+    );
+    return text === '' || text === '.' || text === '..' || text.startsWith('~')
+      ? `~${encoded}`
+      : encoded;
+  }
+
+  function decodeRouteSegment(value) {
+    const raw = String(value == null ? '' : value);
+    const encoded = raw.startsWith('~') ? raw.slice(1) : raw;
+    return decodeURIComponent(encoded);
+  }
+
+  function encodeStoragePath(value, { prefix = false } = {}) {
+    let text = String(value == null ? '' : value).replace(/^\/+/, '');
+    if (prefix) text = text.replace(/\/+$/, '');
+    if (!text) return '';
+    return text.split('/').map(encodeRouteSegment).join('/');
+  }
+
+  function currentApplicationPath() {
+    const current = new URL(window.location?.href || document.baseURI);
+    const rootPath = applicationRoot.pathname.endsWith('/')
+      ? applicationRoot.pathname
+      : `${applicationRoot.pathname}/`;
+    if (!current.pathname.startsWith(rootPath)) return '';
+    return current.pathname.slice(rootPath.length);
+  }
+
+  function currentStorageRoute() {
+    const relative = currentApplicationPath();
+    if (!relative.startsWith('-/')) return null;
+    const trailingSlash = relative.endsWith('/');
+    const segments = relative.split('/');
+    if (segments[0] !== '-' || !segments[1]) return null;
+    try {
+      const instance = decodeRouteSegment(segments[1]);
+      const pathSegments = segments.slice(2);
+      if (trailingSlash) pathSegments.pop();
+      const decoded = pathSegments.map(decodeRouteSegment).join('/');
+      return {
+        instance,
+        path: trailingSlash && decoded ? `${decoded}/` : decoded,
+        view: trailingSlash ? 'browser' : 'preview'
+      };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function browserPageURL(instance, prefix = '') {
+    const id = encodeRouteSegment(instance);
+    const encoded = encodeStoragePath(prefix, { prefix: true });
+    return resolveURL(`-/${id}/${encoded ? `${encoded}/` : ''}`);
+  }
+
+  function previewPageURL(instance, key = '') {
+    const id = encodeRouteSegment(instance);
+    const encoded = encodeStoragePath(key);
+    return resolveURL(`-/${id}/${encoded}`);
+  }
+
   function resolveURL(value = '') {
     if (value instanceof URL) return new URL(value.href);
     const text = String(value || '').trim();
@@ -21,6 +86,44 @@
 
   function runtimeConfig() {
     return (BB.cfg && BB.cfg.runtime) || {};
+  }
+
+  function interfaceScale() {
+    const styles = getComputedStyle(document.documentElement);
+    const configured = Number.parseFloat(styles.getPropertyValue('--browser-ui-scale-active'));
+    return Number.isFinite(configured) && configured > 0 ? configured : 1;
+  }
+
+  function toLayoutPixels(value) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric / interfaceScale() : 0;
+  }
+
+  function layoutRect(target) {
+    const source = typeof target?.getBoundingClientRect === 'function'
+      ? target.getBoundingClientRect()
+      : target;
+    const scale = interfaceScale();
+    const left = Number(source?.left || 0) / scale;
+    const top = Number(source?.top || 0) / scale;
+    const width = Number(source?.width || 0) / scale;
+    const height = Number(source?.height || 0) / scale;
+    return {
+      left,
+      top,
+      right: left + width,
+      bottom: top + height,
+      width,
+      height
+    };
+  }
+
+  function layoutViewport() {
+    const scale = interfaceScale();
+    return {
+      width: window.innerWidth / scale,
+      height: window.innerHeight / scale
+    };
   }
 
   function formatDateTimeUTC(value) {
@@ -120,7 +223,19 @@
     rootURL: applicationRoot.href,
     resolveURL,
     resolvePath,
+    encodeRouteSegment,
+    encodeStoragePath,
+    storageRoute: currentStorageRoute,
+    browserPageURL,
+    previewPageURL,
     formatDateTimeUTC
+  };
+
+  BB.viewport = {
+    scale: interfaceScale,
+    toLayoutPixels,
+    rect: layoutRect,
+    size: layoutViewport
   };
 
   BB.capabilities = {

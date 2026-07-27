@@ -37,19 +37,23 @@
     pop.style.display = 'block';
     pop.style.visibility = 'hidden';
 
-    const r = icon.getBoundingClientRect();
+    const r = BB.viewport?.rect(icon) || icon.getBoundingClientRect();
+    const viewport = BB.viewport?.size() || { width: window.innerWidth, height: window.innerHeight };
     const pw = pop.offsetWidth || 220;
     const ph = pop.offsetHeight || 280;
     const point = anchorPoint && Number.isFinite(anchorPoint.x) && Number.isFinite(anchorPoint.y)
-      ? anchorPoint
+      ? {
+          x: BB.viewport?.toLayoutPixels(anchorPoint.x) ?? anchorPoint.x,
+          y: BB.viewport?.toLayoutPixels(anchorPoint.y) ?? anchorPoint.y
+        }
       : null;
 
     let left = point ? point.x : r.right - pw;
     let top = point ? point.y : r.bottom + 8;
 
-    const maxLeft = Math.max(8, window.innerWidth - pw - 8);
+    const maxLeft = Math.max(8, viewport.width - pw - 8);
     left = Math.max(8, Math.min(left, maxLeft));
-    const maxTop = Math.max(8, window.innerHeight - ph - 8);
+    const maxTop = Math.max(8, viewport.height - ph - 8);
     if (top > maxTop) top = point ? maxTop : Math.max(8, r.top - ph - 8);
     top = Math.max(8, top);
 

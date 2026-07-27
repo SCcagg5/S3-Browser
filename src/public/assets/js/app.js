@@ -21,11 +21,7 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
     return clean ? clean + '/' : '';
   }
 
-  function hashValue(value) {
-    return encodeURIComponent(value || '').replace(/%2F/gi, '/');
-  }
-
-  function parseHash() {
+  function parseLegacyHash() {
     try {
       return normalizePrefix(decodeURIComponent((location.hash || '#').slice(1)));
     } catch (_) {
@@ -522,23 +518,24 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
         const popover = this.$refs.breadcrumbOverflowPopover;
         if (!trigger || !popover) return;
         const margin = 8;
-        const triggerRect = trigger.getBoundingClientRect();
-        const maxWidth = Math.max(220, Math.min(380, window.innerWidth - margin * 2));
+        const viewport = BB.viewport?.size() || { width: window.innerWidth, height: window.innerHeight };
+        const triggerRect = BB.viewport?.rect(trigger) || trigger.getBoundingClientRect();
+        const maxWidth = Math.max(220, Math.min(380, viewport.width - margin * 2));
         popover.style.width = `${maxWidth}px`;
-        popover.style.maxWidth = `${window.innerWidth - margin * 2}px`;
-        const popoverRect = popover.getBoundingClientRect();
+        popover.style.maxWidth = `${viewport.width - margin * 2}px`;
+        const popoverRect = BB.viewport?.rect(popover) || popover.getBoundingClientRect();
         const width = Math.min(maxWidth, Math.max(220, popoverRect.width || maxWidth));
-        const height = Math.min(popoverRect.height || 320, Math.max(120, window.innerHeight - margin * 2));
-        const left = Math.max(margin, Math.min(triggerRect.left, window.innerWidth - width - margin));
+        const height = Math.min(popoverRect.height || 320, Math.max(120, viewport.height - margin * 2));
+        const left = Math.max(margin, Math.min(triggerRect.left, viewport.width - width - margin));
         const below = triggerRect.bottom + 6;
         const above = triggerRect.top - height - 6;
-        const top = below + height <= window.innerHeight - margin ? below : Math.max(margin, above);
+        const top = below + height <= viewport.height - margin ? below : Math.max(margin, above);
         this.breadcrumbPopoverStyle = {
           position: 'fixed',
           left: `${Math.round(left)}px`,
           top: `${Math.round(top)}px`,
           width: `${Math.round(width)}px`,
-          maxHeight: `${Math.max(120, Math.round(window.innerHeight - top - margin))}px`
+          maxHeight: `${Math.max(120, Math.round(viewport.height - top - margin))}px`
         };
       },
 
@@ -571,7 +568,7 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
 
         const line = this.$refs.breadcrumbLine;
         if (!line) return;
-        const available = Math.floor(line.getBoundingClientRect().width || line.clientWidth || 0);
+        const available = Math.floor((BB.viewport?.rect(line).width || line.clientWidth || 0));
         if (available <= 0) return;
 
         const style = window.getComputedStyle(line);
@@ -615,21 +612,38 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
           this.build = response.build || {};
           this.config.runtime = BB.runtime?.configure(response.runtime || {}) || (response.runtime || {});
           this.defaultInstanceId = response.default || this.instances[0]?.id || '';
+          const route = BB.runtime?.storageRoute?.();
+          const routeInstance = route?.view === 'browser' ? route.instance : '';
           const queryInstance = new URLSearchParams(location.search).get('instance');
           const storedInstance = BB.runtime?.readState('object-browser-instance') || '';
-          const candidate = [queryInstance, storedInstance, this.defaultInstanceId]
+          const candidate = [routeInstance, queryInstance, storedInstance, this.defaultInstanceId]
             .find(id => id && this.instances.some(instance => instance.id === id));
           this.instanceId = candidate || this.instances[0]?.id || '';
           if (!this.instanceId) throw new Error('No storage instance is configured.');
           this.applyCurrentInstance();
-          this.pathPrefix = parseHash();
+          this.pathPrefix = routeInstance === this.instanceId
+            ? normalizePrefix(route.path)
+            : parseLegacyHash();
           this.searchPrefix = '';
+          this.replaceBrowserLocation(this.pathPrefix);
           await this.refresh();
         } catch (error) {
           BB.ui.toast(String(error.message || error));
         } finally {
           this.isInitializing = false;
         }
+      },
+
+      browserLocation(prefix = '') {
+        const url = new URL(BB.api.browserPageURL(prefix, { instance: this.instanceId }));
+        return url.pathname + url.search + url.hash;
+      },
+
+      replaceBrowserLocation(prefix = '', { push = false } = {}) {
+        const target = this.browserLocation(prefix);
+        const current = location.pathname + location.search + location.hash;
+        if (target === current) return;
+        history[push ? 'pushState' : 'replaceState'](null, '', target);
       },
 
       applyCurrentInstance() {
@@ -640,9 +654,6 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
         this.config.operations = instance.operations || {};
         this.config.versioningSupported = instance.versioningSupported === true;
         BB.runtime?.writeState('object-browser-instance', instance.id);
-        const url = new URL(location.href);
-        url.searchParams.set('instance', instance.id);
-        history.replaceState(null, '', url.pathname + url.search + url.hash);
         document.title = `${instance.name} - Object Storage Browser`;
       },
 
@@ -651,7 +662,7 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
         this.pathPrefix = '';
         this.searchPrefix = '';
         this.resetPagination();
-        if (location.hash) history.replaceState(null, '', location.pathname + location.search);
+        this.replaceBrowserLocation('', { push: true });
         await this.refresh();
       },
 
@@ -741,9 +752,18 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
         this.$nextTick(() => this.refreshVisibleVersionCounts());
       },
 
-      updatePathFromHash() {
-        const next = parseHash();
-        if (next === this.pathPrefix) return;
+      updatePathFromLocation() {
+        const route = BB.runtime?.storageRoute?.();
+        if (!route || route.view !== 'browser') return;
+        const instance = this.instances.find(item => item.id === route.instance);
+        if (!instance) return;
+        const next = normalizePrefix(route.path);
+        const instanceChanged = instance.id !== this.instanceId;
+        if (!instanceChanged && next === this.pathPrefix) return;
+        if (instanceChanged) {
+          this.instanceId = instance.id;
+          this.applyCurrentInstance();
+        }
         this.pathPrefix = next;
         this.searchPrefix = '';
         this.resetPagination();
@@ -758,7 +778,11 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
           this.refresh();
           return;
         }
-        location.hash = hashValue(normalized);
+        this.pathPrefix = normalized;
+        this.searchPrefix = '';
+        this.resetPagination();
+        this.replaceBrowserLocation(normalized, { push: true });
+        this.refresh();
       },
 
       searchByPrefix() {
@@ -1154,7 +1178,7 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
     },
 
     mounted() {
-      this.onHashChange = () => this.updatePathFromHash();
+      this.onPopState = () => this.updatePathFromLocation();
       this.onResize = () => {
         this.scheduleBreadcrumbLayout();
         if (this.breadcrumbOverflowOpen) this.$nextTick(() => this.positionBreadcrumbOverflow());
@@ -1169,7 +1193,7 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
       this.onWindowDragLeave = event => this.onDragLeave(event);
       this.onWindowDrop = event => this.onDrop(event);
       this.onContextMenu = event => this.onRowContextMenu(event);
-      window.addEventListener('hashchange', this.onHashChange);
+      window.addEventListener('popstate', this.onPopState);
       window.addEventListener('resize', this.onResize);
       window.addEventListener('scroll', this.onWindowScroll, true);
       document.addEventListener('pointerdown', this.onDocumentPointer);
@@ -1190,7 +1214,7 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
     },
 
     beforeUnmount() {
-      window.removeEventListener('hashchange', this.onHashChange);
+      window.removeEventListener('popstate', this.onPopState);
       window.removeEventListener('resize', this.onResize);
       window.removeEventListener('scroll', this.onWindowScroll, true);
       document.removeEventListener('pointerdown', this.onDocumentPointer);

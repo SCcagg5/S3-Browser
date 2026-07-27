@@ -329,6 +329,7 @@ func validateRuntimePolicy(cfg *appConfig) error {
 }
 
 var configIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+var instanceIDPattern = regexp.MustCompile(`^(?:[A-Za-z0-9][A-Za-z0-9._-]*|-)$`)
 
 func decodeAuthBlock(block hclBlock, baseDir string) (authConfig, error) {
 	if len(block.Labels) != 1 {
@@ -496,8 +497,8 @@ func decodeBucketBlock(block hclBlock, authByID map[string]authConfig) (bucketCo
 		Name:         strings.TrimSpace(block.Labels[0]),
 		MaxScanPages: 1,
 	}
-	if !configIDPattern.MatchString(bucket.ID) {
-		return bucketConfig{}, block.errorf("bucket id %q must match %s", bucket.ID, configIDPattern.String())
+	if !instanceIDPattern.MatchString(bucket.ID) {
+		return bucketConfig{}, block.errorf("bucket id %q must match %s", bucket.ID, instanceIDPattern.String())
 	}
 	if value, ok := block.stringAttr("name"); ok {
 		bucket.Name = strings.TrimSpace(value)

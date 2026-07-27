@@ -36,8 +36,8 @@ th.is-right, td.is-right { text-align: right; }
   position: fixed; z-index: 60; display: none;
   background: #fff; border: 1px solid var(--bb-border); border-radius: 8px;
   box-shadow: 0 10px 25px rgba(0,0,0,.12);
-  min-width: 220px; max-width: min(360px, calc(100vw - 16px));
-  max-height: calc(100vh - 16px); overflow: auto;
+  min-width: 220px; max-width: min(360px, calc(calc(100vw / var(--browser-ui-scale-active)) - 16px));
+  max-height: calc(calc(100vh / var(--browser-ui-scale-active)) - 16px); overflow: auto;
 }
 .bb-menu.is-open > .bb-menu-popover { display: block; }
 
@@ -61,8 +61,8 @@ th.is-right, td.is-right { text-align: right; }
 .bb-modal {
   background: var(--bb-bg);
   color: var(--bb-text);
-  width: min(660px, calc(100vw - 32px));
-  max-height: calc(100vh - 32px);
+  width: min(660px, calc(calc(100vw / var(--browser-ui-scale-active)) - 32px));
+  max-height: calc(calc(100vh / var(--browser-ui-scale-active)) - 32px);
   border-radius: 12px;
   box-shadow: 0 20px 45px rgba(0,0,0,.18);
   display: flex; flex-direction: column;
@@ -127,7 +127,7 @@ th.is-right, td.is-right { text-align: right; }
   grid-template-columns: auto minmax(0, 1fr);
   align-items: start;
   gap: 9px;
-  width: min(460px, calc(100vw - 24px));
+  width: min(460px, calc(calc(100vw / var(--browser-ui-scale-active)) - 24px));
   padding: 10px 12px;
   color: #fff;
   background: #111827;
@@ -246,7 +246,7 @@ th.is-right, td.is-right { text-align: right; }
 
 .bb-details-actions { display: flex; gap: 8px; margin-top: 6px; }
 .bb-details-subtitle { margin: 2px 0 0; font-size: 0.95rem; }
-.meta-pre { max-height: 40vh; overflow: auto; }
+.meta-pre { max-height: calc(40vh / var(--browser-ui-scale-active)); overflow: auto; }
 @media (max-width: 600px) {
   .kv-row { grid-template-columns: 120px 1fr; }
 }
@@ -297,7 +297,7 @@ th.is-right, td.is-right { text-align: right; }
 
 /* Aggregated upload/download notifications. One stable panel is used per transfer type. */
 .bb-transfer-panel {
-  width: min(500px, calc(100vw - 24px));
+  width: min(500px, calc(calc(100vw / var(--browser-ui-scale-active)) - 24px));
   color: #fff;
   background: #111827;
   border: 1px solid rgba(255,255,255,.08);
@@ -368,7 +368,7 @@ th.is-right, td.is-right { text-align: right; }
 }
 .bb-transfer-group-action:hover { background: rgba(255,255,255,.15); }
 .bb-transfer-list {
-  max-height: min(330px, 48vh);
+  max-height: min(330px, calc(48vh / var(--browser-ui-scale-active)));
   overflow: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
@@ -473,7 +473,7 @@ th.is-right, td.is-right { text-align: right; }
   .bb-transfer-header { align-items: flex-start; }
   .bb-transfer-group-action { min-width: 31px; width: 31px; padding: 0; }
   .bb-transfer-group-action span { display: none; }
-  .bb-transfer-list { max-height: 52vh; }
+  .bb-transfer-list { max-height: calc(52vh / var(--browser-ui-scale-active)); }
 }
 
 /* Dashboard-aligned notification theme. */
@@ -681,8 +681,8 @@ th.is-right, td.is-right { text-align: right; }
   white-space: nowrap;
 }
 .bb-modal.bb-modal--wide {
-  width: min(1180px, calc(100vw - 2rem));
-  max-width: min(1180px, calc(100vw - 2rem));
+  width: min(1180px, calc(calc(100vw / var(--browser-ui-scale-active)) - 2rem));
+  max-width: min(1180px, calc(calc(100vw / var(--browser-ui-scale-active)) - 2rem));
 }
 
 
@@ -700,7 +700,7 @@ th.is-right, td.is-right { text-align: right; }
 
 /* Full-document search results opened by Ctrl/Cmd+F in structured previews. */
 .document-search-results {
-  width: min(760px, calc(100vw - 2rem));
+  width: min(760px, calc(calc(100vw / var(--browser-ui-scale-active)) - 2rem));
   color: var(--text-color);
   text-align: left;
 }
@@ -725,7 +725,7 @@ th.is-right, td.is-right { text-align: right; }
 .document-search-head span { color: var(--muted-color); font-size: .8rem; }
 .document-search-results ol {
   display: grid;
-  max-height: min(62vh, 560px);
+  max-height: min(calc(62vh / var(--browser-ui-scale-active)), 560px);
   margin: 0;
   padding: .45rem 0;
   overflow: auto;
@@ -832,7 +832,7 @@ th.is-right, td.is-right { text-align: right; }
 /* Keep both Insights views on the same visual canvas height. */
 .folder-insights-panel {
   box-sizing: border-box;
-  height: min(68vh, 680px);
+  height: min(calc(68vh / var(--browser-ui-scale-active)), 680px);
   min-height: 380px;
   overflow: auto;
 }
@@ -934,7 +934,7 @@ body > div > div > div > div > a > i {
 
 /* Use more of the viewport while keeping a small, responsive page gutter. */
 :root {
-  --browser-page-gutter: clamp(.7rem, 1.35vw, 1.5rem);
+  --browser-page-gutter: clamp(.7rem, calc(1.35vw / var(--browser-ui-scale-active)), 1.5rem);
   --browser-shell-max: 100%;
 }
 @media screen and (min-width: 1200px) {
@@ -944,7 +944,7 @@ body > div > div > div > div > a > i {
   :root { --browser-shell-max: 1344px; }
 }
 #app {
-  padding: clamp(1rem, 1.6vw, 1.65rem) var(--browser-page-gutter) 2rem;
+  padding: clamp(1rem, calc(1.6vw / var(--browser-ui-scale-active)), 1.65rem) var(--browser-page-gutter) 2rem;
 }
 #app > .top .container,
 #app > .toolbar .container,
@@ -985,11 +985,11 @@ body > div > div > div > div > a > i {
 /* Keep the fixed metadata columns useful without letting them crowd out names. */
 .browser-card .table th:nth-child(2),
 .browser-card .table td:nth-child(2) {
-  width: clamp(5.5rem, 9vw, 8.125rem) !important;
+  width: clamp(5.5rem, calc(9vw / var(--browser-ui-scale-active)), 8.125rem) !important;
 }
 .browser-card .table th:nth-child(3),
 .browser-card .table td:nth-child(3) {
-  width: clamp(7.25rem, 12vw, 10.625rem) !important;
+  width: clamp(7.25rem, calc(12vw / var(--browser-ui-scale-active)), 10.625rem) !important;
 }
 .browser-card .table th:nth-child(4),
 .browser-card .table td:nth-child(4) {
@@ -1011,7 +1011,7 @@ body > div > div > div > div > a > i {
 
 /* Insights keep one stable canvas height, while Overview content stays compact. */
 .folder-insights-panel {
-  height: min(68vh, 680px);
+  height: min(calc(68vh / var(--browser-ui-scale-active)), 680px);
   min-height: 380px;
 }
 .folder-insights-panel[data-insights-panel="overview"] {
@@ -1148,7 +1148,7 @@ body > div > div > div > div > a > i {
 
 .b-table thead i.mdi::before {
   margin-bottom: 0px !important;
-  margin-top: 1px !important;
+  margin-top: 0px !important;
 }
 
 span.root-link > i.mdi::before {

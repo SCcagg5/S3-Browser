@@ -112,6 +112,19 @@ bucket "archive" {
 	}
 }
 
+func TestLoadConfigAllowsDashInstanceID(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config.hcl")
+	writeConfig(t, path, minimalTestConfig("-"))
+	cfg, err := loadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Buckets) != 1 || cfg.Buckets[0].ID != "-" {
+		t.Fatalf("buckets = %#v", cfg.Buckets)
+	}
+}
+
 func TestLoadConfigBackgroundBudgets(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.hcl")
 	writeConfig(t, path, `

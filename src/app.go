@@ -180,6 +180,10 @@ func (a *application) routes() http.Handler {
 			a.handleObjectGateway(w, r)
 			return
 		}
+		if strings.HasPrefix(r.URL.Path, "/-/") {
+			a.handleStorageFrontend(w, r)
+			return
+		}
 		mux.ServeHTTP(w, r)
 	})
 	internal := requestLogMiddleware(a.config.Runtime.LogMode, requestBudgetMiddleware(a.config.Runtime, sameOriginMutationMiddleware(router)))
@@ -1528,6 +1532,74 @@ func detectKind(key, contentType string) string {
 	return "other"
 }
 
+const frontendBasePlaceholder = "{{APP_BASE}}"
+
+func (a *application) handleStorageFrontend(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		methodNotAllowed(w, http.MethodGet, http.MethodHead)
+		return
+	}
+	relative := strings.TrimPrefix(r.URL.Path, "/-/")
+	if relative == "" {
+		http.NotFound(w, r)
+		return
+	}
+	separator := strings.IndexByte(relative, '/')
+	if separator < 0 {
+		if _, ok := a.instances[relative]; !ok {
+			http.NotFound(w, r)
+			return
+		}
+		target := relative + "/"
+		if r.URL.RawQuery != "" {
+			target += "?" + r.URL.RawQuery
+		}
+		w.Header().Set("Location", target)
+		w.WriteHeader(http.StatusPermanentRedirect)
+		return
+	}
+	instanceID := relative[:separator]
+	if _, ok := a.instances[instanceID]; !ok {
+		http.NotFound(w, r)
+		return
+	}
+	requested := "/preview.html"
+	if strings.HasSuffix(r.URL.Path, "/") {
+		requested = "/index.html"
+	}
+	serveEmbeddedFrontend(w, r, a.publicFS, requested, frontendBaseHref(r.URL.Path))
+}
+
+func frontendBaseHref(requestPath string) string {
+	clean := strings.Trim(strings.TrimSpace(requestPath), "/")
+	if clean == "" {
+		return "./"
+	}
+	depth := len(strings.Split(clean, "/"))
+	if !strings.HasSuffix(requestPath, "/") {
+		depth--
+	}
+	if depth < 1 {
+		return "./"
+	}
+	return strings.Repeat("../", depth)
+}
+
+func serveEmbeddedFrontend(w http.ResponseWriter, r *http.Request, root fs.FS, requested, baseHref string) {
+	name := strings.TrimPrefix(requested, "/")
+	data, err := fs.ReadFile(root, name)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	if bytes.Contains(data, []byte(frontendBasePlaceholder)) {
+		data = bytes.ReplaceAll(data, []byte(frontendBasePlaceholder), []byte(baseHref))
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	http.ServeContent(w, r, path.Base(requested), time.Time{}, bytes.NewReader(data))
+}
+
 func secureStaticHandler(root fs.FS) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -1545,6 +1617,10 @@ func secureStaticHandler(root fs.FS) http.Handler {
 					requested = candidate
 				}
 			}
+		}
+		if requested == "/index.html" || requested == "/preview.html" {
+			serveEmbeddedFrontend(w, r, root, requested, frontendBaseHref(r.URL.Path))
+			return
 		}
 		serveEmbeddedFile(w, r, root, requested)
 	})

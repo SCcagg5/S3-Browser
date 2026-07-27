@@ -241,12 +241,19 @@
       return withInstance('/s3', parameters, explicitInstance);
     },
 
+    browserPageURL(prefix = '', { instance = null } = {}) {
+      const selected = instance === null || instance === undefined ? selectedInstance() : String(instance || '');
+      if (!selected) return BB.runtime.resolveURL('index.html').href;
+      return BB.runtime.browserPageURL(selected, prefix).href;
+    },
+
     previewPageURL(path, { instance = null, version = '', entry = '' } = {}) {
       const clean = String(path || '').replace(/^\/+/, '');
-      const url = BB.runtime.resolveURL('preview.html');
       const selected = instance === null || instance === undefined ? selectedInstance() : String(instance || '');
-      if (selected) url.searchParams.set('instance', selected);
-      url.searchParams.set('path', clean);
+      const url = selected
+        ? BB.runtime.previewPageURL(selected, clean)
+        : BB.runtime.resolveURL('preview.html');
+      if (!selected) url.searchParams.set('path', clean);
       if (version) url.searchParams.set('version', String(version));
       if (entry) url.searchParams.set('entry', String(entry));
       return url.href;

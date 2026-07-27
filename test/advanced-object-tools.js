@@ -60,7 +60,7 @@ assert.doesNotMatch(actions, /function inspectObject\(/);
 assert.doesNotMatch(actions, /bb-inspection/);
 assert.match(css, /\.bb-modal\.bb-modal--details\s*\{[^}]*900px/s);
 assert.match(css, /\.bb-overlay\.bb-overlay--top-anchored\s*\{/);
-assert.match(css, /\.bb-details--file \.bb-details-body \{[^}]*height:\s*auto;[^}]*min-height:\s*0;[^}]*max-height:\s*min\(68vh, 680px\)/s);
+assert.match(css, /\.bb-details--file \.bb-details-body \{[^}]*height:\s*auto;[^}]*min-height:\s*0;[^}]*max-height:\s*min\(calc\(68vh \/ var\(--browser-ui-scale-active\)\), 680px\)/s);
 assert.match(css, /\.bb-details--file \.bb-details-tool-host\.is-idle/);
 assert.match(css, /\.bb-details-tool-host/);
 

@@ -52,6 +52,12 @@
   --shadow-popover: 0 12px 30px rgba(16, 24, 40, .14);
   --shadow-sm: 0 1px 3px rgba(16, 24, 40, .12);
 
+  /* Render the complete application at the same visual density as Chrome at
+     80%, including object previews. JavaScript positioning helpers read the
+     active value so fixed popovers remain anchored to their triggers. */
+  --browser-ui-scale: .8;
+  --browser-ui-scale-active: 1;
+
   /* Shared aliases used by the existing interface layers. */
   --primary-color: var(--color-primary);
   --page-bg: var(--color-bg-page);
@@ -66,4 +72,19 @@
   --bb-text: var(--color-text);
   --bb-muted: var(--color-text-muted);
   --bb-bg: var(--color-bg-panel);
+}
+
+
+/* Chrome zoom changes both visual scale and the effective CSS layout width.
+   Applying the same scale to every application page reproduces that density at
+   100% browser zoom. Coordinate-sensitive controls use BB.viewport to convert
+   visual viewport values back into this scaled layout coordinate space. */
+@media screen and (min-width: 768px) {
+  :root {
+    --browser-ui-scale-active: var(--browser-ui-scale);
+  }
+
+  body {
+    zoom: var(--browser-ui-scale-active);
+  }
 }
