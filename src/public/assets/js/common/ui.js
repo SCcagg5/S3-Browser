@@ -16,20 +16,68 @@
     return n;
   };
 
+  let scrollLockDepth = 0;
+  let scrollLockState = null;
+
   function lockScroll(lock) {
-    const b = document.body;
+    const root = document.documentElement;
+    const body = document.body;
+    if (!root || !body) return;
+
     if (lock) {
-      if (!b.classList.contains('bb-no-scroll')) {
-        b.dataset.prevOverflow = b.style.overflow || '';
-        b.classList.add('bb-no-scroll');
-        b.style.overflow = 'hidden';
+      scrollLockDepth += 1;
+      if (scrollLockDepth > 1) return;
+
+      const scrollbarWidth = Math.max(0, Number(window.innerWidth || 0) - Number(root.clientWidth || 0));
+      const layoutScrollbarWidth = BB.viewport?.toLayoutPixels
+        ? BB.viewport.toLayoutPixels(scrollbarWidth)
+        : scrollbarWidth;
+      const computedBodyPaddingRight = Number.parseFloat(window.getComputedStyle(body).paddingRight) || 0;
+
+      scrollLockState = {
+        rootOverflow: root.style.overflow || '',
+        bodyOverflow: body.style.overflow || '',
+        rootOverscrollBehavior: root.style.overscrollBehavior || '',
+        bodyOverscrollBehavior: body.style.overscrollBehavior || '',
+        rootScrollbarGutter: root.style.scrollbarGutter || '',
+        bodyScrollbarGutter: body.style.scrollbarGutter || '',
+        bodyPaddingRight: body.style.paddingRight || '',
+        scrollX: Number(window.scrollX || window.pageXOffset || 0),
+        scrollY: Number(window.scrollY || window.pageYOffset || 0)
+      };
+
+      root.classList.add('bb-no-scroll');
+      body.classList.add('bb-no-scroll');
+      root.style.overflow = 'hidden';
+      body.style.overflow = 'hidden';
+      root.style.overscrollBehavior = 'none';
+      body.style.overscrollBehavior = 'none';
+      root.style.scrollbarGutter = 'auto';
+      body.style.scrollbarGutter = 'auto';
+      if (layoutScrollbarWidth > 0) {
+        body.style.paddingRight = `${computedBodyPaddingRight + layoutScrollbarWidth}px`;
       }
-    } else {
-      if (b.classList.contains('bb-no-scroll')) {
-        b.classList.remove('bb-no-scroll');
-        b.style.overflow = b.dataset.prevOverflow || '';
-        delete b.dataset.prevOverflow;
-      }
+      return;
+    }
+
+    if (scrollLockDepth === 0) return;
+    scrollLockDepth -= 1;
+    if (scrollLockDepth > 0) return;
+
+    const previous = scrollLockState;
+    scrollLockState = null;
+    root.classList.remove('bb-no-scroll');
+    body.classList.remove('bb-no-scroll');
+    root.style.overflow = previous?.rootOverflow || '';
+    body.style.overflow = previous?.bodyOverflow || '';
+    root.style.overscrollBehavior = previous?.rootOverscrollBehavior || '';
+    body.style.overscrollBehavior = previous?.bodyOverscrollBehavior || '';
+    root.style.scrollbarGutter = previous?.rootScrollbarGutter || '';
+    body.style.scrollbarGutter = previous?.bodyScrollbarGutter || '';
+    body.style.paddingRight = previous?.bodyPaddingRight || '';
+
+    if (previous && typeof window.scrollTo === 'function') {
+      window.scrollTo(previous.scrollX, previous.scrollY);
     }
   }
 
@@ -103,6 +151,8 @@
   }
 
   function cleanup(overlay) {
+    if (overlay.dataset.bbClosing === 'true') return;
+    overlay.dataset.bbClosing = 'true';
     overlay.classList.remove('is-open');
     setTimeout(() => {
       if (overlay.parentNode) overlay.parentNode.removeChild(overlay);

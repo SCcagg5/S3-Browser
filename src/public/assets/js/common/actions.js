@@ -236,65 +236,155 @@
     return `<div class="kv-row"><div class="kv-k">${escapeHTML(label)}</div><div class="kv-v${mono ? ' mono' : ''}">${escapeHTML(value)}</div></div>`;
   }
 
-  function detailsToolStatus(host, message, state = 'idle') {
-    if (!host) return;
-    host.classList.toggle('is-idle', state === 'idle');
-    host.classList.toggle('is-loading', state === 'loading');
-    host.classList.toggle('is-error', state === 'error');
-    host.classList.toggle('has-result', false);
-    host.innerHTML = `<div class="bb-details-tool-status is-${escapeHTML(state)}"><i class="mdi mdi-${state === 'loading' ? 'loading mdi-spin' : (state === 'error' ? 'alert-circle-outline' : 'information-outline')}"></i><span>${escapeHTML(message)}</span></div>`;
+  function detailsToolState(card, statusHost, resultHost, state, message, title = '') {
+    if (!card || !statusHost) return;
+    const normalized = ['idle', 'loading', 'success', 'warning', 'error'].includes(state) ? state : 'idle';
+    card.classList.remove('is-idle', 'is-loading', 'is-success', 'is-warning', 'is-error');
+    card.classList.add(`is-${normalized}`);
+    card.setAttribute('aria-busy', normalized === 'loading' ? 'true' : 'false');
+    statusHost.hidden = false;
+    statusHost.classList.remove('is-idle', 'is-loading', 'is-success', 'is-warning', 'is-error');
+    statusHost.classList.add(`is-${normalized}`);
+    const icon = normalized === 'loading'
+      ? 'loading mdi-spin'
+      : (normalized === 'success'
+        ? 'check-circle-outline'
+        : (normalized === 'warning'
+          ? 'alert-circle-outline'
+          : (normalized === 'error' ? 'close-circle-outline' : 'information-outline')));
+    statusHost.innerHTML = `<i class="mdi mdi-${icon}"></i><div><strong>${escapeHTML(title || message)}</strong>${title && message ? `<span>${escapeHTML(message)}</span>` : ''}</div>`;
+    if (resultHost) {
+      resultHost.classList.toggle('is-previous', normalized === 'loading' && !resultHost.hidden && resultHost.innerHTML.trim() !== '');
+    }
   }
 
-  async function renderDetailsIntegrity(key, version, instance, host, button) {
-    if (!host || !button || button.disabled) return;
-    button.disabled = true;
-    const original = button.innerHTML;
-    button.innerHTML = '<i class="mdi mdi-loading mdi-spin"></i><span>Verifying…</span>';
-    detailsToolStatus(host, 'Reading the complete object and calculating checksums…', 'loading');
+  function detailsToolComplete(card, statusHost, resultHost, state, title, message, html) {
+    if (!card?.isConnected || !statusHost?.isConnected || !resultHost?.isConnected) return false;
+    detailsToolState(card, statusHost, resultHost, state, message, title);
+    resultHost.hidden = false;
+    resultHost.classList.remove('is-previous');
+    resultHost.innerHTML = html;
+    return true;
+  }
+
+  function detailsToolButton(button, state, label) {
+    if (!button?.isConnected) return;
+    button.disabled = state === 'loading';
+    const icon = state === 'loading' ? 'loading mdi-spin' : (state === 'idle' ? 'play' : 'refresh');
+    button.innerHTML = `<i class="mdi mdi-${icon}"></i><span>${escapeHTML(label)}</span>`;
+  }
+
+  async function copyDetailsResult(value, button) {
+    const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+    if (!window.navigator?.clipboard?.writeText) {
+      ui().toast('Clipboard access is unavailable in this browser.', { status: 'error', duration: 2200 });
+      return;
+    }
+    try {
+      await window.navigator.clipboard.writeText(text);
+      if (button?.isConnected) {
+        const original = button.innerHTML;
+        button.innerHTML = '<i class="mdi mdi-check"></i><span>Copied</span>';
+        window.setTimeout(() => { if (button.isConnected) button.innerHTML = original; }, 1200);
+      }
+    } catch (error) {
+      ui().toast(String(error?.message || error || 'Unable to copy the result.'), { status: 'error', duration: 2500 });
+    }
+  }
+
+  function integrityStatus(entry) {
+    const comparisons = Object.entries(entry?.matches || {});
+    const mismatches = comparisons.filter(([, matched]) => matched !== true);
+    if (mismatches.length) {
+      return {
+        state: 'error',
+        title: 'Integrity mismatch',
+        message: `${mismatches.length.toLocaleString()} provider comparison${mismatches.length === 1 ? '' : 's'} did not match.`,
+        comparison: 'Mismatch'
+      };
+    }
+    if (comparisons.length) {
+      return {
+        state: 'success',
+        title: 'Integrity verified',
+        message: `${comparisons.length.toLocaleString()} provider comparison${comparisons.length === 1 ? '' : 's'} matched.`,
+        comparison: 'Verified'
+      };
+    }
+    return {
+      state: 'success',
+      title: 'Checksums calculated',
+      message: 'No comparable provider checksum was exposed for this object.',
+      comparison: 'Not available'
+    };
+  }
+
+  async function renderDetailsIntegrity(key, version, instance, card, button, statusHost, resultHost) {
+    if (!card || !button || !statusHost || !resultHost || button.disabled) return;
+    detailsToolButton(button, 'loading', 'Verifying…');
+    detailsToolState(card, statusHost, resultHost, 'loading', 'Reading the complete object and calculating checksums…', 'Verifying integrity');
     try {
       const created = await BB.api.integrity({ key, version, instance });
       const completed = await resolveAnalysis(created, 'Verifying integrity');
       const entry = completed.integrity?.entries?.[0];
       if (!entry) throw new Error('Integrity result is missing.');
-      const providerRows = Object.entries(entry.providerChecksums || {}).map(([name, value]) => metadataRow(`Provider ${name.toUpperCase()}`, value)).join('');
-      const matchRows = Object.entries(entry.matches || {}).map(([name, value]) => metadataRow(`${name} match`, value ? 'Yes' : 'No')).join('');
-      if (!host.isConnected) return;
-      host.classList.remove('is-idle', 'is-loading', 'is-error');
-      host.classList.add('has-result');
-      host.innerHTML = `<section class="bb-details-section bb-details-tool-result-section"><div class="bb-details-section-title"><i class="mdi mdi-shield-key-outline"></i> Integrity verification</div><div class="bb-kv">${metadataRow('SHA-256', entry.sha256)}${metadataRow('MD5', entry.md5)}${metadataRow('CRC32', entry.crc32)}${metadataRow('CRC32C', entry.crc32c)}${providerRows}${matchRows}</div></section>`;
+      const providerRows = Object.entries(entry.providerChecksums || {}).map(([name, value]) => metadataRow(`Provider ${name.toUpperCase()}`, value, true)).join('');
+      const matchRows = Object.entries(entry.matches || {}).map(([name, value]) => metadataRow(`${name} comparison`, value ? 'Matched' : 'Mismatch')).join('');
+      const status = integrityStatus(entry);
+      const result = {
+        object: { instance, key, version: version || entry.version || '' },
+        checkedAt: new Date().toISOString(),
+        status: status.title,
+        integrity: entry
+      };
+      const html = `<section class="bb-details-section bb-details-tool-result-section"><div class="bb-details-section-title"><i class="mdi mdi-shield-key-outline"></i> Result</div><div class="bb-kv">${metadataRow('Provider comparison', status.comparison)}${metadataRow('SHA-256', entry.sha256, true)}${metadataRow('MD5', entry.md5, true)}${metadataRow('CRC32', entry.crc32, true)}${metadataRow('CRC32C', entry.crc32c, true)}${providerRows}${matchRows}${metadataRow('Checked', new Date(result.checkedAt).toLocaleString())}</div></section><div class="bb-details-tool-footer"><button type="button" class="bb-btn" data-details-integrity-copy><i class="mdi mdi-content-copy"></i><span>Copy results</span></button><button type="button" class="bb-btn" data-details-integrity-json><i class="mdi mdi-download"></i><span>Download JSON</span></button><button type="button" class="bb-btn" data-details-integrity-rerun><i class="mdi mdi-refresh"></i><span>Run again</span></button></div>`;
+      if (!detailsToolComplete(card, statusHost, resultHost, status.state, status.title, status.message, html)) return;
+      resultHost.querySelector('[data-details-integrity-copy]')?.addEventListener('click', event => { void copyDetailsResult(result, event.currentTarget); });
+      resultHost.querySelector('[data-details-integrity-json]')?.addEventListener('click', () => downloadJSON(result, 'integrity-verification.json'));
+      resultHost.querySelector('[data-details-integrity-rerun]')?.addEventListener('click', () => button.click());
+      detailsToolButton(button, 'complete', 'Run again');
     } catch (error) {
-      if (host.isConnected) detailsToolStatus(host, String(error?.message || error), 'error');
-    } finally {
-      if (button.isConnected) {
-        button.disabled = false;
-        button.innerHTML = original;
+      if (card.isConnected) {
+        detailsToolState(card, statusHost, resultHost, 'error', String(error?.message || error), 'Integrity check failed');
+        detailsToolButton(button, 'complete', 'Try again');
       }
     }
   }
 
-  async function renderDetailsInspection(key, version, instance, host, button) {
-    if (!host || !button || button.disabled) return;
-    button.disabled = true;
-    const original = button.innerHTML;
-    button.innerHTML = '<i class="mdi mdi-loading mdi-spin"></i><span>Inspecting…</span>';
-    detailsToolStatus(host, 'Reading bounded header and footer probes…', 'loading');
+  function normalizedMime(value) {
+    return String(value || '').split(';', 1)[0].trim().toLowerCase();
+  }
+
+  async function renderDetailsInspection(key, version, instance, card, button, statusHost, resultHost) {
+    if (!card || !button || !statusHost || !resultHost || button.disabled) return;
+    detailsToolButton(button, 'loading', 'Inspecting…');
+    detailsToolState(card, statusHost, resultHost, 'loading', 'Reading bounded header and footer probes…', 'Inspecting file');
     try {
       const result = await BB.api.inspect(key, { version, instance });
       const headers = Object.entries(result.headers || {}).sort(([a], [b]) => a.localeCompare(b)).map(([name, value]) => metadataRow(name, value)).join('');
       const structure = Object.entries(result.structure || {}).map(([name, value]) => metadataRow(name, value)).join('');
-      const probes = (result.probes || []).map(probe => `<section class="bb-details-section"><div class="bb-details-section-title">${escapeHTML(probe.name)} · ${escapeHTML(probe.range)}</div><pre class="technical-probe">${escapeHTML(probe.hex)}
-${escapeHTML(probe.ascii)}</pre></section>`).join('');
-      if (!host.isConnected) return;
-      host.classList.remove('is-idle', 'is-loading', 'is-error');
-      host.classList.add('has-result');
-      host.innerHTML = `<section class="bb-details-section bb-details-tool-result-section"><div class="bb-details-section-title"><i class="mdi mdi-file-search-outline"></i> Technical inspection</div><div class="bb-kv">${metadataRow('Detected type', result.detectedKind)}${metadataRow('Detected MIME', result.detectedMime)}${metadataRow('Declared MIME', result.declaredMime)}${metadataRow('Size', formatBytes(result.size))}${metadataRow('Storage requests', result.resources?.storageRequests)}${metadataRow('Bytes read', formatBytes(result.resources?.storageBytes || 0))}</div></section>${structure ? `<section class="bb-details-section"><div class="bb-details-section-title">Structure</div><div class="bb-kv">${structure}</div></section>` : ''}${headers ? `<section class="bb-details-section"><div class="bb-details-section-title">Provider headers</div><div class="bb-kv">${headers}</div></section>` : ''}${probes}<div class="bb-details-tool-footer"><button type="button" class="bb-btn" data-details-inspection-json><i class="mdi mdi-download"></i><span>Download JSON</span></button></div>`;
-      host.querySelector('[data-details-inspection-json]')?.addEventListener('click', () => downloadJSON(result, 'technical-inspection.json'));
+      const probes = (result.probes || []).map(probe => `<section class="bb-details-technical-section"><div class="bb-details-section-title">${escapeHTML(probe.name)} · ${escapeHTML(probe.range)}</div><pre class="technical-probe">${escapeHTML(probe.hex)}\n${escapeHTML(probe.ascii)}</pre></section>`).join('');
+      const declaredMime = normalizedMime(result.declaredMime);
+      const detectedMime = normalizedMime(result.detectedMime);
+      const mismatch = Boolean(declaredMime && detectedMime && declaredMime !== detectedMime);
+      const state = mismatch ? 'warning' : 'success';
+      const title = mismatch ? 'Inspection complete with warnings' : 'Inspection complete';
+      const message = mismatch ? 'The declared and detected MIME types differ.' : 'The bounded technical inspection completed successfully.';
+      const summary = `<section class="bb-details-section bb-details-tool-result-section"><div class="bb-details-section-title"><i class="mdi mdi-file-search-outline"></i> Summary</div><div class="bb-kv">${metadataRow('Detected type', result.detectedKind)}${metadataRow('Detected MIME', result.detectedMime)}${metadataRow('Declared MIME', result.declaredMime)}${metadataRow('Consistency', mismatch ? 'MIME mismatch' : 'Consistent')}${metadataRow('Size', formatBytes(result.size))}${metadataRow('Storage requests', result.resources?.storageRequests)}${metadataRow('Bytes read', formatBytes(result.resources?.storageBytes || 0))}</div></section>`;
+      const structureSection = structure ? `<section class="bb-details-section"><div class="bb-details-section-title"><i class="mdi mdi-file-outline"></i> Structure</div><div class="bb-kv">${structure}</div></section>` : '';
+      const technical = headers || probes
+        ? `<details class="bb-details-technical"><summary class="has-bb-chevron"><i class="mdi mdi-file-code-outline"></i><span>Technical details</span></summary><div class="bb-details-technical-body">${headers ? `<section class="bb-details-technical-section"><div class="bb-details-section-title">Provider headers</div><div class="bb-kv">${headers}</div></section>` : ''}${probes}</div></details>`
+        : '';
+      const html = `${summary}${structureSection}${technical}<div class="bb-details-tool-footer"><button type="button" class="bb-btn" data-details-inspection-copy><i class="mdi mdi-content-copy"></i><span>Copy results</span></button><button type="button" class="bb-btn" data-details-inspection-json><i class="mdi mdi-download"></i><span>Download JSON</span></button><button type="button" class="bb-btn" data-details-inspection-rerun><i class="mdi mdi-refresh"></i><span>Inspect again</span></button></div>`;
+      if (!detailsToolComplete(card, statusHost, resultHost, state, title, message, html)) return;
+      resultHost.querySelector('[data-details-inspection-copy]')?.addEventListener('click', event => { void copyDetailsResult(result, event.currentTarget); });
+      resultHost.querySelector('[data-details-inspection-json]')?.addEventListener('click', () => downloadJSON(result, 'technical-inspection.json'));
+      resultHost.querySelector('[data-details-inspection-rerun]')?.addEventListener('click', () => button.click());
+      detailsToolButton(button, 'complete', 'Inspect again');
     } catch (error) {
-      if (host.isConnected) detailsToolStatus(host, String(error?.message || error), 'error');
-    } finally {
-      if (button.isConnected) {
-        button.disabled = false;
-        button.innerHTML = original;
+      if (card.isConnected) {
+        detailsToolState(card, statusHost, resultHost, 'error', String(error?.message || error), 'Inspection failed');
+        detailsToolButton(button, 'complete', 'Try again');
       }
     }
   }
@@ -409,7 +499,18 @@ ${escapeHTML(probe.ascii)}</pre></section>`).join('');
         ? `<section class="bb-details-section bb-details-count-section"><div class="bb-details-section-title"><i class="mdi mdi-${escapeHTML(countAction.icon)}"></i> Document dimensions</div><div class="bb-details-count-result" data-document-count-result><span>Not calculated. This operation reads the complete document.</span></div><button type="button" class="bb-btn bb-details-count-button" data-document-count>${escapeHTML(countAction.label)}</button></section>`
         : '';
       const overviewSections = `${storageSection}${customSection}${fileSection}${countSection}`;
-      const advancedPanel = `<section class="bb-details-advanced"><div class="bb-details-tool-actions"><button type="button" class="bb-btn" data-details-integrity><i class="mdi mdi-shield-key-outline"></i><span>Verify integrity</span></button><button type="button" class="bb-btn" data-details-inspect><i class="mdi mdi-file-search-outline"></i><span>Inspect</span></button></div><div class="bb-details-tool-host is-idle" data-details-tool-host><div class="bb-details-tool-status is-idle"><i class="mdi mdi-information-outline"></i><span>Select a tool to start an explicit analysis.</span></div></div></section>`;
+      const advancedPanel = `<section class="bb-details-advanced">
+        <article class="bb-details-tool-card is-idle" data-details-tool-card="integrity" aria-busy="false">
+          <div class="bb-details-tool-card-head"><div class="bb-details-tool-heading"><span class="bb-details-tool-icon"><i class="mdi mdi-shield-key-outline"></i></span><div><strong>Verify integrity</strong><span>Calculate checksums for the complete object and compare them with values exposed by the provider.</span></div></div><button type="button" class="bb-btn bb-details-tool-run" data-details-integrity><i class="mdi mdi-play"></i><span>Run check</span></button></div>
+          <div class="bb-details-tool-status is-idle" data-details-integrity-status hidden></div>
+          <div class="bb-details-tool-result" data-details-integrity-result hidden></div>
+        </article>
+        <article class="bb-details-tool-card is-idle" data-details-tool-card="inspection" aria-busy="false">
+          <div class="bb-details-tool-card-head"><div class="bb-details-tool-heading"><span class="bb-details-tool-icon"><i class="mdi mdi-file-search-outline"></i></span><div><strong>Inspect file</strong><span>Read bounded byte ranges to identify the format, structure, provider headers and technical probes.</span></div></div><button type="button" class="bb-btn bb-details-tool-run" data-details-inspect><i class="mdi mdi-play"></i><span>Inspect</span></button></div>
+          <div class="bb-details-tool-status is-idle" data-details-inspection-status hidden></div>
+          <div class="bb-details-tool-result" data-details-inspection-result hidden></div>
+        </article>
+      </section>`;
       const icon = BB.detect.iconForType(type);
 
       const availableVersions = objectVersions
@@ -466,14 +567,19 @@ ${escapeHTML(probe.ascii)}</pre></section>`).join('');
           };
           tabs.forEach(tab => tab.addEventListener('click', () => activateDetailsTab(tab.dataset.detailsTab)));
 
-          const toolHost = overlay.querySelector('[data-details-tool-host]');
+          const integrityCard = overlay.querySelector('[data-details-tool-card="integrity"]');
           const integrityButton = overlay.querySelector('[data-details-integrity]');
+          const integrityStatusHost = overlay.querySelector('[data-details-integrity-status]');
+          const integrityResultHost = overlay.querySelector('[data-details-integrity-result]');
+          const inspectionCard = overlay.querySelector('[data-details-tool-card="inspection"]');
           const inspectButton = overlay.querySelector('[data-details-inspect]');
+          const inspectionStatusHost = overlay.querySelector('[data-details-inspection-status]');
+          const inspectionResultHost = overlay.querySelector('[data-details-inspection-result]');
           integrityButton?.addEventListener('click', () => {
-            void renderDetailsIntegrity(key, selectedVersion, selectedInstance, toolHost, integrityButton);
+            void renderDetailsIntegrity(key, selectedVersion, selectedInstance, integrityCard, integrityButton, integrityStatusHost, integrityResultHost);
           });
           inspectButton?.addEventListener('click', () => {
-            void renderDetailsInspection(key, selectedVersion, selectedInstance, toolHost, inspectButton);
+            void renderDetailsInspection(key, selectedVersion, selectedInstance, inspectionCard, inspectButton, inspectionStatusHost, inspectionResultHost);
           });
 
           const versionSelect = overlay.querySelector('[data-details-version]');
@@ -988,7 +1094,11 @@ ${escapeHTML(probe.ascii)}</pre></section>`).join('');
               <div class="folder-treemap-tooltip" data-treemap-tooltip role="status" hidden><strong></strong><span></span></div>
             </section>
           </div>
-        </div>`
+        </div>`,
+        onOpen: ({ overlay, modal }) => {
+          overlay?.classList.add('bb-overlay--top-anchored');
+          modal?.classList.add('bb-modal--wide', 'bb-modal--insights');
+        }
       });
 
       let resizeObserver = null;
@@ -997,7 +1107,7 @@ ${escapeHTML(probe.ascii)}</pre></section>`).join('');
         const root = document.getElementById(insightID);
         if (!root) return;
         const modal = root.closest('.bb-modal');
-        modal?.classList.add('bb-modal--wide');
+        modal?.classList.add('bb-modal--wide', 'bb-modal--insights');
         const map = root.querySelector('.folder-treemap');
         const treemapPanel = root.querySelector('[data-insights-panel="treemap"]');
         const treemapTooltip = root.querySelector('[data-treemap-tooltip]');

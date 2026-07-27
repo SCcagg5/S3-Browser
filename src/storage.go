@@ -450,6 +450,7 @@ func (s *storageInstance) operationCapabilities() map[string]capabilityState {
 func (s *storageInstance) publicInfo() instanceInfo {
 	return instanceInfo{
 		ID:                  s.cfg.ID,
+		Host:                s.cfg.AuthID,
 		Name:                s.cfg.Name,
 		Provider:            s.cfg.Provider,
 		Bucket:              s.cfg.Bucket,
@@ -463,6 +464,7 @@ func (s *storageInstance) publicInfo() instanceInfo {
 
 type instanceInfo struct {
 	ID                  string                     `json:"id"`
+	Host                string                     `json:"host"`
 	Name                string                     `json:"name"`
 	Provider            string                     `json:"provider"`
 	Bucket              string                     `json:"bucket"`

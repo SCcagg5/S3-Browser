@@ -8,6 +8,18 @@
   <link rel="icon" type="image/svg+xml" href="favicon.svg?v=2" />
   <title>Object Storage Browser</title>
 
+  <!-- Keep the first visible header frame stable on hard reloads. -->
+  <link rel="preload" as="image" type="image/svg+xml" href="assets/icons/mdi/source-commit.svg" fetchpriority="high" data-bb-initial-icon />
+  <link rel="preload" as="image" type="image/svg+xml" href="assets/icons/mdi/database-outline.svg" fetchpriority="high" data-bb-initial-icon />
+  <link rel="preload" as="image" type="image/svg+xml" href="assets/icons/mdi/eye-outline.svg" fetchpriority="high" data-bb-initial-icon />
+  <link rel="preload" as="image" type="image/svg+xml" href="assets/icons/mdi/pencil-outline.svg" fetchpriority="high" data-bb-initial-icon />
+  <link rel="preload" as="image" type="image/svg+xml" href="assets/icons/mdi/delete-outline.svg" fetchpriority="high" data-bb-initial-icon />
+  <link rel="preload" as="image" type="image/svg+xml" href="assets/icons/mdi/magnify.svg" fetchpriority="high" data-bb-initial-icon />
+  <link rel="preload" as="image" type="image/svg+xml" href="assets/icons/mdi/refresh.svg" fetchpriority="high" data-bb-initial-icon />
+  <link rel="preload" as="image" type="image/svg+xml" href="assets/icons/mdi/cogs.svg" fetchpriority="high" data-bb-initial-icon />
+  <link rel="preload" as="image" type="image/svg+xml" href="assets/icons/mdi/plus.svg" fetchpriority="high" data-bb-initial-icon />
+  <link rel="preload" as="image" type="image/svg+xml" href="assets/icons/mdi/chevron-down.svg" fetchpriority="high" data-bb-initial-icon />
+
   <link rel="stylesheet" href="assets/css/icons.css" />
   <link rel="stylesheet" href="assets/vendor/github-markdown-css/5/github-markdown-light.min.css" />
   <link rel="stylesheet" href="assets/vendor/highlightjs/11/styles/github.min.css" />
@@ -37,12 +49,17 @@
         <div class="container">
           <div class="head">
             <div ref="breadcrumbRegion" class="title breadcrumbs browser-breadcrumbs">
-              <button v-if="breadcrumbs.length" type="button" class="root-link" title="Storage root" @click="goToPrefix('')">
+              <button
+                type="button"
+                class="root-link"
+                :class="{ 'breadcrumb-current': !breadcrumbs.length }"
+                :aria-current="breadcrumbs.length ? null : 'page'"
+                :aria-disabled="breadcrumbs.length ? 'false' : 'true'"
+                :tabindex="breadcrumbs.length ? 0 : -1"
+                title="Storage root"
+                @click="breadcrumbs.length && goToPrefix('')">
                 <i class="mdi mdi-database-outline"></i>
               </button>
-              <span v-else class="root-link breadcrumb-current" aria-current="page" title="Storage root">
-                <i class="mdi mdi-database-outline"></i>
-              </span>
               <h1 ref="breadcrumbLine" class="breadcrumb-line">
                 <span class="breadcrumb-separator">/</span>
 
@@ -104,57 +121,35 @@
               </h1>
             </div>
 
-            <div v-if="currentInstance" class="header-tools">
-              <b-dropdown
-                v-if="instances.length > 1"
+            <div class="header-tools">
+              <div
+                v-if="currentInstance && instances.length > 1"
+                ref="storageSwitcher"
                 class="storage-switcher"
-                position="is-bottom-left"
-                :mobile-modal="false"
-                aria-role="list">
-                <template #trigger>
-                  <button type="button" class="storage-switcher-trigger has-bb-chevron" aria-haspopup="listbox" :title="permissionSummaryTitle">
-                    <i class="mdi mdi-database-outline storage-switcher-icon"></i>
-                    <span class="storage-switcher-copy">
-                      <span class="storage-switcher-title-row">
-                        <strong>{{ currentInstance.name }}</strong>
+                :class="['storage-tree-switcher', { 'is-open': storageSwitcherOpen }]">
+                <button
+                  ref="storageSwitcherTrigger"
+                  type="button"
+                  class="storage-switcher-trigger has-bb-chevron"
+                  aria-haspopup="menu"
+                  :aria-expanded="storageSwitcherOpen ? 'true' : 'false'"
+                  :title="`${currentInstance.host} / ${currentInstance.id}. ${permissionSummaryTitle}`"
+                  @click.stop="toggleStorageSwitcher">
+                  <i class="mdi mdi-database-outline storage-switcher-icon"></i>
+                  <span class="storage-switcher-copy">
+                    <span class="storage-switcher-title-row">
+                      <strong>{{ currentInstance.host }} / {{ currentInstance.id }}</strong>
+                      <span
+                        class="storage-switcher-permissions is-interactive"
+                        role="button"
+                        tabindex="0"
+                        aria-label="Open storage permission details"
+                        :title="`${permissionSummaryTitle}. Open details.`"
+                        @click.stop="showPermissionDetails"
+                        @keydown.enter.stop.prevent="showPermissionDetails"
+                        @keydown.space.stop.prevent="showPermissionDetails">
                         <span
-                          class="storage-switcher-permissions is-interactive"
-                          role="button"
-                          tabindex="0"
-                          aria-label="Open storage permission details"
-                          :title="`${permissionSummaryTitle}. Open details.`"
-                          @click.stop="showPermissionDetails"
-                          @keydown.enter.stop.prevent="showPermissionDetails"
-                          @keydown.space.stop.prevent="showPermissionDetails">
-                          <span
-                            v-for="item in permissionStates"
-                            :key="item.key"
-                            class="storage-permission-dot"
-                            :class="capabilityClass(item.state)"
-                            :title="`${item.label}: ${capabilityLabel(item.state)}`">
-                            <i class="mdi" :class="`mdi-${item.icon}`"></i>
-                          </span>
-                        </span>
-                      </span>
-                      <small>{{ currentInstance.bucket }} · {{ currentInstance.provider.toUpperCase() }}</small>
-                    </span>
-                  </button>
-                </template>
-
-                <b-dropdown-item
-                  v-for="instance in otherInstances"
-                  :key="instance.id"
-                  aria-role="listitem"
-                  @click="selectInstance(instance.id)">
-                  <span class="storage-option-icon">
-                    <i class="mdi mdi-database-outline"></i>
-                  </span>
-                  <span class="storage-option-copy">
-                    <span class="storage-option-title-row">
-                      <strong>{{ instance.name }}</strong>
-                      <span class="storage-option-permissions" :aria-label="`${instance.name} permissions`">
-                        <span
-                          v-for="item in permissionStatesFor(instance)"
+                          v-for="item in permissionStates"
                           :key="item.key"
                           class="storage-permission-dot"
                           :class="capabilityClass(item.state)"
@@ -163,17 +158,81 @@
                         </span>
                       </span>
                     </span>
-                    <small>{{ instance.bucket }}<span v-if="instance.rootPrefix"> / {{ instance.rootPrefix }}</span> · {{ instance.provider.toUpperCase() }}</small>
+                    <small>{{ currentInstance.bucket }}<span v-if="currentInstance.name !== currentInstance.bucket"> · {{ currentInstance.name }}</span> · {{ currentInstance.provider.toUpperCase() }}</small>
                   </span>
-                </b-dropdown-item>
-              </b-dropdown>
+                </button>
 
-              <div v-else class="storage-switcher is-static-switcher">
+                <div
+                  v-show="storageSwitcherOpen"
+                  ref="storageSwitcherPopover"
+                  class="storage-tree-popover"
+                  role="menu"
+                  aria-label="Storage hosts and buckets"
+                  @click.stop>
+                  <section
+                    v-for="host in storageHosts"
+                    :key="host.id"
+                    class="storage-host-group"
+                    :class="{ 'is-current-host': host.id === currentInstance.host }">
+                    <button
+                      type="button"
+                      class="storage-host-row"
+                      :aria-expanded="isHostExpanded(host.id) ? 'true' : 'false'"
+                      @click.stop="toggleHost(host.id)">
+                      <span class="storage-host-chevron" :class="{ 'is-expanded': isHostExpanded(host.id) }" aria-hidden="true">
+                        <i class="mdi mdi-chevron-right"></i>
+                      </span>
+                      <span class="storage-host-icon"><i class="mdi mdi-database-outline"></i></span>
+                      <span class="storage-host-copy">
+                        <strong>{{ host.id }}</strong>
+                        <small>{{ host.provider.toUpperCase() }} · {{ host.instances.length }} bucket{{ host.instances.length === 1 ? '' : 's' }}</small>
+                      </span>
+                    </button>
+
+                    <div v-show="isHostExpanded(host.id)" class="storage-bucket-list" role="group" :aria-label="`${host.id} buckets`">
+                      <button
+                        v-for="instance in host.instances"
+                        :key="instance.id"
+                        type="button"
+                        class="storage-bucket-row"
+                        :class="{ 'is-current-storage': instance.id === instanceId }"
+                        role="menuitemradio"
+                        :aria-checked="instance.id === instanceId ? 'true' : 'false'"
+                        @click="selectInstance(instance.id)">
+                        <span class="storage-option-icon"><i class="mdi mdi-folder"></i></span>
+                        <span class="storage-option-copy">
+                          <span class="storage-option-title-row">
+                            <strong>{{ instance.id }}</strong>
+                            <span class="storage-option-permissions" :aria-label="`${instance.name} permissions`">
+                              <span
+                                v-for="item in permissionStatesFor(instance)"
+                                :key="item.key"
+                                class="storage-permission-dot"
+                                :class="capabilityClass(item.state)"
+                                :title="`${item.label}: ${capabilityLabel(item.state)}`">
+                                <i class="mdi" :class="`mdi-${item.icon}`"></i>
+                              </span>
+                            </span>
+                          </span>
+                          <small>
+                            {{ instance.bucket }}<span v-if="instance.name !== instance.bucket"> · {{ instance.name }}</span><span v-if="instance.rootPrefix"> · /{{ instance.rootPrefix }}</span>
+                          </small>
+                        </span>
+                        <span class="storage-option-check" aria-hidden="true">
+                          <i v-if="instance.id === instanceId" class="mdi mdi-check"></i>
+                        </span>
+                      </button>
+                    </div>
+                  </section>
+                </div>
+              </div>
+
+              <div v-else-if="currentInstance" class="storage-switcher is-static-switcher">
                 <div class="storage-switcher-trigger is-static" :title="permissionSummaryTitle">
                   <i class="mdi mdi-database-outline storage-switcher-icon"></i>
                   <span class="storage-switcher-copy">
                     <span class="storage-switcher-title-row">
-                      <strong>{{ currentInstance.name }}</strong>
+                      <strong>{{ currentInstance.host }} / {{ currentInstance.id }}</strong>
                       <span
                           class="storage-switcher-permissions is-interactive"
                           role="button"
@@ -193,7 +252,17 @@
                           </span>
                         </span>
                     </span>
-                    <small>{{ currentInstance.bucket }} · {{ currentInstance.provider.toUpperCase() }}</small>
+                    <small>{{ currentInstance.bucket }}<span v-if="currentInstance.name !== currentInstance.bucket"> · {{ currentInstance.name }}</span> · {{ currentInstance.provider.toUpperCase() }}</small>
+                  </span>
+                </div>
+              </div>
+
+              <div v-else class="storage-switcher is-static-switcher is-loading-switcher" aria-hidden="true">
+                <div class="storage-switcher-trigger is-static is-loading">
+                  <span class="storage-switcher-loading-icon"></span>
+                  <span class="storage-switcher-copy">
+                    <span class="storage-switcher-loading-line is-title"></span>
+                    <span class="storage-switcher-loading-line is-subtitle"></span>
                   </span>
                 </div>
               </div>

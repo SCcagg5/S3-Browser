@@ -1390,7 +1390,7 @@
       }
       const route = BB.runtime?.storageRoute?.();
       const requested = route?.view === 'preview'
-        ? route.instance
+        ? instances.find(item => String(item.host || item.id || '') === route.host && item.id === route.bucket)?.id || ''
         : new URLSearchParams(location.search).get('instance');
       currentInstance = instances.find(item => item.id === requested)
         || instances.find(item => item.id === response.default)
@@ -1402,7 +1402,7 @@
       config.capabilities = currentInstance.capabilities || {};
       config.operations = currentInstance.operations || {};
       config.versioningSupported = currentInstance.versioningSupported === true;
-      BB.api.setInstance(currentInstance.id);
+      BB.api.setInstance(currentInstance);
       replacePreviewLocation(currentKey());
       applyCapabilities();
       await configureVersionSelector(currentKey());

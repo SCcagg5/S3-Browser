@@ -1157,36 +1157,139 @@ body.is-viewport-pdf .pdf-custom-stage {
 }
 .bb-details-advanced {
   display: grid;
+  gap: .85rem;
+}
+.bb-details-tool-card {
+  min-width: 0;
+  padding: .9rem;
+  background: #fff;
+  border: 1px solid var(--bb-border, #d7dde5);
+  border-radius: .7rem;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, .04);
+  transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease;
+}
+.bb-details-tool-card.is-loading {
+  border-color: #b9d8ff;
+  box-shadow: 0 0 0 3px rgba(22, 125, 240, .08);
+}
+.bb-details-tool-card.is-success { border-color: #abefc6; }
+.bb-details-tool-card.is-warning { border-color: #fedf89; }
+.bb-details-tool-card.is-error { border-color: #fecdca; }
+.bb-details-tool-card-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  align-items: center;
   gap: .8rem;
 }
-.bb-details-tool-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: .55rem;
-}
-.bb-details-tool-actions .bb-btn {
-  display: inline-flex;
+.bb-details-tool-heading {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 2.35rem minmax(0, 1fr);
   align-items: center;
-  gap: .4rem;
+  gap: .7rem;
 }
-.bb-details-tool-host {
-  min-height: 13rem;
-  padding: .85rem;
-  background: #f8fafc;
-  border: 1px solid var(--bb-border, #d7dde5);
-  border-radius: .55rem;
+.bb-details-tool-heading > div {
+  display: grid;
+  min-width: 0;
+  gap: .18rem;
+}
+.bb-details-tool-heading strong {
+  color: #243244;
+  font-size: .92rem;
+  line-height: 1.3;
+}
+.bb-details-tool-heading span:not(.bb-details-tool-icon) {
+  color: var(--bb-muted, #667085);
+  font-size: .78rem;
+  line-height: 1.42;
+}
+.bb-details-tool-icon {
+  display: inline-flex;
+  width: 2.35rem;
+  height: 2.35rem;
+  align-items: center;
+  justify-content: center;
+  color: #475467;
+  background: #f2f4f7;
+  border-radius: .58rem;
+  font-size: 1.2rem;
+}
+.bb-details-tool-run {
+  display: inline-flex;
+  min-width: 7.8rem;
+  align-items: center;
+  justify-content: center;
+  gap: .4rem;
+  white-space: nowrap;
 }
 .bb-details-tool-status {
   display: flex;
-  min-height: 10rem;
-  align-items: center;
-  justify-content: center;
-  gap: .55rem;
-  color: var(--bb-muted, #667085);
-  text-align: center;
+  min-width: 0;
+  align-items: flex-start;
+  gap: .58rem;
+  margin-top: .75rem;
+  padding: .62rem .7rem;
+  color: #475467;
+  background: #f8fafc;
+  border: 1px solid #e4e7ec;
+  border-radius: .52rem;
+}
+.bb-details-tool-status[hidden] { display: none !important; }
+.bb-details-tool-status > .mdi {
+  flex: 0 0 auto;
+  margin-top: .02rem;
+  font-size: 1.08rem;
+}
+.bb-details-tool-status > div {
+  display: grid;
+  min-width: 0;
+  gap: .08rem;
+}
+.bb-details-tool-status strong {
+  color: currentColor;
+  font-size: .82rem;
+  line-height: 1.35;
+}
+.bb-details-tool-status span {
+  color: inherit;
+  font-size: .76rem;
+  line-height: 1.4;
+  opacity: .88;
+}
+.bb-details-tool-status.is-loading {
+  color: #175cd3;
+  background: #eff8ff;
+  border-color: #b2ddff;
+}
+.bb-details-tool-status.is-success {
+  color: #067647;
+  background: #ecfdf3;
+  border-color: #abefc6;
+}
+.bb-details-tool-status.is-warning {
+  color: #b54708;
+  background: #fffaeb;
+  border-color: #fedf89;
 }
 .bb-details-tool-status.is-error {
   color: #b42318;
+  background: #fef3f2;
+  border-color: #fecdca;
+}
+.bb-details-tool-result {
+  min-width: 0;
+  margin-top: .8rem;
+  padding-top: .78rem;
+  border-top: 1px solid #eaecf0;
+  transition: opacity .15s ease;
+}
+.bb-details-tool-result[hidden] { display: none !important; }
+.bb-details-tool-result.is-previous {
+  opacity: .55;
+  pointer-events: none;
+}
+.bb-details-tool-result .bb-details-section + .bb-details-section {
+  margin-top: .72rem;
 }
 .bb-details-tool-result-section {
   padding-top: 0;
@@ -1194,44 +1297,99 @@ body.is-viewport-pdf .pdf-custom-stage {
 }
 .bb-details-tool-footer {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
-  padding-top: .75rem;
+  gap: .45rem;
+  padding-top: .8rem;
 }
-.bb-details-tool-host .technical-probe {
+.bb-details-tool-footer .bb-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .38rem;
+}
+.bb-details-technical {
+  margin-top: .78rem;
+  background: #fbfcfe;
+  border: 1px solid #e4e7ec;
+  border-radius: .55rem;
+  overflow: hidden;
+}
+.bb-details-technical > summary {
+  display: flex;
+  min-height: 2.7rem;
+  align-items: center;
+  gap: .5rem;
+  padding: .55rem .7rem;
+  color: #344054;
+  font-size: .8rem;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+.bb-details-technical > summary::-webkit-details-marker { display: none; }
+.bb-details-technical > summary:focus-visible {
+  outline: 2px solid rgba(22, 125, 240, .3);
+  outline-offset: -2px;
+}
+.bb-details-technical > summary.has-bb-chevron:after {
+  margin-left: auto !important;
+  color: #667085;
+  transition: transform .15s ease;
+}
+.bb-details-technical[open] > summary.has-bb-chevron:after {
+  transform: rotate(180deg) !important;
+}
+.bb-details-technical-body {
+  display: grid;
+  gap: .8rem;
+  padding: .75rem;
+  border-top: 1px solid #e4e7ec;
+}
+.bb-details-technical-section {
+  display: grid;
+  min-width: 0;
+  gap: .42rem;
+}
+.bb-details-tool-result .technical-probe {
   max-width: 100%;
   max-height: 18rem;
   overflow: auto;
+  scrollbar-gutter: stable;
+}
+@media (max-width: 680px) {
+  .bb-details-tool-card-head { grid-template-columns: 1fr; }
+  .bb-details-tool-run { width: 100%; }
+  .bb-details-tool-footer { justify-content: stretch; }
+  .bb-details-tool-footer .bb-btn { flex: 1 1 10rem; }
 }
 
 /* Final adaptive Details modal contract. The overlay is top-anchored so tab
    changes can resize the dialog without moving its upper edge or flickering. */
 .bb-overlay.bb-overlay--top-anchored {
+  --bb-modal-top-offset: clamp(2rem, calc(15vh / var(--browser-ui-scale-active)), 11rem);
   box-sizing: border-box;
   align-items: flex-start;
-  padding: clamp(1rem, calc(6vh / var(--browser-ui-scale-active)), 3.5rem) 1rem 1rem;
-  overflow: auto;
+  padding: var(--bb-modal-top-offset) 1rem 1rem;
+  overflow: hidden;
+  scrollbar-gutter: auto;
 }
-.bb-overlay--top-anchored .bb-modal.bb-modal--details {
-  max-height: calc(calc(100dvh / var(--browser-ui-scale-active)) - clamp(2rem, calc(12vh / var(--browser-ui-scale-active)), 7rem));
+.bb-overlay--top-anchored .bb-modal.bb-modal--details,
+.bb-overlay--top-anchored .bb-modal.bb-modal--insights {
+  max-height: calc(calc(100dvh / var(--browser-ui-scale-active)) - var(--bb-modal-top-offset) - 1rem);
 }
 .bb-details--file .bb-details-body {
   height: auto;
   min-height: 0;
   max-height: min(calc(68vh / var(--browser-ui-scale-active)), 680px);
   overflow: auto;
+  scrollbar-gutter: stable;
 }
 .bb-details--file .bb-details-panel {
   min-height: 0;
 }
 .bb-details--file .bb-details-advanced {
   gap: .65rem;
-}
-.bb-details--file .bb-details-tool-host {
-  min-height: 0;
-  padding: .65rem;
-}
-.bb-details--file .bb-details-tool-status {
-  min-height: 3.25rem;
 }
 
 /* Last-modified display mode and sorting are independent controls. */
@@ -1241,7 +1399,7 @@ body.is-viewport-pdf .pdf-custom-stage {
   min-width: 0;
   grid-template-columns: 1.5rem minmax(max-content, 1fr);
   align-items: center;
-  gap: .2rem;
+  column-gap: .5rem;
 }
 .modified-header-controls .navigation-sort-button {
   min-width: 0;
@@ -1330,24 +1488,5 @@ body.is-viewport-pdf .pdf-custom-stage {
   appearance: none;
 }
 
-
-/* Final compact Details sizing. The top edge remains anchored while Overview
-   and Advanced grow only when their actual content requires it. */
-.bb-details--file .bb-details-tool-host.is-idle {
-  padding-block: .45rem;
-  background: #fbfcfe;
-}
-.bb-details--file .bb-details-tool-host.is-idle .bb-details-tool-status {
-  min-height: 0;
-  justify-content: flex-start;
-  text-align: left;
-}
-.bb-details--file .bb-details-tool-host.is-loading .bb-details-tool-status,
-.bb-details--file .bb-details-tool-host.is-error .bb-details-tool-status {
-  min-height: 3.25rem;
-}
-.bb-details--file .bb-details-tool-host.has-result {
-  padding: .65rem;
-}
 
 

@@ -36,7 +36,8 @@ function fakeElement(dataset = {}) {
     },
     setAttribute() {},
     addEventListener(name, listener) { listeners.set(name, listener); },
-    emit(name) { return listeners.get(name)?.({ target: this }); },
+    emit(name) { return listeners.get(name)?.({ target: this, currentTarget: this }); },
+    click() { return this.emit('click'); },
     querySelector() { return null; },
     replaceChildren() { this.innerHTML = ''; },
     insertAdjacentHTML(_where, html) { this.innerHTML += html; },
@@ -46,14 +47,30 @@ function fakeElement(dataset = {}) {
 
 const tabs = [fakeElement({ detailsTab: 'overview' }), fakeElement({ detailsTab: 'advanced' })];
 const panels = [fakeElement({ detailsPanel: 'overview' }), fakeElement({ detailsPanel: 'advanced' })];
+const integrityCard = fakeElement({ detailsToolCard: 'integrity' });
 const integrityButton = fakeElement();
+const integrityStatus = fakeElement();
+const integrityResult = fakeElement();
+const inspectionCard = fakeElement({ detailsToolCard: 'inspection' });
 const inspectButton = fakeElement();
-const toolHost = fakeElement();
+const inspectionStatus = fakeElement();
+const inspectionResult = fakeElement();
 const modalClasses = [];
 const overlayClasses = [];
 let alertHTML = '';
 let integrityCalls = 0;
 let inspectCalls = 0;
+
+const bySelector = new Map([
+  ['[data-details-tool-card="integrity"]', integrityCard],
+  ['[data-details-integrity]', integrityButton],
+  ['[data-details-integrity-status]', integrityStatus],
+  ['[data-details-integrity-result]', integrityResult],
+  ['[data-details-tool-card="inspection"]', inspectionCard],
+  ['[data-details-inspect]', inspectButton],
+  ['[data-details-inspection-status]', inspectionStatus],
+  ['[data-details-inspection-result]', inspectionResult]
+]);
 
 const overlay = {
   classList: { add(value) { overlayClasses.push(value); } },
@@ -62,12 +79,7 @@ const overlay = {
     if (selector === '[data-details-panel]') return panels;
     return [];
   },
-  querySelector(selector) {
-    if (selector === '[data-details-tool-host]') return toolHost;
-    if (selector === '[data-details-integrity]') return integrityButton;
-    if (selector === '[data-details-inspect]') return inspectButton;
-    return null;
-  }
+  querySelector(selector) { return bySelector.get(selector) || null; }
 };
 
 const document = {
@@ -96,14 +108,20 @@ const BB = {
       integrityCalls++;
       return {
         status: 'completed',
-        integrity: { entries: [{ sha256: 'abc', md5: 'def', crc32: '1234', crc32c: '5678', providerChecksums: {}, matches: {} }] }
+        integrity: {
+          entries: [{
+            sha256: 'abc', md5: 'def', crc32: '1234', crc32c: '5678',
+            providerChecksums: { md5: 'def' }, matches: { md5: true }
+          }]
+        }
       };
     },
     async inspect() {
       inspectCalls++;
       return {
         detectedKind: 'binary', detectedMime: 'application/octet-stream', declaredMime: 'application/octet-stream', size: 123,
-        resources: { storageRequests: 2, storageBytes: 64 }, headers: {}, structure: {}, probes: []
+        resources: { storageRequests: 2, storageBytes: 64 }, headers: { etag: 'etag-1' }, structure: { Kind: 'binary' },
+        probes: [{ name: 'Header', range: 'bytes=0-15', hex: '00 01', ascii: '..' }]
       };
     }
   },
@@ -131,7 +149,7 @@ const BB = {
   }
 };
 
-const windowObject = { BB, setTimeout, clearTimeout };
+const windowObject = { BB, setTimeout, clearTimeout, navigator: {} };
 windowObject.window = windowObject;
 const context = vm.createContext({
   window: windowObject,
@@ -150,27 +168,33 @@ vm.runInContext(source, context, { filename: 'src/public/assets/js/common/action
 (async () => {
   assert.equal(await BB.actions.showMetadata('object.bin'), true);
   assert.match(alertHTML, /data-details-tab="advanced"/);
-  assert.match(alertHTML, /data-details-tool-host/);
+  assert.match(alertHTML, /data-details-tool-card="integrity"/);
+  assert.match(alertHTML, /data-details-tool-card="inspection"/);
+  assert.doesNotMatch(alertHTML, /data-details-tool-host/);
   assert.deepEqual(modalClasses, ['bb-modal--details']);
   assert.deepEqual(overlayClasses, ['bb-overlay--top-anchored']);
-  assert.match(alertHTML, /bb-details-tool-host is-idle/);
   assert.equal(integrityCalls, 0, 'integrity must not start while opening Details');
   assert.equal(inspectCalls, 0, 'inspection must not start while opening Details');
 
   integrityButton.emit('click');
   await new Promise(resolve => setTimeout(resolve, 0));
   assert.equal(integrityCalls, 1);
-  assert.match(toolHost.innerHTML, /Integrity verification/);
-  assert.match(toolHost.innerHTML, /SHA-256/);
-  assert.equal(toolHost.classes.has('has-result'), true);
+  assert.match(integrityStatus.innerHTML, /check-circle-outline/);
+  assert.match(integrityStatus.innerHTML, /Integrity verified/);
+  assert.match(integrityResult.innerHTML, /SHA-256/);
+  assert.equal(integrityCard.classes.has('is-success'), true);
+  assert.equal(inspectionResult.innerHTML, '', 'integrity must not populate inspection');
 
+  const integrityHTML = integrityResult.innerHTML;
   inspectButton.emit('click');
   await new Promise(resolve => setTimeout(resolve, 0));
   assert.equal(inspectCalls, 1);
-  assert.match(toolHost.innerHTML, /Technical inspection/);
-  assert.match(toolHost.innerHTML, /Storage requests/);
+  assert.match(inspectionStatus.innerHTML, /Inspection complete/);
+  assert.match(inspectionResult.innerHTML, /Storage requests/);
+  assert.match(inspectionResult.innerHTML, /Technical details/);
+  assert.equal(integrityResult.innerHTML, integrityHTML, 'inspection must preserve integrity output');
 
-  console.log('Details Advanced tab behavior tests passed');
+  console.log('Details Advanced independent tool behavior tests passed');
 })().catch(error => {
   console.error(error);
   process.exitCode = 1;

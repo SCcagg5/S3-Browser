@@ -365,6 +365,8 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
         breadcrumbLayoutFrame: 0,
         breadcrumbOverflowOpen: false,
         breadcrumbPopoverStyle: {},
+        storageSwitcherOpen: false,
+        expandedHosts: {},
         isDragActive: false,
         dragDepth: 0,
         versionCountRequest: 0
@@ -374,7 +376,21 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
     computed: {
       cssVars() { return { '--primary-color': this.config.primaryColor }; },
       currentInstance() { return this.instances.find(instance => instance.id === this.instanceId) || null; },
-      otherInstances() { return this.instances.filter(instance => instance.id !== this.instanceId); },
+      storageHosts() {
+        const hosts = [];
+        const byID = new Map();
+        for (const instance of this.instances) {
+          const id = String(instance.host || instance.id || '');
+          let host = byID.get(id);
+          if (!host) {
+            host = { id, provider: String(instance.provider || ''), instances: [] };
+            byID.set(id, host);
+            hosts.push(host);
+          }
+          host.instances.push(instance);
+        }
+        return hosts;
+      },
       capabilities() { return this.currentInstance?.capabilities || {}; },
       versioningSupported() { return this.currentInstance?.versioningSupported === true; },
       operations() { return this.currentInstance?.operations || {}; },
@@ -461,6 +477,7 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
       },
       instanceId() {
         this.closeBreadcrumbOverflow();
+        this.expandCurrentHost();
         this.$nextTick(() => this.scheduleBreadcrumbLayout());
       }
     },
@@ -491,6 +508,35 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
           { key: 'write', label: 'Write', icon: 'pencil-outline', state: capabilities.write || {} },
           { key: 'delete', label: 'Delete', icon: 'delete-outline', state: capabilities.delete || {} }
         ];
+      },
+
+      toggleStorageSwitcher() {
+        if (this.storageSwitcherOpen) {
+          this.closeStorageSwitcher();
+          return;
+        }
+        this.expandCurrentHost();
+        this.storageSwitcherOpen = true;
+      },
+
+      closeStorageSwitcher() {
+        this.storageSwitcherOpen = false;
+      },
+
+      expandCurrentHost() {
+        const host = String(this.currentInstance?.host || '');
+        if (!host || this.expandedHosts[host] === true) return;
+        this.expandedHosts = { ...this.expandedHosts, [host]: true };
+      },
+
+      isHostExpanded(host) {
+        return this.expandedHosts[String(host || '')] === true;
+      },
+
+      toggleHost(host) {
+        const id = String(host || '');
+        if (!id) return;
+        this.expandedHosts = { ...this.expandedHosts, [id]: !this.isHostExpanded(id) };
       },
 
       toggleBreadcrumbOverflow() {
@@ -540,15 +586,20 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
       },
 
       onBreadcrumbDocumentPointer(event) {
-        if (!this.breadcrumbOverflowOpen) return;
-        const trigger = this.$refs.breadcrumbOverflowTrigger;
-        const popover = this.$refs.breadcrumbOverflowPopover;
-        if (trigger?.contains(event.target) || popover?.contains(event.target)) return;
-        this.closeBreadcrumbOverflow();
+        if (this.storageSwitcherOpen && !this.$refs.storageSwitcher?.contains(event.target)) {
+          this.closeStorageSwitcher();
+        }
+        if (this.breadcrumbOverflowOpen) {
+          const trigger = this.$refs.breadcrumbOverflowTrigger;
+          const popover = this.$refs.breadcrumbOverflowPopover;
+          if (!trigger?.contains(event.target) && !popover?.contains(event.target)) this.closeBreadcrumbOverflow();
+        }
       },
 
       onBreadcrumbDocumentKeydown(event) {
-        if (event.key === 'Escape') this.closeBreadcrumbOverflow();
+        if (event.key !== 'Escape') return;
+        this.closeBreadcrumbOverflow();
+        this.closeStorageSwitcher();
       },
 
       scheduleBreadcrumbLayout() {
@@ -608,12 +659,17 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
         this.isInitializing = true;
         try {
           const response = await BB.api.instances();
-          this.instances = response.instances || [];
+          this.instances = (response.instances || []).map(instance => ({
+            ...instance,
+            host: String(instance.host || instance.id || '')
+          }));
           this.build = response.build || {};
           this.config.runtime = BB.runtime?.configure(response.runtime || {}) || (response.runtime || {});
           this.defaultInstanceId = response.default || this.instances[0]?.id || '';
           const route = BB.runtime?.storageRoute?.();
-          const routeInstance = route?.view === 'browser' ? route.instance : '';
+          const routeInstance = route?.view === 'browser'
+            ? this.instances.find(instance => instance.host === route.host && instance.id === route.bucket)?.id || ''
+            : '';
           const queryInstance = new URLSearchParams(location.search).get('instance');
           const storedInstance = BB.runtime?.readState('object-browser-instance') || '';
           const candidate = [routeInstance, queryInstance, storedInstance, this.defaultInstanceId]
@@ -649,7 +705,7 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
       applyCurrentInstance() {
         const instance = this.currentInstance;
         if (!instance) return;
-        BB.api.setInstance(instance.id);
+        BB.api.setInstance(instance);
         this.config.capabilities = instance.capabilities || {};
         this.config.operations = instance.operations || {};
         this.config.versioningSupported = instance.versioningSupported === true;
@@ -667,7 +723,9 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
       },
 
       async selectInstance(id) {
-        if (!id || id === this.instanceId) return;
+        if (!id) return;
+        this.closeStorageSwitcher();
+        if (id === this.instanceId) return;
         this.instanceId = id;
         await this.changeInstance();
       },
@@ -755,7 +813,7 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
       updatePathFromLocation() {
         const route = BB.runtime?.storageRoute?.();
         if (!route || route.view !== 'browser') return;
-        const instance = this.instances.find(item => item.id === route.instance);
+        const instance = this.instances.find(item => item.host === route.host && item.id === route.bucket);
         if (!instance) return;
         const next = normalizePrefix(route.path);
         const instanceChanged = instance.id !== this.instanceId;
@@ -1229,6 +1287,35 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
     }
   });
 
+  function preloadInitialShellIcons() {
+    if (typeof window.Image !== 'function') return Promise.resolve();
+    const iconURLs = Array.from(
+      document.querySelectorAll('link[data-bb-initial-icon]'),
+      link => link.href
+    ).filter(Boolean);
+    return Promise.all(iconURLs.map(url => new Promise(resolve => {
+      const image = new window.Image();
+      let complete = false;
+      const finish = () => {
+        if (complete) return;
+        complete = true;
+        image.removeEventListener('load', finish);
+        image.removeEventListener('error', finish);
+        resolve();
+      };
+      image.addEventListener('load', finish, { once: true });
+      image.addEventListener('error', finish, { once: true });
+      image.decoding = 'async';
+      image.src = url;
+      if (image.complete) finish();
+    })));
+  }
+
+  function mountBrowser() {
+    app.mount('#root');
+  }
+
   app.use(Buefy.default, { defaultIconPack: 'mdi' });
-  app.mount('#root');
+  const iconWaitLimit = new Promise(resolve => window.setTimeout(resolve, 600));
+  Promise.race([preloadInitialShellIcons(), iconWaitLimit]).then(mountBrowser, mountBrowser);
 })();

@@ -53,7 +53,10 @@ assert.doesNotMatch(actions, /BB\.api\.compare/);
 assert.match(actions, /async function renderDetailsIntegrity\(/);
 assert.match(actions, /async function renderDetailsInspection\(/);
 assert.match(actions, /data-details-tab="advanced"/);
-assert.match(actions, /data-details-tool-host/);
+assert.match(actions, /data-details-tool-card=\"integrity\"/);
+assert.match(actions, /data-details-tool-card=\"inspection\"/);
+assert.match(actions, /data-details-integrity-result/);
+assert.match(actions, /data-details-inspection-result/);
 assert.match(actions, /modal\?\.classList\.add\('bb-modal--details'\)/);
 assert.doesNotMatch(actions, /function verifyIntegrity\(/);
 assert.doesNotMatch(actions, /function inspectObject\(/);
@@ -61,8 +64,9 @@ assert.doesNotMatch(actions, /bb-inspection/);
 assert.match(css, /\.bb-modal\.bb-modal--details\s*\{[^}]*900px/s);
 assert.match(css, /\.bb-overlay\.bb-overlay--top-anchored\s*\{/);
 assert.match(css, /\.bb-details--file \.bb-details-body \{[^}]*height:\s*auto;[^}]*min-height:\s*0;[^}]*max-height:\s*min\(calc\(68vh \/ var\(--browser-ui-scale-active\)\), 680px\)/s);
-assert.match(css, /\.bb-details--file \.bb-details-tool-host\.is-idle/);
-assert.match(css, /\.bb-details-tool-host/);
+assert.match(css, /\.bb-details-tool-card\s*\{/);
+assert.match(css, /\.bb-details-tool-status\.is-success/);
+assert.match(css, /\.bb-details-tool-result\.is-previous/);
 
 // Per-object integrity and inspection are exposed only from Details and start
 // only from their button event handlers.
@@ -78,7 +82,13 @@ assert.match(actions, /integrityButton\?\.addEventListener\('click'/);
 assert.match(actions, /inspectButton\?\.addEventListener\('click'/);
 assert.equal((actions.match(/renderDetailsIntegrity\(/g) || []).length, 2);
 assert.equal((actions.match(/renderDetailsInspection\(/g) || []).length, 2);
-assert.match(actions, /host\.innerHTML = `<section class="bb-details-section bb-details-tool-result-section"/);
+assert.match(actions, /Integrity verified/);
+assert.match(actions, /Checksums calculated/);
+assert.match(actions, /Inspection complete with warnings/);
+assert.match(actions, /data-details-integrity-rerun/);
+assert.match(actions, /data-details-inspection-rerun/);
+assert.match(actions, /bb-overlay--top-anchored/);
+assert.match(actions, /bb-modal--insights/);
 assert.match(css, /\.bb-version-pagination/);
 
 // Indexed ZIP-compatible archives keep selective entry access and extraction.

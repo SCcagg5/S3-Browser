@@ -22,6 +22,7 @@ const dataGridCSS = read('src/public/assets/css/data-grid.css');
 const interactionCSS = read('src/public/assets/css/interaction.css');
 const styleCSS = read('src/public/assets/css/style.css');
 const uiCSS = read('src/public/assets/css/ui.css');
+const uiJS = read('src/public/assets/js/common/ui.js');
 const treemapCSS = read('src/public/assets/css/treemap.css');
 const viewersCSS = read('src/public/assets/css/viewers.css');
 
@@ -50,6 +51,27 @@ for (const icon of usedIcons) {
   assert.equal(fs.existsSync(svg), true, `missing local MDI SVG: ${icon}`);
   assert.match(iconsCSS, new RegExp(`\\.mdi-${icon.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}\\s*\\{[^}]*${icon}\\.svg`), `missing CSS mask for ${icon}`);
 }
+
+// Initial header and toolbar masks are fetched before Vue removes v-cloak.
+const initialShellIcons = [
+  'source-commit',
+  'database-outline',
+  'eye-outline',
+  'pencil-outline',
+  'delete-outline',
+  'magnify',
+  'refresh',
+  'cogs',
+  'plus',
+  'chevron-down'
+];
+for (const icon of initialShellIcons) {
+  assert.ok(index.includes(`<link rel="preload" as="image" type="image/svg+xml" href="assets/icons/mdi/${icon}.svg" fetchpriority="high" data-bb-initial-icon />`), `missing initial icon preload: ${icon}`);
+}
+assert.match(app, /function preloadInitialShellIcons\(\)/);
+assert.match(app, /document\.querySelectorAll\('link\[data-bb-initial-icon\]'\)/);
+assert.match(app, /Promise\.race\(\[preloadInitialShellIcons\(\), iconWaitLimit\]\)\.then\(mountBrowser, mountBrowser\)/);
+assert.doesNotMatch(app, /app\.use\(Buefy\.default[^;]+;\s*app\.mount\('#root'\)/);
 
 // Downward disclosures have one implementation: the interaction-layer mask.
 for (const source of [index, previewHTML, app, preview, actions]) {
@@ -205,6 +227,27 @@ assert.doesNotMatch(preview, /nativeURL\.searchParams\.delete\('range_only'\)/);
 assert.match(preview, /const rangeURL = boundedURL\.href/);
 assert.match(preview, /fetch\(rangeURL,/);
 
+
+// Modal overlays sit below the old centered Insights position while sharing one top edge.
+assert.match(interactionCSS, /--bb-modal-top-offset:\s*clamp\(2rem, calc\(15vh \/ var\(--browser-ui-scale-active\)\), 11rem\)/);
+assert.match(interactionCSS, /padding:\s*var\(--bb-modal-top-offset\) 1rem 1rem/);
+assert.match(interactionCSS, /bb-modal--details,[\s\S]*bb-modal--insights/);
+
+// Opening any modal locks both scrolling elements, including nested overlays.
+assert.match(uiCSS, /html\.bb-no-scroll,[\s\S]*body\.bb-no-scroll\s*\{[^}]*overflow:\s*hidden !important[^}]*overscroll-behavior:\s*none[^}]*scrollbar-gutter:\s*auto !important/);
+assert.match(uiCSS, /\.bb-overlay\s*\{[^}]*overscroll-behavior:\s*contain/s);
+assert.match(uiJS, /let scrollLockDepth = 0/);
+assert.match(uiJS, /document\.documentElement/);
+assert.match(uiJS, /root\.classList\.add\('bb-no-scroll'\)/);
+assert.match(uiJS, /body\.classList\.add\('bb-no-scroll'\)/);
+assert.match(uiJS, /if \(scrollLockDepth > 0\) return/);
+assert.match(uiJS, /window\.scrollTo\(previous\.scrollX, previous\.scrollY\)/);
+assert.match(uiJS, /window\.innerWidth[\s\S]*root\.clientWidth/);
+assert.match(uiJS, /BB\.viewport\?\.toLayoutPixels/);
+assert.match(uiJS, /body\.style\.paddingRight = `\$\{computedBodyPaddingRight \+ layoutScrollbarWidth\}px`/);
+assert.match(uiJS, /root\.style\.scrollbarGutter = 'auto'/);
+assert.match(uiJS, /body\.style\.paddingRight = previous\?\.bodyPaddingRight \|\| ''/);
+assert.match(interactionCSS, /bb-overlay\.bb-overlay--top-anchored[\s\S]*overflow:\s*hidden[\s\S]*scrollbar-gutter:\s*auto/);
 
 // The final interaction layer is loaded after all other component CSS.
 for (const html of [index, previewHTML]) {

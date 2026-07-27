@@ -7,9 +7,26 @@
 
   const RESUMABLE_UPLOAD_THRESHOLD = 32 * 1024 * 1024;
   let instanceId = '';
+  const instanceRoutes = new Map();
 
   function selectedInstance() {
     return instanceId || (BB.cfg && BB.cfg.instanceId) || '';
+  }
+
+  function rememberInstances(instances) {
+    for (const instance of Array.from(instances || [])) {
+      const id = String(instance?.id || '');
+      if (!id) continue;
+      instanceRoutes.set(id, {
+        host: String(instance?.host || id),
+        bucket: id
+      });
+    }
+  }
+
+  function routeForInstance(id) {
+    const selected = String(id || '');
+    return instanceRoutes.get(selected) || { host: selected, bucket: selected };
   }
 
   function withInstance(path, extraParams, explicitInstance = null) {
@@ -214,8 +231,9 @@
   }
 
   const api = {
-    setInstance(id) {
-      instanceId = String(id || '');
+    setInstance(value) {
+      if (value && typeof value === 'object') rememberInstances([value]);
+      instanceId = String(value && typeof value === 'object' ? value.id : value || '');
       BB.cfg = BB.cfg || {};
       BB.cfg.instanceId = instanceId;
     },
@@ -224,7 +242,9 @@
 
     async instances() {
       const response = await request('/api/instances');
-      return response.json();
+      const payload = await response.json();
+      rememberInstances(payload?.instances);
+      return payload;
     },
 
     urlForKey(key, explicitInstance = null, version = '') {
@@ -244,14 +264,16 @@
     browserPageURL(prefix = '', { instance = null } = {}) {
       const selected = instance === null || instance === undefined ? selectedInstance() : String(instance || '');
       if (!selected) return BB.runtime.resolveURL('index.html').href;
-      return BB.runtime.browserPageURL(selected, prefix).href;
+      const route = routeForInstance(selected);
+      return BB.runtime.browserPageURL(route.host, route.bucket, prefix).href;
     },
 
     previewPageURL(path, { instance = null, version = '', entry = '' } = {}) {
       const clean = String(path || '').replace(/^\/+/, '');
       const selected = instance === null || instance === undefined ? selectedInstance() : String(instance || '');
+      const route = routeForInstance(selected);
       const url = selected
-        ? BB.runtime.previewPageURL(selected, clean)
+        ? BB.runtime.previewPageURL(route.host, route.bucket, clean)
         : BB.runtime.resolveURL('preview.html');
       if (!selected) url.searchParams.set('path', clean);
       if (version) url.searchParams.set('version', String(version));

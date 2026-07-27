@@ -44,14 +44,16 @@
     if (!relative.startsWith('-/')) return null;
     const trailingSlash = relative.endsWith('/');
     const segments = relative.split('/');
-    if (segments[0] !== '-' || !segments[1]) return null;
+    if (segments[0] !== '-' || !segments[1] || !segments[2]) return null;
     try {
-      const instance = decodeRouteSegment(segments[1]);
-      const pathSegments = segments.slice(2);
+      const host = decodeRouteSegment(segments[1]);
+      const bucket = decodeRouteSegment(segments[2]);
+      const pathSegments = segments.slice(3);
       if (trailingSlash) pathSegments.pop();
       const decoded = pathSegments.map(decodeRouteSegment).join('/');
       return {
-        instance,
+        host,
+        bucket,
         path: trailingSlash && decoded ? `${decoded}/` : decoded,
         view: trailingSlash ? 'browser' : 'preview'
       };
@@ -60,16 +62,18 @@
     }
   }
 
-  function browserPageURL(instance, prefix = '') {
-    const id = encodeRouteSegment(instance);
+  function browserPageURL(host, bucket, prefix = '') {
+    const hostID = encodeRouteSegment(host);
+    const bucketID = encodeRouteSegment(bucket);
     const encoded = encodeStoragePath(prefix, { prefix: true });
-    return resolveURL(`-/${id}/${encoded ? `${encoded}/` : ''}`);
+    return resolveURL(`-/${hostID}/${bucketID}/${encoded ? `${encoded}/` : ''}`);
   }
 
-  function previewPageURL(instance, key = '') {
-    const id = encodeRouteSegment(instance);
+  function previewPageURL(host, bucket, key = '') {
+    const hostID = encodeRouteSegment(host);
+    const bucketID = encodeRouteSegment(bucket);
     const encoded = encodeStoragePath(key);
-    return resolveURL(`-/${id}/${encoded}`);
+    return resolveURL(`-/${hostID}/${bucketID}/${encoded}`);
   }
 
   function resolveURL(value = '') {

@@ -32,13 +32,13 @@ for (const [name, html] of [['index', index], ['preview', preview]]) {
 assert.match(runtime, /new URL\('\.', document\.baseURI\)/);
 assert.ok(runtime.includes("new URL(text.replace(/^\\/+/, ''), applicationRoot)"));
 assert.match(runtime, /function currentStorageRoute\(\)/);
-assert.match(runtime, /function browserPageURL\(instance, prefix = ''\)/);
-assert.match(runtime, /function previewPageURL\(instance, key = ''\)/);
+assert.match(runtime, /function browserPageURL\(host, bucket, prefix = ''\)/);
+assert.match(runtime, /function previewPageURL\(host, bucket, key = ''\)/);
 assert.match(runtime, /text === '\.' \|\| text === '\.\.'/);
 assert.match(api, /BB\.runtime\.resolveURL\(path\)/);
 assert.match(api, /BB\.runtime\.resolvePath\(path\)/);
 assert.match(api, /browserPageURL\(prefix = ''/);
-assert.match(api, /BB\.runtime\.previewPageURL\(selected, clean\)/);
+assert.match(api, /BB\.runtime\.previewPageURL\(route\.host, route\.bucket, clean\)/);
 assert.match(app, /replaceBrowserLocation\(this\.pathPrefix\)/);
 assert.match(app, /window\.addEventListener\('popstate'/);
 assert.match(actions, /BB\.api\.browserPageURL\(ensurePrefix\(clean\)/);
@@ -75,7 +75,17 @@ const sandbox = {
   localStorage: { getItem() { return ''; }, setItem() {}, removeItem() {} },
   fetch: async value => {
     requested.push(String(value));
-    return { ok: true, json: async () => ({ instances: [] }) };
+    return {
+      ok: true,
+      json: async () => ({
+        default: 'documents',
+        instances: [
+          { id: 'documents', host: 'primary-s3', bucket: 'documents' },
+          { id: 'api', host: 'api-host', bucket: 'api' },
+          { id: '-', host: '-', bucket: '-' }
+        ]
+      })
+    };
   },
   XMLHttpRequest: function XMLHttpRequest() {},
   console
@@ -85,6 +95,7 @@ sandbox.window.BB = { detect: {} };
 vm.createContext(sandbox);
 vm.runInContext(runtime, sandbox, { filename: 'runtime.js' });
 vm.runInContext(api, sandbox, { filename: 'api.js' });
+await sandbox.BB.api.instances();
 sandbox.BB.api.setInstance('documents');
 
 assert.equal(
@@ -93,38 +104,37 @@ assert.equal(
 );
 assert.equal(
   sandbox.BB.api.browserPageURL('folder/subfolder/', { instance: 'documents' }),
-  'https://example.test/s3-browser/-/documents/folder/subfolder/'
+  'https://example.test/s3-browser/-/primary-s3/documents/folder/subfolder/'
 );
 assert.equal(
   sandbox.BB.api.browserPageURL('', { instance: '-' }),
-  'https://example.test/s3-browser/-/-/'
+  'https://example.test/s3-browser/-/-/-/'
 );
 assert.equal(
   sandbox.BB.api.previewPageURL('folder/file name #1.txt', { instance: 'documents' }),
-  'https://example.test/s3-browser/-/documents/folder/file%20name%20%231.txt'
+  'https://example.test/s3-browser/-/primary-s3/documents/folder/file%20name%20%231.txt'
 );
 assert.equal(
   sandbox.BB.api.previewPageURL('folder/../~private//file.txt', { instance: 'api' }),
-  'https://example.test/s3-browser/-/api/folder/~../~~private/~/file.txt'
+  'https://example.test/s3-browser/-/api-host/api/folder/~../~~private/~/file.txt'
 );
 
-location.href = 'https://example.test/s3-browser/-/documents/folder/~../~~private/~/file.txt?version=v1';
-location.pathname = '/s3-browser/-/documents/folder/~../~~private/~/file.txt';
+location.href = 'https://example.test/s3-browser/-/primary-s3/documents/folder/~../~~private/~/file.txt?version=v1';
+location.pathname = '/s3-browser/-/primary-s3/documents/folder/~../~~private/~/file.txt';
 location.search = '?version=v1';
 assert.deepEqual(
   { ...sandbox.BB.runtime.storageRoute() },
-  { instance: 'documents', path: 'folder/../~private//file.txt', view: 'preview' }
+  { host: 'primary-s3', bucket: 'documents', path: 'folder/../~private//file.txt', view: 'preview' }
 );
 
-location.href = 'https://example.test/s3-browser/-/api/folder/~../';
-location.pathname = '/s3-browser/-/api/folder/~../';
+location.href = 'https://example.test/s3-browser/-/api-host/api/folder/~../';
+location.pathname = '/s3-browser/-/api-host/api/folder/~../';
 location.search = '';
 assert.deepEqual(
   { ...sandbox.BB.runtime.storageRoute() },
-  { instance: 'api', path: 'folder/../', view: 'browser' }
+  { host: 'api-host', bucket: 'api', path: 'folder/../', view: 'browser' }
 );
 
-await sandbox.BB.api.instances();
 assert.equal(requested[0], '/s3-browser/api/instances');
 assert.equal(requested[0].includes('/s3-browser/s3-browser/'), false);
 await sandbox.BB.api.spreadsheet({ key: 'book.xlsx', instance: 'documents' });

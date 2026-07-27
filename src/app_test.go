@@ -1012,10 +1012,10 @@ func TestFrontendBaseHrefForFriendlyRoutes(t *testing.T) {
 		{path: "/", want: "./"},
 		{path: "/index.html", want: "./"},
 		{path: "/preview.html", want: "./"},
-		{path: "/-/api/", want: "../../"},
-		{path: "/-/api/folder/", want: "../../../"},
-		{path: "/-/api/file.pdf", want: "../../"},
-		{path: "/-/api/folder/file.pdf", want: "../../../"},
+		{path: "/-/host/api/", want: "../../../"},
+		{path: "/-/host/api/folder/", want: "../../../../"},
+		{path: "/-/host/api/file.pdf", want: "../../../"},
+		{path: "/-/host/api/folder/file.pdf", want: "../../../../"},
 	} {
 		t.Run(test.path, func(t *testing.T) {
 			t.Parallel()
@@ -1033,9 +1033,12 @@ func TestFriendlyStorageFrontendRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	app := &application{
-		config:    appConfig{Runtime: defaultRuntimePolicy()},
-		instances: map[string]*storageInstance{"api": nil, "-": nil},
-		publicFS:  publicFS,
+		config: appConfig{Runtime: defaultRuntimePolicy()},
+		instances: map[string]*storageInstance{
+			"api": {cfg: bucketConfig{ID: "api", AuthID: "host"}},
+			"-":   {cfg: bucketConfig{ID: "-", AuthID: "-"}},
+		},
+		publicFS: publicFS,
 	}
 	handler := app.routes()
 
@@ -1048,12 +1051,13 @@ func TestFriendlyStorageFrontendRoutes(t *testing.T) {
 		contentType string
 	}{
 		{path: "/", status: http.StatusOK, content: `id="root"`, base: `<base href="./" />`, contentType: "text/html"},
-		{path: "/-/api", status: http.StatusPermanentRedirect, location: "api/"},
-		{path: "/-/api/", status: http.StatusOK, content: `id="root"`, base: `<base href="../../" />`, contentType: "text/html"},
-		{path: "/-/-/", status: http.StatusOK, content: `id="root"`, base: `<base href="../../" />`, contentType: "text/html"},
-		{path: "/-/api/folder/", status: http.StatusOK, content: `id="root"`, base: `<base href="../../../" />`, contentType: "text/html"},
-		{path: "/-/api/document.pdf", status: http.StatusOK, content: `class="preview-root"`, base: `<base href="../../" />`, contentType: "text/html"},
-		{path: "/-/api/folder/document.pdf", status: http.StatusOK, content: `class="preview-root"`, base: `<base href="../../../" />`, contentType: "text/html"},
+		{path: "/-/host/api", status: http.StatusPermanentRedirect, location: "api/"},
+		{path: "/-/host/api/", status: http.StatusOK, content: `id="root"`, base: `<base href="../../../" />`, contentType: "text/html"},
+		{path: "/-/-/-/", status: http.StatusOK, content: `id="root"`, base: `<base href="../../../" />`, contentType: "text/html"},
+		{path: "/-/host/api/folder/", status: http.StatusOK, content: `id="root"`, base: `<base href="../../../../" />`, contentType: "text/html"},
+		{path: "/-/host/api/document.pdf", status: http.StatusOK, content: `class="preview-root"`, base: `<base href="../../../" />`, contentType: "text/html"},
+		{path: "/-/host/api/folder/document.pdf", status: http.StatusOK, content: `class="preview-root"`, base: `<base href="../../../../" />`, contentType: "text/html"},
+		{path: "/-/api/", status: http.StatusPermanentRedirect, location: "../../-/host/api/"},
 		{path: "/-/missing/", status: http.StatusNotFound},
 	} {
 		t.Run(test.path, func(t *testing.T) {

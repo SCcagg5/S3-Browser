@@ -328,7 +328,7 @@ func validateRuntimePolicy(cfg *appConfig) error {
 	return nil
 }
 
-var configIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+var configIDPattern = regexp.MustCompile(`^(?:[A-Za-z0-9][A-Za-z0-9._-]*|-)$`)
 var instanceIDPattern = regexp.MustCompile(`^(?:[A-Za-z0-9][A-Za-z0-9._-]*|-)$`)
 
 func decodeAuthBlock(block hclBlock, baseDir string) (authConfig, error) {

@@ -14,6 +14,7 @@ import (
 	"log"
 	"mime"
 	"net/http"
+	"net/url"
 	"path"
 	"sort"
 	"strconv"
@@ -1544,30 +1545,53 @@ func (a *application) handleStorageFrontend(w http.ResponseWriter, r *http.Reque
 		http.NotFound(w, r)
 		return
 	}
-	separator := strings.IndexByte(relative, '/')
-	if separator < 0 {
-		if _, ok := a.instances[relative]; !ok {
-			http.NotFound(w, r)
+	trailingSlash := strings.HasSuffix(r.URL.Path, "/")
+	segments := strings.Split(strings.TrimSuffix(relative, "/"), "/")
+	if len(segments) >= 2 {
+		hostID, bucketID := segments[0], segments[1]
+		if instance, ok := a.instances[bucketID]; ok && instance != nil && instance.cfg.AuthID == hostID {
+			if len(segments) == 2 && !trailingSlash {
+				target := bucketID + "/"
+				if r.URL.RawQuery != "" {
+					target += "?" + r.URL.RawQuery
+				}
+				w.Header().Set("Location", target)
+				w.WriteHeader(http.StatusPermanentRedirect)
+				return
+			}
+			requested := "/preview.html"
+			if trailingSlash {
+				requested = "/index.html"
+			}
+			serveEmbeddedFrontend(w, r, a.publicFS, requested, frontendBaseHref(r.URL.Path))
 			return
 		}
-		target := relative + "/"
-		if r.URL.RawQuery != "" {
-			target += "?" + r.URL.RawQuery
-		}
-		w.Header().Set("Location", target)
-		w.WriteHeader(http.StatusPermanentRedirect)
-		return
 	}
-	instanceID := relative[:separator]
-	if _, ok := a.instances[instanceID]; !ok {
+
+	// Keep previously shared /-/<instance>/... links usable. The first request
+	// is redirected to the canonical /-/<host>/<bucket>/... route while
+	// preserving the public application prefix and the opaque encoded key.
+	legacyID := segments[0]
+	legacy, ok := a.instances[legacyID]
+	if !ok || legacy == nil {
 		http.NotFound(w, r)
 		return
 	}
-	requested := "/preview.html"
-	if strings.HasSuffix(r.URL.Path, "/") {
-		requested = "/index.html"
+	escapedRelative := strings.TrimPrefix(r.URL.EscapedPath(), "/-/")
+	rest := ""
+	if separator := strings.IndexByte(escapedRelative, '/'); separator >= 0 {
+		rest = escapedRelative[separator:]
 	}
-	serveEmbeddedFrontend(w, r, a.publicFS, requested, frontendBaseHref(r.URL.Path))
+	if rest == "" {
+		rest = "/"
+	}
+	target := frontendBaseHref(r.URL.Path) + "-/" + url.PathEscape(legacy.cfg.AuthID) + "/" + url.PathEscape(legacy.cfg.ID) + rest
+	if r.URL.RawQuery != "" {
+		target += "?" + r.URL.RawQuery
+	}
+	w.Header().Set("Location", target)
+	w.WriteHeader(http.StatusPermanentRedirect)
+	return
 }
 
 func frontendBaseHref(requestPath string) string {
