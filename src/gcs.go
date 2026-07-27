@@ -253,8 +253,19 @@ func (g *gcsBackend) List(ctx context.Context, options listOptions) (listPage, e
 }
 
 func (g *gcsBackend) Head(ctx context.Context, key string) (objectResponse, error) {
+	return g.headWithGeneration(ctx, key, "")
+}
+
+func (g *gcsBackend) HeadObjectVersion(ctx context.Context, key, generation string) (objectResponse, error) {
+	return g.headWithGeneration(ctx, key, generation)
+}
+
+func (g *gcsBackend) headWithGeneration(ctx context.Context, key, generation string) (objectResponse, error) {
 	query := url.Values{}
-	query.Set("fields", "name,size,updated,etag,contentType,cacheControl,contentDisposition,contentEncoding,generation,metadata")
+	query.Set("fields", "name,size,updated,timeCreated,timeDeleted,etag,contentType,cacheControl,contentDisposition,contentEncoding,generation,metageneration,md5Hash,crc32c,metadata")
+	if generation != "" {
+		query.Set("generation", generation)
+	}
 	u := g.objectMetadataURL(key, query)
 	resp, err := g.do(ctx, http.MethodGet, u, nil, 0, nil)
 	if err != nil {
@@ -274,6 +285,9 @@ func (g *gcsBackend) Head(ctx context.Context, key string) (objectResponse, erro
 		ContentDisposition string            `json:"contentDisposition"`
 		ContentEncoding    string            `json:"contentEncoding"`
 		Generation         string            `json:"generation"`
+		Metageneration     string            `json:"metageneration"`
+		MD5Hash            string            `json:"md5Hash"`
+		CRC32C             string            `json:"crc32c"`
 		Metadata           map[string]string `json:"metadata"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&metadata); err != nil {
@@ -302,6 +316,19 @@ func (g *gcsBackend) Head(ctx context.Context, key string) (objectResponse, erro
 	if metadata.Generation != "" {
 		headers.Set("x-goog-generation", metadata.Generation)
 	}
+	if metadata.Metageneration != "" {
+		headers.Set("x-goog-metageneration", metadata.Metageneration)
+	}
+	if metadata.MD5Hash != "" || metadata.CRC32C != "" {
+		values := make([]string, 0, 2)
+		if metadata.CRC32C != "" {
+			values = append(values, "crc32c="+metadata.CRC32C)
+		}
+		if metadata.MD5Hash != "" {
+			values = append(values, "md5="+metadata.MD5Hash)
+		}
+		headers.Set("x-goog-hash", strings.Join(values, ","))
+	}
 	for name, value := range metadata.Metadata {
 		headers.Set("x-goog-meta-"+name, value)
 	}
@@ -309,8 +336,19 @@ func (g *gcsBackend) Head(ctx context.Context, key string) (objectResponse, erro
 }
 
 func (g *gcsBackend) Get(ctx context.Context, key string, requestHeaders http.Header) (objectResponse, error) {
+	return g.getWithGeneration(ctx, key, "", requestHeaders)
+}
+
+func (g *gcsBackend) GetObjectVersion(ctx context.Context, key, generation string, requestHeaders http.Header) (objectResponse, error) {
+	return g.getWithGeneration(ctx, key, generation, requestHeaders)
+}
+
+func (g *gcsBackend) getWithGeneration(ctx context.Context, key, generation string, requestHeaders http.Header) (objectResponse, error) {
 	query := url.Values{}
 	query.Set("alt", "media")
+	if generation != "" {
+		query.Set("generation", generation)
+	}
 	u := g.objectMetadataURL(key, query)
 	headers := make(http.Header)
 	for _, name := range []string{"Range", "If-Match", "If-None-Match", "If-Modified-Since", "If-Unmodified-Since", "If-Range"} {
@@ -332,10 +370,106 @@ func (g *gcsBackend) Get(ctx context.Context, key string, requestHeaders http.He
 	return objectResponse{StatusCode: resp.StatusCode, Header: resp.Header.Clone(), Body: resp.Body}, nil
 }
 
+func (g *gcsBackend) ListObjectVersions(ctx context.Context, key, pageToken string, maximum int) (objectVersionPage, error) {
+	query := url.Values{}
+	query.Set("prefix", key)
+	query.Set("versions", "true")
+	if maximum <= 0 || maximum > 1000 {
+		maximum = 1000
+	}
+	query.Set("maxResults", strconv.Itoa(maximum))
+	if pageToken != "" {
+		query.Set("pageToken", pageToken)
+	}
+	query.Set("fields", "items(name,size,updated,timeCreated,timeDeleted,etag,contentType,generation,metageneration,md5Hash,crc32c),nextPageToken")
+	u := g.apiURL("storage/v1/b/"+pathSegment(g.cfg.Bucket)+"/o", query)
+	resp, err := g.do(ctx, http.MethodGet, u, nil, 0, nil)
+	if err != nil {
+		return objectVersionPage{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return objectVersionPage{}, gcsResponseError(resp)
+	}
+	var result struct {
+		NextPageToken string `json:"nextPageToken"`
+		Items         []struct {
+			Name           string `json:"name"`
+			Size           string `json:"size"`
+			Updated        string `json:"updated"`
+			TimeCreated    string `json:"timeCreated"`
+			TimeDeleted    string `json:"timeDeleted"`
+			ETag           string `json:"etag"`
+			ContentType    string `json:"contentType"`
+			Generation     string `json:"generation"`
+			Metageneration string `json:"metageneration"`
+			MD5Hash        string `json:"md5Hash"`
+			CRC32C         string `json:"crc32c"`
+		} `json:"items"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 32<<20)).Decode(&result); err != nil {
+		return objectVersionPage{}, fmt.Errorf("decode gcs version response: %w", err)
+	}
+	page := objectVersionPage{}
+	lastExactKey := false
+	for _, item := range result.Items {
+		lastExactKey = item.Name == key
+		if item.Name != key {
+			continue
+		}
+		size, _ := strconv.ParseInt(item.Size, 10, 64)
+		modified, _ := time.Parse(time.RFC3339Nano, item.Updated)
+		checksums := make(map[string]string)
+		if item.MD5Hash != "" {
+			checksums["md5"] = item.MD5Hash
+		}
+		if item.CRC32C != "" {
+			checksums["crc32c"] = item.CRC32C
+		}
+		if len(checksums) == 0 {
+			checksums = nil
+		}
+		page.Versions = append(page.Versions, storedObjectVersion{
+			Version: item.Generation, IsCurrent: item.TimeDeleted == "", Size: size,
+			LastModified: modified, ETag: item.ETag, ContentType: item.ContentType, Checksums: checksums,
+		})
+	}
+	sortedVersions(page.Versions)
+	// Exactly one generation can be current. Some compatible APIs omit or
+	// inconsistently populate timeDeleted for archived generations, so keep
+	// only the newest live candidate on the first page and never mark a
+	// continuation-page generation as current.
+	currentKept := false
+	for index := range page.Versions {
+		if pageToken == "" && page.Versions[index].IsCurrent && !currentKept {
+			currentKept = true
+			continue
+		}
+		page.Versions[index].IsCurrent = false
+	}
+	// GCS prefix listing may continue with another object. Do not carry a
+	// cursor into a neighboring key when the caller requested one exact key.
+	if result.NextPageToken != "" && lastExactKey {
+		page.NextPageToken = result.NextPageToken
+	}
+	return page, nil
+}
+
 func (g *gcsBackend) Put(ctx context.Context, key string, body io.Reader, size int64, contentType string) error {
+	return g.put(ctx, key, body, size, contentType, false)
+}
+
+func (g *gcsBackend) PutIfAbsent(ctx context.Context, key string, body io.Reader, size int64, contentType string) error {
+	return g.put(ctx, key, body, size, contentType, true)
+}
+
+func (g *gcsBackend) put(ctx context.Context, key string, body io.Reader, size int64, contentType string, ifAbsent bool) error {
 	query := url.Values{}
 	query.Set("uploadType", "media")
 	query.Set("name", key)
+	if ifAbsent {
+		query.Set("ifGenerationMatch", "0")
+	}
 	u := g.apiURL("upload/storage/v1/b/"+pathSegment(g.cfg.Bucket)+"/o", query)
 	headers := make(http.Header)
 	if contentType == "" {
@@ -347,6 +481,10 @@ func (g *gcsBackend) Put(ctx context.Context, key string, body io.Reader, size i
 		return err
 	}
 	defer resp.Body.Close()
+	if ifAbsent && resp.StatusCode == http.StatusPreconditionFailed {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+		return apiError{Status: http.StatusConflict, Code: "object_exists", Message: "an object already exists at the extraction destination"}
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return gcsResponseError(resp)
 	}
@@ -538,12 +676,38 @@ func (g *gcsBackend) Delete(ctx context.Context, key string) error {
 	return nil
 }
 
+func (g *gcsBackend) DeleteObjectVersion(ctx context.Context, key, generation string) error {
+	query := url.Values{}
+	query.Set("generation", generation)
+	resp, err := g.do(ctx, http.MethodDelete, g.objectMetadataURL(key, query), nil, 0, nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return gcsResponseError(resp)
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+	return nil
+}
+
+func (g *gcsBackend) RestoreObjectVersion(ctx context.Context, key, generation string) error {
+	return g.rewriteObject(ctx, key, key, generation)
+}
+
 func (g *gcsBackend) Copy(ctx context.Context, sourceKey, destinationKey string) error {
+	return g.rewriteObject(ctx, sourceKey, destinationKey, "")
+}
+
+func (g *gcsBackend) rewriteObject(ctx context.Context, sourceKey, destinationKey, sourceGeneration string) error {
 	objectPath := "storage/v1/b/" + pathSegment(g.cfg.Bucket) + "/o/" + pathSegment(sourceKey) +
 		"/rewriteTo/b/" + pathSegment(g.cfg.Bucket) + "/o/" + pathSegment(destinationKey)
 	var rewriteToken string
 	for attempts := 0; attempts < 10000; attempts++ {
 		query := url.Values{}
+		if sourceGeneration != "" {
+			query.Set("sourceGeneration", sourceGeneration)
+		}
 		if rewriteToken != "" {
 			query.Set("rewriteToken", rewriteToken)
 		}

@@ -112,9 +112,44 @@ func (s *s3Backend) List(ctx context.Context, options listOptions) (listPage, er
 }
 
 func (s *s3Backend) Head(ctx context.Context, key string) (objectResponse, error) {
-	resp, err := s.do(ctx, http.MethodHead, key, nil, nil, 0, nil)
+	headers := make(http.Header)
+	headers.Set("x-amz-checksum-mode", "ENABLED")
+	resp, err := s.do(ctx, http.MethodHead, key, nil, nil, 0, headers)
 	if err != nil {
 		return objectResponse{}, err
+	}
+	// A number of S3-compatible providers predate checksum mode. Retry without
+	// the optional request header rather than making basic metadata unavailable.
+	if resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusNotImplemented {
+		_ = resp.Body.Close()
+		resp, err = s.do(ctx, http.MethodHead, key, nil, nil, 0, nil)
+		if err != nil {
+			return objectResponse{}, err
+		}
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		defer resp.Body.Close()
+		return objectResponse{}, s3ResponseError(resp)
+	}
+	_ = resp.Body.Close()
+	return objectResponse{StatusCode: resp.StatusCode, Header: resp.Header.Clone()}, nil
+}
+
+func (s *s3Backend) HeadObjectVersion(ctx context.Context, key, version string) (objectResponse, error) {
+	query := url.Values{}
+	query.Set("versionId", version)
+	headers := make(http.Header)
+	headers.Set("x-amz-checksum-mode", "ENABLED")
+	resp, err := s.do(ctx, http.MethodHead, key, query, nil, 0, headers)
+	if err != nil {
+		return objectResponse{}, err
+	}
+	if resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusNotImplemented {
+		_ = resp.Body.Close()
+		resp, err = s.do(ctx, http.MethodHead, key, query, nil, 0, nil)
+		if err != nil {
+			return objectResponse{}, err
+		}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		defer resp.Body.Close()
@@ -125,6 +160,16 @@ func (s *s3Backend) Head(ctx context.Context, key string) (objectResponse, error
 }
 
 func (s *s3Backend) Get(ctx context.Context, key string, requestHeaders http.Header) (objectResponse, error) {
+	return s.getWithQuery(ctx, key, nil, requestHeaders)
+}
+
+func (s *s3Backend) GetObjectVersion(ctx context.Context, key, version string, requestHeaders http.Header) (objectResponse, error) {
+	query := url.Values{}
+	query.Set("versionId", version)
+	return s.getWithQuery(ctx, key, query, requestHeaders)
+}
+
+func (s *s3Backend) getWithQuery(ctx context.Context, key string, query url.Values, requestHeaders http.Header) (objectResponse, error) {
 	headers := make(http.Header)
 	for _, name := range []string{"Range", "If-Match", "If-None-Match", "If-Modified-Since", "If-Unmodified-Since", "If-Range"} {
 		if value := requestHeaders.Get(name); value != "" {
@@ -134,7 +179,7 @@ func (s *s3Backend) Get(ctx context.Context, key string, requestHeaders http.Hea
 	if headers.Get("Range") != "" {
 		headers.Set("Accept-Encoding", "identity")
 	}
-	resp, err := s.do(ctx, http.MethodGet, key, nil, nil, 0, headers)
+	resp, err := s.do(ctx, http.MethodGet, key, query, nil, 0, headers)
 	if err != nil {
 		return objectResponse{}, err
 	}
@@ -145,16 +190,110 @@ func (s *s3Backend) Get(ctx context.Context, key string, requestHeaders http.Hea
 	return objectResponse{StatusCode: resp.StatusCode, Header: resp.Header.Clone(), Body: resp.Body}, nil
 }
 
+func (s *s3Backend) ListObjectVersions(ctx context.Context, key, pageToken string, maximum int) (objectVersionPage, error) {
+	cursor, err := decodeS3VersionCursor(pageToken)
+	if err != nil {
+		return objectVersionPage{}, apiError{Status: http.StatusBadRequest, Code: "invalid_page_token", Message: "version page token is invalid"}
+	}
+	query := url.Values{}
+	query.Set("versions", "")
+	query.Set("prefix", key)
+	if maximum <= 0 || maximum > 1000 {
+		maximum = 1000
+	}
+	query.Set("max-keys", strconv.Itoa(maximum))
+	if cursor.KeyMarker != "" {
+		query.Set("key-marker", cursor.KeyMarker)
+	}
+	if cursor.VersionIDMarker != "" {
+		query.Set("version-id-marker", cursor.VersionIDMarker)
+	}
+	resp, err := s.do(ctx, http.MethodGet, "", query, nil, 0, nil)
+	if err != nil {
+		return objectVersionPage{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return objectVersionPage{}, s3ResponseError(resp)
+	}
+	var result struct {
+		IsTruncated         bool   `xml:"IsTruncated"`
+		NextKeyMarker       string `xml:"NextKeyMarker"`
+		NextVersionIDMarker string `xml:"NextVersionIdMarker"`
+		Versions            []struct {
+			Key          string `xml:"Key"`
+			VersionID    string `xml:"VersionId"`
+			IsLatest     bool   `xml:"IsLatest"`
+			LastModified string `xml:"LastModified"`
+			ETag         string `xml:"ETag"`
+			Size         int64  `xml:"Size"`
+		} `xml:"Version"`
+		DeleteMarkers []struct {
+			Key          string `xml:"Key"`
+			VersionID    string `xml:"VersionId"`
+			IsLatest     bool   `xml:"IsLatest"`
+			LastModified string `xml:"LastModified"`
+		} `xml:"DeleteMarker"`
+	}
+	if err := xml.NewDecoder(io.LimitReader(resp.Body, 32<<20)).Decode(&result); err != nil {
+		return objectVersionPage{}, fmt.Errorf("decode s3 version response: %w", err)
+	}
+	page := objectVersionPage{}
+	for _, item := range result.Versions {
+		if item.Key != key {
+			continue
+		}
+		modified, _ := time.Parse(time.RFC3339Nano, item.LastModified)
+		page.Versions = append(page.Versions, storedObjectVersion{
+			Version: item.VersionID, IsCurrent: item.IsLatest, Size: item.Size,
+			LastModified: modified, ETag: strings.Trim(item.ETag, `"`),
+		})
+	}
+	for _, item := range result.DeleteMarkers {
+		if item.Key != key {
+			continue
+		}
+		modified, _ := time.Parse(time.RFC3339Nano, item.LastModified)
+		page.Versions = append(page.Versions, storedObjectVersion{
+			Version: item.VersionID, IsCurrent: item.IsLatest, DeleteMarker: true, LastModified: modified,
+		})
+	}
+	sortedVersions(page.Versions)
+	// Prefix listing can continue with a different key. Only expose a cursor
+	// while the provider is still paginating versions of the exact object.
+	if result.IsTruncated && result.NextKeyMarker == key && result.NextVersionIDMarker != "" {
+		page.NextPageToken = encodeS3VersionCursor(s3VersionCursor{
+			KeyMarker: result.NextKeyMarker, VersionIDMarker: result.NextVersionIDMarker,
+		})
+	}
+	return page, nil
+}
+
 func (s *s3Backend) Put(ctx context.Context, key string, body io.Reader, size int64, contentType string) error {
+	return s.put(ctx, key, body, size, contentType, false)
+}
+
+func (s *s3Backend) PutIfAbsent(ctx context.Context, key string, body io.Reader, size int64, contentType string) error {
+	return s.put(ctx, key, body, size, contentType, true)
+}
+
+func (s *s3Backend) put(ctx context.Context, key string, body io.Reader, size int64, contentType string, ifAbsent bool) error {
 	headers := make(http.Header)
 	if contentType != "" {
 		headers.Set("Content-Type", contentType)
+	}
+	if ifAbsent {
+		headers.Set("If-None-Match", "*")
 	}
 	resp, err := s.do(ctx, http.MethodPut, key, nil, body, size, headers)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
+	if ifAbsent && (resp.StatusCode == http.StatusConflict || resp.StatusCode == http.StatusPreconditionFailed) {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+		return apiError{Status: http.StatusConflict, Code: "object_exists", Message: "an object already exists at the extraction destination"}
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return s3ResponseError(resp)
 	}
@@ -279,6 +418,57 @@ func (s *s3Backend) AbortMultipart(ctx context.Context, key, uploadID string) er
 	return nil
 }
 
+func (s *s3Backend) ListMultipartParts(ctx context.Context, key, uploadID string) ([]multipartPart, error) {
+	if strings.TrimSpace(uploadID) == "" {
+		return nil, fmt.Errorf("multipart upload id is required")
+	}
+	parts := make([]multipartPart, 0)
+	marker := 0
+	for {
+		query := url.Values{}
+		query.Set("uploadId", uploadID)
+		query.Set("max-parts", "1000")
+		if marker > 0 {
+			query.Set("part-number-marker", strconv.Itoa(marker))
+		}
+		resp, err := s.do(ctx, http.MethodGet, key, query, nil, 0, nil)
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			err := s3ResponseError(resp)
+			resp.Body.Close()
+			return nil, err
+		}
+		var result struct {
+			IsTruncated          bool `xml:"IsTruncated"`
+			NextPartNumberMarker int  `xml:"NextPartNumberMarker"`
+			Parts                []struct {
+				PartNumber int    `xml:"PartNumber"`
+				ETag       string `xml:"ETag"`
+				Size       int64  `xml:"Size"`
+			} `xml:"Part"`
+		}
+		err = xml.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&result)
+		resp.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("decode s3 multipart parts response: %w", err)
+		}
+		for _, part := range result.Parts {
+			parts = append(parts, multipartPart{PartNumber: part.PartNumber, ETag: strings.Trim(part.ETag, `"`), Size: part.Size})
+		}
+		if !result.IsTruncated {
+			break
+		}
+		if result.NextPartNumberMarker <= marker {
+			return nil, fmt.Errorf("s3 multipart parts response did not advance its marker")
+		}
+		marker = result.NextPartNumberMarker
+	}
+	sort.Slice(parts, func(i, j int) bool { return parts[i].PartNumber < parts[j].PartNumber })
+	return parts, nil
+}
+
 func (s *s3Backend) Delete(ctx context.Context, key string) error {
 	resp, err := s.do(ctx, http.MethodDelete, key, nil, nil, 0, nil)
 	if err != nil {
@@ -289,6 +479,48 @@ func (s *s3Backend) Delete(ctx context.Context, key string) error {
 		return s3ResponseError(resp)
 	}
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+	return nil
+}
+
+func (s *s3Backend) DeleteObjectVersion(ctx context.Context, key, version string) error {
+	query := url.Values{}
+	query.Set("versionId", version)
+	resp, err := s.do(ctx, http.MethodDelete, key, query, nil, 0, nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return s3ResponseError(resp)
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+	return nil
+}
+
+func (s *s3Backend) RestoreObjectVersion(ctx context.Context, key, version string) error {
+	headers := make(http.Header)
+	copySource := "/" + awsURIEncode(s.cfg.Bucket, true) + "/" + awsURIEncode(key, false) + "?versionId=" + url.QueryEscape(version)
+	headers.Set("x-amz-copy-source", copySource)
+	resp, err := s.do(ctx, http.MethodPut, key, nil, nil, 0, headers)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return s3ResponseError(resp)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return fmt.Errorf("read s3 restore response: %w", err)
+	}
+	var embedded struct {
+		XMLName xml.Name
+		Code    string `xml:"Code"`
+		Message string `xml:"Message"`
+	}
+	if len(body) > 0 && xml.Unmarshal(body, &embedded) == nil && embedded.XMLName.Local == "Error" {
+		return &upstreamError{StatusCode: http.StatusBadGateway, Code: embedded.Code, Message: embedded.Message}
+	}
 	return nil
 }
 

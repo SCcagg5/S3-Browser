@@ -31,7 +31,7 @@ assert.match(runtime, /new URL\('\.', document\.baseURI\)/);
 assert.match(runtime, /text\.replace\(\/\^\\\/\+\/, ''\), applicationRoot/);
 assert.match(api, /BB\.runtime\.resolveURL\(path\)/);
 assert.match(api, /BB\.runtime\.resolvePath\(path\)/);
-assert.match(app, /new URL\('preview\.html', window\.location\.href\)/);
+assert.match(app, /BB\.api\.previewPageURL\(row\.key/);
 assert.match(previewJS, /new URL\('index\.html', location\.href\)/);
 assert.doesNotMatch(`${app}\n${previewJS}`, /location\.(?:href|assign)\s*=\s*['"]\//);
 
@@ -68,6 +68,10 @@ sandbox.BB.api.setInstance('documents');
 assert.equal(
   sandbox.BB.api.urlForKey('folder/file.txt'),
   'https://example.test/s3-browser/s3?instance=documents&key=folder%2Ffile.txt'
+);
+assert.equal(
+  sandbox.BB.api.previewPageURL('folder/file.txt', { instance: 'documents' }),
+  'https://example.test/s3-browser/preview.html?instance=documents&path=folder%2Ffile.txt'
 );
 await sandbox.BB.api.instances();
 assert.equal(requested[0], '/s3-browser/api/instances');

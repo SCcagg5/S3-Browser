@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -364,5 +365,106 @@ func TestGCSGetForwardsRangeResumeHeaders(t *testing.T) {
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusPartialContent {
 		t.Fatalf("status = %d", response.StatusCode)
+	}
+}
+
+func TestGCSObjectVersionLifecycle(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/storage/v1/b/bucket/o" && r.URL.Query().Get("versions") == "true":
+			if got := r.URL.Query().Get("prefix"); got != "folder/file.txt" {
+				t.Errorf("prefix = %q", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"nextPageToken":"next","items":[
+{"name":"folder/file.txt","size":"3","updated":"2026-01-01T00:00:00Z","timeDeleted":"2026-01-02T00:00:00Z","etag":"old","contentType":"text/plain","generation":"1","md5Hash":"YWJj","crc32c":"Nks/tw=="},
+{"name":"folder/file.txt","size":"4","updated":"2026-01-03T00:00:00Z","etag":"current","contentType":"text/plain","generation":"2"},
+{"name":"folder/file.txt-copy","size":"9","updated":"2026-01-04T00:00:00Z","generation":"3"}]}`)
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/storage/v1/b/bucket/o/folder/file.txt") && r.URL.Query().Get("generation") == "1" && r.URL.Query().Get("alt") == "":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"name":"folder/file.txt","size":"3","updated":"2026-01-01T00:00:00Z","etag":"old","contentType":"text/plain","generation":"1","metageneration":"2","md5Hash":"YWJj","crc32c":"Nks/tw=="}`)
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/storage/v1/b/bucket/o/folder/file.txt") && r.URL.Query().Get("generation") == "1" && r.URL.Query().Get("alt") == "media":
+			if got := r.Header.Get("Range"); got != "bytes=0-1" {
+				t.Errorf("Range = %q", got)
+			}
+			w.Header().Set("Content-Range", "bytes 0-1/3")
+			w.WriteHeader(http.StatusPartialContent)
+			_, _ = io.WriteString(w, "ab")
+		case r.Method == http.MethodDelete && r.URL.Query().Get("generation") == "1":
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/rewriteTo/"):
+			if got := r.URL.Query().Get("sourceGeneration"); got != "1" {
+				t.Errorf("sourceGeneration = %q", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"done":true}`)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	defer server.Close()
+
+	backend := newAnonymousGCSBackendForTest(t, server.URL, "bucket")
+	page, err := backend.ListObjectVersions(context.Background(), "folder/file.txt", "", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.NextPageToken != "" || len(page.Versions) != 2 || page.Versions[0].Version != "2" || !page.Versions[0].IsCurrent || page.Versions[1].IsCurrent {
+		t.Fatalf("page = %+v", page)
+	}
+	if page.Versions[1].Checksums["md5"] != "YWJj" {
+		t.Fatalf("checksums = %+v", page.Versions[1].Checksums)
+	}
+	head, err := backend.HeadObjectVersion(context.Background(), "folder/file.txt", "1")
+	if err != nil || head.Header.Get("x-goog-generation") != "1" || !strings.Contains(head.Header.Get("x-goog-hash"), "md5=YWJj") {
+		t.Fatalf("head = %+v, %v", head, err)
+	}
+	headers := make(http.Header)
+	headers.Set("Range", "bytes=0-1")
+	response, err := backend.GetObjectVersion(context.Background(), "folder/file.txt", "1", headers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	if string(body) != "ab" {
+		t.Fatalf("body = %q", body)
+	}
+	if err := backend.DeleteObjectVersion(context.Background(), "folder/file.txt", "1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := backend.RestoreObjectVersion(context.Background(), "folder/file.txt", "1"); err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 5 {
+		t.Fatalf("calls = %d", calls.Load())
+	}
+}
+
+func TestGCSPutIfAbsentUsesGenerationPrecondition(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("method = %s", r.Method)
+		}
+		if got := r.URL.Query().Get("uploadType"); got != "media" {
+			t.Errorf("uploadType = %q", got)
+		}
+		if got := r.URL.Query().Get("ifGenerationMatch"); got != "0" {
+			t.Errorf("ifGenerationMatch = %q", got)
+		}
+		w.WriteHeader(http.StatusPreconditionFailed)
+	}))
+	defer server.Close()
+
+	backend := newAnonymousGCSBackendForTest(t, server.URL, "bucket")
+	err := backend.PutIfAbsent(context.Background(), "existing.txt", strings.NewReader("value"), 5, "text/plain")
+	var apiErr apiError
+	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusConflict || apiErr.Code != "object_exists" {
+		t.Fatalf("PutIfAbsent() error = %#v", err)
 	}
 }

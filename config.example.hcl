@@ -1,22 +1,32 @@
 server {
-  listen     = ":8080"
-  state_mode = "ephemeral"
-  log_mode   = "anonymous"
+  listen            = ":8080"
+  job_history_limit = 10
+  access_mode       = "inherit_credentials"
+  log_mode          = "anonymous"
 
-  max_storage_bytes_per_request        = 2147483648
-  max_storage_requests_per_request     = 4096
-  max_range_cache_bytes                = 33554432
-  max_concurrent_storage_requests      = 8
-  max_concurrent_requests_per_storage  = 4
-  session_ttl_seconds                  = 1200
-  max_stats_folders                    = 10000
-  max_archive_entries                  = 100000
+  # This is a soft Go heap target, not a container memory reservation.
+  memory_limit_bytes = 67108864
+
+  # Complete user-triggered reads of objects close to 100 GB remain possible,
+  # while previews and metadata readers still use exact bounded byte ranges.
+  max_storage_bytes_per_request       = 274877906944
+  max_storage_requests_per_request    = 4096
+  max_range_cache_bytes               = 8388608
+  max_concurrent_storage_requests     = 4
+  max_concurrent_requests_per_storage = 2
+
+  session_ttl_seconds = 1200
+  max_stats_folders   = 1000
+  max_archive_entries = 10000
+
+  # These limits apply only to explicit complete-object operations such as
+  # per-object integrity verification and selected archive extraction.
+  max_background_storage_bytes    = 274877906944
+  max_background_storage_requests = 100000
 }
 
-# One authentication can be reused by any number of buckets. Credentials may
-# be written directly in this HCL file or read from mounted files.
-# Each bucket also controls how many 1,000-entry provider listing pages may
-# be combined in one navigation batch. Use 0 for no page-count limit.
+# One authentication can be reused by any number of buckets. Each bucket keeps
+# its own root, permission ceiling, and navigation scan limit.
 auth "primary-s3" {
   provider               = "s3"
   mode                   = "access_key"
@@ -43,7 +53,7 @@ bucket "archive" {
   max_scan_pages = 0
 }
 
-# A separate authentication can use another provider.
+# A separate authentication may use another provider.
 auth "gcs-service-account" {
   provider         = "gcs"
   mode             = "service_account"

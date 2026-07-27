@@ -3,6 +3,9 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"errors"
+	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -152,5 +155,20 @@ func TestSQLiteVarintAndRecordSafety(t *testing.T) {
 	}
 	if _, err := sqliteLocalPayloadSize(maxSQLiteRecordPayload+1, 4096, true); err == nil {
 		t.Fatal("expected oversized record error")
+	}
+}
+
+func TestSQLiteSessionManagerBoundsInMemorySessions(t *testing.T) {
+	t.Parallel()
+	manager := &sqliteSessionManager{sessions: make(map[string]*sqliteSession)}
+	for index := 0; index < maxInMemorySQLiteSessions; index++ {
+		if err := manager.register(&sqliteSession{ID: fmt.Sprintf("session-%d", index)}); err != nil {
+			t.Fatalf("register session %d: %v", index, err)
+		}
+	}
+	err := manager.register(&sqliteSession{ID: "overflow"})
+	var apiErr apiError
+	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusTooManyRequests || apiErr.Code != "sqlite_session_limit_reached" {
+		t.Fatalf("overflow error = %#v", err)
 	}
 }

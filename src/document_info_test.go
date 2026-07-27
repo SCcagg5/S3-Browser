@@ -80,7 +80,7 @@ func TestLargestStatsEntriesRemainBoundedAndSortedWhenCloned(t *testing.T) {
 	if len(entries) != maxStatsLargestEntries {
 		t.Fatalf("len(entries) = %d", len(entries))
 	}
-	job := persistentJob{Stats: &statsResponse{Largest: entries}}.public()
+	job := jobState{Stats: &statsResponse{Largest: entries}}.public()
 	if job.Stats == nil || len(job.Stats.Largest) != maxStatsLargestEntries {
 		t.Fatalf("public stats = %+v", job.Stats)
 	}
@@ -105,7 +105,7 @@ func TestRecentStatsEntriesRemainBoundedAndSortedWhenCloned(t *testing.T) {
 	if len(entries) != maxStatsRecentEntries {
 		t.Fatalf("len(entries) = %d", len(entries))
 	}
-	job := persistentJob{Stats: &statsResponse{Recent: entries}}.public()
+	job := jobState{Stats: &statsResponse{Recent: entries}}.public()
 	if job.Stats == nil || len(job.Stats.Recent) != maxStatsRecentEntries {
 		t.Fatalf("public stats = %+v", job.Stats)
 	}

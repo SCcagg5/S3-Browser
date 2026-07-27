@@ -95,7 +95,11 @@ func isCertificateExtension(extension, contentType string) bool {
 }
 
 func openStructuredRangeSource(ctx context.Context, instance *storageInstance, key string, listed mediaSourceMetadata) (*objectRangeSource, error) {
-	source, err := openObjectRangeSource(ctx, instance, key)
+	return openStructuredRangeSourceVersion(ctx, instance, key, "", listed)
+}
+
+func openStructuredRangeSourceVersion(ctx context.Context, instance *storageInstance, key, version string, listed mediaSourceMetadata) (*objectRangeSource, error) {
+	source, err := openObjectRangeSourceVersion(ctx, instance, key, version)
 	if err != nil {
 		return nil, err
 	}

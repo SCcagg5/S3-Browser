@@ -19,6 +19,7 @@
   <link rel="stylesheet" href="assets/css/data-grid.css" />
   <link rel="stylesheet" href="assets/css/viewers.css" />
   <link rel="stylesheet" href="assets/css/interaction.css" />
+  <link rel="stylesheet" href="assets/css/treemap.css" />
 </head>
 <body>
   <div id="root" v-cloak>
@@ -371,6 +372,7 @@
                     <div v-if="props.row.type === 'content'" class="object-name-cell">
                       <b-icon pack="mdi" :icon="fileRowIcon(props.row)" class="name-column-icon is-smmd"></b-icon>
                       <button type="button" class="object-link" :title="props.row.name" @click="openPreview(props.row)">{{ props.row.name }}</button>
+                      <span v-if="versioningSupported && Number.isInteger(props.row.versionCount)" class="object-version-count" :title="`${props.row.versionCount} version${props.row.versionCount === 1 ? '' : 's'}`">{{ props.row.versionCount }}</span>
                     </div>
                     <div v-else class="object-name-cell">
                       <b-icon pack="mdi" icon="folder" class="name-column-icon is-smmd"></b-icon>
@@ -407,22 +409,33 @@
 
                 <b-table-column field="dateModified" label="Last modified" cell-class="modified-column" header-class="modified-column-header">
                   <template #header>
-                    <button
-                      type="button"
-                      class="navigation-sort-button is-numeric"
-                      :class="{ 'is-sortable': navigationSortAvailable, 'is-active': navigationSortField === 'dateModified' }"
-                      :disabled="!navigationSortAvailable"
-                      :aria-label="navigationSortAvailable ? 'Sort by last modified' : 'Last modified'"
-                      @click="toggleNavigationSort('dateModified')">
-                      <span>Last modified</span>
-                      <span class="navigation-sort-icon" :class="{ 'is-placeholder': !navigationSortAvailable }" aria-hidden="true">
-                        <i v-if="navigationSortIcon('dateModified')" class="mdi" :class="`mdi-${navigationSortIcon('dateModified')}`"></i>
-                      </span>
-                    </button>
+                    <div class="modified-header-controls">
+                      <button
+                        type="button"
+                        class="modified-time-toggle"
+                        :class="{ 'is-absolute': modifiedTimeMode === 'absolute' }"
+                        :title="modifiedTimeMode === 'relative' ? 'Show exact UTC dates' : 'Show relative times'"
+                        :aria-label="modifiedTimeMode === 'relative' ? 'Show exact UTC dates' : 'Show relative times'"
+                        @click.stop="toggleModifiedTimeMode">
+                        <i class="mdi mdi-clock-outline" aria-hidden="true"></i>
+                      </button>
+                      <button
+                        type="button"
+                        class="navigation-sort-button is-numeric"
+                        :class="{ 'is-sortable': navigationSortAvailable, 'is-active': navigationSortField === 'dateModified' }"
+                        :disabled="!navigationSortAvailable"
+                        :aria-label="navigationSortAvailable ? 'Sort by last modified' : 'Last modified'"
+                        @click="toggleNavigationSort('dateModified')">
+                        <span>Last modified</span>
+                        <span class="navigation-sort-icon" :class="{ 'is-placeholder': !navigationSortAvailable }" aria-hidden="true">
+                          <i v-if="navigationSortIcon('dateModified')" class="mdi" :class="`mdi-${navigationSortIcon('dateModified')}`"></i>
+                        </span>
+                      </button>
+                    </div>
                   </template>
                   <template #default="props">
                     <span v-if="props.row.dateModified" class="object-modified" :title="formatDateTime_utc(props.row.dateModified)">
-                      {{ formatDateTime_relative(props.row.dateModified) }}
+                      {{ formatDateTime_display(props.row.dateModified) }}
                     </span>
                     <span v-else class="object-modified object-modified-empty">-</span>
                   </template>
@@ -438,6 +451,7 @@
                         <div class="bb-menu-list">
                           <div v-if="canRead" class="bb-menu-item" @click="onRowMetadata(props.row)"><i class="mdi mdi-information-outline"></i> Details</div>
                           <div v-if="canRead" class="bb-menu-item" @click="onRowDownload(props.row)"><i class="mdi mdi-download"></i> Download</div>
+                          <div v-if="canRead && versioningSupported" class="bb-menu-item" @click="onRowVersions(props.row)"><i class="mdi mdi-source-commit"></i> Versions</div>
                           <div v-if="canCopy" class="bb-menu-item" @click="onRowCopy(props.row)"><i class="mdi mdi-content-copy"></i> Copy</div>
                           <div v-if="canRename" class="bb-menu-item" @click="onRowRename(props.row)"><i class="mdi mdi-rename-outline"></i> Rename</div>
                           <div v-if="canDelete" class="bb-menu-item danger" @click="onRowDelete(props.row)"><i class="mdi mdi-delete-outline"></i> Delete</div>
@@ -489,6 +503,7 @@
   <script src="assets/js/common/runtime.js"></script>
   <script src="assets/js/common/api.js"></script>
   <script src="assets/js/common/ui.js"></script>
+  <script src="assets/js/common/download-manager.js"></script>
   <script src="assets/js/common/actions.js"></script>
   <script src="assets/js/common/menu.js"></script>
   <script src="assets/js/common/render.js"></script>

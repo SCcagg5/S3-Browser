@@ -1,8 +1,10 @@
 server {
-  listen            = ":8080"
-  state_mode        = "persistent"
-  data_dir          = "/data"
-  job_history_limit = 100
+  listen                               = ":8080"
+  job_history_limit                    = 10
+  memory_limit_bytes                   = 67108864
+  max_range_cache_bytes                = 8388608
+  max_concurrent_storage_requests      = 4
+  max_concurrent_requests_per_storage  = 2
 }
 
 auth "garage" {

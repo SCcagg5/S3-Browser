@@ -14,7 +14,6 @@ import (
 
 type appConfig struct {
 	Listen          string
-	DataDir         string
 	JobHistoryLimit int
 	Runtime         runtimePolicy
 	Authentications []authConfig
@@ -105,7 +104,7 @@ func decodeConfig(data, sourceName, sourceDir string) (appConfig, error) {
 
 	cfg := appConfig{
 		Listen:          ":8080",
-		JobHistoryLimit: 100,
+		JobHistoryLimit: 10,
 		Runtime:         defaultRuntimePolicy(),
 		SourceDir:       sourceDir,
 		SourceName:      sourceName,
@@ -188,14 +187,15 @@ func decodeServerBlock(block hclBlock, cfg *appConfig) error {
 		return block.errorf("nested blocks are not supported inside server")
 	}
 	serverKinds := map[string]hclValueKind{
-		"listen": hclString, "data_dir": hclString, "job_history_limit": hclNumber,
-		"access_mode": hclString, "state_mode": hclString, "log_mode": hclString,
-		"browser_persistence": hclBool, "allow_full_object_fallback": hclBool,
-		"memory_limit_bytes": hclNumber, "max_storage_bytes_per_request": hclNumber,
-		"max_storage_requests_per_request": hclNumber, "max_temp_bytes_per_session": hclNumber,
-		"max_range_cache_bytes": hclNumber, "max_concurrent_storage_requests": hclNumber,
+		"listen": hclString, "job_history_limit": hclNumber,
+		"access_mode": hclString, "log_mode": hclString,
+		"allow_full_object_fallback": hclBool,
+		"memory_limit_bytes":         hclNumber, "max_storage_bytes_per_request": hclNumber,
+		"max_storage_requests_per_request": hclNumber,
+		"max_range_cache_bytes":            hclNumber, "max_concurrent_storage_requests": hclNumber,
 		"max_concurrent_requests_per_storage": hclNumber, "session_ttl_seconds": hclNumber,
 		"max_stats_folders": hclNumber, "max_archive_entries": hclNumber,
+		"max_background_storage_bytes": hclNumber, "max_background_storage_requests": hclNumber,
 	}
 	allowed := make([]string, 0, len(serverKinds))
 	for name := range serverKinds {
@@ -214,33 +214,17 @@ func decodeServerBlock(block hclBlock, cfg *appConfig) error {
 		}
 		cfg.Listen = listen
 	}
-	if value, ok := block.stringAttr("data_dir"); ok {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			return block.errorf("server.data_dir cannot be empty")
-		}
-		if !filepath.IsAbs(value) {
-			value = filepath.Join(cfg.SourceDir, value)
-		}
-		cfg.DataDir = filepath.Clean(value)
-	}
 	if value, ok := block.intAttr("job_history_limit"); ok {
-		if value < 1 || value > 10000 {
-			return block.errorf("server.job_history_limit must be between 1 and 10000")
+		if value < 1 || value > 20 {
+			return block.errorf("server.job_history_limit must be between 1 and 20")
 		}
 		cfg.JobHistoryLimit = int(value)
 	}
 	if value, ok := block.stringAttr("access_mode"); ok {
 		cfg.Runtime.AccessMode = strings.ToLower(strings.TrimSpace(value))
 	}
-	if value, ok := block.stringAttr("state_mode"); ok {
-		cfg.Runtime.StateMode = strings.ToLower(strings.TrimSpace(value))
-	}
 	if value, ok := block.stringAttr("log_mode"); ok {
 		cfg.Runtime.LogMode = strings.ToLower(strings.TrimSpace(value))
-	}
-	if value, ok := block.boolAttr("browser_persistence"); ok {
-		cfg.Runtime.BrowserPersistence = value
 	}
 	if value, ok := block.boolAttr("allow_full_object_fallback"); ok {
 		cfg.Runtime.AllowFullObjectFallback = value
@@ -252,8 +236,9 @@ func decodeServerBlock(block hclBlock, cfg *appConfig) error {
 		{"memory_limit_bytes", &cfg.Runtime.MemoryLimitBytes},
 		{"max_storage_bytes_per_request", &cfg.Runtime.MaxStorageBytesPerRequest},
 		{"max_storage_requests_per_request", &cfg.Runtime.MaxStorageRequestsPerRequest},
-		{"max_temp_bytes_per_session", &cfg.Runtime.MaxTempBytesPerSession},
 		{"max_range_cache_bytes", &cfg.Runtime.MaxRangeCacheBytes},
+		{"max_background_storage_bytes", &cfg.Runtime.MaxBackgroundStorageBytes},
+		{"max_background_storage_requests", &cfg.Runtime.MaxBackgroundStorageRequests},
 	}
 	for _, setting := range integerSettings {
 		if value, ok := block.intAttr(setting.name); ok {
@@ -292,27 +277,10 @@ func validateRuntimePolicy(cfg *appConfig) error {
 	default:
 		return fmt.Errorf("server.access_mode must be %q or %q", accessModeInheritCredentials, accessModeForceReadOnly)
 	}
-	switch cfg.Runtime.StateMode {
-	case stateModeEphemeral:
-		if strings.TrimSpace(cfg.DataDir) != "" {
-			return fmt.Errorf("server.data_dir requires state_mode = %q", stateModePersistent)
-		}
-		cfg.DataDir = ""
-	case stateModePersistent:
-		if strings.TrimSpace(cfg.DataDir) == "" {
-			return fmt.Errorf("server.data_dir is required when state_mode = %q", stateModePersistent)
-		}
-		cfg.DataDir = filepath.Clean(cfg.DataDir)
-	default:
-		return fmt.Errorf("server.state_mode must be %q or %q", stateModeEphemeral, stateModePersistent)
-	}
 	switch cfg.Runtime.LogMode {
 	case logModeAnonymous, logModeDetailed:
 	default:
 		return fmt.Errorf("server.log_mode must be %q or %q", logModeAnonymous, logModeDetailed)
-	}
-	if cfg.Runtime.BrowserPersistence && cfg.Runtime.StateMode != stateModePersistent {
-		return fmt.Errorf("server.browser_persistence requires state_mode = %q", stateModePersistent)
 	}
 	validateRange := func(name string, value, minimum, maximum int64) error {
 		if value < minimum || value > maximum {
@@ -331,8 +299,9 @@ func validateRuntimePolicy(cfg *appConfig) error {
 	}{
 		{"max_storage_bytes_per_request", cfg.Runtime.MaxStorageBytesPerRequest, 1 << 20, 1 << 50},
 		{"max_storage_requests_per_request", cfg.Runtime.MaxStorageRequestsPerRequest, 1, 10_000_000},
-		{"max_temp_bytes_per_session", cfg.Runtime.MaxTempBytesPerSession, 0, 1 << 50},
 		{"max_range_cache_bytes", cfg.Runtime.MaxRangeCacheBytes, 1 << 20, 4 << 30},
+		{"max_background_storage_bytes", cfg.Runtime.MaxBackgroundStorageBytes, 1 << 20, 1 << 50},
+		{"max_background_storage_requests", cfg.Runtime.MaxBackgroundStorageRequests, 1, 10_000_000},
 	} {
 		if err := validateRange(setting.name, setting.value, setting.min, setting.max); err != nil {
 			return err

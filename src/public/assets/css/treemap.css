@@ -1,0 +1,329 @@
+/* Treemap rendering contract. This file is the only source of treemap styles. */
+.folder-insights-panel[data-insights-panel="treemap"] {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* The map itself is only a positioning surface. Visual hierarchy belongs to
+   each folder rectangle, not to a global frame behind the tree. */
+.folder-treemap {
+  position: relative;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  contain: layout paint;
+}
+
+
+.folder-treemap-tooltip {
+  position: absolute;
+  z-index: 3000;
+  display: flex;
+  max-width: min(320px, calc(100% - 16px));
+  flex-direction: column;
+  gap: .08rem;
+  padding: .42rem .52rem;
+  color: var(--color-text, #172033);
+  background: var(--color-bg-panel, #fff);
+  border: 1px solid var(--color-border, #dfe4ea);
+  border-radius: var(--radius-sm, 6px);
+  box-shadow: var(--shadow-popover, 0 12px 30px rgba(16, 24, 40, .14));
+  font-size: .7rem;
+  line-height: 1.25;
+  pointer-events: none;
+}
+
+.folder-treemap-tooltip[hidden] {
+  display: none;
+}
+
+.folder-treemap-tooltip strong,
+.folder-treemap-tooltip span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-treemap-tooltip strong {
+  color: var(--color-text-strong, #101828);
+  font-size: .75rem;
+  font-weight: 700;
+}
+
+.folder-treemap-tooltip span {
+  color: var(--color-text-muted, #667085);
+  font-variant-numeric: tabular-nums;
+}
+
+.folder-treemap.is-layout-pending {
+  visibility: hidden;
+}
+
+.folder-treemap-node {
+  position: absolute;
+  box-sizing: border-box;
+  overflow: hidden;
+  background: var(--treemap-color);
+  border: 1px solid rgba(255, 255, 255, .82);
+  border-radius: 2px;
+  box-shadow: none;
+  cursor: pointer;
+  outline: 0;
+}
+
+/* Every folder owns its own pale surface and one neutral outline. Children are
+   inset by the layout code, so nesting remains visible without stacked dark
+   borders. Terminal and expanded folders use the same visual contract. */
+.folder-treemap-node.is-folder {
+  background: #f8fafc;
+  border: 1px solid #c7d0dc;
+  border-radius: 2px;
+}
+
+.folder-treemap-node.is-file {
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, .1);
+}
+
+.folder-treemap-node.is-other {
+  cursor: default;
+  background-color: #f3b944;
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgba(255, 255, 255, .24) 0,
+    rgba(255, 255, 255, .24) 7px,
+    rgba(255, 255, 255, .04) 7px,
+    rgba(255, 255, 255, .04) 14px
+  );
+  border-color: #b45309;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px rgba(120, 53, 15, .18);
+}
+
+.folder-treemap-node.is-hovered,
+.folder-treemap-node:focus-visible {
+  outline: 2px solid #167df0;
+  outline-offset: -2px;
+}
+
+.folder-treemap-node.is-other.is-hovered,
+.folder-treemap-node.is-other:focus-visible {
+  outline-color: #92400e;
+}
+
+/* Every label starts in the top-left corner. Compact modes only reduce type and
+   padding; they never vertically center a label. */
+.folder-treemap-label {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  display: flex;
+  box-sizing: border-box;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: .08rem;
+  padding: .26rem .34rem;
+  overflow: hidden;
+  color: #fff;
+  font-size: .74rem;
+  font-weight: 700;
+  line-height: 1.12;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .72);
+  pointer-events: none;
+  background: none;
+}
+
+.folder-treemap-node.is-folder > .folder-treemap-label {
+  height: var(--treemap-header, 100%);
+  padding: 2px 5px;
+  color: #182230;
+  text-shadow: none;
+  background: none;
+}
+
+/* Expanded folders reserve exactly two compact text rows: the folder name and
+   the size/object-count line. The header never allocates a third visual row. */
+.folder-treemap-node.is-folder.is-branch > .folder-treemap-label {
+  display: grid;
+  grid-template-rows: 12px 10px;
+  align-content: start;
+  gap: 0;
+  line-height: 1;
+}
+
+.folder-treemap-node.is-folder.is-branch > .folder-treemap-label .folder-treemap-name {
+  align-self: center;
+  font-size: .72rem;
+  line-height: 1;
+}
+
+.folder-treemap-node.is-folder.is-branch > .folder-treemap-label .folder-treemap-details {
+  align-self: center;
+  line-height: 1;
+}
+
+.folder-treemap-node.is-folder.is-branch > .folder-treemap-label .folder-treemap-size {
+  font-size: .62rem;
+  line-height: 1;
+}
+
+.folder-treemap-node.is-folder.is-branch > .folder-treemap-label .folder-treemap-meta {
+  font-size: .58rem;
+  line-height: 1;
+}
+
+
+.folder-treemap-node.is-folder.is-branch > .folder-treemap-label .folder-treemap-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-treemap-node.is-other > .folder-treemap-label {
+  color: #5f370e;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, .55);
+  background: none;
+}
+
+.folder-treemap-name {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* Size always occupies its own second line. */
+.folder-treemap-details {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: .28rem;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.folder-treemap-size {
+  flex: 0 0 auto;
+  color: inherit;
+  font-size: .66rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  white-space: nowrap;
+  background: none;
+}
+
+.folder-treemap-meta {
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  font-size: .61rem;
+  font-weight: 600;
+  opacity: .9;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-treemap-meta:not([hidden])::before {
+  content: "·";
+  margin-right: .28rem;
+}
+
+.folder-treemap-label.is-compact {
+  gap: .06rem;
+  padding: .18rem .28rem;
+  font-size: .68rem;
+}
+
+.folder-treemap-label.is-compact .folder-treemap-name,
+.folder-treemap-label.is-tiny .folder-treemap-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-treemap-label.is-tiny {
+  gap: .02rem;
+  padding: .1rem .18rem;
+  font-size: .58rem;
+  line-height: 1.05;
+}
+
+.folder-treemap-label.is-tiny .folder-treemap-size {
+  font-size: .55rem;
+}
+
+.folder-treemap-node.is-other > .folder-treemap-label.is-other-inline {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: .28rem;
+  padding: .08rem .3rem;
+  font-size: .64rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.folder-treemap-node.is-other > .folder-treemap-label.is-other-inline .folder-treemap-name {
+  display: block;
+  flex: 0 0 auto;
+  overflow: visible;
+  white-space: nowrap;
+}
+
+.folder-treemap-node.is-other > .folder-treemap-label.is-other-inline .folder-treemap-details {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.folder-treemap-node.is-other > .folder-treemap-label.is-other-inline .folder-treemap-size,
+.folder-treemap-node.is-other > .folder-treemap-label.is-other-inline .folder-treemap-meta {
+  font-size: .55rem;
+}
+
+.folder-treemap-node.is-other > .folder-treemap-label.is-other-compact {
+  gap: 0;
+  padding: .08rem .2rem;
+  font-size: .62rem;
+  line-height: 1;
+}
+
+.folder-treemap-node.is-other > .folder-treemap-label.is-other-compact .folder-treemap-details {
+  gap: .18rem;
+}
+
+.folder-treemap-node.is-other > .folder-treemap-label.is-other-compact .folder-treemap-size,
+.folder-treemap-node.is-other > .folder-treemap-label.is-other-compact .folder-treemap-meta {
+  font-size: .53rem;
+}
+
+.folder-treemap-label.is-hidden {
+  display: none;
+}
+
+.folder-treemap-empty {
+  display: grid;
+  height: 100%;
+  place-items: center;
+  color: #667085;
+  font-size: .8rem;
+}
+
+@media (max-width: 640px) {
+  .folder-treemap-label {
+    padding: .22rem .26rem;
+  }
+}

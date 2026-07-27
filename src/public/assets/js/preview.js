@@ -2,7 +2,7 @@
   'use strict';
 
   const BB = (window.BB = window.BB || {});
-  const config = { instanceId: '', capabilities: {}, operations: {}, runtime: { browserPersistence: false } };
+  const config = { instanceId: '', capabilities: {}, operations: {}, runtime: {}, versioningSupported: false };
   const MAX_TEXT_PREVIEW = 8 * 1024 * 1024;
   const TEXT_SNIFF_LIMIT = 128 * 1024;
   const PDFJS_VERSION = '4.10.38';
@@ -34,16 +34,12 @@
     })[character]);
   }
 
-  function listedObjectMetadata() {
-    const params = new URLSearchParams(location.search);
-    if (params.get('listed') !== '1' || !params.has('size')) return null;
-    const size = Number(params.get('size'));
-    return {
-      size: Number.isFinite(size) && size >= 0 ? size : 0,
-      mime: String(params.get('mime') || ''),
-      etag: String(params.get('etag') || ''),
-      lastModified: String(params.get('lastModified') || '')
-    };
+  function currentVersion() {
+    return new URLSearchParams(location.search).get('version') || '';
+  }
+
+  function currentArchiveEntry() {
+    return String(new URLSearchParams(location.search).get('entry') || '').replace(/^\/+/, '');
   }
 
   function scheduleViewerLayout() {
@@ -105,13 +101,7 @@
   }
 
   function currentKey() {
-    const raw = (location.hash || '#').slice(1);
-    try { return decodeURIComponent(raw).replace(/^\/+/, ''); }
-    catch (_) { return raw.replace(/^\/+/, ''); }
-  }
-
-  function encodeHash(value) {
-    return encodeURIComponent(value || '').replace(/%2F/gi, '/');
+    return String(new URLSearchParams(location.search).get('path') || '').replace(/^\/+/, '');
   }
 
   function parentPrefix(key) {
@@ -128,12 +118,14 @@
     return `${(value / 1024 ** 3).toFixed(2)} GB`;
   }
 
-  function setDocMeta(key, size) {
+  function setDocMeta(key, size, archiveKey = '') {
     const name = key.split('/').pop() || key;
     const prefix = parentPrefix(key).replace(/\/$/, '');
     byId('docName').textContent = name || 'Object';
     byId('docName').title = name || 'Object';
-    byId('docPrefix').textContent = prefix ? ` / ${prefix}` : ' / root';
+    byId('docPrefix').textContent = archiveKey
+      ? ` / ${archiveKey}${prefix ? ` / ${prefix}` : ''}`
+      : (prefix ? ` / ${prefix}` : ' / root');
     byId('docSize').textContent = Number.isFinite(Number(size)) ? `(${formatBytes(size)})` : '';
     byId('instanceMeta').textContent = currentInstance
       ? `${currentInstance.name} · ${currentInstance.provider.toUpperCase()} · ${currentInstance.bucket}`
@@ -158,18 +150,89 @@
     const remove = can('delete');
     setVisible('openRawBtn', download);
     setVisible('pv-download', download);
-    setVisible('pv-details', details);
-    setVisible('pv-copy', copy);
-    setVisible('pv-rename', rename);
-    setVisible('pv-delete', remove);
-    setVisible('previewMenu', download || details || copy || rename || remove);
+    const archiveEntry = !!currentArchiveEntry();
+    setVisible('pv-details', details && !archiveEntry);
+    setVisible('pv-copy', copy && !archiveEntry);
+    setVisible('pv-rename', rename && !archiveEntry);
+    const selectedHistoricalVersion = !!currentVersion();
+    const versioning = currentInstance?.versioningSupported === true;
+    setVisible('pv-versions', versioning && preview && !archiveEntry);
+    setVisible('pv-copy', copy && !selectedHistoricalVersion && !archiveEntry);
+    setVisible('pv-rename', rename && !selectedHistoricalVersion && !archiveEntry);
+    setVisible('pv-delete', remove && !selectedHistoricalVersion && !archiveEntry);
+    setVisible('previewMenu', download || (!archiveEntry && (details || versioning || (!selectedHistoricalVersion && (copy || rename || remove)))));
     return preview;
   }
 
-  function updateBackLink(key) {
+  function versionOptionLabel(version) {
+    const date = version?.lastModified ? new Date(version.lastModified).toLocaleString() : 'Previous version';
+    const identifier = String(version?.version || '');
+    const short = identifier.length > 24 ? `${identifier.slice(0, 12)}…${identifier.slice(-8)}` : identifier;
+    return short ? `${date} · ${short}` : date;
+  }
+
+  async function configureVersionSelector(key) {
+    const control = byId('previewVersionControl');
+    const select = byId('previewVersionSelect');
+    if (!control || !select) return;
+    control.hidden = true;
+    select.replaceChildren();
+    if (currentArchiveEntry() || currentInstance?.versioningSupported !== true) return;
+
+    try {
+      const versions = await BB.api.allVersions(key, { instance: config.instanceId });
+      const availableVersions = versions.filter(version => version && !version.deleteMarker && version.version);
+      const label = control.querySelector('span');
+      if (label) label.textContent = `Version (${availableVersions.length.toLocaleString()})`;
+      control.title = `${availableVersions.length.toLocaleString()} available version${availableVersions.length === 1 ? '' : 's'}`;
+      const current = document.createElement('option');
+      current.value = '';
+      const currentRecord = availableVersions.find(version => version.isCurrent);
+      current.textContent = currentRecord ? `Current · ${versionOptionLabel(currentRecord)}` : 'Current';
+      select.append(current);
+      for (const version of availableVersions) {
+        if (!version || version.deleteMarker || version.isCurrent || !version.version) continue;
+        const option = document.createElement('option');
+        option.value = version.version;
+        option.textContent = versionOptionLabel(version);
+        select.append(option);
+      }
+      const selected = currentVersion();
+      if (selected && !Array.from(select.options).some(option => option.value === selected)) {
+        const option = document.createElement('option');
+        option.value = selected;
+        option.textContent = `Selected · ${selected}`;
+        select.append(option);
+      }
+      select.value = selected;
+      control.hidden = false;
+    } catch (error) {
+      console.warn('Unable to load object versions for the preview selector', error);
+      control.hidden = true;
+    }
+  }
+
+  function selectVersion(version) {
+    const url = new URL(location.href);
+    if (version) url.searchParams.set('version', version);
+    else url.searchParams.delete('version');
+    history.replaceState(null, '', url.pathname + url.search);
+    applyCapabilities();
+    void render();
+  }
+
+  function updateBackLink(key, entry = '') {
+    if (entry) {
+      byId('backBtn').href = BB.api.previewPageURL(key, {
+        instance: config.instanceId,
+        version: currentVersion()
+      });
+      return;
+    }
     const url = new URL('index.html', location.href);
     if (config.instanceId) url.searchParams.set('instance', config.instanceId);
-    url.hash = encodeHash(parentPrefix(key));
+    const prefix = parentPrefix(key);
+    if (prefix) url.hash = encodeURIComponent(prefix).replace(/%2F/gi, '/');
     byId('backBtn').href = url.pathname + url.search + url.hash;
   }
 
@@ -885,8 +948,8 @@
     return scroller;
   }
 
-  async function renderWordDocument(key, size, etag = '') {
-    const payload = await BB.api.wordPreview({ key, size, etag, instance: config.instanceId });
+  async function renderWordDocument(key, size, etag = '', version = '') {
+    const payload = await BB.api.wordPreview({ key, size, etag, version, instance: config.instanceId });
     const wrapper = document.createElement('article');
     wrapper.className = 'word-document';
     let activeList = null;
@@ -1048,6 +1111,7 @@
     const payload = await BB.api.searchDocument({
       key,
       query,
+      version: currentVersion(),
       instance: config.instanceId,
       signal: activeSearchController.signal
     });
@@ -1137,14 +1201,16 @@
   async function render() {
     cleanupPreviewResources();
     const key = currentKey();
+    const archiveEntry = currentArchiveEntry();
+    const displayKey = archiveEntry || key;
     const container = byId('viewer');
     if (!key) {
-      renderError(new Error('No object key is present in the URL.'));
+      renderError(new Error('No object path is present in the URL.'));
       return;
     }
     if (BB.capabilities?.actionable && !BB.capabilities.actionable(config, 'preview')) {
-      setDocMeta(key, NaN);
-      updateBackLink(key);
+      setDocMeta(displayKey, NaN, archiveEntry ? key : '');
+      updateBackLink(key, archiveEntry);
       renderError(new Error('Read access is not available for this storage instance.'));
       return;
     }
@@ -1160,72 +1226,108 @@
     scheduleViewerLayout();
 
     try {
-      const metadata = listedObjectMetadata() || await BB.api.head(key);
-      setDocMeta(key, metadata.size);
-      updateBackLink(key);
-      const rawURL = BB.api.urlForKey(key);
-      const browserPreviewURL = BB.api.previewURLForKey(key);
-      byId('openRawBtn').href = BB.api.openURLForKey(key);
-      const type = BB.detect.resolveType(key, metadata.mime);
+      const version = currentVersion();
+      const metadata = archiveEntry
+        ? await BB.api.archiveEntryHead(key, archiveEntry, { instance: config.instanceId, version })
+        : await BB.api.head(key, version, config.instanceId);
+      setDocMeta(displayKey, metadata.size, archiveEntry ? key : '');
+      updateBackLink(key, archiveEntry);
+      const rawURL = archiveEntry
+        ? BB.api.archiveEntryURL(key, archiveEntry, { inline: true, instance: config.instanceId, version })
+        : BB.api.urlForKey(key, config.instanceId, version);
+      const browserPreviewURL = archiveEntry
+        ? rawURL
+        : BB.api.previewURLForKey(key, config.instanceId, version);
+      byId('openRawBtn').href = archiveEntry
+        ? BB.api.archiveEntryURL(key, archiveEntry, { inline: true, instance: config.instanceId, version })
+        : BB.api.openURLForKey(key, config.instanceId, version);
+      const type = BB.detect.resolveType(displayKey, metadata.mime);
       let node;
       let className = 'preview-content';
 
       if (type === 'image') node = renderImage(browserPreviewURL);
-      else if (type === 'raw-image' || type === 'image-convert') node = renderImage(BB.api.imagePreviewURL(key));
-      else if (type === 'video') node = BB.structuredViewers.renderVideo(browserPreviewURL, key);
-      else if (type === 'audio') node = renderAudio(browserPreviewURL, key, metadata.mime);
-      else if (type === 'pdf') node = renderPDF(browserPreviewURL, metadata);
+      else if ((type === 'raw-image' || type === 'image-convert') && !archiveEntry) node = renderImage(BB.api.imagePreviewURL(key, { version, instance: config.instanceId }));
+      else if (type === 'video') node = BB.structuredViewers.renderVideo(browserPreviewURL, displayKey);
+      else if (type === 'audio') node = renderAudio(browserPreviewURL, displayKey, metadata.mime);
+      else if (type === 'pdf' && !archiveEntry) node = renderPDF(browserPreviewURL, metadata);
+      else if (type === 'pdf') node = unavailablePreview('PDF archive entry preview is unavailable', 'Extract the PDF or download it before opening the strict Range-based PDF viewer.', 'file-pdf-box');
       else if (type === 'word') {
-        node = await renderWordDocument(key, metadata.size, metadata.etag || metadata.headers?.etag || '');
-        className = 'preview-document word-preview';
+        if (archiveEntry) node = unavailablePreview('Office archive entry preview is unavailable', 'Extract the document before opening its structured preview.', 'file-word-outline');
+        else {
+          node = await renderWordDocument(key, metadata.size, metadata.etag || metadata.headers?.etag || '', version);
+          className = 'preview-document word-preview';
+        }
       } else if (type === 'json') {
-        node = BB.jsonViewer.render({
-          key,
-          size: metadata.size,
-          etag: metadata.etag || metadata.headers?.etag || '',
-          instance: config.instanceId
-        });
-        className = 'preview-data json-preview-host';
+        if (archiveEntry) {
+          node = BB.render.renderCode(await fetchLimitedText(rawURL, metadata.size), 'json');
+          className = 'preview-code';
+        } else {
+          node = BB.jsonViewer.render({
+            key,
+            size: metadata.size,
+            etag: metadata.etag || metadata.headers?.etag || '',
+            version,
+            instance: config.instanceId
+          });
+          className = 'preview-data json-preview-host';
+        }
       } else if (type === 'markdown') {
         node = BB.render.renderMarkdown(await fetchLimitedText(rawURL, metadata.size));
         className = 'markdown-body preview-document';
       } else if (type === 'code') {
-        node = BB.render.renderCode(await fetchLimitedText(rawURL, metadata.size), BB.detect.resolveLang(key, metadata.mime));
+        node = BB.render.renderCode(await fetchLimitedText(rawURL, metadata.size), BB.detect.resolveLang(displayKey, metadata.mime));
         className = 'preview-code';
       } else if (type === 'contact' || type === 'calendar' || type === 'email' || type === 'certificate') {
-        const payload = await BB.api.structuredPreview(key, {
-          size: metadata.size,
-          mime: metadata.mime,
-          etag: metadata.etag || metadata.headers?.etag || '',
-          lastModified: metadata.lastModified || metadata.headers?.['last-modified'] || '',
-          instance: config.instanceId
-        });
-        node = BB.structuredViewers.renderStructured(payload);
-        className = 'preview-data structured-preview-root';
+        if (archiveEntry) {
+          node = BB.render.renderCode(await fetchLimitedText(rawURL, metadata.size), BB.detect.resolveLang(displayKey, metadata.mime));
+          className = 'preview-code';
+        } else {
+          const payload = await BB.api.structuredPreview(key, {
+            size: metadata.size,
+            mime: metadata.mime,
+            etag: metadata.etag || metadata.headers?.etag || '',
+            lastModified: metadata.lastModified || metadata.headers?.['last-modified'] || '',
+            version,
+            instance: config.instanceId
+          });
+          node = BB.structuredViewers.renderStructured(payload);
+          className = 'preview-data structured-preview-root';
+        }
       } else if (type === 'tabular') {
-        node = await BB.tabular.fetchTextTable(rawURL, key, metadata.size, {
-          etag: metadata.etag || metadata.headers?.etag || '',
-          instance: config.instanceId
+        node = await BB.tabular.fetchTextTable(rawURL, displayKey, metadata.size, archiveEntry ? {} : {
+          etag: metadata.etag || metadata.headers?.etag || '', version, instance: config.instanceId
         });
         className = 'preview-data';
       } else if (type === 'spreadsheet') {
-        node = await BB.tabular.renderSpreadsheet(rawURL, key, metadata.size);
-        className = 'preview-data';
+        if (archiveEntry) node = unavailablePreview('Spreadsheet archive entry preview is unavailable', 'Extract the spreadsheet before opening its worksheet viewer.', 'file-excel-outline');
+        else {
+          node = await BB.tabular.renderSpreadsheet(rawURL, key, metadata.size, { version, instance: config.instanceId });
+          className = 'preview-data';
+        }
       } else if (type === 'parquet') {
-        node = await BB.tabular.renderParquet(key, metadata.size, { etag: metadata.etag || metadata.headers?.etag || '', instance: config.instanceId });
-        className = 'preview-data';
+        if (archiveEntry) node = unavailablePreview('Parquet archive entry preview is unavailable', 'Extract the file before opening its column metadata.', 'file-table-outline');
+        else {
+          node = await BB.tabular.renderParquet(key, metadata.size, { etag: metadata.etag || metadata.headers?.etag || '', version, instance: config.instanceId });
+          className = 'preview-data';
+        }
       } else if (type === 'sqlite') {
-        node = await BB.sqliteViewer.render({ key, size: metadata.size, instance: config.instanceId });
-        className = 'preview-data sqlite-preview-host';
+        if (archiveEntry) node = unavailablePreview('Database archive entry preview is unavailable', 'Extract the database before opening its page-based reader.', 'database-outline');
+        else {
+          node = await BB.sqliteViewer.render({ key, size: metadata.size, version, instance: config.instanceId });
+          className = 'preview-data sqlite-preview-host';
+        }
       } else if (type === 'word-unavailable' || type === 'sheet-unavailable' || type === 'slide-unavailable' || type === 'diagram-unavailable') {
         node = officeUnavailable(type);
       } else if (type === 'archive') {
-        const extension = BB.detect.extOf(key);
-        if (DETERMINISTIC_ZIP_PREVIEW_EXTENSIONS.has(extension)) {
+        const extension = BB.detect.extOf(displayKey);
+        if (archiveEntry) {
+          node = unavailablePreview('Nested archive preview is unavailable', 'Extract the nested archive before inspecting its central directory.', 'folder-zip-outline');
+        } else if (DETERMINISTIC_ZIP_PREVIEW_EXTENSIONS.has(extension)) {
           const payload = await BB.api.archivePreview(key, {
             size: metadata.size,
             etag: metadata.etag || metadata.headers?.etag || '',
             lastModified: metadata.lastModified || metadata.headers?.['last-modified'] || '',
+            version,
             instance: config.instanceId
           });
           node = BB.structuredViewers.renderArchive(payload);
@@ -1234,9 +1336,9 @@
           node = unavailablePreview('Archive preview is not available', 'This format requires a complete explicit scan and is not previewed automatically.', 'folder-zip-outline');
         }
       } else {
-        const text = await sniffUnknownText(rawURL, key, metadata.size);
+        const text = await sniffUnknownText(rawURL, displayKey, metadata.size);
         if (text != null) {
-          node = BB.render.renderCode(text, BB.detect.resolveLang(key, metadata.mime));
+          node = BB.render.renderCode(text, BB.detect.resolveLang(displayKey, metadata.mime));
           className = 'preview-code';
         } else {
           node = unavailablePreview('No preview available', 'Download the file and open it with a compatible application.');
@@ -1250,7 +1352,7 @@
       container.className = className;
       container.replaceChildren(node);
       normalizeHorizontalPreviewScrollers(node);
-      configureDocumentSearch(node, type, key);
+      configureDocumentSearch(node, type, displayKey);
       if (typeof node?.cleanup === 'function') activeMediaCleanups.add(() => node.cleanup());
       if (type === 'markdown' && typeof BB.render.renderMermaid === 'function') {
         await BB.render.renderMermaid(node);
@@ -1283,8 +1385,10 @@
       config.instanceId = currentInstance.id;
       config.capabilities = currentInstance.capabilities || {};
       config.operations = currentInstance.operations || {};
+      config.versioningSupported = currentInstance.versioningSupported === true;
       BB.api.setInstance(currentInstance.id);
       applyCapabilities();
+      await configureVersionSelector(currentKey());
       await render();
     } catch (error) {
       renderError(error);
@@ -1293,17 +1397,41 @@
 
   byId('pv-download').addEventListener('click', () => {
     const key = currentKey();
-    BB.actions.downloadObject(key, key.split('/').pop());
+    const entry = currentArchiveEntry();
+    if (entry) {
+      const anchor = document.createElement('a');
+      anchor.href = BB.api.archiveEntryURL(key, entry, {
+        inline: false,
+        instance: config.instanceId,
+        version: currentVersion()
+      });
+      anchor.download = entry.split('/').pop() || 'archive-entry';
+      anchor.hidden = true;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      return;
+    }
+    BB.actions.downloadObject(key, key.split('/').pop(), { version: currentVersion() });
   });
   byId('pv-copy').addEventListener('click', async () => { await BB.actions.copyObject(currentKey()); });
   byId('pv-rename').addEventListener('click', async () => {
     const destination = await BB.actions.renameObject(currentKey());
-    if (destination) location.hash = encodeHash(destination);
+    if (destination) {
+      const url = new URL(location.href);
+      url.searchParams.set('path', destination);
+      history.replaceState(null, '', url.pathname + url.search);
+      await configureVersionSelector(destination);
+      await render();
+    }
   });
-  byId('pv-details').addEventListener('click', () => BB.actions.showMetadata(currentKey(), listedObjectMetadata() || {}));
+  byId('pv-details').addEventListener('click', () => BB.actions.showMetadata(currentKey(), { version: currentVersion() }));
+  byId('pv-versions').addEventListener('click', () => BB.actions.showVersions(currentKey()));
   byId('pv-delete').addEventListener('click', async () => {
     if (await BB.actions.deleteObject(currentKey())) location.href = byId('backBtn').href;
   });
+
+  byId('previewVersionSelect')?.addEventListener('change', event => selectVersion(event.target.value));
 
   window.addEventListener('keydown', event => {
     if (!(event.ctrlKey || event.metaKey) || event.altKey || String(event.key).toLowerCase() !== 'f') return;
@@ -1311,7 +1439,6 @@
     event.preventDefault();
     void openDocumentSearch();
   });
-  window.addEventListener('hashchange', render);
   installViewerLayoutObserver();
   initialize();
 })();

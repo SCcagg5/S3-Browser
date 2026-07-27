@@ -234,6 +234,10 @@ type ObjectReader interface {
 type ObjectWriter interface {
 	Put(context.Context, string, io.Reader, int64, string) error
 }
+
+type ConditionalObjectWriter interface {
+	PutIfAbsent(context.Context, string, io.Reader, int64, string) error
+}
 type ObjectDeleter interface {
 	Delete(context.Context, string) error
 }
@@ -263,6 +267,10 @@ type storageInstance struct {
 	policy        runtimePolicy
 	concurrency   *storageConcurrency
 	gate          chan struct{}
+
+	versioningMu        sync.RWMutex
+	versioningSupported bool
+	versioningChecked   bool
 }
 
 func newStorageInstance(cfg bucketConfig, auth *sharedAuthentication, policy runtimePolicy, concurrency *storageConcurrency) (*storageInstance, error) {
@@ -441,26 +449,28 @@ func (s *storageInstance) operationCapabilities() map[string]capabilityState {
 
 func (s *storageInstance) publicInfo() instanceInfo {
 	return instanceInfo{
-		ID:           s.cfg.ID,
-		Name:         s.cfg.Name,
-		Provider:     s.cfg.Provider,
-		Bucket:       s.cfg.Bucket,
-		Region:       s.cfg.Region,
-		RootPrefix:   s.cfg.RootPrefix,
-		Capabilities: s.capabilities(),
-		Operations:   s.operationCapabilities(),
+		ID:                  s.cfg.ID,
+		Name:                s.cfg.Name,
+		Provider:            s.cfg.Provider,
+		Bucket:              s.cfg.Bucket,
+		Region:              s.cfg.Region,
+		RootPrefix:          s.cfg.RootPrefix,
+		VersioningSupported: s.versioningAvailable(),
+		Capabilities:        s.capabilities(),
+		Operations:          s.operationCapabilities(),
 	}
 }
 
 type instanceInfo struct {
-	ID           string                     `json:"id"`
-	Name         string                     `json:"name"`
-	Provider     string                     `json:"provider"`
-	Bucket       string                     `json:"bucket"`
-	Region       string                     `json:"region,omitempty"`
-	RootPrefix   string                     `json:"rootPrefix,omitempty"`
-	Capabilities capabilities               `json:"capabilities"`
-	Operations   map[string]capabilityState `json:"operations"`
+	ID                  string                     `json:"id"`
+	Name                string                     `json:"name"`
+	Provider            string                     `json:"provider"`
+	Bucket              string                     `json:"bucket"`
+	Region              string                     `json:"region,omitempty"`
+	RootPrefix          string                     `json:"rootPrefix,omitempty"`
+	VersioningSupported bool                       `json:"versioningSupported"`
+	Capabilities        capabilities               `json:"capabilities"`
+	Operations          map[string]capabilityState `json:"operations"`
 }
 
 type upstreamError struct {

@@ -14,7 +14,8 @@ import (
 )
 
 const (
-	maxSQLitePreviewBytes = int64(16 << 40)
+	maxSQLitePreviewBytes     = int64(16 << 40)
+	maxInMemorySQLiteSessions = 4
 )
 
 type sqliteColumnInfo struct {
@@ -185,6 +186,37 @@ func (m *sqliteSessionManager) get(id string) (*sqliteSession, bool) {
 	return &copySession, true
 }
 
+func (m *sqliteSessionManager) hasSessionCapacity() bool {
+	if m == nil {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.sessions) < maxInMemorySQLiteSessions
+}
+
+func sqliteSessionCapacityError() error {
+	return apiError{
+		Status:  http.StatusTooManyRequests,
+		Code:    "sqlite_session_limit_reached",
+		Message: fmt.Sprintf("the server is already tracking %d active SQLite preview sessions", maxInMemorySQLiteSessions),
+	}
+}
+
+func (m *sqliteSessionManager) register(session *sqliteSession) error {
+	if m == nil || session == nil || strings.TrimSpace(session.ID) == "" {
+		return fmt.Errorf("SQLite preview session is invalid")
+	}
+	m.mu.Lock()
+	if _, exists := m.sessions[session.ID]; !exists && len(m.sessions) >= maxInMemorySQLiteSessions {
+		m.mu.Unlock()
+		return sqliteSessionCapacityError()
+	}
+	m.sessions[session.ID] = session
+	m.mu.Unlock()
+	return nil
+}
+
 func (m *sqliteSessionManager) remove(id string) bool {
 	m.mu.Lock()
 	session, ok := m.sessions[id]
@@ -201,6 +233,9 @@ func (m *sqliteSessionManager) remove(id string) bool {
 func (m *sqliteSessionManager) create(ctx context.Context, request sqliteSessionRequest) (*sqliteSession, error) {
 	if m == nil || m.app == nil {
 		return nil, apiError{Status: http.StatusServiceUnavailable, Code: "sqlite_unavailable", Message: "SQLite preview is unavailable"}
+	}
+	if !m.hasSessionCapacity() {
+		return nil, sqliteSessionCapacityError()
 	}
 	instance := m.app.instances[strings.TrimSpace(request.Instance)]
 	if instance == nil {
@@ -260,9 +295,12 @@ func (m *sqliteSessionManager) create(ctx context.Context, request sqliteSession
 		CreatedAt:   now,
 		LastAccess:  now,
 	}
-	m.mu.Lock()
-	m.sessions[id] = session
-	m.mu.Unlock()
+	if err := m.register(session); err != nil {
+		if session.Source != nil {
+			session.Source.clearCache()
+		}
+		return nil, err
+	}
 	return session, nil
 }
 

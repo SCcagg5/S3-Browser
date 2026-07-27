@@ -242,13 +242,6 @@ button.dropdown-item,
   .bb-permission-provider span { text-align: left; }
 }
 
-.folder-treemap-rule {
-  margin: 0 0 .55rem;
-  color: #667085;
-  font-size: .76rem;
-  line-height: 1.35;
-}
-
 
 /* Targeted layout contracts: preserve navigation rhythm and make byte sizes scan-friendly. */
 .pagination-control .is-pagination-placeholder,
@@ -672,7 +665,6 @@ body.is-viewport-pdf .pdf-custom-stage { min-height: 0; }
   align-items: center;
   gap: .55rem;
   padding: 0 0 .7rem;
-  margin-bottom: 0px !important;
 }
 .archive-entry-search {
   min-width: min(18rem, 100%);
@@ -854,6 +846,9 @@ body.is-viewport-pdf .pdf-custom-stage {
   justify-self: end;
   color: #98a2b3;
 }
+.navigation-sort-icon .mdi {
+  transform: translateY(1px);
+}
 .navigation-sort-button.is-active .navigation-sort-icon { color: var(--primary-color); }
 .navigation-sort-icon.is-placeholder { visibility: hidden; }
 .browser-card .table th.name-column-header .th-wrap,
@@ -901,16 +896,13 @@ body.is-viewport-pdf .pdf-custom-stage {
   vertical-align: middle;
 }
 .archive-entry-table .archive-cell-name,
-.archive-entry-table .archive-cell-type,
 .archive-entry-table .archive-cell-method,
-.archive-entry-table .archive-cell-modified,
-.archive-entry-table .archive-cell-crc { text-align: left; }
+.archive-entry-table .archive-cell-modified { text-align: left; }
 .archive-entry-table .archive-cell-compressed,
 .archive-entry-table .archive-cell-size { text-align: right; }
 .archive-entry-table .archive-cell-compressed,
 .archive-entry-table .archive-cell-size,
-.archive-entry-table .archive-cell-modified,
-.archive-entry-table .archive-cell-crc {
+.archive-entry-table .archive-cell-modified {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -957,4 +949,396 @@ body.is-viewport-pdf .pdf-custom-stage {
 .viewer.is-certificate-preview .structured-preview-tabs {
   margin-bottom: 0;
 }
+
+
+/* Advanced object tools: versioning, comparison, integrity and inspection. */
+.bb-version-table,
+.bb-comparison .data-table-scroll {
+  width: 100%;
+  max-width: none;
+}
+
+.bb-version-actions,
+.archive-cell-actions {
+  white-space: nowrap;
+}
+
+.bb-version-actions .bb-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.875rem;
+  margin: 0 .2rem .2rem 0;
+  padding: .25rem .5rem;
+  font-size: .75rem;
+  text-decoration: none;
+}
+
+.bb-version-actions .danger {
+  color: var(--bb-danger, #c62828);
+}
+
+.bb-comparison pre,
+.technical-probe {
+  max-width: 42rem;
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  font-family: var(--bb-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: .75rem;
+}
+
+
+.archive-entry-table .archive-cell-actions {
+  text-align: right;
+}
+
+
+.bb-version-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  min-height: 2.5rem;
+  padding-top: .75rem;
+  color: var(--bb-muted, #667085);
+  font-size: .8125rem;
+}
+
+.bb-version-pagination [hidden] {
+  visibility: hidden;
+  display: inline-flex !important;
+  pointer-events: none;
+}
+
+/* Selective archive extraction and per-entry integrity actions. */
+.archive-selection-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: .4rem;
+  margin-left: auto;
+}
+.archive-selection-summary {
+  min-width: 5.5rem;
+  color: var(--bb-muted, #667085);
+  font-size: .75rem;
+  text-align: right;
+}
+.archive-cell-select {
+  width: 2.5rem;
+  text-align: center !important;
+}
+.archive-cell-select input {
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  vertical-align: middle;
+}
+.archive-entry-table {
+  min-width: 78rem;
+}
+@media (max-width: 760px) {
+  .archive-selection-actions {
+    width: 100%;
+    margin-left: 0;
+  }
+  .archive-selection-summary {
+    margin-right: auto;
+    text-align: left;
+  }
+}
+
+/* Object version controls. */
+.preview-version-control,
+.bb-details-version-control {
+  display: inline-flex;
+  align-items: center;
+  gap: .45rem;
+  min-width: 0;
+  color: var(--bb-muted, #667085);
+  font-size: .75rem;
+  font-weight: 600;
+}
+
+.preview-version-control select,
+.bb-details-version-control select {
+  min-width: 0;
+  height: 2rem;
+  padding: 0 1.75rem 0 .55rem;
+  border: 1px solid var(--bb-border, #d7dde5);
+  border-radius: .4rem;
+  background: var(--bb-surface, #fff);
+  color: var(--bb-text, #1f2937);
+  font: inherit;
+}
+
+.preview-version-control select {
+  width: clamp(10rem, 24vw, 22rem);
+}
+
+.bb-details-version-control {
+  margin-left: auto;
+  padding-left: 1rem;
+}
+
+.bb-details-version-control select {
+  width: clamp(11rem, 30vw, 28rem);
+}
+
+
+.object-version-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  min-width: 1.4rem;
+  height: 1.25rem;
+  padding: 0 .35rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bb-primary, #2563eb) 12%, transparent);
+  color: var(--bb-primary, #2563eb);
+  font-size: .68rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+
+@media (max-width: 760px) {
+  .preview-version-control > span,
+  .bb-details-version-control > span {
+    display: none;
+  }
+  .preview-version-control select {
+    width: clamp(8rem, 38vw, 15rem);
+  }
+  .bb-details-head {
+    flex-wrap: wrap;
+  }
+  .bb-details-version-control {
+    flex-basis: 100%;
+    width: 100%;
+    margin-left: 0;
+    padding: .6rem 0 0;
+  }
+  .bb-details-version-control select {
+    width: 100%;
+  }
+}
+
+/* File Details stays compact while keeping the same bounded working height as Insights. */
+.bb-modal.bb-modal--details {
+  width: min(900px, calc(100vw - 2rem));
+  max-width: min(900px, calc(100vw - 2rem));
+}
+.bb-details--file .bb-details-body {
+  box-sizing: border-box;
+  width: 100%;
+  height: min(68vh, 680px);
+  min-height: 380px;
+  padding: 0 .15rem .15rem;
+  overflow: auto;
+}
+.bb-details-tabs {
+  position: sticky;
+  z-index: 4;
+  top: 0;
+  margin: 0 0 .75rem;
+  padding-top: .05rem;
+  background: var(--bb-surface, #fff);
+  border-bottom: 1px solid var(--bb-border, #d7dde5);
+}
+.bb-details-panel {
+  min-width: 0;
+}
+.bb-details-panel[hidden] {
+  display: none !important;
+}
+.bb-details-advanced {
+  display: grid;
+  gap: .8rem;
+}
+.bb-details-tool-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .55rem;
+}
+.bb-details-tool-actions .bb-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+}
+.bb-details-tool-host {
+  min-height: 13rem;
+  padding: .85rem;
+  background: #f8fafc;
+  border: 1px solid var(--bb-border, #d7dde5);
+  border-radius: .55rem;
+}
+.bb-details-tool-status {
+  display: flex;
+  min-height: 10rem;
+  align-items: center;
+  justify-content: center;
+  gap: .55rem;
+  color: var(--bb-muted, #667085);
+  text-align: center;
+}
+.bb-details-tool-status.is-error {
+  color: #b42318;
+}
+.bb-details-tool-result-section {
+  padding-top: 0;
+  border-top: 0;
+}
+.bb-details-tool-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: .75rem;
+}
+.bb-details-tool-host .technical-probe {
+  max-width: 100%;
+  max-height: 18rem;
+  overflow: auto;
+}
+
+/* Final adaptive Details modal contract. The overlay is top-anchored so tab
+   changes can resize the dialog without moving its upper edge or flickering. */
+.bb-overlay.bb-overlay--top-anchored {
+  box-sizing: border-box;
+  align-items: flex-start;
+  padding: clamp(1rem, 6vh, 3.5rem) 1rem 1rem;
+  overflow: auto;
+}
+.bb-overlay--top-anchored .bb-modal.bb-modal--details {
+  max-height: calc(100dvh - clamp(2rem, 12vh, 7rem));
+}
+.bb-details--file .bb-details-body {
+  height: auto;
+  min-height: 0;
+  max-height: min(68vh, 680px);
+  overflow: auto;
+}
+.bb-details--file .bb-details-panel {
+  min-height: 0;
+}
+.bb-details--file .bb-details-advanced {
+  gap: .65rem;
+}
+.bb-details--file .bb-details-tool-host {
+  min-height: 0;
+  padding: .65rem;
+}
+.bb-details--file .bb-details-tool-status {
+  min-height: 3.25rem;
+}
+
+/* Last-modified display mode and sorting are independent controls. */
+.modified-header-controls {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: .2rem;
+}
+.modified-header-controls .navigation-sort-button {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.modified-time-toggle {
+  appearance: none;
+  display: inline-flex;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex: 0 0 1.75rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: #667085;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  cursor: pointer;
+  margin-top: -2.5px;
+}
+.modified-time-toggle:hover,
+.modified-time-toggle:focus-visible,
+.modified-time-toggle.is-absolute {
+  color: var(--primary-color);
+  background: transparent;
+  border: 0;
+  outline: 0;
+}
+.modified-time-toggle .mdi {
+  width: 1rem;
+  height: 1rem;
+  font-size: 1rem;
+  transform: translateY(1px);
+  transition: color .14s ease, transform .14s ease;
+}
+.modified-time-toggle:hover .mdi,
+.modified-time-toggle:focus-visible .mdi,
+.modified-time-toggle.is-absolute .mdi {
+  transform: translateY(1px) scale(1.06);
+}
+
+/* Archive inventories contain regular files only. Header and body share this
+   exact seven-column contract, and row actions reuse the navigation kebab. */
+.archive-entry-table {
+  min-width: 62rem;
+}
+.archive-entry-table .archive-cell-name,
+.archive-entry-table .archive-cell-method,
+.archive-entry-table .archive-cell-modified {
+  text-align: left;
+}
+.archive-entry-table .archive-cell-compressed,
+.archive-entry-table .archive-cell-size {
+  text-align: right;
+}
+.archive-entry-table .archive-cell-actions {
+  text-align: center;
+}
+.archive-entry-menu {
+  justify-content: center;
+}
+.archive-entry-menu .bb-kebab {
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.archive-entry-menu .bb-menu-popover {
+  min-width: 180px;
+}
+.archive-entry-menu .bb-menu-item {
+  width: 100%;
+  text-decoration: none;
+}
+.archive-entry-menu button.bb-menu-item {
+  appearance: none;
+}
+
+
+/* Final compact Details sizing. The top edge remains anchored while Overview
+   and Advanced grow only when their actual content requires it. */
+.bb-details--file .bb-details-tool-host.is-idle {
+  padding-block: .45rem;
+  background: #fbfcfe;
+}
+.bb-details--file .bb-details-tool-host.is-idle .bb-details-tool-status {
+  min-height: 0;
+  justify-content: flex-start;
+  text-align: left;
+}
+.bb-details--file .bb-details-tool-host.is-loading .bb-details-tool-status,
+.bb-details--file .bb-details-tool-host.is-error .bb-details-tool-status {
+  min-height: 3.25rem;
+}
+.bb-details--file .bb-details-tool-host.has-result {
+  padding: .65rem;
+}
+
 

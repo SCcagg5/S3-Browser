@@ -763,7 +763,7 @@
     return notes.join(' ');
   }
 
-  function createRemoteDelimitedTable({ key, size, etag = '', instance = null } = {}) {
+  function createRemoteDelimitedTable({ key, size, etag = '', version = '', instance = null } = {}) {
     const root = document.createElement('div');
     const state = {
       page: 0,
@@ -798,7 +798,7 @@
       state.counting = true;
       drawLoadedPage();
       try {
-        const result = await BB.api.documentCount({ key, instance, signal: state.controller?.signal || null });
+        const result = await BB.api.documentCount({ key, version, instance, signal: state.controller?.signal || null });
         state.totalRows = Number(result.rows || 0);
         state.totalColumns = Number(result.columns || state.headers.length || 0);
       } finally {
@@ -911,6 +911,7 @@
         key,
         cursor: nextPage > 0 ? state.pages[nextPage - 1].nextCursor : '',
         etag,
+        version,
         pageSize: state.pageSize,
         instance,
         signal: state.controller.signal
@@ -934,7 +935,7 @@
       state.controller?.abort();
       state.controller = new AbortController();
       loading('Searching the complete document…');
-      const result = await BB.api.searchDocument({ key, query: normalized, instance, signal: state.controller.signal });
+      const result = await BB.api.searchDocument({ key, query: normalized, version, instance, signal: state.controller.signal });
       if (serial !== state.serial) return;
       state.searchQuery = normalized;
       state.searchResult = result;
@@ -953,6 +954,7 @@
         key,
         size,
         etag: options.etag || '',
+        version: options.version || '',
         instance: options.instance ?? null
       });
     }
@@ -1107,11 +1109,11 @@
     });
   }
 
-  async function renderRemoteSpreadsheet(key, objectSize = 0) {
+  async function renderRemoteSpreadsheet(key, objectSize = 0, options = {}) {
     const root = document.createElement('section');
     root.className = 'spreadsheet-preview remote-spreadsheet-preview';
     root.dataset.previewKind = 'spreadsheet';
-    root.dataset.sourceUrl = BB.api.urlForKey(key);
+    root.dataset.sourceUrl = BB.api.urlForKey(key, options.instance ?? null, options.version || '');
     const state = {
       sheet: 0,
       page: 0,
@@ -1171,6 +1173,8 @@
           sortDirection: state.sortDirection,
           search: state.search,
           size: objectSize,
+          version: options.version || '',
+          instance: options.instance ?? null,
           signal: requestController.signal
         });
         if (serial !== requestSerial) return;
@@ -1290,9 +1294,9 @@
     return root;
   }
 
-  async function renderSpreadsheet(url, key, size) {
+  async function renderSpreadsheet(url, key, size, options = {}) {
     const extension = BB.detect.extOf(key);
-    if (extension === 'xlsx' || extension === 'xlsm') return renderRemoteSpreadsheet(key, size);
+    if (extension === 'xlsx' || extension === 'xlsm') return renderRemoteSpreadsheet(key, size, options);
     return renderUnsupportedBinarySpreadsheet(url, key, size);
   }
 
@@ -1330,6 +1334,7 @@
       key,
       size,
       etag: options.etag || '',
+      version: options.version || '',
       instance: options.instance ?? null
     });
     const rows = Array.from(payload.schema || []).map(field => [

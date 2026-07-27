@@ -236,6 +236,69 @@
     return `<div class="kv-row"><div class="kv-k">${escapeHTML(label)}</div><div class="kv-v${mono ? ' mono' : ''}">${escapeHTML(value)}</div></div>`;
   }
 
+  function detailsToolStatus(host, message, state = 'idle') {
+    if (!host) return;
+    host.classList.toggle('is-idle', state === 'idle');
+    host.classList.toggle('is-loading', state === 'loading');
+    host.classList.toggle('is-error', state === 'error');
+    host.classList.toggle('has-result', false);
+    host.innerHTML = `<div class="bb-details-tool-status is-${escapeHTML(state)}"><i class="mdi mdi-${state === 'loading' ? 'loading mdi-spin' : (state === 'error' ? 'alert-circle-outline' : 'information-outline')}"></i><span>${escapeHTML(message)}</span></div>`;
+  }
+
+  async function renderDetailsIntegrity(key, version, instance, host, button) {
+    if (!host || !button || button.disabled) return;
+    button.disabled = true;
+    const original = button.innerHTML;
+    button.innerHTML = '<i class="mdi mdi-loading mdi-spin"></i><span>Verifying…</span>';
+    detailsToolStatus(host, 'Reading the complete object and calculating checksums…', 'loading');
+    try {
+      const created = await BB.api.integrity({ key, version, instance });
+      const completed = await resolveAnalysis(created, 'Verifying integrity');
+      const entry = completed.integrity?.entries?.[0];
+      if (!entry) throw new Error('Integrity result is missing.');
+      const providerRows = Object.entries(entry.providerChecksums || {}).map(([name, value]) => metadataRow(`Provider ${name.toUpperCase()}`, value)).join('');
+      const matchRows = Object.entries(entry.matches || {}).map(([name, value]) => metadataRow(`${name} match`, value ? 'Yes' : 'No')).join('');
+      if (!host.isConnected) return;
+      host.classList.remove('is-idle', 'is-loading', 'is-error');
+      host.classList.add('has-result');
+      host.innerHTML = `<section class="bb-details-section bb-details-tool-result-section"><div class="bb-details-section-title"><i class="mdi mdi-shield-key-outline"></i> Integrity verification</div><div class="bb-kv">${metadataRow('SHA-256', entry.sha256)}${metadataRow('MD5', entry.md5)}${metadataRow('CRC32', entry.crc32)}${metadataRow('CRC32C', entry.crc32c)}${providerRows}${matchRows}</div></section>`;
+    } catch (error) {
+      if (host.isConnected) detailsToolStatus(host, String(error?.message || error), 'error');
+    } finally {
+      if (button.isConnected) {
+        button.disabled = false;
+        button.innerHTML = original;
+      }
+    }
+  }
+
+  async function renderDetailsInspection(key, version, instance, host, button) {
+    if (!host || !button || button.disabled) return;
+    button.disabled = true;
+    const original = button.innerHTML;
+    button.innerHTML = '<i class="mdi mdi-loading mdi-spin"></i><span>Inspecting…</span>';
+    detailsToolStatus(host, 'Reading bounded header and footer probes…', 'loading');
+    try {
+      const result = await BB.api.inspect(key, { version, instance });
+      const headers = Object.entries(result.headers || {}).sort(([a], [b]) => a.localeCompare(b)).map(([name, value]) => metadataRow(name, value)).join('');
+      const structure = Object.entries(result.structure || {}).map(([name, value]) => metadataRow(name, value)).join('');
+      const probes = (result.probes || []).map(probe => `<section class="bb-details-section"><div class="bb-details-section-title">${escapeHTML(probe.name)} · ${escapeHTML(probe.range)}</div><pre class="technical-probe">${escapeHTML(probe.hex)}
+${escapeHTML(probe.ascii)}</pre></section>`).join('');
+      if (!host.isConnected) return;
+      host.classList.remove('is-idle', 'is-loading', 'is-error');
+      host.classList.add('has-result');
+      host.innerHTML = `<section class="bb-details-section bb-details-tool-result-section"><div class="bb-details-section-title"><i class="mdi mdi-file-search-outline"></i> Technical inspection</div><div class="bb-kv">${metadataRow('Detected type', result.detectedKind)}${metadataRow('Detected MIME', result.detectedMime)}${metadataRow('Declared MIME', result.declaredMime)}${metadataRow('Size', formatBytes(result.size))}${metadataRow('Storage requests', result.resources?.storageRequests)}${metadataRow('Bytes read', formatBytes(result.resources?.storageBytes || 0))}</div></section>${structure ? `<section class="bb-details-section"><div class="bb-details-section-title">Structure</div><div class="bb-kv">${structure}</div></section>` : ''}${headers ? `<section class="bb-details-section"><div class="bb-details-section-title">Provider headers</div><div class="bb-kv">${headers}</div></section>` : ''}${probes}<div class="bb-details-tool-footer"><button type="button" class="bb-btn" data-details-inspection-json><i class="mdi mdi-download"></i><span>Download JSON</span></button></div>`;
+      host.querySelector('[data-details-inspection-json]')?.addEventListener('click', () => downloadJSON(result, 'technical-inspection.json'));
+    } catch (error) {
+      if (host.isConnected) detailsToolStatus(host, String(error?.message || error), 'error');
+    } finally {
+      if (button.isConnected) {
+        button.disabled = false;
+        button.innerHTML = original;
+      }
+    }
+  }
+
   function headerValue(headers, ...names) {
     const values = headers || {};
     for (const name of names) {
@@ -248,6 +311,8 @@
   async function showMetadata(key, options = {}) {
     if (!(await requirePermissions(['details']))) return false;
     const name = key.split('/').pop() || key;
+    const selectedVersion = String(options.version || '');
+    const selectedInstance = options.instance ?? null;
     let detailsNotification = null;
     const notificationTimer = window.setTimeout(() => {
       detailsNotification = ui().toast(`Loading details for ${name}...`, {
@@ -257,16 +322,32 @@
         detail: key
       });
     }, 300);
+
     try {
-      const result = await BB.api.mediaInfo(key, options);
+      // Always read the selected immutable object version directly. Listing
+      // hints describe only the current object and must never leak into a
+      // historical version's metadata.
+      const result = await BB.api.mediaInfo(key, {
+        instance: selectedInstance,
+        version: selectedVersion
+      });
+      let objectVersions = [];
+      if (BB.cfg?.versioningSupported === true) {
+        try {
+          objectVersions = await BB.api.allVersions(key, { instance: selectedInstance });
+        } catch (versionError) {
+          console.warn('Unable to load versions for file details', versionError);
+        }
+      }
+
       const headers = result.headers || {};
       const type = BB.detect.resolveType(key, result.mime || '');
       const storageRows = [
         metadataRow('Size', formatBytes(result.size)),
-        metadataRow('MIME type', result.mime || '—'),
+        metadataRow('MIME type', result.mime || '-'),
         metadataRow('Modified', headerValue(headers, 'last-modified')),
         metadataRow('ETag', headerValue(headers, 'etag'), true),
-        metadataRow('Version', headerValue(headers, 'x-amz-version-id', 'x-goog-generation'), true)
+        metadataRow('Version', headerValue(headers, 'x-amz-version-id', 'x-goog-generation') || selectedVersion, true)
       ].filter(Boolean).join('');
 
       const customMetadata = Object.entries(headers)
@@ -327,7 +408,22 @@
       const countSection = countAction
         ? `<section class="bb-details-section bb-details-count-section"><div class="bb-details-section-title"><i class="mdi mdi-${escapeHTML(countAction.icon)}"></i> Document dimensions</div><div class="bb-details-count-result" data-document-count-result><span>Not calculated. This operation reads the complete document.</span></div><button type="button" class="bb-btn bb-details-count-button" data-document-count>${escapeHTML(countAction.label)}</button></section>`
         : '';
+      const overviewSections = `${storageSection}${customSection}${fileSection}${countSection}`;
+      const advancedPanel = `<section class="bb-details-advanced"><div class="bb-details-tool-actions"><button type="button" class="bb-btn" data-details-integrity><i class="mdi mdi-shield-key-outline"></i><span>Verify integrity</span></button><button type="button" class="bb-btn" data-details-inspect><i class="mdi mdi-file-search-outline"></i><span>Inspect</span></button></div><div class="bb-details-tool-host is-idle" data-details-tool-host><div class="bb-details-tool-status is-idle"><i class="mdi mdi-information-outline"></i><span>Select a tool to start an explicit analysis.</span></div></div></section>`;
       const icon = BB.detect.iconForType(type);
+
+      const availableVersions = objectVersions
+        .filter(version => version && !version.deleteMarker && version.version);
+      const historicalVersions = availableVersions.filter(version => !version.isCurrent);
+      const currentVersionRecord = availableVersions.find(version => version.isCurrent);
+      const selectedVersionKnown = !selectedVersion || historicalVersions.some(version => version.version === selectedVersion);
+      const versionCount = availableVersions.length;
+      const currentVersionLabel = currentVersionRecord
+        ? `Current · ${versionDateLabel(currentVersionRecord)} · ${versionDisplayLabel(currentVersionRecord)}`
+        : 'Current';
+      const versionSelector = BB.cfg?.versioningSupported === true
+        ? `<label class="bb-details-version-control" title="${versionCount.toLocaleString()} available version${versionCount === 1 ? '' : 's'}"><span>Version (${versionCount.toLocaleString()})</span><select data-details-version><option value="">${escapeHTML(currentVersionLabel)}</option>${historicalVersions.map(version => `<option value="${escapeHTML(version.version)}"${version.version === selectedVersion ? ' selected' : ''}>${escapeHTML(`${versionDateLabel(version)} · ${versionDisplayLabel(version)}`)}</option>`).join('')}${selectedVersion && !selectedVersionKnown ? `<option value="${escapeHTML(selectedVersion)}" selected>Selected · ${escapeHTML(selectedVersion)}</option>` : ''}</select></label>`
+        : '';
 
       window.clearTimeout(notificationTimer);
       if (detailsNotification) {
@@ -340,12 +436,57 @@
           duration: 1400
         });
       }
+
       await ui().alert({
-        html: `<div class="bb-details">
-          <div class="bb-details-head"><i class="mdi mdi-${escapeHTML(icon)}"></i><div class="bb-details-titles"><div class="bb-details-name">${escapeHTML(name)}</div><div class="bb-details-prefix">${escapeHTML(key)}</div></div></div>
-          <div class="bb-details-body">${storageSection}${customSection}${fileSection}${countSection}</div>
+        html: `<div class="bb-details bb-details--file">
+          <div class="bb-details-head"><i class="mdi mdi-${escapeHTML(icon)}"></i><div class="bb-details-titles"><div class="bb-details-name">${escapeHTML(name)}</div><div class="bb-details-prefix">${escapeHTML(key)}</div></div>${versionSelector}</div>
+          <div class="bb-details-body">
+            <div class="spreadsheet-tabs bb-details-tabs" role="tablist" aria-label="File details">
+              <button type="button" class="spreadsheet-tab is-active" role="tab" aria-selected="true" data-details-tab="overview"><i class="mdi mdi-information-outline"></i><span>Overview</span></button>
+              <button type="button" class="spreadsheet-tab" role="tab" aria-selected="false" data-details-tab="advanced"><i class="mdi mdi-cogs"></i><span>Advanced</span></button>
+            </div>
+            <section class="bb-details-panel" data-details-panel="overview">${overviewSections}</section>
+            <section class="bb-details-panel" data-details-panel="advanced" hidden>${advancedPanel}</section>
+          </div>
         </div>`,
-        onOpen: countAction ? ({ overlay }) => {
+        onOpen: ({ overlay, modal }) => {
+          overlay?.classList.add('bb-overlay--top-anchored');
+          modal?.classList.add('bb-modal--details');
+          const tabs = Array.from(overlay.querySelectorAll('[data-details-tab]'));
+          const panels = Array.from(overlay.querySelectorAll('[data-details-panel]'));
+          const activateDetailsTab = name => {
+            const next = name === 'advanced' ? 'advanced' : 'overview';
+            tabs.forEach(tab => {
+              const active = tab.dataset.detailsTab === next;
+              tab.classList.toggle('is-active', active);
+              tab.setAttribute('aria-selected', active ? 'true' : 'false');
+              tab.tabIndex = active ? 0 : -1;
+            });
+            panels.forEach(panel => { panel.hidden = panel.dataset.detailsPanel !== next; });
+          };
+          tabs.forEach(tab => tab.addEventListener('click', () => activateDetailsTab(tab.dataset.detailsTab)));
+
+          const toolHost = overlay.querySelector('[data-details-tool-host]');
+          const integrityButton = overlay.querySelector('[data-details-integrity]');
+          const inspectButton = overlay.querySelector('[data-details-inspect]');
+          integrityButton?.addEventListener('click', () => {
+            void renderDetailsIntegrity(key, selectedVersion, selectedInstance, toolHost, integrityButton);
+          });
+          inspectButton?.addEventListener('click', () => {
+            void renderDetailsInspection(key, selectedVersion, selectedInstance, toolHost, inspectButton);
+          });
+
+          const versionSelect = overlay.querySelector('[data-details-version]');
+          versionSelect?.addEventListener('change', () => {
+            const nextVersion = String(versionSelect.value || '');
+            if (nextVersion === selectedVersion) return;
+            overlay.querySelector('.bb-modal-x')?.click();
+            window.setTimeout(() => {
+              void showMetadata(key, { instance: selectedInstance, version: nextVersion });
+            }, 140);
+          });
+
+          if (!countAction) return;
           const button = overlay.querySelector('[data-document-count]');
           const resultHost = overlay.querySelector('[data-document-count-result]');
           if (!button || !resultHost) return;
@@ -355,7 +496,12 @@
             button.innerHTML = '<i class="mdi mdi-loading mdi-spin"></i><span>Calculating…</span>';
             resultHost.textContent = 'Reading the complete document…';
             try {
-              const count = await BB.api.documentCount({ key, size: Number(result.size || options.size || 0), instance: options.instance ?? null });
+              const count = await BB.api.documentCount({
+                key,
+                size: Number(result.size || 0),
+                version: selectedVersion,
+                instance: selectedInstance
+              });
               resultHost.replaceChildren();
               if (countAction.kind === 'lines') {
                 resultHost.insertAdjacentHTML('beforeend', `<div class="bb-kv">${metadataRow('Lines', Number(count.lines || 0).toLocaleString())}</div>`);
@@ -373,7 +519,7 @@
               button.innerHTML = `<i class="mdi mdi-alert-circle-outline"></i><span>${escapeHTML(countAction.label)}</span>`;
             }
           });
-        } : null
+        }
       });
       return true;
     } catch (error) {
@@ -406,15 +552,38 @@
       .sort((left, right) => right.bytes - left.bytes || right.count - left.count || left.name.localeCompare(right.name));
   }
 
-  function statsColor(index) {
-    const hue = (210 + index * 47) % 360;
-    return `hsl(${hue} 66% 55%)`;
+  const statsTypePalette = Object.freeze({
+    archive: '#9333ea',
+    audio: '#7c3aed',
+    calendar: '#0284c7',
+    certificate: '#d97706',
+    code: '#2563eb',
+    contact: '#0d9488',
+    database: '#0f766e',
+    document: '#4f46e5',
+    email: '#ea580c',
+    image: '#db2777',
+    markdown: '#0891b2',
+    pdf: '#dc2626',
+    spreadsheet: '#16a34a',
+    text: '#64748b',
+    video: '#be123c',
+    other: '#3ecf8e'
+  });
+
+  function statsTypeColor(type) {
+    const normalized = String(type || 'other').trim().toLowerCase();
+    if (statsTypePalette[normalized]) return statsTypePalette[normalized];
+    let hash = 0;
+    for (let index = 0; index < normalized.length; index++) hash = ((hash << 5) - hash + normalized.charCodeAt(index)) | 0;
+    const hue = (210 + Math.abs(hash) * 47) % 360;
+    return `hsl(${hue} 62% 52%)`;
   }
 
   function distributionEntries(entries, field, maximum = 7) {
     const source = Array.from(entries || []);
     const ordered = source
-      .map((entry, colorIndex) => ({ ...entry, colorIndex }))
+      .map(entry => ({ ...entry }))
       .filter(entry => Number(entry?.[field] || 0) > 0)
       .sort((left, right) => Number(right[field] || 0) - Number(left[field] || 0) || left.name.localeCompare(right.name));
     if (ordered.length <= maximum) return ordered;
@@ -423,8 +592,7 @@
     visible.push({
       name: visible.some(entry => entry.name === 'other') ? 'other types' : 'other',
       count: hidden.reduce((sum, entry) => sum + Number(entry.count || 0), 0),
-      bytes: hidden.reduce((sum, entry) => sum + Number(entry.bytes || 0), 0),
-      colorIndex: source.length
+      bytes: hidden.reduce((sum, entry) => sum + Number(entry.bytes || 0), 0)
     });
     return visible;
   }
@@ -433,15 +601,15 @@
     const displayed = distributionEntries(entries, field);
     const total = displayed.reduce((sum, entry) => sum + Number(entry[field] || 0), 0);
     if (!(total > 0)) return '';
-    const segments = displayed.map((entry, index) => {
+    const segments = displayed.map(entry => {
       const percent = Number(entry[field] || 0) * 100 / total;
       const detail = field === 'bytes' ? formatBytes(entry.bytes) : `${entry.count.toLocaleString()} object(s)`;
-      return `<span class="folder-distribution-segment" style="--segment-width:${percent}%;--segment-color:${statsColor(entry.colorIndex ?? index)}" title="${escapeHTML(`${entry.name}: ${percent.toFixed(1)}% · ${detail}`)}"></span>`;
+      return `<span class="folder-distribution-segment" style="--segment-width:${percent}%;--segment-color:${statsTypeColor(entry.name)}" title="${escapeHTML(`${entry.name}: ${percent.toFixed(1)}% · ${detail}`)}"></span>`;
     }).join('');
-    const legend = displayed.map((entry, index) => {
+    const legend = displayed.map(entry => {
       const percent = Number(entry[field] || 0) * 100 / total;
       const detail = field === 'bytes' ? formatBytes(entry.bytes) : `${entry.count.toLocaleString()} object(s)`;
-      return `<div class="folder-distribution-legend-item"><span class="folder-distribution-swatch" style="--segment-color:${statsColor(entry.colorIndex ?? index)}"></span><span class="folder-distribution-label">${escapeHTML(entry.name)}</span><span class="folder-distribution-value">${percent.toFixed(1)}% · ${escapeHTML(detail)}</span></div>`;
+      return `<div class="folder-distribution-legend-item"><span class="folder-distribution-swatch" style="--segment-color:${statsTypeColor(entry.name)}"></span><span class="folder-distribution-label">${escapeHTML(entry.name)}</span><span class="folder-distribution-value">${percent.toFixed(1)}% · ${escapeHTML(detail)}</span></div>`;
     }).join('');
     return `<section class="folder-distribution"><div class="folder-distribution-title">${escapeHTML(title)}</div><div class="folder-distribution-bar" role="img" aria-label="${escapeHTML(title)}">${segments}</div><div class="folder-distribution-legend">${legend}</div></section>`;
   }
@@ -456,8 +624,7 @@
       const name = path.split('/').filter(Boolean).pop() || path || 'Unnamed file';
       const kind = String(entry?.type || 'other');
       const iconName = BB.detect?.iconForType?.(kind) || 'file-outline';
-      const modified = entry?.lastModified ? new Date(entry.lastModified) : null;
-      const dateLabel = modified && !Number.isNaN(modified.getTime()) ? modified.toLocaleString() : 'Unknown date';
+      const dateLabel = BB.runtime.formatDateTimeUTC(entry?.lastModified) || 'Unknown date';
       const primaryMeta = mode === 'recent' ? dateLabel : formatBytes(entry?.bytes || 0);
       const secondaryMeta = mode === 'recent' ? formatBytes(entry?.bytes || 0) : dateLabel;
       return `<button type="button" class="folder-file-list-row" data-insight-file="true" data-path="${escapeHTML(path)}" data-kind="file" data-size="${Math.max(0, Number(entry?.bytes || 0))}" data-mime="${escapeHTML(entry?.mime || '')}" data-etag="${escapeHTML(entry?.etag || '')}" data-modified="${escapeHTML(entry?.lastModified || '')}" title="${escapeHTML(path)}">
@@ -469,183 +636,34 @@
     return `<section class="folder-file-list"><div class="folder-file-list-title">${escapeHTML(title)}</div><div class="folder-file-list-rows">${rows}</div></section>`;
   }
 
-  const treemapMinimumShare = 0.01;
   const treemapMaximumRectangles = 1000;
   const treemapMaximumDepth = 5;
-
-  function treemapScopeThreshold(totalBytes) {
-    const threshold = Math.max(0, Number(totalBytes || 0)) * treemapMinimumShare;
-    // Keep a stable decimal representation in both the algorithm and the DOM.
-    // This also prevents a floating-point tail from moving an exact 1% item
-    // below the cutoff in one code path and above it in another.
-    return Number(threshold.toFixed(6));
-  }
+  const treemapGapPixels = 2;
+  const treemapOtherInlineMinimumHeightPixels = 26;
+  const treemapOtherStackedMinimumHeightPixels = 34;
+  const treemapOtherInlineMinimumWidthPixels = 180;
+  const treemapMinimumRegularPixels = 30;
+  const treemapFolderHeaderPixels = 26;
+  const treemapBranchInsetPixels = 2;
 
   function treemapObjectCount(value) {
     const count = Math.max(0, Number(value || 0));
     return `${count.toLocaleString()} ${count === 1 ? 'file' : 'files'}`;
   }
 
-  function treemapFolderNode(name, path) {
-    return {
-      name,
-      path,
-      bytes: 0,
-      count: 0,
-      children: new Map(),
-      folder: true,
-      type: 'folder',
-      aggregateKnown: false
-    };
+  function treemapChildren(node) {
+    return Array.isArray(node?.children)
+      ? node.children.filter(child => Number(child?.bytes || 0) > 0)
+      : [];
   }
 
-  function normalizedStatsFolderPath(value, cleanPrefix) {
-    let relative = String(value || '').replace(/^\/+/, '');
-    if (!relative || relative === '(root)') return '';
-    if (cleanPrefix && relative.startsWith(cleanPrefix)) relative = relative.slice(cleanPrefix.length);
-    return ensurePrefix(relative);
+  function treemapOtherReadableHeight(width) {
+    return width >= treemapOtherInlineMinimumWidthPixels
+      ? treemapOtherInlineMinimumHeightPixels
+      : treemapOtherStackedMinimumHeightPixels;
   }
 
-  function ensureTreemapFolder(root, parts, cleanPrefix) {
-    let parent = root;
-    let pathValue = cleanPrefix;
-    for (const part of parts) {
-      pathValue += `${part}/`;
-      const key = `folder:${part}`;
-      let child = parent.children.get(key);
-      if (!child) {
-        child = treemapFolderNode(part, pathValue);
-        parent.children.set(key, child);
-      }
-      parent = child;
-    }
-    return parent;
-  }
 
-  function finalizeTreemapNode(node) {
-    let childBytes = 0;
-    let childCount = 0;
-    for (const child of node.children?.values?.() || []) {
-      finalizeTreemapNode(child);
-      childBytes += Math.max(0, Number(child.bytes || 0));
-      childCount += Math.max(0, Number(child.count || 0));
-    }
-    if (node.folder) {
-      if (!node.aggregateKnown) {
-        node.bytes = childBytes;
-        node.count = childCount;
-      } else {
-        // A malformed response must never make a child larger than
-        // its parent. Keeping the larger value also prevents negative local
-        // "Others" totals without issuing another storage request.
-        node.bytes = Math.max(Number(node.bytes || 0), childBytes);
-        node.count = Math.max(Number(node.count || 0), childCount);
-      }
-    }
-  }
-
-  function buildTreemapTree(stats, prefix) {
-    const cleanPrefix = ensurePrefix(prefix);
-    const root = treemapFolderNode(cleanPrefix || '/', cleanPrefix);
-    root.bytes = Math.max(0, Number(stats?.totalBytes || 0));
-    root.count = Math.max(0, Number(stats?.count || 0));
-    root.aggregateKnown = true;
-
-    const folders = Object.entries(stats?.byFolder || {})
-      .map(([path, value]) => ({
-        path: normalizedStatsFolderPath(path, cleanPrefix),
-        bytes: Math.max(0, Number(value?.bytes || 0)),
-        count: Math.max(0, Number(value?.count || 0))
-      }))
-      .filter(entry => entry.path)
-      .sort((left, right) => left.path.split('/').length - right.path.split('/').length || left.path.localeCompare(right.path));
-
-    for (const entry of folders) {
-      const parts = entry.path.split('/').filter(Boolean);
-      if (!parts.length) continue;
-      const folder = ensureTreemapFolder(root, parts, cleanPrefix);
-      folder.bytes = entry.bytes;
-      folder.count = entry.count;
-      folder.aggregateKnown = true;
-    }
-
-    for (const entry of Array.from(stats?.largest || []).slice(0, treemapMaximumRectangles)) {
-      const fullPath = String(entry?.path || '').replace(/^\/+/, '');
-      if (!fullPath || (cleanPrefix && !fullPath.startsWith(cleanPrefix))) continue;
-      const relative = cleanPrefix ? fullPath.slice(cleanPrefix.length) : fullPath;
-      const parts = relative.split('/').filter(Boolean);
-      if (!parts.length) continue;
-      const fileName = parts.pop();
-      const parent = ensureTreemapFolder(root, parts, cleanPrefix);
-      const bytes = Math.max(0, Number(entry?.bytes || 0));
-      parent.children.set(`file:${fileName}`, {
-        name: fileName,
-        path: fullPath,
-        bytes,
-        count: 1,
-        children: new Map(),
-        folder: false,
-        type: String(entry?.type || 'other'),
-        mime: String(entry?.mime || ''),
-        etag: String(entry?.etag || ''),
-        lastModified: String(entry?.lastModified || '')
-      });
-    }
-
-    finalizeTreemapNode(root);
-    return root;
-  }
-
-  function groupedTreemapChildren(node, scopeTotalBytes) {
-    if (!node?.folder) return [];
-    const children = Array.from(node.children?.values?.() || [])
-      .filter(child => Number(child.bytes || 0) > 0)
-      .sort((left, right) => Number(right.bytes || 0) - Number(left.bytes || 0) || left.name.localeCompare(right.name));
-    if (!children.length && !(Number(node.bytes || 0) > 0)) return [];
-
-    const nodeBytes = Math.max(0, Number(node.bytes || 0));
-    const nodeCount = Math.max(0, Number(node.count || 0));
-    const listedBytes = children.reduce((sum, child) => sum + Math.max(0, Number(child.bytes || 0)), 0);
-    const listedCount = children.reduce((sum, child) => sum + Math.max(0, Number(child.count || 0)), 0);
-    let otherBytes = Math.max(0, nodeBytes - listedBytes);
-    let otherCount = Math.max(0, nodeCount - listedCount);
-    const visible = [];
-
-    // The threshold is always based on the complete selected scope, never on
-    // the current nested folder. A 40 KiB file therefore remains below one
-    // percent in a 12 MiB scope even when its immediate parent is tiny.
-    const threshold = treemapScopeThreshold(scopeTotalBytes || nodeBytes);
-    for (const child of children) {
-      const childBytes = Math.max(0, Number(child.bytes || 0));
-      if (childBytes >= threshold) {
-        visible.push(child);
-      } else {
-        otherBytes += childBytes;
-        otherCount += Math.max(0, Number(child.count || 0));
-      }
-    }
-
-    if (otherBytes > 0 || otherCount > 0) {
-      visible.push({
-        name: 'Others',
-        path: node.path,
-        bytes: otherBytes,
-        count: otherCount,
-        children: new Map(),
-        folder: false,
-        type: 'other',
-        other: true
-      });
-    }
-    return visible.sort((left, right) => Number(right.bytes || 0) - Number(left.bytes || 0) || left.name.localeCompare(right.name));
-  }
-
-  function treemapColorIndex(node) {
-    const value = String(node?.type || node?.path || node?.name || 'other');
-    let hash = 0;
-    for (let index = 0; index < value.length; index++) hash = ((hash << 5) - hash + value.charCodeAt(index)) | 0;
-    return Math.abs(hash) % 29;
-  }
 
   function treemapWorstAspectRatio(row, side) {
     if (!row.length || !(side > 0)) return Number.POSITIVE_INFINITY;
@@ -710,8 +728,8 @@
 
   function squarifyTreemapNodes(nodes, x, y, width, height) {
     const visible = Array.from(nodes || [])
-      .filter(node => Number(node.bytes || 0) > 0)
-      .sort((left, right) => Number(right.bytes || 0) - Number(left.bytes || 0) || left.name.localeCompare(right.name));
+      .filter(node => Number(node?.bytes || 0) > 0)
+      .sort((left, right) => Number(right.bytes || 0) - Number(left.bytes || 0) || String(left.name || '').localeCompare(String(right.name || '')));
     const totalBytes = visible.reduce((sum, node) => sum + Math.max(0, Number(node.bytes || 0)), 0);
     const totalArea = Math.max(0, width) * Math.max(0, height);
     if (!visible.length || !(totalBytes > 0) || !(totalArea > 0)) return [];
@@ -742,9 +760,37 @@
     return rectangles;
   }
 
-  function layoutTreemapGroup(nodes, x, y, width, height, depth, output, scopeTotalBytes) {
-    if (output.length >= treemapMaximumRectangles || width < 0.15 || height < 0.15) return;
-    const rectangles = squarifyTreemapNodes(nodes, x, y, width, height);
+  function layoutTreemapNodes(nodes, x, y, width, height) {
+    const visible = Array.from(nodes || []).filter(node => Number(node?.bytes || 0) > 0);
+    if (!visible.length || !(width > 0) || !(height > 0)) return [];
+
+    const otherNodes = visible.filter(node => String(node?.kind || '') === 'other');
+    const regularNodes = visible.filter(node => String(node?.kind || '') !== 'other');
+    if (!otherNodes.length || !regularNodes.length) return squarifyTreemapNodes(visible, x, y, width, height);
+
+    const totalBytes = visible.reduce((sum, node) => sum + Math.max(0, Number(node.bytes || 0)), 0);
+    const otherBytes = otherNodes.reduce((sum, node) => sum + Math.max(0, Number(node.bytes || 0)), 0);
+    const share = otherBytes / Math.max(Number.EPSILON, totalBytes);
+    const rectangles = [];
+
+    // Others stays proportional to its exact byte share. It only receives the
+    // smallest horizontal strip required to keep its two-line label readable.
+    // The minimum is always clamped below the room reserved for regular nodes,
+    // so a tiny aggregate can never consume most of its parent rectangle.
+    const naturalHeight = height * share;
+    const maximumHeight = Math.max(0, height - Math.min(treemapMinimumRegularPixels, height));
+    if (!(maximumHeight > 0)) return squarifyTreemapNodes(visible, x, y, width, height);
+    const readableMinimum = Math.min(treemapOtherReadableHeight(width), maximumHeight);
+    const stripHeight = Math.min(maximumHeight, Math.max(naturalHeight, readableMinimum));
+    const regularHeight = Math.max(0, height - stripHeight);
+    rectangles.push(...squarifyTreemapNodes(regularNodes, x, y, width, regularHeight));
+    rectangles.push(...squarifyTreemapNodes(otherNodes, x, y + regularHeight, width, stripHeight));
+    return rectangles;
+  }
+
+  function layoutTreemapGroup(nodes, x, y, width, height, depth, output) {
+    if (output.length >= treemapMaximumRectangles || width < 1 || height < 1) return;
+    const rectangles = layoutTreemapNodes(nodes, x, y, width, height);
     for (const rectangle of rectangles) {
       if (output.length >= treemapMaximumRectangles) break;
       collectTreemapRectangles(
@@ -754,39 +800,55 @@
         rectangle.width,
         rectangle.height,
         depth,
-        output,
-        scopeTotalBytes
+        output
       );
     }
   }
 
-  function collectTreemapRectangles(node, x, y, width, height, depth, output, scopeTotalBytes) {
-    if (output.length >= treemapMaximumRectangles || width < 0.15 || height < 0.15 || node.bytes <= 0) return;
-    const children = groupedTreemapChildren(node, scopeTotalBytes);
-    const isLeaf = !children.length || depth >= treemapMaximumDepth;
-    const kind = node.other ? 'other' : (isLeaf && !node.folder ? 'file' : 'folder');
-    const color = node.folder && !isLeaf
-      ? `hsl(${(215 + depth * 19) % 360} 28% ${92 - depth * 3}%)`
-      : statsColor(treemapColorIndex(node));
+  function collectTreemapRectangles(node, x, y, width, height, depth, output) {
+    if (output.length >= treemapMaximumRectangles || width < 1 || height < 1 || Number(node?.bytes || 0) <= 0) return;
+    const gap = Math.min(treemapGapPixels, width * 0.04, height * 0.04);
+    const drawX = x + gap / 2;
+    const drawY = y + gap / 2;
+    const drawWidth = Math.max(0, width - gap);
+    const drawHeight = Math.max(0, height - gap);
+    if (drawWidth < 1 || drawHeight < 1) return;
+
+    const children = treemapChildren(node);
+    const declaredKind = String(node.kind || '');
+    const isFolder = declaredKind === 'folder';
+    const canExpandFolder = isFolder
+      && children.length > 0
+      && depth < treemapMaximumDepth
+      && drawWidth >= 80
+      && drawHeight >= 84;
+    const isBranch = canExpandFolder;
+    const isLeaf = !isBranch;
+    const kind = declaredKind === 'other' ? 'other' : (declaredKind === 'file' ? 'file' : 'folder');
+    const color = statsTypeColor(node.type || 'other');
     const countLabel = treemapObjectCount(node.count);
-    const titlePath = node.other ? `${node.path || '/'} - Others` : (node.path || node.name);
+    const titlePath = kind === 'other' ? `${node.path || '/'} - Others` : (node.path || node.name);
     const title = `${titlePath}\n${formatBytes(node.bytes)} · ${countLabel}`;
     const sizeLabel = formatBytes(node.bytes);
-    const detail = countLabel;
 
-    const header = !isLeaf && height > 2.2 ? Math.min(3.3, Math.max(1.25, height * 0.2)) : 0;
-    const headerRatio = height > 0 ? Math.max(0, Math.min(100, header / height * 100)) : 0;
-    const label = `<span class="folder-treemap-label"><strong><span class="folder-treemap-name">${escapeHTML(node.name)}</span><span class="folder-treemap-size">${escapeHTML(sizeLabel)}</span></strong><small>${escapeHTML(detail)}</small></span>`;
-    output.push(`<div class="folder-treemap-node is-${kind}" data-kind="${kind}" data-depth="${depth}" data-header-ratio="${headerRatio}" data-path="${escapeHTML(node.path || '')}" data-size="${Math.max(0, Number(node.bytes || 0))}" data-count="${Math.max(0, Number(node.count || 0))}" data-mime="${escapeHTML(node.mime || '')}" data-etag="${escapeHTML(node.etag || '')}" data-modified="${escapeHTML(node.lastModified || '')}" title="${escapeHTML(title)}" style="left:${x}%;top:${y}%;width:${width}%;height:${height}%;z-index:${depth};--treemap-color:${color};--treemap-header:${headerRatio}%">${label}</div>`);
+    // Every expanded folder owns a header. If the rectangle cannot reserve a
+    // readable header and child area, it is rendered as a terminal folder tile
+    // instead of drawing an unnamed container around its descendants.
+    const header = isBranch ? Math.min(treemapFolderHeaderPixels, Math.max(0, drawHeight - 30)) : 0;
+    const labelName = node.name || (kind === 'folder' ? 'Folder' : 'Unnamed');
+    const label = `<span class="folder-treemap-label"><span class="folder-treemap-name">${escapeHTML(labelName)}</span><span class="folder-treemap-details"><span class="folder-treemap-size">${escapeHTML(sizeLabel)}</span><span class="folder-treemap-meta">${escapeHTML(countLabel)}</span></span></span>`;
+    const branchClass = isBranch ? ' is-branch has-header' : ' is-terminal';
+    const role = kind === 'other' ? 'img' : 'button';
+    const headerValue = header > 0 ? `${header.toFixed(2)}px` : '100%';
+    output.push(`<div class="folder-treemap-node is-${kind}${branchClass}" tabindex="0" role="${role}" aria-label="${escapeHTML(title.replace(/\n/g, ', '))}" data-kind="${kind}" data-name="${escapeHTML(node.name || '')}" data-depth="${depth}" data-header-height="${header}" data-path="${escapeHTML(node.path || '')}" data-size="${Math.max(0, Number(node.bytes || 0))}" data-count="${Math.max(0, Number(node.count || 0))}" data-mime="${escapeHTML(node.mime || '')}" data-etag="${escapeHTML(node.etag || '')}" data-modified="${escapeHTML(node.lastModified || '')}" style="left:${drawX.toFixed(2)}px;top:${drawY.toFixed(2)}px;width:${drawWidth.toFixed(2)}px;height:${drawHeight.toFixed(2)}px;z-index:${depth};--treemap-color:${color};--treemap-header:${headerValue}">${label}</div>`);
     if (isLeaf || output.length >= treemapMaximumRectangles) return;
 
-    const insetX = Math.min(.22, width * .02);
-    const insetBottom = Math.min(.25, height * .02);
-    const innerX = x + insetX;
-    const innerY = y + header;
-    const innerWidth = Math.max(0, width - insetX * 2);
-    const innerHeight = Math.max(0, height - header - insetBottom);
-    layoutTreemapGroup(children, innerX, innerY, innerWidth, innerHeight, depth + 1, output, scopeTotalBytes);
+    const inset = Math.min(treemapBranchInsetPixels, drawWidth / 4, drawHeight / 4);
+    const innerX = drawX + inset;
+    const innerY = drawY + header + inset;
+    const innerWidth = Math.max(0, drawWidth - inset * 2);
+    const innerHeight = Math.max(0, drawHeight - header - inset * 2);
+    layoutTreemapGroup(children, innerX, innerY, innerWidth, innerHeight, depth + 1, output);
   }
 
   function fitTreemapLabels(map) {
@@ -794,42 +856,78 @@
     map.querySelectorAll('.folder-treemap-node').forEach(node => {
       const label = node.querySelector('.folder-treemap-label');
       if (!label) return;
-      const detail = label.querySelector('small');
+      const meta = label.querySelector('.folder-treemap-meta');
       const rect = node.getBoundingClientRect();
-      const headerRatio = Math.max(0, Math.min(100, Number(node.dataset.headerRatio || 0)));
-      const labelHeight = node.dataset.kind === 'folder' && headerRatio > 0
-        ? rect.height * headerRatio / 100
-        : rect.height;
-      label.style.maxHeight = `${Math.max(0, labelHeight)}px`;
-      label.classList.remove('is-hidden', 'is-compact', 'is-tiny', 'is-micro', 'is-vertical');
-      if (detail) detail.hidden = false;
+      const headerHeight = Math.max(0, Number(node.dataset.headerHeight || 0));
+      const labelHeight = node.classList.contains('is-branch') && headerHeight > 0 ? headerHeight : rect.height;
+      const isOther = node.dataset.kind === 'other';
+      const isFolder = node.dataset.kind === 'folder';
+      const isBranch = node.classList.contains('is-branch');
 
-      // Keep a readable name on every rectangle that has a physically usable
-      // strip. Thin horizontal cells use a micro one-line label; tall narrow
-      // cells rotate the name. Only genuinely sub-pixel cells are hidden.
-      if (rect.width < 9 || labelHeight < 6) {
+      label.style.maxHeight = `${Math.max(0, labelHeight)}px`;
+      label.classList.remove('is-hidden', 'is-compact', 'is-tiny', 'is-other-compact', 'is-other-inline');
+      if (meta) meta.hidden = false;
+
+      // Others always keeps its name, exact size, and exact object count. The
+      // layout reserves enough space; compact mode only reduces typography.
+      if (isOther) {
+        if (rect.width >= treemapOtherInlineMinimumWidthPixels && labelHeight < 38) {
+          label.classList.add('is-other-inline');
+        } else if (rect.width < 150 || labelHeight < 58) {
+          label.classList.add('is-other-compact');
+        }
+        return;
+      }
+
+      // A folder rectangle is never rendered without its name. Small folders
+      // use compact typography rather than hiding the complete label.
+      if (isFolder) {
+        if (rect.width < 82 || labelHeight < 38) label.classList.add('is-tiny');
+        else if (rect.width < 140 || labelHeight < 52) label.classList.add('is-compact');
+        if (meta && (rect.width < 220 || labelHeight < 70 || isBranch)) meta.hidden = true;
+        return;
+      }
+
+      if (rect.width < 40 || labelHeight < 24) {
         label.classList.add('is-hidden');
         return;
       }
-      if (rect.width < 24 && labelHeight >= 34) {
-        label.classList.add('is-vertical');
-        if (detail) detail.hidden = true;
+      if (rect.width < 82 || labelHeight < 38) {
+        label.classList.add('is-tiny');
+        if (meta) meta.hidden = true;
         return;
       }
-      if (rect.width < 48 || labelHeight < 15) {
-        label.classList.add('is-micro');
-        if (detail) detail.hidden = true;
-      } else if (rect.width < 78 || labelHeight < 31) {
+      if (rect.width < 140 || labelHeight < 52) {
         label.classList.add('is-compact');
-        if (detail) detail.hidden = true;
+        if (meta) meta.hidden = true;
+        return;
       }
-      // A long filename must never flow into a neighbouring rectangle. Reduce
-      // the type once before relying on ellipsis inside the measured node.
-      if (label.scrollWidth > Math.max(1, rect.width - 4) && !label.classList.contains('is-micro')) {
-        label.classList.add('is-tiny');
-        if (detail) detail.hidden = true;
+      if (rect.width < 220 || labelHeight < 70) {
+        if (meta) meta.hidden = true;
       }
     });
+  }
+
+  function renderTreemap(map, nodes) {
+    if (!map) return;
+    const bounds = map.getBoundingClientRect();
+    const width = Math.max(0, Math.floor(bounds.width));
+    const height = Math.max(0, Math.floor(bounds.height));
+    if (!(width > 0) || !(height > 0)) return;
+    if (map.dataset.layoutWidth === String(width) && map.dataset.layoutHeight === String(height) && map.dataset.layoutReady === '1') {
+      fitTreemapLabels(map);
+      return;
+    }
+
+    const output = [];
+    layoutTreemapGroup(nodes, 0, 0, width, height, 1, output);
+    map.innerHTML = output.join('') || '<div class="folder-treemap-empty">No objects found.</div>';
+    map.dataset.layoutWidth = String(width);
+    map.dataset.layoutHeight = String(height);
+    map.dataset.layoutReady = '1';
+    map.classList.remove('is-layout-pending');
+    map.setAttribute('aria-busy', 'false');
+    fitTreemapLabels(map);
   }
 
   function navigateFromStats(metadata) {
@@ -840,16 +938,7 @@
       location.hash = encodeURIComponent(ensurePrefix(clean)).replace(/%2F/gi, '/');
       return;
     }
-    const url = new URL('preview.html', location.href);
-    const instance = BB.api.getInstance();
-    if (instance) url.searchParams.set('instance', instance);
-    url.searchParams.set('listed', '1');
-    url.searchParams.set('size', String(Math.max(0, Number(metadata?.size || 0))));
-    if (metadata?.mime) url.searchParams.set('mime', String(metadata.mime));
-    if (metadata?.etag) url.searchParams.set('etag', String(metadata.etag));
-    if (metadata?.modified) url.searchParams.set('lastModified', String(metadata.modified));
-    url.hash = encodeURIComponent(clean).replace(/%2F/gi, '/');
-    location.href = url.pathname + url.search + url.hash;
+    location.href = BB.api.previewPageURL(clean, { instance: BB.api.getInstance() });
   }
 
   async function collectPrefixStats(prefix, label) {
@@ -872,13 +961,9 @@
       const stats = await collectPrefixStats(cleanPrefix, isRoot ? 'Computing storage insights' : 'Computing folder insights');
       if (!stats) return false;
       const entries = statsTypeEntries(stats);
-      const tree = buildTreemapTree(stats, cleanPrefix);
-      const scopeTotalBytes = Math.max(0, Number(stats.totalBytes || tree.bytes || 0));
-      const groupingThreshold = treemapScopeThreshold(scopeTotalBytes);
-      const nodes = groupedTreemapChildren(tree, scopeTotalBytes);
-      const rectangleList = [];
-      layoutTreemapGroup(nodes, 0, 0, 100, 100, 1, rectangleList, scopeTotalBytes);
-      const rectangles = rectangleList.join('');
+      const tree = stats?.treemap || null;
+      const rootChildren = treemapChildren(tree);
+      const nodes = rootChildren.length ? rootChildren : (tree && Number(tree.bytes || 0) > 0 ? [tree] : []);
       const insightID = `folder-insights-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
       const requestedTab = initialTab === 'treemap' ? 'treemap' : 'overview';
       const dialog = ui().alert({
@@ -899,8 +984,8 @@
               <div class="folder-details-footer">Computed in ${Number(stats.tookMs || 0).toLocaleString()} ms</div>
             </section>
             <section class="folder-insights-panel" data-insights-panel="treemap" hidden>
-              <div class="folder-treemap-rule">Files and folders below 1% of this scope (${escapeHTML(formatBytes(groupingThreshold))}) are grouped into Others.</div>
-              <div class="folder-treemap" data-group-threshold="${groupingThreshold}" role="img" aria-label="${scopeTitle} size treemap">${rectangles || '<div class="folder-treemap-empty">No objects found.</div>'}</div>
+              <div class="folder-treemap is-layout-pending" role="img" aria-label="${scopeTitle} size treemap" aria-busy="true"></div>
+              <div class="folder-treemap-tooltip" data-treemap-tooltip role="status" hidden><strong></strong><span></span></div>
             </section>
           </div>
         </div>`
@@ -914,8 +999,61 @@
         const modal = root.closest('.bb-modal');
         modal?.classList.add('bb-modal--wide');
         const map = root.querySelector('.folder-treemap');
+        const treemapPanel = root.querySelector('[data-insights-panel="treemap"]');
+        const treemapTooltip = root.querySelector('[data-treemap-tooltip]');
+        let hoveredTreemapNode = null;
+        const hideTreemapTooltip = () => {
+          if (!treemapTooltip) return;
+          treemapTooltip.hidden = true;
+        };
+        const clearTreemapHover = () => {
+          hoveredTreemapNode?.classList.remove('is-hovered');
+          hoveredTreemapNode = null;
+          hideTreemapTooltip();
+        };
+        const placeTreemapTooltip = (node, clientX, clientY) => {
+          if (!treemapTooltip || !treemapPanel || !node || node.dataset.kind !== 'folder') {
+            hideTreemapTooltip();
+            return;
+          }
+          const nameHost = treemapTooltip.querySelector('strong');
+          const metaHost = treemapTooltip.querySelector('span');
+          const folderName = node.dataset.name || node.dataset.path || 'Folder';
+          if (nameHost) nameHost.textContent = folderName;
+          if (metaHost) metaHost.textContent = `${formatBytes(Number(node.dataset.size || 0))} · ${treemapObjectCount(node.dataset.count || 0)}`;
+          treemapTooltip.hidden = false;
+
+          const panelRect = treemapPanel.getBoundingClientRect();
+          const nodeRect = node.getBoundingClientRect();
+          const tooltipRect = treemapTooltip.getBoundingClientRect();
+          const anchorX = Number.isFinite(clientX) ? clientX : nodeRect.left + Math.min(nodeRect.width, 24);
+          const anchorY = Number.isFinite(clientY) ? clientY : nodeRect.top + Math.min(nodeRect.height, 24);
+          const maximumLeft = Math.max(8, panelRect.width - tooltipRect.width - 8);
+          const maximumTop = Math.max(8, panelRect.height - tooltipRect.height - 8);
+          const left = Math.min(maximumLeft, Math.max(8, anchorX - panelRect.left + 12));
+          const top = Math.min(maximumTop, Math.max(8, anchorY - panelRect.top + 12));
+          treemapTooltip.style.left = `${left}px`;
+          treemapTooltip.style.top = `${top}px`;
+        };
+        const updateTreemapHover = (node, clientX, clientY) => {
+          if (hoveredTreemapNode !== node) {
+            hoveredTreemapNode?.classList.remove('is-hovered');
+            hoveredTreemapNode = node || null;
+            hoveredTreemapNode?.classList.add('is-hovered');
+          }
+          placeTreemapTooltip(node, clientX, clientY);
+        };
         const tabs = Array.from(root.querySelectorAll('[data-insights-tab]'));
         const panels = Array.from(root.querySelectorAll('[data-insights-panel]'));
+        let treemapRenderPending = false;
+        const scheduleTreemapRender = () => {
+          if (!map || treemapRenderPending) return;
+          treemapRenderPending = true;
+          requestAnimationFrame(() => {
+            treemapRenderPending = false;
+            renderTreemap(map, nodes);
+          });
+        };
         const activate = tabName => {
           const next = tabName === 'treemap' ? 'treemap' : 'overview';
           tabs.forEach(tab => {
@@ -925,10 +1063,22 @@
             tab.tabIndex = active ? 0 : -1;
           });
           panels.forEach(panel => { panel.hidden = panel.dataset.insightsPanel !== next; });
-          if (next === 'treemap') requestAnimationFrame(() => fitTreemapLabels(map));
+          if (next === 'treemap') scheduleTreemapRender();
         };
         tabs.forEach(tab => tab.addEventListener('click', () => activate(tab.dataset.insightsTab)));
         activate(requestedTab);
+        map?.addEventListener('pointermove', event => {
+          const node = event.target.closest('.folder-treemap-node');
+          updateTreemapHover(node, event.clientX, event.clientY);
+        });
+        map?.addEventListener('pointerleave', clearTreemapHover);
+        map?.addEventListener('focusin', event => {
+          const node = event.target.closest('.folder-treemap-node');
+          updateTreemapHover(node);
+        });
+        map?.addEventListener('focusout', event => {
+          if (!map.contains(event.relatedTarget)) clearTreemapHover();
+        });
         map?.addEventListener('click', event => {
           const node = event.target.closest('.folder-treemap-node[data-path]');
           if (!node || !node.dataset.path || node.dataset.kind === 'other') return;
@@ -958,10 +1108,10 @@
           });
         });
         if (map && typeof ResizeObserver === 'function') {
-          resizeObserver = new ResizeObserver(() => fitTreemapLabels(map));
+          resizeObserver = new ResizeObserver(scheduleTreemapRender);
           resizeObserver.observe(map);
         } else if (map) {
-          resizeHandler = () => fitTreemapLabels(map);
+          resizeHandler = scheduleTreemapRender;
           window.addEventListener('resize', resizeHandler, { passive: true });
         }
       });
@@ -1151,14 +1301,334 @@
     anchor.remove();
   }
 
-  async function downloadObject(key, filename) {
+  async function downloadObject(key, filename, options = {}) {
     if (!allowed('download')) return false;
     const safeFilename = filename || key.split('/').pop() || 'download';
-    const downloadURL = BB.api.urlForKey(key, BB.api.getInstance());
-    triggerBrowserDownload(downloadURL, safeFilename);
-    ui().toast('Download started in the browser.', { type: 'info', duration: 4000 });
+    if (BB.downloads?.download) {
+      try {
+        await BB.downloads.download({
+          key,
+          filename: safeFilename,
+          version: options.version || '',
+          instance: options.instance || BB.api.getInstance()
+        });
+      } catch (error) {
+        if (error?.name === 'AbortError') return false;
+        BB.downloads.fallbackDownload(key, safeFilename, options.version || '', options.instance || BB.api.getInstance());
+        ui().toast(`Resumable download was unavailable: ${String(error?.message || error)}. Browser download started instead.`, { type: 'warning', duration: 6500 });
+      }
+    } else {
+      const downloadURL = BB.api.openURLForKey(key, options.instance || BB.api.getInstance(), options.version || '');
+      triggerBrowserDownload(downloadURL, safeFilename);
+      ui().toast('Download started in the browser.', { type: 'info', duration: 4000 });
+    }
     return true;
   }
+
+
+  async function resolveAnalysis(created, label) {
+    if (created?.status === 'completed') return created;
+    return waitForJob(created, label);
+  }
+
+  function analysisTable(headers, rows, className = '') {
+    return `<div class="data-table-scroll ${escapeHTML(className)}"><table class="data-table"><thead><tr>${headers.map(value => `<th>${escapeHTML(value)}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
+  }
+
+  function downloadJSON(value, filename) {
+    const blob = new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    triggerBrowserDownload(url, filename);
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function versionDisplayLabel(version) {
+    const identifier = String(version?.version || '');
+    if (!identifier) return 'Unknown version';
+    return identifier.length > 32 ? `${identifier.slice(0, 16)}…${identifier.slice(-12)}` : identifier;
+  }
+
+  function versionDateLabel(version) {
+    return version?.lastModified ? new Date(version.lastModified).toLocaleString() : '';
+  }
+
+  async function fetchExactVersionRange(key, version, start, end, size, etag, instance, signal) {
+    const headers = { Range: `bytes=${start}-${end}` };
+    if (etag) headers['If-Match'] = etag;
+    const response = await fetch(BB.api.urlForKey(key, instance, version), {
+      method: 'GET',
+      headers,
+      cache: 'no-store',
+      signal
+    });
+    if (response.status !== 206) {
+      try { await response.body?.cancel?.(); } catch (_) {}
+      throw new Error(`The storage provider returned HTTP ${response.status} instead of an exact byte range.`);
+    }
+    const contentRange = String(response.headers.get('Content-Range') || '');
+    const match = /^bytes\s+(\d+)-(\d+)\/(\d+)$/.exec(contentRange);
+    if (!match || Number(match[1]) !== start || Number(match[2]) !== end || Number(match[3]) !== size) {
+      try { await response.body?.cancel?.(); } catch (_) {}
+      throw new Error('The storage provider returned an unexpected Content-Range while comparing versions.');
+    }
+    const expectedLength = end - start + 1;
+    const declaredLength = Number(response.headers.get('Content-Length') || expectedLength);
+    if (!Number.isFinite(declaredLength) || declaredLength !== expectedLength) {
+      try { await response.body?.cancel?.(); } catch (_) {}
+      throw new Error('The storage provider returned an unexpected range length while comparing versions.');
+    }
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.byteLength !== expectedLength) {
+      throw new Error('The storage provider returned an incomplete byte range while comparing versions.');
+    }
+    return bytes;
+  }
+
+  async function compareVersions(key, leftVersion, rightVersion, options = {}) {
+    if (!(await requirePermissions(['read']))) return false;
+    const leftID = String(leftVersion || '').trim();
+    const rightID = String(rightVersion || '').trim();
+    const instance = options.instance || BB.api.getInstance();
+    if (!leftID || !rightID || leftID === rightID) {
+      await ui().alert({ title: 'Compare versions', message: 'Select two different object versions.' });
+      return false;
+    }
+
+    const controller = new AbortController();
+    const task = transferGroup('comparison').add({
+      id: `compare-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
+      name: key.split('/').pop() || key,
+      status: 'preparing',
+      progress: 0,
+      detail: 'Reading version metadata...',
+      onCancel: () => controller.abort()
+    });
+
+    try {
+      const [left, right] = await Promise.all([
+        BB.api.head(key, leftID, instance),
+        BB.api.head(key, rightID, instance)
+      ]);
+      if (!left.sizeKnown || !right.sizeKnown) throw new Error('Both version sizes must be known before comparison.');
+      const leftSize = Number(left.size || 0);
+      const rightSize = Number(right.size || 0);
+      const leftETag = String(left.headers?.etag || '');
+      const rightETag = String(right.headers?.etag || '');
+      let equal = leftSize === rightSize;
+      let firstDifference = equal ? null : Math.min(leftSize, rightSize);
+      let comparedBytes = 0;
+      const chunkSize = 2 * 1024 * 1024;
+
+      task.update({
+        status: 'running',
+        progress: equal && leftSize > 0 ? 0 : 1,
+        detail: equal ? `Comparing ${formatBytes(leftSize)} in bounded ranges...` : 'The version sizes differ.',
+        onCancel: () => controller.abort()
+      });
+
+      if (equal && leftSize > 0) {
+        for (let start = 0; start < leftSize; start += chunkSize) {
+          if (controller.signal.aborted) throw abortError();
+          const end = Math.min(leftSize - 1, start + chunkSize - 1);
+          const [leftBytes, rightBytes] = await Promise.all([
+            fetchExactVersionRange(key, leftID, start, end, leftSize, leftETag, instance, controller.signal),
+            fetchExactVersionRange(key, rightID, start, end, rightSize, rightETag, instance, controller.signal)
+          ]);
+          for (let index = 0; index < leftBytes.length; index++) {
+            if (leftBytes[index] !== rightBytes[index]) {
+              equal = false;
+              firstDifference = start + index;
+              break;
+            }
+          }
+          comparedBytes = end + 1;
+          task.update({
+            status: 'running',
+            progress: leftSize ? comparedBytes / leftSize : 1,
+            detail: `${formatBytes(comparedBytes)} / ${formatBytes(leftSize)} compared`,
+            onCancel: () => controller.abort()
+          });
+          if (!equal) break;
+        }
+      }
+
+      const detail = equal
+        ? `${formatBytes(leftSize)} compared exactly in the browser.`
+        : (firstDifference === null ? 'The versions differ.' : `First difference at byte ${Number(firstDifference).toLocaleString()}.`);
+      task.complete({ name: key.split('/').pop() || key, detail, progress: 1 });
+      await ui().alert({
+        html: `<div class="bb-details bb-comparison">
+          <div class="bb-details-head"><i class="mdi mdi-swap-vertical"></i><div class="bb-details-titles"><div class="bb-details-name">${equal ? 'Versions are identical' : 'Versions differ'}</div><div class="bb-details-prefix">${escapeHTML(key)}</div></div></div>
+          <div class="bb-details-body"><section class="bb-details-section"><div class="bb-kv">
+            ${metadataRow('Left version', leftID, true)}
+            ${metadataRow('Right version', rightID, true)}
+            ${metadataRow('Left size', formatBytes(leftSize))}
+            ${metadataRow('Right size', formatBytes(rightSize))}
+            ${metadataRow('Bytes compared', formatBytes(comparedBytes))}
+            ${firstDifference === null ? '' : metadataRow('First different byte', Number(firstDifference).toLocaleString())}
+            ${metadataRow('Result', equal ? 'Identical' : 'Different')}
+          </div></section></div>
+        </div>`
+      });
+      return true;
+    } catch (error) {
+      if (isAbortError(error)) {
+        task.canceled({ detail: 'Comparison canceled.' });
+        return false;
+      }
+      task.fail({ detail: String(error?.message || error) });
+      showTaskFailure('Comparing versions', error);
+      return false;
+    }
+  }
+
+  async function showVersions(key, options = {}) {
+    if (!(await requirePermissions(['read']))) return false;
+    if (BB.cfg?.versioningSupported !== true) return false;
+    const instance = options.instance || BB.api.getInstance();
+    const canWriteVersion = allowed('write');
+    const canDeleteVersion = allowed('delete');
+    try {
+      const firstPage = await BB.api.versions(key, { maximum: 250, instance });
+      const versions = [...(firstPage.versions || [])];
+      let pageToken = firstPage.nextPageToken || '';
+      if (!versions.length && !pageToken) {
+        await ui().alert({ title: 'Versions', message: 'No object versions were returned by the provider.' });
+        return true;
+      }
+
+      const renderRow = (version, index) => {
+        const state = version.isCurrent ? '<strong>Current</strong>' : (version.deleteMarker ? 'Delete marker' : 'Previous');
+        const deleteLabel = version.deleteMarker ? (version.isCurrent ? 'Remove marker' : 'Delete marker') : 'Delete';
+        const selectable = !version.deleteMarker && !!version.version;
+        return `<tr data-version-row="${index}">
+          <td class="bb-version-select-cell">${selectable ? `<input type="checkbox" data-version-select="${index}" aria-label="Select version ${escapeHTML(versionDisplayLabel(version))}">` : ''}</td>
+          <td>${state}</td>
+          <td class="is-monospace" title="${escapeHTML(version.version || '')}">${escapeHTML(versionDisplayLabel(version))}</td>
+          <td class="is-numeric">${version.deleteMarker ? '-' : escapeHTML(formatBytes(version.size || 0))}</td>
+          <td>${escapeHTML(versionDateLabel(version))}</td>
+          <td class="bb-version-actions">
+            ${version.deleteMarker ? '' : `<button class="bb-btn" data-version-download="${index}">Download</button>`}
+            ${canWriteVersion && !version.isCurrent && !version.deleteMarker ? `<button class="bb-btn bb-btn-primary" data-version-restore="${index}">Restore</button>` : ''}
+            ${canDeleteVersion ? `<button class="bb-btn danger" data-version-delete="${index}">${deleteLabel}</button>` : ''}
+          </td>
+        </tr>`;
+      };
+      const initialRows = versions.map(renderRow).join('');
+      await ui().alert({
+        html: `<div class="bb-details bb-version-browser"><div class="bb-details-head"><i class="mdi mdi-source-commit"></i><div class="bb-details-titles"><div class="bb-details-name">Object versions</div><div class="bb-details-prefix">${escapeHTML(key)}</div></div></div><div class="bb-details-body"><div class="bb-version-toolbar"><button type="button" class="bb-btn bb-btn-primary" data-version-compare-selected disabled><i class="mdi mdi-swap-vertical"></i><span>Compare selected</span></button><span data-version-selection>Choose two versions</span></div><div class="data-table-scroll bb-version-table"><table class="data-table"><thead><tr><th aria-label="Selection"></th><th>State</th><th>Version</th><th>Size</th><th>Modified</th><th>Actions</th></tr></thead><tbody data-version-body>${initialRows}</tbody></table></div><div class="bb-version-pagination"><button type="button" class="bb-btn" data-version-more${pageToken ? '' : ' hidden'}>Load more</button><span data-version-count>${versions.length.toLocaleString()} version record(s)</span></div></div></div>`,
+        onOpen: ({ overlay }) => {
+          const body = overlay.querySelector('[data-version-body]');
+          const moreButton = overlay.querySelector('[data-version-more]');
+          const count = overlay.querySelector('[data-version-count]');
+          const compareButton = overlay.querySelector('[data-version-compare-selected]');
+          const selectionLabel = overlay.querySelector('[data-version-selection]');
+          const selected = [];
+
+          const refreshSelection = () => {
+            const selectedSet = new Set(selected);
+            overlay.querySelectorAll('[data-version-select]').forEach(input => {
+              const index = Number(input.dataset.versionSelect);
+              input.checked = selectedSet.has(index);
+              input.disabled = selected.length >= 2 && !selectedSet.has(index);
+            });
+            compareButton.disabled = selected.length !== 2;
+            selectionLabel.textContent = selected.length === 2 ? 'Two versions selected' : `${selected.length} of 2 selected`;
+          };
+          const updateFooter = () => {
+            moreButton.hidden = !pageToken;
+            count.textContent = `${versions.length.toLocaleString()} version record(s)`;
+            refreshSelection();
+          };
+          const appendPage = async () => {
+            if (!pageToken || moreButton.disabled) return;
+            moreButton.disabled = true;
+            moreButton.textContent = 'Loading...';
+            try {
+              const page = await BB.api.versions(key, { pageToken, maximum: 250, instance });
+              const offset = versions.length;
+              const incoming = page.versions || [];
+              versions.push(...incoming);
+              body.insertAdjacentHTML('beforeend', incoming.map((version, index) => renderRow(version, offset + index)).join(''));
+              pageToken = page.nextPageToken || '';
+              updateFooter();
+            } catch (error) {
+              ui().toast(`Loading versions failed: ${String(error?.message || error)}`, { status: 'error', duration: 6000 });
+            } finally {
+              moreButton.disabled = false;
+              moreButton.textContent = 'Load more';
+            }
+          };
+          const reload = async () => {
+            const page = await BB.api.versions(key, { maximum: 250, instance });
+            versions.splice(0, versions.length, ...(page.versions || []));
+            selected.splice(0, selected.length);
+            pageToken = page.nextPageToken || '';
+            body.innerHTML = versions.map(renderRow).join('');
+            updateFooter();
+          };
+
+          moreButton.addEventListener('click', appendPage);
+          compareButton.addEventListener('click', async () => {
+            if (selected.length !== 2) return;
+            const left = versions[selected[0]];
+            const right = versions[selected[1]];
+            if (!left || !right || left.deleteMarker || right.deleteMarker) return;
+            await compareVersions(key, left.version, right.version, { instance });
+          });
+          overlay.addEventListener('change', event => {
+            const input = event.target.closest('[data-version-select]');
+            if (!input) return;
+            const index = Number(input.dataset.versionSelect);
+            const existing = selected.indexOf(index);
+            if (input.checked && existing < 0 && selected.length < 2) selected.push(index);
+            if (!input.checked && existing >= 0) selected.splice(existing, 1);
+            refreshSelection();
+          });
+          overlay.addEventListener('click', async event => {
+            const target = event.target.closest('[data-version-download],[data-version-restore],[data-version-delete]');
+            if (!target) return;
+            const rawIndex = target.dataset.versionDownload ?? target.dataset.versionRestore ?? target.dataset.versionDelete;
+            const version = versions[Number(rawIndex)];
+            if (!version) return;
+            try {
+              if (target.hasAttribute('data-version-download')) {
+                await downloadObject(key, key.split('/').pop(), { version: version.version, instance });
+                return;
+              }
+              if (target.hasAttribute('data-version-restore')) {
+                if (!(await requirePermissions(['write']))) return;
+                if (!(await ui().confirm({ title: 'Restore version', message: `Create a new current version of "${key}" from ${version.version}?` }))) return;
+                await BB.api.restoreVersion(key, version.version, instance);
+                ui().toast('Version restored.', { type: 'success', duration: 4000 });
+                await reload();
+                return;
+              }
+              if (target.hasAttribute('data-version-delete')) {
+                if (!(await requirePermissions(['delete']))) return;
+                const message = version.deleteMarker
+                  ? `Permanently remove delete marker ${version.version} from "${key}"?${version.isCurrent ? ' The previous object version may become current again.' : ''}`
+                  : `Permanently delete exact version ${version.version} of "${key}"?${version.isCurrent ? ' A previous version or delete marker may become current.' : ''}`;
+                if (!(await ui().confirm({ title: version.deleteMarker ? 'Remove delete marker' : 'Delete version', message }))) return;
+                await BB.api.deleteVersion(key, version.version, instance);
+                ui().toast(version.deleteMarker ? 'Delete marker removed.' : 'Version deleted.', { type: 'success', duration: 4000 });
+                await reload();
+              }
+            } catch (error) {
+              ui().toast(`Version action failed: ${String(error?.message || error)}`, { status: 'error', duration: 6000 });
+            }
+          });
+          updateFooter();
+        }
+      });
+      return true;
+    } catch (error) {
+      if (Number(error?.status || 0) === 501) return false;
+      await ui().alert({ title: 'Versions', message: String(error?.message || error) });
+      return false;
+    }
+  }
+
 
   BB.actions = {
     showMetadata,
@@ -1174,10 +1644,10 @@
     deletePrefix,
     waitForJob,
     downloadObject,
+    showVersions,
     triggerBrowserDownload,
     formatTransferDetail,
     formatBytes,
-    isAbortError,
-    moveToTrash: async () => false
+    isAbortError
   };
 })();

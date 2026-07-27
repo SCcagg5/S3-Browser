@@ -26,6 +26,7 @@
         key: String(input.key || ''),
         size: Math.max(0, Number(input.size) || 0),
         etag: String(input.etag || ''),
+        version: String(input.version || ''),
         instance: input.instance == null ? null : String(input.instance)
       };
     }
@@ -34,6 +35,7 @@
       key: String(url.searchParams.get('key') || ''),
       size: Math.max(0, Number(fallbackSize) || 0),
       etag: '',
+      version: String(url.searchParams.get('version') || ''),
       instance: url.searchParams.get('instance')
     };
   }
@@ -107,6 +109,7 @@
           key: view.key,
           cursor: cursors[target] || '',
           etag: view.etag,
+          version: view.version,
           instance: view.instance,
           signal: view.signal
         };
@@ -258,6 +261,7 @@
           type: node.type,
           limit: TREE_PAGE_SIZE,
           etag: view.etag,
+          version: view.version,
           instance: view.instance,
           signal: view.signal
         });
@@ -309,6 +313,7 @@
           key: view.key,
           limit: TREE_PAGE_SIZE,
           etag: view.etag,
+          version: view.version,
           instance: view.instance,
           signal: view.signal
         });
@@ -395,6 +400,7 @@
       view.summaryPromise = BB.api.jsonSummary({
         key: view.key,
         etag: view.etag,
+        version: view.version,
         instance: view.instance,
         signal: view.signal
       }).then(summary => {

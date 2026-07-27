@@ -101,7 +101,7 @@
     return box;
   }
 
-  async function renderSQLite({ key, size = 0, instance = '' } = {}) {
+  async function renderSQLite({ key, size = 0, version = '', instance = '' } = {}) {
     const root = document.createElement('section');
     root.className = 'sqlite-preview preview-data';
     root.appendChild(loadingView('Preparing the SQLite database...'));
@@ -122,7 +122,7 @@
     };
 
     try {
-      session = await BB.api.createSQLiteSession({ key, size, instance, signal: abortController.signal });
+      session = await BB.api.createSQLiteSession({ key, size, version, instance, signal: abortController.signal });
     } catch (error) {
       root.replaceChildren(errorView(error));
       root.cleanup = () => abortController.abort();

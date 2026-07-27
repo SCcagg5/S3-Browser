@@ -7,9 +7,9 @@ services:
     container_name: s3-browser
     restart: unless-stopped
     command: ["-c", "/config/config.hcl"]
+    read_only: true
     volumes:
       - ./config.hcl:/config/config.hcl:ro
-      - browser-data:/data
     ports:
       - "8080:8080"
     depends_on:
@@ -33,6 +33,3 @@ services:
         hard: 262144
     volumes:
       - ./config.hcl:/config/config.hcl:ro
-
-volumes:
-  browser-data:

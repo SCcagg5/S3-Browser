@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"io/fs"
 	"mime"
 	"mime/multipart"
 	"mime/quotedprintable"
@@ -32,6 +33,7 @@ const (
 type structuredPreviewResponse struct {
 	Instance     string                 `json:"instance"`
 	Key          string                 `json:"key"`
+	Version      string                 `json:"version,omitempty"`
 	Kind         string                 `json:"kind"`
 	Container    string                 `json:"container,omitempty"`
 	Properties   map[string]string      `json:"properties,omitempty"`
@@ -97,6 +99,7 @@ type emailPreviewAttachment struct {
 type archivePreviewResponse struct {
 	Instance   string                `json:"instance"`
 	Key        string                `json:"key"`
+	Version    string                `json:"version,omitempty"`
 	Container  string                `json:"container"`
 	Properties map[string]string     `json:"properties,omitempty"`
 	Package    map[string]string     `json:"package,omitempty"`
@@ -106,14 +109,11 @@ type archivePreviewResponse struct {
 
 type archivePreviewEntry struct {
 	Name             string `json:"name"`
-	Type             string `json:"type"`
 	CompressedSize   uint64 `json:"compressedSize"`
 	UncompressedSize uint64 `json:"uncompressedSize"`
 	Method           string `json:"method"`
 	Modified         string `json:"modified,omitempty"`
-	CRC32            string `json:"crc32,omitempty"`
 	Encrypted        bool   `json:"encrypted,omitempty"`
-	Mode             string `json:"mode,omitempty"`
 }
 
 type epubPreviewData struct {
@@ -186,6 +186,7 @@ func (a *application) handleStructuredPreview(w http.ResponseWriter, r *http.Req
 	response := structuredPreviewResponse{
 		Instance:    instance.cfg.ID,
 		Key:         key,
+		Version:     strings.TrimSpace(r.URL.Query().Get("version")),
 		Kind:        kind,
 		RawEncoding: "text",
 	}
@@ -273,16 +274,18 @@ func (a *application) handleArchivePreview(w http.ResponseWriter, r *http.Reques
 	response := archivePreviewResponse{
 		Instance:   instance.cfg.ID,
 		Key:        key,
+		Version:    strings.TrimSpace(r.URL.Query().Get("version")),
 		Container:  archiveContainerLabel(extension),
 		Properties: zipArchiveProperties(reader),
 		Entries:    make([]archivePreviewEntry, 0, len(reader.File)),
 	}
 	for _, file := range reader.File {
-		entryType := "File"
-		if file.FileInfo().IsDir() || strings.HasSuffix(file.Name, "/") {
-			entryType = "Folder"
-		} else if file.Mode()&0o170000 == 0o120000 {
-			entryType = "Symlink"
+		// The archive inventory is intentionally a file list, not a synthetic
+		// filesystem tree. Explicit directory records and symbolic links are not
+		// actionable preview targets, so omitting them keeps the response smaller
+		// and guarantees that every visible row uses the same interaction model.
+		if file.FileInfo().IsDir() || strings.HasSuffix(file.Name, "/") || file.Mode()&fs.ModeSymlink != 0 || !file.Mode().IsRegular() {
+			continue
 		}
 		modified := ""
 		if !file.Modified.IsZero() {
@@ -290,14 +293,11 @@ func (a *application) handleArchivePreview(w http.ResponseWriter, r *http.Reques
 		}
 		response.Entries = append(response.Entries, archivePreviewEntry{
 			Name:             file.Name,
-			Type:             entryType,
 			CompressedSize:   file.CompressedSize64,
 			UncompressedSize: file.UncompressedSize64,
 			Method:           zipCompressionMethodLabel(file.Method),
 			Modified:         modified,
-			CRC32:            fmt.Sprintf("%08x", file.CRC32),
 			Encrypted:        file.Flags&0x1 != 0,
-			Mode:             file.Mode().String(),
 		})
 	}
 	response.Package = inspectArchivePackageMetadata(reader, extension)

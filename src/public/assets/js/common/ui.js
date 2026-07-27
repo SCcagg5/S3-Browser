@@ -415,7 +415,8 @@
 
     const labels = {
       upload: { title: 'Uploads', icon: 'cloud-upload-outline' },
-      download: { title: 'Downloads', icon: 'cloud-download-outline' }
+      download: { title: 'Downloads', icon: 'cloud-download-outline' },
+      comparison: { title: 'Version comparison', icon: 'swap-vertical' }
     };
     const label = labels[normalizedKind] || { title: 'Transfers', icon: 'swap-vertical' };
     const panel = el('section', `bb-transfer-panel is-${normalizedKind}`, '');

@@ -1,105 +1,127 @@
 # Architecture
 
-## Process model
+## Runtime shape
 
-The project builds one statically linked Go executable. The frontend is embedded into that executable. No helper process, shell command, CGO library, database server, or remote asset host is required at runtime.
+The application is one static Go binary with embedded frontend assets. It does not execute helper processes, require CGO, or write application state to disk.
 
-## Main backend responsibilities
+The runtime can be placed in a scratch container with a read-only root filesystem. Only the HCL file and any credential files need to be mounted read-only.
 
-- `config.go`: strict HCL parsing and validation;
-- `authentication.go`: shared provider authentication, HTTP transport, and token state;
-- `storage.go`: provider-neutral operations, permission discovery, budgets, and concurrency gates;
-- `s3.go` and `gcs.go`: provider protocol implementations;
-- `app.go`: HTTP routing and API handlers;
-- `runtime_policy.go`: resource accounting and execution limits;
-- `object_range_source.go`: exact remote ranges and bounded cache behavior;
-- document-specific readers: spreadsheet, SQLite, JSON, Parquet, Office, media, image, and archive metadata;
-- `jobs.go` and `uploads.go`: explicit long-running operations and resumable transfers;
-- `state_files.go`: quarantine of persistent records that reference removed buckets.
+## Configuration and shared provider clients
 
-## Authentication and buckets
+HCL defines reusable authentication objects and bucket views. Buckets referencing the same authentication share provider credentials, token refresh state, HTTP transport, and connection pool. Each bucket independently defines:
 
-`auth` objects are initialized once. Buckets that reference the same authentication share:
+- provider bucket name;
+- display name;
+- virtual root prefix;
+- permission ceiling;
+- navigation scan limit;
+- learned capability state.
 
-- the endpoint URL;
-- the provider HTTP transport and connection pool;
-- access credentials;
-- the renewable GCS token source where applicable.
+## Storage interfaces
 
-Every bucket creates its own storage instance with:
+The backend separates listing, object reads, ranged reads, writes, deletion, copy/rewrite, multipart upload, and version operations. Read-only preview code receives only the operations it needs.
 
-- bucket name;
-- exposed root prefix;
-- independent permission ceiling;
-- independent learned capability state;
-- independent request concurrency gate;
-- independent navigation scan-page limit.
-
-Secrets are therefore not duplicated into each bucket configuration.
-
-## HTTP routing and reverse-proxy prefixes
-
-The backend router always serves routes from `/`. It does not know or accept the public reverse-proxy prefix.
-
-The frontend contains relative asset references and resolves runtime URLs from `document.baseURI`. To expose the application at `/s3-browser/`, the reverse proxy removes `/s3-browser/` before forwarding requests to the backend. The public URL must retain a trailing slash so relative browser URLs remain inside that prefix.
-
-The object gateway is the exact `/s3` endpoint with an opaque `key` query parameter. Object keys are never interpreted as HTTP path segments.
-
-## Navigation listing and global sorting
-
-The backend requests provider listing pages with a maximum of 1,000 entries and combines at most the configured `max_scan_pages` for the selected bucket. A value of zero removes the page-count limit.
-
-The response distinguishes two cases:
-
-- `scanComplete=true`: the provider reported the actual end of the folder; global sorting is safe;
-- `scanComplete=false`: a continuation token remains because the configured scan limit was reached; the frontend must retain provider-order pagination.
-
-When complete, the frontend can sort the full batch by Name, Size, or Last modified and paginate locally without issuing another provider request. Header icon placeholders retain identical column geometry whether sorting is active, inactive, or unavailable.
-
-## Resource budgets
-
-Every API request can carry a resource budget containing:
-
-- provider request count;
-- provider bytes read;
-- start time and elapsed time.
-
-Storage requests also pass through:
+All provider traffic passes through:
 
 - a global concurrency gate;
 - a per-bucket concurrency gate;
-- request-context cancellation.
+- a request counter;
+- a transferred-byte counter;
+- request cancellation;
+- strict response validation.
 
-Readers must use exact bounded ranges. A provider that ignores a required range is rejected unless a specific bounded reader explicitly permits a controlled fallback.
+Provider redirects and environment-derived proxies are disabled.
 
-## State model
+## Stateless state model
 
-Ephemeral mode keeps jobs, capability observations, upload state, and preview sessions in memory or bounded temporary storage. State disappears on process restart.
+The server has no local database, cache directory, checkpoint directory, or temporary-file contract.
 
-Persistent mode stores only application state in `data_dir`. It does not create hidden control objects in connected buckets. On startup, a state file referencing a removed bucket is moved to an `orphaned` directory. It cannot repeatedly fail or restart the application.
+Process memory contains only bounded live state:
 
-## Insights execution
+- at most four active or queued background jobs;
+- a small terminal-job history;
+- current upload sessions;
+- current preview sessions;
+- short-lived range caches;
+- process-local permission observations;
+- short-lived Insights results.
 
-Insights use a 100 ms synchronous fast path:
+A process restart discards all of this state. No hidden object is written to a connected bucket to replace local state.
 
-1. a recent completed result may be reused immediately;
-2. otherwise an existing active job is reused or a new job is created;
-3. the request waits for up to 100 ms;
-4. a completed result is returned directly;
-5. longer work continues as a background job.
+## Upload resume protocol
 
-The frontend creates the bottom-right progress notification only for the background-job case.
+A resumable upload creates a provider-side S3 multipart upload or GCS resumable session. The server returns an opaque `s3br1` token containing the encrypted and authenticated provider coordinates, target object, size, media type, chunk size, and expiry.
 
-## Frontend structure
+The token key is derived from the configured provider credential material when available. This allows another process with the same HCL credentials to open the token without a server-side record. The server then reconciles the actual provider state:
 
-Common components provide:
+- S3: lists uploaded parts and validates contiguous part numbers and sizes;
+- GCS: queries the resumable-session offset.
 
-- capability-aware actions;
-- shared transfer controls;
-- tabular grids;
-- structured metadata previews;
-- archive inventory;
-- PDF.js canvas rendering;
-- safe image, media, text, JSON, SQLite, Office, and code previews.
+The process tracks at most four active upload sessions. Completed and canceled sessions are removed from process memory. Cancel also aborts the provider session when supported.
 
-Tabular viewers use full-width scroll containers and do not reserve an unused permanent scrollbar gutter.
+The browser currently keeps active tokens in page memory. An API client may retain the opaque token outside the server and submit it to `/api/uploads/resume` after a server restart.
+
+## Background jobs
+
+Jobs are memory-only and use two workers. The manager admits no more than four active or queued jobs. Terminal results are retained only up to `job_history_limit`.
+
+Supported job types are limited to operations that can stream with bounded memory:
+
+- prefix copy, move, and delete;
+- Insights statistics;
+- per-object integrity verification;
+- selected archive-entry extraction;
+- selected archive-entry integrity verification.
+
+Insights uses a 100 ms synchronous fast path. A fresh completed result can be reused for 30 seconds. Longer work continues in memory and can be paused, resumed, or canceled while the process remains alive.
+
+
+## Insights treemap normalization
+
+The statistics worker builds the semantic treemap on the backend after the complete Insights scan finishes. The backend:
+
+- calculates the exact global one-percent byte threshold using integer arithmetic;
+- groups sub-threshold direct children into exact `Others` aggregates;
+- preserves exact bytes and object counts for every emitted node;
+- contracts folder chains that contain only one child and therefore introduce no real branch;
+- removes a sole `Others` child because the parent already represents the same exact scope;
+- returns an immutable `treemap` tree plus `treemapThresholdBytes`.
+
+The browser performs only geometric squarified layout, label fitting, focus feedback, and navigation. It does not reconstruct folders, regroup data, or decide which single-child nodes to remove.
+
+## Version capability and version access
+
+At startup, each bucket performs one bounded version-list probe. A successful provider response enables version controls. HTTP 501, access denial, timeout, malformed response, or any other error disables them for that bucket without failing application startup.
+
+When available:
+
+- `/api/versions` pages exact versions or generations of one key;
+- `/api/version-counts` counts exact non-delete-marker versions for visible keys;
+- object, metadata, preview, inspection, and integrity endpoints accept an exact version identifier;
+- restore and permanent exact-version deletion call the provider implementation.
+
+The frontend never offers version controls for a bucket that failed the probe.
+
+## Browser-only version comparison
+
+Comparison is deliberately limited to two immutable versions returned for the same object key. The browser obtains exact version sizes, reads both versions through strict 2 MiB Range requests, compares blocks, and stops at the first differing byte.
+
+The backend has no generic comparison route and does not retain comparison state or content.
+
+## Large-object readers
+
+Range-aware readers use exact start and end offsets, validate HTTP 206 and `Content-Range`, bind sessions to ETag/generation when available, and reject expanded or full-object responses.
+
+Caches are byte-bounded LRU structures. Parsers read format indexes, headers, trailers, central directories, and directly referenced members rather than accumulating complete objects.
+
+Complete-object work is allowed only after an explicit action such as per-object integrity verification. It streams through small fixed buffers under background byte/request budgets.
+
+## Archive extraction
+
+ZIP-compatible archives use their central directory. A selected member is read from its exact compressed ranges, decompressed as a stream, and written directly to the explicit destination object.
+
+The server never writes a temporary archive or member to disk. Unsafe paths, symbolic links, encrypted members, collisions, oversized expansion, and existing destinations are rejected. An interrupted provider upload is aborted where the provider API allows it.
+
+## Frontend path model
+
+Assets and API URLs are relative to `document.baseURI`. A path-stripping reverse proxy can therefore expose the same build at `/`, `/s3-browser/`, or another prefix without an HCL public-path setting or a frontend rebuild.

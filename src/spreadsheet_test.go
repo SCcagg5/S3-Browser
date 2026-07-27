@@ -7,8 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -162,9 +160,6 @@ func TestSpreadsheetPreviewHasNoCrossRequestOrPersistentCache(t *testing.T) {
 	secondGets, secondHeads, _ := backendReadCounts(backend)
 	if firstGets == 0 || secondGets <= firstGets || firstHeads != 0 || secondHeads != 0 {
 		t.Fatalf("first GET/HEAD = %d/%d, second = %d/%d", firstGets, firstHeads, secondGets, secondHeads)
-	}
-	if _, err := os.Stat(filepath.Join(app.config.DataDir, "spreadsheets")); !os.IsNotExist(err) {
-		t.Fatalf("spreadsheet cache directory exists or cannot be checked: %v", err)
 	}
 }
 

@@ -80,6 +80,9 @@ func (s *storageInstance) List(ctx context.Context, options listOptions) (listPa
 }
 
 func (s *storageInstance) Head(ctx context.Context, key string) (objectResponse, error) {
+	if version := objectVersionFromContext(ctx); version != "" {
+		return s.HeadVersion(ctx, key, version)
+	}
 	release, err := s.beginStorageRequest(ctx)
 	if err != nil {
 		return objectResponse{}, err
@@ -116,6 +119,9 @@ func (r *budgetReadCloser) Close() error {
 }
 
 func (s *storageInstance) Get(ctx context.Context, key string, headers http.Header) (objectResponse, error) {
+	if version := objectVersionFromContext(ctx); version != "" {
+		return s.GetVersion(ctx, key, version, headers)
+	}
 	release, err := s.beginStorageRequest(ctx)
 	if err != nil {
 		return objectResponse{}, err
@@ -173,6 +179,38 @@ func (s *storageInstance) Put(ctx context.Context, key string, body io.Reader, s
 	err = s.backend.Put(ctx, key, body, size, contentType)
 	s.observePermission(permissionWrite, err)
 	return err
+}
+
+// PutIfAbsent creates an object only when no current object already exists at
+// the destination. S3 and GCS implement this atomically through provider
+// preconditions. The fallback is intentionally conservative and is used only
+// by test or third-party backends that do not expose conditional writes.
+func (s *storageInstance) PutIfAbsent(ctx context.Context, key string, body io.Reader, size int64, contentType string) error {
+	if conditional, ok := s.backend.(ConditionalObjectWriter); ok {
+		release, err := s.beginStorageRequest(ctx)
+		if err != nil {
+			return err
+		}
+		defer release()
+		if budget := budgetFromContext(ctx); budget != nil && size > 0 {
+			if err := budget.consumeBytes(size); err != nil {
+				return err
+			}
+		}
+		err = conditional.PutIfAbsent(ctx, key, body, size, contentType)
+		s.observePermission(permissionWrite, err)
+		return err
+	}
+
+	response, err := s.Head(ctx, key)
+	if err == nil {
+		closeObjectResponse(response)
+		return apiError{Status: http.StatusConflict, Code: "object_exists", Message: "an object already exists at the extraction destination"}
+	}
+	if !isStorageNotFound(err) {
+		return err
+	}
+	return s.Put(ctx, key, body, size, contentType)
 }
 
 func (s *storageInstance) Delete(ctx context.Context, key string) error {

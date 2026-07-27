@@ -53,9 +53,8 @@ func TestLoadConfigSharesAuthenticationAcrossBuckets(t *testing.T) {
 	configPath := filepath.Join(dir, "config.hcl")
 	writeConfig(t, configPath, `
 server {
-  listen     = ":9090"
-  state_mode = "persistent"
-  data_dir   = "./state"
+  listen            = ":9090"
+  job_history_limit = 17
 }
 
 auth "production" {
@@ -68,11 +67,11 @@ auth "production" {
 }
 
 bucket "documents" {
-  name        = "Documents"
-  auth        = "production"
-  bucket      = "documents"
-  permissions   = ["read", "write", "delete"]
-  root_prefix  = "/tenant-a"
+  name           = "Documents"
+  auth           = "production"
+  bucket         = "documents"
+  permissions    = ["read", "write", "delete"]
+  root_prefix    = "/tenant-a"
   max_scan_pages = 15
 }
 
@@ -87,11 +86,8 @@ bucket "archive" {
 	if err != nil {
 		t.Fatalf("loadConfig() error = %v", err)
 	}
-	if cfg.Listen != ":9090" {
-		t.Fatalf("server listen = %q", cfg.Listen)
-	}
-	if cfg.DataDir != filepath.Join(dir, "state") {
-		t.Fatalf("DataDir = %q", cfg.DataDir)
+	if cfg.Listen != ":9090" || cfg.JobHistoryLimit != 17 {
+		t.Fatalf("server config = listen:%q history:%d", cfg.Listen, cfg.JobHistoryLimit)
 	}
 	if len(cfg.Authentications) != 1 || len(cfg.Buckets) != 2 {
 		t.Fatalf("auth=%d buckets=%d", len(cfg.Authentications), len(cfg.Buckets))
@@ -114,8 +110,63 @@ bucket "archive" {
 	if got := strings.Join(cfg.Buckets[0].Permissions, ","); got != "read,write,delete" {
 		t.Fatalf("documents permissions = %q", got)
 	}
-	if got := strings.Join(cfg.Buckets[1].Permissions, ","); got != "read" {
-		t.Fatalf("archive permissions = %q", got)
+}
+
+func TestLoadConfigBackgroundBudgets(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.hcl")
+	writeConfig(t, path, `
+server {
+  max_background_storage_bytes    = 274877906944
+  max_background_storage_requests = 12345
+}
+
+`+minimalTestConfig("primary"))
+	cfg, err := loadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Runtime.MaxBackgroundStorageBytes != 274877906944 {
+		t.Fatalf("MaxBackgroundStorageBytes = %d", cfg.Runtime.MaxBackgroundStorageBytes)
+	}
+	if cfg.Runtime.MaxBackgroundStorageRequests != 12345 {
+		t.Fatalf("MaxBackgroundStorageRequests = %d", cfg.Runtime.MaxBackgroundStorageRequests)
+	}
+}
+
+func TestLoadConfigRejectsInvalidBackgroundBudgets(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		attribute string
+		value     string
+	}{
+		{name: "background bytes too small", attribute: "max_background_storage_bytes", value: "1024"},
+		{name: "background requests zero", attribute: "max_background_storage_requests", value: "0"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.hcl")
+			writeConfig(t, path, "server { "+test.attribute+" = "+test.value+" }\n"+minimalTestConfig("primary"))
+			if _, err := loadConfig(path); err == nil || !strings.Contains(err.Error(), test.attribute) {
+				t.Fatalf("error = %v", err)
+			}
+		})
+	}
+}
+
+func TestLoadConfigUsesLowMemoryDefaults(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.hcl")
+	writeConfig(t, path, minimalTestConfig("primary"))
+	cfg, err := loadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.JobHistoryLimit != 10 || cfg.Runtime.MaxRangeCacheBytes != 8<<20 {
+		t.Fatalf("defaults = history:%d cache:%d", cfg.JobHistoryLimit, cfg.Runtime.MaxRangeCacheBytes)
+	}
+	if cfg.Runtime.MaxConcurrentStorageRequests != 4 || cfg.Runtime.MaxConcurrentRequestsPerStore != 2 {
+		t.Fatalf("concurrency defaults = global:%d bucket:%d", cfg.Runtime.MaxConcurrentStorageRequests, cfg.Runtime.MaxConcurrentRequestsPerStore)
+	}
+	if cfg.Runtime.MaxStorageBytesPerRequest < 100<<30 || cfg.Runtime.MaxBackgroundStorageBytes < 100<<30 {
+		t.Fatalf("streaming byte budgets must support 100 GiB objects: request:%d background:%d", cfg.Runtime.MaxStorageBytesPerRequest, cfg.Runtime.MaxBackgroundStorageBytes)
 	}
 }
 
@@ -156,16 +207,13 @@ func TestLoadConfigRejectsUnknownAuthenticationAttributes(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.hcl")
 	writeConfig(t, path, `
 auth "broken" {
-  provider          = "s3"
-  endpoint          = "http://localhost:9000"
-  region            = "test"
+  provider           = "s3"
+  endpoint           = "http://localhost:9000"
+  region             = "test"
   unsupported_option = "value"
 }
 
-bucket "bucket" {
-  auth   = "broken"
-  bucket = "bucket"
-}
+bucket "bucket" { auth = "broken" bucket = "bucket" }
 `)
 	_, err := loadConfig(path)
 	if err == nil || !strings.Contains(err.Error(), `unknown attribute "unsupported_option"`) {
@@ -175,59 +223,18 @@ bucket "bucket" {
 
 func TestLoadConfigRejectsUnknownAuthentication(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.hcl")
-	writeConfig(t, path, `
-auth "public" {
-  provider = "s3"
-  mode     = "anonymous"
-  endpoint = "http://localhost:9000"
-  region   = "test"
-}
-
-bucket "broken" {
-  auth   = "missing"
-  bucket = "bucket"
-}
+	writeConfig(t, path, minimalTestConfig("known")+`
+bucket "broken" { auth = "missing" bucket = "bucket" }
 `)
 	_, err := loadConfig(path)
 	if err == nil || !strings.Contains(err.Error(), `auth "missing" is not defined`) {
 		t.Fatalf("error = %v", err)
 	}
 }
-
-func TestLoadConfigRejectsDataDirectoryInEphemeralMode(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.hcl")
-	writeConfig(t, path, `
-server { data_dir = "./state" }
-
-auth "public" {
-  provider = "s3"
-  mode     = "anonymous"
-  endpoint = "http://localhost:9000"
-  region   = "test"
-}
-
-bucket "bucket" { auth = "public" bucket = "bucket" }
-`)
-	_, err := loadConfig(path)
-	if err == nil || !strings.Contains(err.Error(), "data_dir requires state_mode") {
-		t.Fatalf("error = %v", err)
-	}
-}
-
 func TestLoadConfigRejectsUnknownServerAttribute(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.hcl")
-	writeConfig(t, path, `
-server { public_prefix = "/browser/" }
-
-auth "public" {
-  provider = "s3"
-  mode     = "anonymous"
-  endpoint = "http://localhost:9000"
-  region   = "test"
-}
-
-bucket "bucket" { auth = "public" bucket = "bucket" }
-`)
+	writeConfig(t, path, `server { public_prefix = "/browser/" }
+`+minimalTestConfig("bucket"))
 	_, err := loadConfig(path)
 	if err == nil || !strings.Contains(err.Error(), "public_prefix") {
 		t.Fatalf("error = %v", err)
@@ -235,10 +242,8 @@ bucket "bucket" { auth = "public" bucket = "bucket" }
 }
 
 func TestLoadConfigValidatesMaxScanPages(t *testing.T) {
-	for _, value := range []string{"1000001"} {
-		t.Run(value, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "config.hcl")
-			writeConfig(t, path, `
+	path := filepath.Join(t.TempDir(), "config.hcl")
+	writeConfig(t, path, `
 auth "public" {
   provider = "s3"
   mode     = "anonymous"
@@ -249,13 +254,11 @@ auth "public" {
 bucket "bucket" {
   auth           = "public"
   bucket         = "bucket"
-  max_scan_pages = `+value+`
+  max_scan_pages = 1000001
 }
 `)
-			if _, err := loadConfig(path); err == nil || !strings.Contains(err.Error(), "max_scan_pages") {
-				t.Fatalf("error = %v", err)
-			}
-		})
+	if _, err := loadConfig(path); err == nil || !strings.Contains(err.Error(), "max_scan_pages") {
+		t.Fatalf("error = %v", err)
 	}
 }
 
@@ -352,47 +355,22 @@ bucket "one" {
 
 func TestLoadConfigJobHistoryLimit(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.hcl")
-	writeConfig(t, path, `
-server {
-  state_mode       = "persistent"
-  data_dir         = "./state"
-  job_history_limit = 37
-}
-
-auth "public" {
-  provider = "s3"
-  mode     = "anonymous"
-  endpoint = "http://localhost:9000"
-  region   = "test"
-}
-
-bucket "primary" { auth = "public" bucket = "bucket" }
-`)
+	writeConfig(t, path, `server { job_history_limit = 12 }
+`+minimalTestConfig("primary"))
 	cfg, err := loadConfig(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.JobHistoryLimit != 37 {
-		t.Fatalf("JobHistoryLimit = %d, want 37", cfg.JobHistoryLimit)
+	if cfg.JobHistoryLimit != 12 {
+		t.Fatalf("JobHistoryLimit = %d, want 12", cfg.JobHistoryLimit)
 	}
 }
 
 func TestLoadConfigRejectsInvalidJobHistoryLimit(t *testing.T) {
-	for _, value := range []string{"0", "10001", `"100"`} {
+	for _, value := range []string{"0", "21", `"100"`} {
 		t.Run(value, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "config.hcl")
-			writeConfig(t, path, `
-server { job_history_limit = `+value+` }
-
-auth "public" {
-  provider = "s3"
-  mode     = "anonymous"
-  endpoint = "http://localhost:9000"
-  region   = "test"
-}
-
-bucket "primary" { auth = "public" bucket = "bucket" }
-`)
+			writeConfig(t, path, "server { job_history_limit = "+value+" }\n"+minimalTestConfig("primary"))
 			if _, err := loadConfig(path); err == nil {
 				t.Fatal("expected invalid job history limit to fail")
 			}

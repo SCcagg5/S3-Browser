@@ -24,26 +24,15 @@ RUN set -eux; \
         -trimpath \
         -ldflags="-s -w -buildid= -X main.buildVersion=${VERSION} -X main.buildCommit=${COMMIT} -X main.buildDate=${BUILD_DATE}" \
         -o /out/rootfs/s3-browser .; \
-    mkdir -p \
-      /out/rootfs/config \
-      /out/rootfs/data \
-      /out/rootfs/etc/ssl/certs \
-      /out/rootfs/tmp; \
-    cp /etc/ssl/certs/ca-certificates.crt /out/rootfs/etc/ssl/certs/ca-certificates.crt; \
-    printf 'nonroot:x:65532:65532:nonroot:/data:/sbin/nologin\n' > /out/rootfs/etc/passwd; \
-    printf 'nonroot:x:65532:\n' > /out/rootfs/etc/group; \
-    chown -R 65532:65532 /out/rootfs/data /out/rootfs/tmp; \
-    chmod 0700 /out/rootfs/data; \
-    chmod 1777 /out/rootfs/tmp
+    mkdir -p /out/rootfs/config /out/rootfs/etc/ssl/certs; \
+    cp /etc/ssl/certs/ca-certificates.crt /out/rootfs/etc/ssl/certs/ca-certificates.crt
 
-# The default and release runtime is a true scratch image. The statically
-# linked Go binary, CA bundle, writable runtime directories, and numeric user
-# metadata are the only files copied into it.
+# The runtime contains only the static binary and CA bundle. The application
+# does not require a writable filesystem, a data volume, or /tmp.
 FROM scratch AS runtime
 COPY --from=builder /out/rootfs/ /
 USER 65532:65532
-WORKDIR /data
-VOLUME ["/data"]
+WORKDIR /
 EXPOSE 8080
 STOPSIGNAL SIGTERM
 ENTRYPOINT ["/s3-browser"]

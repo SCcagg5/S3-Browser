@@ -1,51 +1,36 @@
 # Object Storage Browser
 
-A self-contained Go application for browsing, previewing, downloading, uploading, copying, moving, renaming, and deleting objects in S3-compatible storage and Google Cloud Storage.
+Object Storage Browser is a self-contained Go application for browsing and operating on S3-compatible storage and Google Cloud Storage. It is designed for hosts with a small memory budget and for objects that can be hundreds of gigabytes.
 
-The application is designed for very large objects and constrained hosts:
+Core properties:
 
 - one statically linked Go binary;
 - HCL configuration only;
-- no runtime dependency on environment variables;
-- no external commands or CGO;
-- no third-party asset requests at runtime;
-- exact byte-range reads for large-file previews;
-- bounded memory, temporary storage, request count, and transferred-byte budgets;
-- read, write, and delete actions limited independently for every configured bucket;
-- reusable authentication definitions shared by multiple buckets;
-- relative frontend URLs that work behind a path-stripping reverse proxy.
+- no application configuration or provider credentials from environment variables;
+- no local database, cache directory, temporary file, or persisted job state;
+- no hidden control objects, indexes, or checkpoints in connected buckets;
+- compatible with a read-only root filesystem;
+- shared authentication definitions that can serve multiple independently configured buckets;
+- exact byte-range readers for large-object previews and inspection;
+- bounded provider requests, transferred bytes, concurrency, cache size, and in-memory job history;
+- frontend URLs resolved relative to `document.baseURI` for deployment behind a path-stripping reverse proxy;
+- no runtime CDN or third-party asset requests.
 
 ## Quick start
 
-1. Copy the example configuration:
+```sh
+cp config.example.hcl config.hcl
+cd src
+CGO_ENABLED=0 go build -trimpath -o s3-browser .
+./s3-browser -c ../config.hcl
+```
 
-   ```sh
-   cp config.example.hcl config.hcl
-   ```
+The configuration must contain at least one `auth` block and one `bucket` block.
 
-2. Edit `config.hcl` and define at least one `auth` block and one `bucket` block.
-
-3. Build and start the application:
-
-   ```sh
-   cd src
-   CGO_ENABLED=0 go build -trimpath -o s3-browser .
-   ./s3-browser -config ../config.hcl
-   ```
-
-The example listens on port 8080.
-
-## Configuration model
-
-Configuration is loaded only from the HCL file passed with `-config` or `-c`. The process does not read application settings or provider credentials from environment variables.
+## Shared authentication and bucket-specific policy
 
 ```hcl
-server {
-  listen     = ":8080"
-  state_mode = "ephemeral"
-}
-
-auth "shared-s3" {
+auth "primary-s3" {
   provider               = "s3"
   mode                   = "access_key"
   endpoint               = "https://s3.example.internal"
@@ -56,7 +41,7 @@ auth "shared-s3" {
 
 bucket "documents" {
   name           = "Documents"
-  auth           = "shared-s3"
+  auth           = "primary-s3"
   bucket         = "documents"
   permissions    = ["read", "write", "delete"]
   max_scan_pages = 15
@@ -64,32 +49,57 @@ bucket "documents" {
 
 bucket "archive" {
   name           = "Archive"
-  auth           = "shared-s3"
+  auth           = "primary-s3"
   bucket         = "archive"
   permissions    = ["read"]
+  root_prefix    = "published/"
   max_scan_pages = 0
 }
 ```
 
-The two buckets share one credential set, one HTTP connection pool, and one renewable provider token state. Their application permission ceilings and listing scan limits remain independent.
+Both buckets reuse one credential set and HTTP connection pool. Their root prefixes, permission ceilings, navigation scan limits, and learned provider capabilities remain independent.
 
-Omitting `permissions` does not force read-only access. It lets the application attempt every supported operation and learn explicit provider denials during the current process lifetime. Defining `permissions` creates an application-side ceiling in addition to the provider policy.
+Omitting `permissions` lets the application attempt every supported file operation. Explicit provider denials are learned only in memory for the current process. Defining `permissions` creates an application-side ceiling in addition to the provider policy.
 
-`max_scan_pages` controls how many provider listing pages may be combined for one navigation batch. Provider pages are requested with a limit of 1,000 entries. `1` scans at most one page, `15` scans at most fifteen pages, and `0` removes the page-count limit. Global navigation sorting is enabled only when the backend reaches the actual end of the listing within that limit. The configured value is never exposed in the frontend.
+`max_scan_pages` controls how many 1,000-entry provider listing pages may be combined for one navigation batch. `0` removes the page-count limit. Global column sorting is enabled only when the actual end of the listing has been reached.
 
-See [Configuration](docs/CONFIGURATION.md) for every supported field.
+See [Configuration](docs/CONFIGURATION.md) for all fields.
+
+## Stateless runtime
+
+The server never writes application state to the local filesystem. Background jobs, preview sessions, permission observations, and active upload sessions exist only in bounded process memory and disappear on restart.
+
+Resumable uploads use an encrypted, authenticated token returned to the client. The token contains the provider-side multipart or resumable-session coordinates. A fresh server process using the same configured credentials can reconstruct the provider upload state from that token; the server does not store the token or a checkpoint file.
+
+Completed and canceled uploads are removed from server memory. The process tracks at most four active upload sessions. Background jobs are limited to four active or queued operations and a small configurable in-memory terminal history.
+
+## Version support
+
+At startup, the server performs one bounded version-listing probe per configured bucket. A provider that returns `501 Not Implemented`, denies the operation, or otherwise fails the probe is marked as not supporting version browsing. Version controls and version-count requests are then omitted from the frontend for that bucket.
+
+When supported:
+
+- the navigation displays the exact number of non-delete-marker versions for visible files;
+- Preview and Details expose a version selector;
+- the version browser supports paginated listing, exact-version download, restore, and permanent exact-version deletion according to bucket permissions;
+- comparison is available only between two versions of the same object;
+- comparison runs entirely in the browser with two bounded range buffers and stops at the first differing byte.
+
+There is no generic cross-object comparison endpoint on the backend.
+
+## Large-object tools
+
+- **Verify integrity** is an explicit per-object full scan. Hashes are calculated while streaming; object content is not accumulated in memory.
+- **Inspect** performs a bounded technical inspection using object metadata and small exact header/trailer ranges.
+- Both tools are available only in the **Advanced** tab of Details. Opening Details or the Advanced tab does not start either operation; computation begins only after the corresponding button is clicked, and results remain inside Details.
+- **Archive entry access** uses the ZIP central directory and reads only selected regular, unencrypted members. Members can be opened, downloaded, verified, or streamed directly to an explicit destination object.
+- **Insights** returns inline when complete within 100 ms; otherwise it continues as a memory-only background job with pause, resume, and cancel controls. The backend also produces the semantic treemap tree, applies the global one-percent grouping rule, and contracts redundant single-child folder chains before the response reaches the browser.
+
+The project intentionally has no global duplicate finder and no global checksum-manifest generator. Exact global results would require retaining or emitting large scan state, which conflicts with the stateless low-memory runtime contract.
 
 ## Reverse proxy path prefixes
 
-The backend always serves paths from `/`. The frontend uses only relative assets and resolves API, preview, object, and download URLs against `document.baseURI`.
-
-To publish the application at:
-
-```text
-https://example.com/s3-browser/
-```
-
-the reverse proxy must strip `/s3-browser/` before forwarding the request:
+The backend always serves paths from `/`. The frontend uses relative URLs. To publish it at `/s3-browser/`, strip that prefix before forwarding:
 
 ```nginx
 location /s3-browser/ {
@@ -99,43 +109,20 @@ location /s3-browser/ {
 }
 ```
 
-For example:
+Keep the public trailing slash so browser-relative URLs resolve inside the proxy prefix. No public-path setting is required or accepted in HCL.
 
-```text
-/s3-browser/api/list  ->  /api/list
-/s3-browser/s3       ->  /s3
-```
+## PDF.js
 
-No application-prefix setting is required or accepted in HCL. The public URL should keep its trailing slash so browser-relative URLs resolve inside the proxy prefix.
+The PDF preview is a local canvas viewer using a custom `PDFDataRangeTransport`; it does not use an iframe, embed, object element, or native-browser fallback.
 
-## Runtime state
-
-`state_mode = "ephemeral"` is the default and recommended mode. It creates no persistent job or upload database. Temporary preview state is bounded and expires automatically.
-
-`state_mode = "persistent"` requires `data_dir` and enables resumable application state across restarts. It does not create hidden objects, tags, or prefixes in the connected storage. State files that refer to a bucket removed from the HCL configuration are moved to an `orphaned` directory and do not block startup.
-
-## Permissions
-
-Each bucket can independently permit any subset of:
-
-- `read`: list, inspect, preview, search, and download;
-- `write`: upload, create folder markers, copy, and overwrite;
-- `delete`: delete objects and the source side of move or rename operations.
-
-Move and rename require read, write, and delete. Copy requires read and write. The backend validates every operation even when the frontend has hidden or disabled an action.
-
-## Large-object behavior
-
-Large-object readers use explicit bounded ranges. The application does not silently replace a failed range preview with a complete-object download. Operations that require a complete deterministic scan are started only after an explicit user action and remain subject to resource budgets.
-
-PDF preview uses a local PDF.js canvas renderer with a custom `PDFDataRangeTransport`. The application expects these files before compilation:
+The release build expects:
 
 ```text
 src/public/assets/vendor/pdfjs/4.10.38/pdf.min.mjs
 src/public/assets/vendor/pdfjs/4.10.38/pdf.worker.min.mjs
 ```
 
-They are intentionally not downloaded by the application at runtime.
+The application never downloads these files at runtime.
 
 ## Documentation
 
@@ -147,4 +134,4 @@ They are intentionally not downloaded by the application at runtime.
 
 ## License
 
-Review and add the license appropriate for your deployment before redistribution. Third-party assets retain their own license notices in their vendor directories.
+Add the project license required for your deployment before redistribution. Third-party assets retain their own notices under `src/public/assets/vendor/`.

@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -91,6 +92,20 @@ func TestArchivePreviewReturnsCompleteCentralDirectoryForEasyFormats(t *testing.
 			t.Fatal(err)
 		}
 	}
+	directoryHeader := &zip.FileHeader{Name: "empty/", Method: zip.Store}
+	directoryHeader.SetMode(fs.ModeDir | 0o755)
+	if _, err := writer.CreateHeader(directoryHeader); err != nil {
+		t.Fatal(err)
+	}
+	symlinkHeader := &zip.FileHeader{Name: "main-link", Method: zip.Store}
+	symlinkHeader.SetMode(fs.ModeSymlink | 0o777)
+	symlink, err := writer.CreateHeader(symlinkHeader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := symlink.Write([]byte("example/Main.class")); err != nil {
+		t.Fatal(err)
+	}
 	if err := writer.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -112,6 +127,11 @@ func TestArchivePreviewReturnsCompleteCentralDirectoryForEasyFormats(t *testing.
 	}
 	if payload.Container != "Java archive" || len(payload.Entries) != len(files) {
 		t.Fatalf("archive response = %+v", payload)
+	}
+	for _, entry := range payload.Entries {
+		if entry.Name == "empty/" || entry.Name == "main-link" {
+			t.Fatalf("directory or symbolic link leaked into file-only inventory: %+v", payload.Entries)
+		}
 	}
 	if payload.Package["Main class"] != "example.Main" {
 		t.Fatalf("package metadata = %+v", payload.Package)

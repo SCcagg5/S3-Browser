@@ -18,7 +18,12 @@
       ? selectedInstance()
       : String(explicitInstance || '');
     if (id) url.searchParams.set('instance', id);
-    Object.entries(extraParams || {}).forEach(([key, value]) => {
+    const parameters = { ...(extraParams || {}) };
+    if (Object.prototype.hasOwnProperty.call(parameters, 'key') && !parameters.version) {
+      const selectedVersion = new URL(window.location?.href || document.baseURI).searchParams.get('version') || '';
+      if (selectedVersion) parameters.version = selectedVersion;
+    }
+    Object.entries(parameters).forEach(([key, value]) => {
       // Empty strings are meaningful for parameters such as delimiter=. Only
       // undefined and null mean that the caller did not supply a value.
       if (value !== undefined && value !== null) url.searchParams.set(key, String(value));
@@ -222,31 +227,146 @@
       return response.json();
     },
 
-    urlForKey(key, explicitInstance = null) {
+    urlForKey(key, explicitInstance = null, version = '') {
       const clean = String(key || '').replace(/^\/+/, '');
-      return withInstance('/s3', { key: clean }, explicitInstance);
+      const parameters = { key: clean };
+      if (version) parameters.version = version;
+      return withInstance('/s3', parameters, explicitInstance);
     },
 
-    previewURLForKey(key, explicitInstance = null) {
+    previewURLForKey(key, explicitInstance = null, version = '') {
       const clean = String(key || '').replace(/^\/+/, '');
-      return withInstance('/s3', { key: clean, preview: 1 }, explicitInstance);
+      const parameters = { key: clean, preview: 1 };
+      if (version) parameters.version = version;
+      return withInstance('/s3', parameters, explicitInstance);
     },
 
-    openURLForKey(key, explicitInstance = null) {
+    previewPageURL(path, { instance = null, version = '', entry = '' } = {}) {
+      const clean = String(path || '').replace(/^\/+/, '');
+      const url = BB.runtime.resolveURL('preview.html');
+      const selected = instance === null || instance === undefined ? selectedInstance() : String(instance || '');
+      if (selected) url.searchParams.set('instance', selected);
+      url.searchParams.set('path', clean);
+      if (version) url.searchParams.set('version', String(version));
+      if (entry) url.searchParams.set('entry', String(entry));
+      return url.href;
+    },
+
+    openURLForKey(key, explicitInstance = null, version = '') {
       const clean = String(key || '').replace(/^\/+/, '');
       const filename = clean.split('/').filter(Boolean).pop() || 'download';
-      return withInstance(`/open/${encodeURIComponent(filename)}`, { key: clean }, explicitInstance);
+      const parameters = { key: clean };
+      if (version) parameters.version = version;
+      return withInstance(`/open/${encodeURIComponent(filename)}`, parameters, explicitInstance);
     },
 
-    async head(key) {
-      const response = await request(this.urlForKey(key), { method: 'HEAD' });
+    async head(key, version = '', explicitInstance = null) {
+      const response = await request(this.urlForKey(key, explicitInstance, version), { method: 'HEAD' });
       const headers = {};
       response.headers.forEach((value, name) => { headers[name] = value; });
+      const rawSize = response.headers.get('Content-Length');
       return {
         mime: response.headers.get('Content-Type') || '',
-        size: Number(response.headers.get('Content-Length') || 0),
+        size: rawSize === null ? null : Number(rawSize),
+        sizeKnown: rawSize !== null && Number.isFinite(Number(rawSize)) && Number(rawSize) >= 0,
         headers
       };
+    },
+
+    async versions(key, { pageToken = '', maximum = 250, instance = null } = {}) {
+      const response = await request(withInstance('/api/versions', { key, pageToken, max: maximum }, instance));
+      return response.json();
+    },
+
+    async allVersions(key, { instance = null } = {}) {
+      const versions = [];
+      let pageToken = '';
+      const seen = new Set();
+      do {
+        const page = await this.versions(key, { pageToken, maximum: 1000, instance });
+        versions.push(...(page.versions || []));
+        const next = String(page.nextPageToken || '');
+        if (!next) break;
+        if (next === pageToken || seen.has(next)) throw new Error('The provider returned a repeated version page token.');
+        seen.add(next);
+        pageToken = next;
+      } while (versions.length <= 100000);
+      if (versions.length > 100000) throw new Error('The object has more than 100,000 versions.');
+      return versions;
+    },
+
+    async versionCounts(keys, instance = null) {
+      const response = await request('/api/version-counts', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instance: instance || selectedInstance(), keys })
+      });
+      return response.json();
+    },
+
+    async restoreVersion(key, version, instance = null) {
+      const response = await request('/api/versions/restore', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instance: instance || selectedInstance(), key, version })
+      });
+      return response.json();
+    },
+
+    async deleteVersion(key, version, instance = null) {
+      const response = await request(withInstance('/api/versions', { key, version }, instance), { method: 'DELETE' });
+      return response.status === 204;
+    },
+
+    async integrity({ key = '', version = '', instance = null } = {}) {
+      const response = await request('/api/integrity', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instance: instance || selectedInstance(), key, version })
+      });
+      return response.json();
+    },
+
+    async inspect(key, { version = '', instance = null } = {}) {
+      const response = await request(withInstance('/api/inspect', { key, version }, instance));
+      return response.json();
+    },
+
+    archiveEntryURL(key, entry, { inline = false, instance = null, version = '', size = 0, etag = '', lastModified = '' } = {}) {
+      const parameters = { key, version, entry, inline: inline ? 1 : 0 };
+      if (Number(size) > 0) parameters.size = Number(size);
+      if (etag) parameters.etag = etag;
+      if (lastModified) parameters.lastModified = lastModified;
+      return withInstance('/api/archive-entry', parameters, instance);
+    },
+
+    async archiveEntryHead(key, entry, { instance = null, version = '' } = {}) {
+      const response = await request(this.archiveEntryURL(key, entry, { inline: true, instance, version }), { method: 'HEAD' });
+      const headers = {};
+      response.headers.forEach((value, name) => { headers[name] = value; });
+      const rawSize = response.headers.get('Content-Length');
+      return {
+        mime: response.headers.get('Content-Type') || '',
+        size: rawSize === null ? null : Number(rawSize),
+        sizeKnown: rawSize !== null && Number.isFinite(Number(rawSize)) && Number(rawSize) >= 0,
+        headers
+      };
+    },
+
+    async archiveEntryIntegrity(key, entry, { version = '', instance = null } = {}) {
+      const response = await request('/api/archive-entry/integrity', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instance: instance || selectedInstance(), key, version, entry })
+      });
+      return response.json();
+    },
+
+    async extractArchive(key, entries, { version = '', target = '', targetInstance = null, instance = null } = {}) {
+      const response = await request('/api/archive-extract', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          instance: instance || selectedInstance(), key, version, entries,
+          targetInstance: targetInstance || instance || selectedInstance(), target
+        })
+      });
+      return response.json();
     },
 
     async spreadsheet({
@@ -259,6 +379,7 @@
       sortDirection = '',
       search = '',
       size = 0,
+      version = '',
       instance = null,
       signal = null
     } = {}) {
@@ -271,6 +392,7 @@
         search
       };
       if (Number(size) > 0) parameters.size = Math.floor(Number(size));
+      if (version) parameters.version = String(version);
       if (sortColumn && sortDirection) {
         parameters.sortColumn = sortColumn;
         parameters.sortDirection = sortDirection;
@@ -279,62 +401,69 @@
       return response.json();
     },
 
-    async delimitedPage({ key, cursor = '', etag = '', pageSize = 100, instance = null, signal = null } = {}) {
+    async delimitedPage({ key, cursor = '', etag = '', pageSize = 100, version = '', instance = null, signal = null } = {}) {
       const parameters = { key, pageSize };
+      if (version) parameters.version = String(version);
       if (cursor) parameters.cursor = cursor;
       if (etag) parameters.etag = etag;
       const response = await request(withInstance('/api/delimited', parameters, instance), { signal });
       return response.json();
     },
 
-    async documentCount({ key, size = 0, instance = null, signal = null } = {}) {
+    async documentCount({ key, size = 0, version = '', instance = null, signal = null } = {}) {
       const parameters = { key };
+      if (version) parameters.version = String(version);
       if (Number(size) > 0) parameters.size = Math.floor(Number(size));
       const response = await request(withInstance('/api/document-count', parameters, instance), { signal });
       return response.json();
     },
 
-    async wordPreview({ key, size = 0, etag = '', instance = null, signal = null } = {}) {
+    async wordPreview({ key, size = 0, etag = '', version = '', instance = null, signal = null } = {}) {
       const parameters = { key };
+      if (version) parameters.version = String(version);
       if (Number(size) > 0) parameters.size = Math.floor(Number(size));
       if (etag) parameters.etag = String(etag);
       const response = await request(withInstance('/api/document/word', parameters, instance), { signal });
       return response.json();
     },
 
-    async parquetPreview({ key, size = 0, etag = '', instance = null, signal = null } = {}) {
+    async parquetPreview({ key, size = 0, etag = '', version = '', instance = null, signal = null } = {}) {
       const parameters = { key };
+      if (version) parameters.version = String(version);
       if (Number(size) > 0) parameters.size = Math.floor(Number(size));
       if (etag) parameters.etag = String(etag);
       const response = await request(withInstance('/api/parquet', parameters, instance), { signal });
       return response.json();
     },
 
-    async jsonRaw({ key, cursor = '', etag = '', instance = null, signal = null } = {}) {
+    async jsonRaw({ key, cursor = '', etag = '', version = '', instance = null, signal = null } = {}) {
       const parameters = { key };
+      if (version) parameters.version = String(version);
       if (cursor) parameters.cursor = cursor;
       if (etag) parameters.etag = etag;
       const response = await request(withInstance('/api/json/raw', parameters, instance), { signal });
       return response.json();
     },
 
-    async jsonBeautify({ key, cursor = '', etag = '', instance = null, signal = null } = {}) {
+    async jsonBeautify({ key, cursor = '', etag = '', version = '', instance = null, signal = null } = {}) {
       const parameters = { key };
+      if (version) parameters.version = String(version);
       if (cursor) parameters.cursor = cursor;
       if (etag) parameters.etag = etag;
       const response = await request(withInstance('/api/json/beautify', parameters, instance), { signal });
       return response.json();
     },
 
-    async jsonSummary({ key, etag = '', instance = null, signal = null } = {}) {
+    async jsonSummary({ key, etag = '', version = '', instance = null, signal = null } = {}) {
       const parameters = { key };
+      if (version) parameters.version = String(version);
       if (etag) parameters.etag = etag;
       const response = await request(withInstance('/api/json/summary', parameters, instance), { signal });
       return response.json();
     },
 
-    async searchDocument({ key, query, instance = null, signal = null } = {}) {
-      const response = await request(withInstance('/api/search', { key, q: query }, instance), { signal });
+    async searchDocument({ key, query, version = '', instance = null, signal = null } = {}) {
+      const response = await request(withInstance('/api/search', { key, q: query, version }, instance), { signal });
       return response.json();
     },
 
@@ -346,10 +475,12 @@
       type = '',
       limit = 50,
       etag = '',
+      version = '',
       instance = null,
       signal = null
     } = {}) {
       const parameters = { key, limit };
+      if (version) parameters.version = String(version);
       if (Number(start) > 0) parameters.start = Math.floor(Number(start));
       if (String(cursor || '').trim()) parameters.cursor = String(cursor);
       if (Number(index) > 0) parameters.index = Math.floor(Number(index));
@@ -359,8 +490,8 @@
       return response.json();
     },
 
-    async createSQLiteSession({ key, size = 0, instance = null, signal = null } = {}) {
-      const response = await request('/api/sqlite/sessions', {
+    async createSQLiteSession({ key, size = 0, version = '', instance = null, signal = null } = {}) {
+      const response = await request(withInstance('/api/sqlite/sessions', { key, version }, instance), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal,
@@ -397,6 +528,7 @@
 
     async mediaInfo(key, options = {}) {
       const parameters = { key };
+      if (options.version) parameters.version = String(options.version);
       const size = Number(options.size);
       if (Number.isFinite(size) && size >= 0) parameters.size = String(size);
       if (options.mime) parameters.mime = String(options.mime);
@@ -410,6 +542,7 @@
 
     async structuredPreview(key, options = {}) {
       const parameters = { key };
+      if (options.version) parameters.version = String(options.version);
       const size = Number(options.size);
       if (Number.isFinite(size) && size >= 0) parameters.size = String(size);
       if (options.mime) parameters.mime = String(options.mime);
@@ -423,6 +556,7 @@
 
     async archivePreview(key, options = {}) {
       const parameters = { key };
+      if (options.version) parameters.version = String(options.version);
       const size = Number(options.size);
       if (Number.isFinite(size) && size >= 0) parameters.size = String(size);
       if (options.etag) parameters.etag = String(options.etag);
@@ -434,7 +568,9 @@
     },
 
     imagePreviewURL(key, options = {}) {
-      return withInstance('/api/image-preview', { key }, options.instance ?? null);
+      const parameters = { key };
+      if (options.version) parameters.version = String(options.version);
+      return withInstance('/api/image-preview', parameters, options.instance ?? null);
     },
 
     async putBlob(key, blob, mime, options = {}) {
@@ -501,20 +637,28 @@
       return response.json();
     },
 
-    async uploadStatus(id, options = {}) {
-      const response = await request(`/api/uploads/${encodeURIComponent(id)}`, {
+    async resumeUpload(resumeToken, options = {}) {
+      const response = await request('/api/uploads/resume', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resumeToken }),
         signal: options.signal || null
       });
       return response.json();
     },
 
-    async uploadChunk(id, blob, start, total, options = {}) {
+    async uploadStatus(resumeToken, options = {}) {
+      return this.resumeUpload(resumeToken, options);
+    },
+
+    async uploadChunk(resumeToken, blob, start, total, options = {}) {
       const end = start + blob.size - 1;
-      return xhrRequest(`/api/uploads/${encodeURIComponent(id)}`, {
+      return xhrRequest('/api/uploads', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/octet-stream',
-          'Content-Range': `bytes ${start}-${end}/${total}`
+          'Content-Range': `bytes ${start}-${end}/${total}`,
+          'X-S3-Browser-Resume-Token': resumeToken
         },
         body: blob,
         signal: options.signal || null,
@@ -522,13 +666,11 @@
       });
     },
 
-    async cancelUpload(id) {
-      const response = await request(`/api/uploads/${encodeURIComponent(id)}`, { method: 'DELETE' });
-      return response.json();
-    },
-
-    async uploads() {
-      const response = await request(withInstance('/api/uploads'));
+    async cancelUpload(resumeToken) {
+      const response = await request('/api/uploads', {
+        method: 'DELETE',
+        headers: { 'X-S3-Browser-Resume-Token': resumeToken }
+      });
       return response.json();
     },
 
@@ -546,13 +688,14 @@
       const storageKey = uploadStorageKey(instance, key, blob, options.lastModified);
       let upload = null;
       let resumed = false;
-      const storedID = readStoredUpload(storageKey);
-      if (storedID) {
+      const storedToken = readStoredUpload(storageKey);
+      if (storedToken) {
         try {
-          const candidate = await this.uploadStatus(storedID, { signal });
+          const candidate = await this.uploadStatus(storedToken, { signal });
           if (candidate.instance === instance && candidate.key === key && candidate.totalSize === blob.size && candidate.status === 'uploading') {
             upload = candidate;
             resumed = Number(candidate.uploadedBytes || 0) > 0;
+            storeUpload(storageKey, candidate.resumeToken || storedToken);
             onSession(candidate);
           } else if (candidate.status === 'completed' && candidate.key === key && candidate.totalSize === blob.size) {
             storeUpload(storageKey, '');
@@ -562,13 +705,13 @@
             storeUpload(storageKey, '');
           }
         } catch (error) {
-          if (error.status === 404) storeUpload(storageKey, '');
+          if ([400, 404, 410].includes(Number(error.status || 0))) storeUpload(storageKey, '');
           else throw error;
         }
       }
       if (!upload) {
         upload = await this.createUpload({ instance, key, size: blob.size, contentType: mime }, { signal });
-        storeUpload(storageKey, upload.id);
+        storeUpload(storageKey, upload.resumeToken);
         onSession(upload);
       }
 
@@ -617,10 +760,11 @@
 
         for (;;) {
           try {
-            upload = await this.uploadChunk(upload.id, chunk, start, blob.size, {
+            upload = await this.uploadChunk(upload.resumeToken, chunk, start, blob.size, {
               signal,
               onProgress: event => emit(start + Math.min(chunk.size, Number(event.loaded || 0)), { phase: 'uploading' })
             });
+            storeUpload(storageKey, upload.resumeToken || storedToken || '');
             const chunkThroughput = chunk.size * 1000 / Math.max(1, Date.now() - chunkStartedAt);
             speedBps = speedBps ? speedBps * 0.65 + chunkThroughput * 0.35 : chunkThroughput;
             selectedChunkSize = adaptiveUploadChunkSize(upload, selectedChunkSize, speedBps);
@@ -629,7 +773,8 @@
           } catch (error) {
             if (error?.name === 'AbortError') throw error;
             if (error.code === 'offset_mismatch' || error.status === 409) {
-              upload = await this.uploadStatus(upload.id, { signal });
+              upload = await this.uploadStatus(upload.resumeToken, { signal });
+              storeUpload(storageKey, upload.resumeToken || storedToken || '');
               emit(Number(upload.uploadedBytes || 0), { phase: 'resuming' });
               break;
             }
@@ -639,8 +784,9 @@
             emit(start, { phase: 'retrying', retryAttempt: attempt, retryInSeconds: delay / 1000 });
             await sleepWithSignal(delay, signal);
             try {
-              const status = await this.uploadStatus(upload.id, { signal });
+              const status = await this.uploadStatus(upload.resumeToken, { signal });
               upload = status;
+              storeUpload(storageKey, status.resumeToken || storedToken || '');
               if (Number(status.nextOffset || status.uploadedBytes || 0) > start || status.status !== 'uploading') {
                 emit(Number(status.uploadedBytes || 0), { phase: status.status === 'completed' ? 'completed' : 'resuming' });
                 break;
@@ -651,7 +797,7 @@
           }
         }
       }
-      if (upload.status !== 'completed') upload = await this.uploadStatus(upload.id, { signal });
+      if (upload.status !== 'completed') { upload = await this.uploadStatus(upload.resumeToken, { signal }); storeUpload(storageKey, upload.resumeToken || storedToken || ''); }
       if (upload.status !== 'completed') throw new Error(upload.error || `Upload stopped with status ${upload.status}.`);
       storeUpload(storageKey, '');
       emit(blob.size, { phase: 'completed', status: 'completed' });

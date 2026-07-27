@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -217,5 +218,142 @@ func TestS3GetForwardsRangeResumeHeaders(t *testing.T) {
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusPartialContent {
 		t.Fatalf("status = %d", response.StatusCode)
+	}
+}
+
+func TestS3ObjectVersionLifecycle(t *testing.T) {
+	t.Parallel()
+	var calls []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.Method+" "+r.URL.EscapedPath()+"?"+r.URL.RawQuery)
+		switch {
+		case r.Method == http.MethodGet && r.URL.Query().Has("versions"):
+			if got := r.URL.Query().Get("prefix"); got != "folder/file.txt" {
+				t.Errorf("prefix = %q", got)
+			}
+			if got := r.URL.Query().Get("max-keys"); got != "250" {
+				t.Errorf("max-keys = %q", got)
+			}
+			w.Header().Set("Content-Type", "application/xml")
+			_, _ = io.WriteString(w, `<ListVersionsResult>
+<IsTruncated>true</IsTruncated><NextKeyMarker>folder/file.txt</NextKeyMarker><NextVersionIdMarker>v1</NextVersionIdMarker>
+<Version><Key>folder/file.txt</Key><VersionId>v1</VersionId><IsLatest>false</IsLatest><LastModified>2026-01-01T00:00:00.000Z</LastModified><ETag>&quot;etag-1&quot;</ETag><Size>3</Size></Version>
+<Version><Key>folder/file.txt</Key><VersionId>v2</VersionId><IsLatest>true</IsLatest><LastModified>2026-01-02T00:00:00.000Z</LastModified><ETag>&quot;etag-2&quot;</ETag><Size>4</Size></Version>
+<DeleteMarker><Key>folder/file.txt</Key><VersionId>deleted</VersionId><IsLatest>false</IsLatest><LastModified>2025-12-31T00:00:00.000Z</LastModified></DeleteMarker>
+<Version><Key>folder/file.txt-copy</Key><VersionId>other</VersionId><IsLatest>true</IsLatest><LastModified>2026-01-03T00:00:00.000Z</LastModified><Size>5</Size></Version>
+</ListVersionsResult>`)
+		case r.Method == http.MethodHead && r.URL.Query().Get("versionId") == "v1":
+			if got := r.Header.Get("x-amz-checksum-mode"); got != "ENABLED" {
+				t.Errorf("checksum mode = %q", got)
+			}
+			w.Header().Set("Content-Length", "3")
+			w.Header().Set("x-amz-checksum-sha256", "YWJj")
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodGet && r.URL.Query().Get("versionId") == "v1":
+			if got := r.Header.Get("Range"); got != "bytes=0-1" {
+				t.Errorf("Range = %q", got)
+			}
+			w.Header().Set("Content-Range", "bytes 0-1/3")
+			w.WriteHeader(http.StatusPartialContent)
+			_, _ = io.WriteString(w, "ab")
+		case r.Method == http.MethodDelete && r.URL.Query().Get("versionId") == "v1":
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPut && r.URL.Query().Get("versionId") == "":
+			if got := r.Header.Get("x-amz-copy-source"); got != "/bucket/folder/file.txt?versionId=v1" {
+				t.Errorf("copy source = %q", got)
+			}
+			_, _ = io.WriteString(w, `<CopyObjectResult/>`)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	defer server.Close()
+
+	backend := newAnonymousS3BackendForTest(t, server.URL, "bucket")
+	page, err := backend.ListObjectVersions(context.Background(), "folder/file.txt", "", 250)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Versions) != 3 || page.Versions[0].Version != "v2" || !page.Versions[0].IsCurrent || !page.Versions[2].DeleteMarker {
+		t.Fatalf("versions = %+v", page.Versions)
+	}
+	cursor, err := decodeS3VersionCursor(page.NextPageToken)
+	if err != nil || cursor.KeyMarker != "folder/file.txt" || cursor.VersionIDMarker != "v1" {
+		t.Fatalf("cursor = %+v, %v", cursor, err)
+	}
+	head, err := backend.HeadObjectVersion(context.Background(), "folder/file.txt", "v1")
+	if err != nil || head.Header.Get("x-amz-checksum-sha256") != "YWJj" {
+		t.Fatalf("head = %+v, %v", head, err)
+	}
+	headers := make(http.Header)
+	headers.Set("Range", "bytes=0-1")
+	response, err := backend.GetObjectVersion(context.Background(), "folder/file.txt", "v1", headers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusPartialContent || string(body) != "ab" {
+		t.Fatalf("version body = %q status=%d", body, response.StatusCode)
+	}
+	if err := backend.DeleteObjectVersion(context.Background(), "folder/file.txt", "v1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := backend.RestoreObjectVersion(context.Background(), "folder/file.txt", "v1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 5 {
+		t.Fatalf("calls = %v", calls)
+	}
+}
+
+func TestS3ListMultipartPartsPaginatesAndSorts(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Query().Get("uploadId") != "upload-1" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/xml")
+		if r.URL.Query().Get("part-number-marker") == "" {
+			_, _ = io.WriteString(w, `<ListPartsResult><IsTruncated>true</IsTruncated><NextPartNumberMarker>1</NextPartNumberMarker><Part><PartNumber>1</PartNumber><ETag>&quot;one&quot;</ETag><Size>5</Size></Part></ListPartsResult>`)
+			return
+		}
+		if r.URL.Query().Get("part-number-marker") != "1" {
+			t.Errorf("marker = %q", r.URL.Query().Get("part-number-marker"))
+		}
+		_, _ = io.WriteString(w, `<ListPartsResult><IsTruncated>false</IsTruncated><Part><PartNumber>2</PartNumber><ETag>&quot;two&quot;</ETag><Size>7</Size></Part></ListPartsResult>`)
+	}))
+	defer server.Close()
+	backend := newAnonymousS3BackendForTest(t, server.URL, "bucket")
+	parts, err := backend.ListMultipartParts(context.Background(), "large.bin", "upload-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(parts) != 2 || parts[0].PartNumber != 1 || parts[1].ETag != "two" || parts[1].Size != 7 {
+		t.Fatalf("parts = %+v", parts)
+	}
+}
+
+func TestS3PutIfAbsentUsesAtomicPrecondition(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
+			t.Errorf("method = %s", r.Method)
+		}
+		if got := r.Header.Get("If-None-Match"); got != "*" {
+			t.Errorf("If-None-Match = %q", got)
+		}
+		w.WriteHeader(http.StatusPreconditionFailed)
+	}))
+	defer server.Close()
+
+	backend := newAnonymousS3BackendForTest(t, server.URL, "bucket")
+	err := backend.PutIfAbsent(context.Background(), "existing.txt", strings.NewReader("value"), 5, "text/plain")
+	var apiErr apiError
+	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusConflict || apiErr.Code != "object_exists" {
+		t.Fatalf("PutIfAbsent() error = %#v", err)
 	}
 }

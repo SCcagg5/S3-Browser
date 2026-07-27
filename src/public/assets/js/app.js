@@ -6,7 +6,8 @@ const config = {
   instanceId: '',
   capabilities: {},
   operations: {},
-  runtime: { browserPersistence: false },
+  runtime: {},
+  versioningSupported: false,
 };
 window.BB = window.BB || {};
 BB.cfg = config;
@@ -22,22 +23,6 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
 
   function hashValue(value) {
     return encodeURIComponent(value || '').replace(/%2F/gi, '/');
-  }
-
-  function parentPrefix(value) {
-    const key = String(value || '');
-    const slash = key.lastIndexOf('/');
-    return slash < 0 ? '' : key.slice(0, slash + 1);
-  }
-
-  function subtitleMatchesVideo(videoKey, candidateKey) {
-    if (!/\.(?:vtt|srt)$/i.test(candidateKey) || parentPrefix(videoKey) !== parentPrefix(candidateKey)) return false;
-    const descriptor = BB.detect.videoVariantDescriptor(videoKey);
-    const name = String(candidateKey || '').split('/').pop() || '';
-    const stem = name.replace(/\.(?:vtt|srt)$/i, '').toLowerCase();
-    const base = descriptor.baseStem.toLowerCase();
-    return stem === base || stem.startsWith(`${base}.`) || stem.startsWith(`${base}-`) ||
-      stem.startsWith(`${base}_`) || stem.startsWith(`${base} `);
   }
 
   function parseHash() {
@@ -208,8 +193,8 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
       }
 
       entry.cancelPromise = (async () => {
-        if (entry.uploadId) {
-          try { await BB.api.cancelUpload(entry.uploadId); }
+        if (entry.resumeToken) {
+          try { await BB.api.cancelUpload(entry.resumeToken); }
           catch (error) {
             if (Number(error?.status || 0) !== 404) throw error;
           }
@@ -249,7 +234,7 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
           lastModified: entry.file.lastModified,
           signal: controller.signal,
           onSession(upload) {
-            entry.uploadId = String(upload?.id || '');
+            entry.resumeToken = String(upload?.resumeToken || '');
           },
           onProgress(progress) {
             if (entry.pauseRequested || entry.cancelRequested) return;
@@ -269,8 +254,8 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
       } catch (error) {
         if (BB.actions.isAbortError(error) || controller.signal.aborted) {
           if (entry.cancelRequested) {
-            if (entry.uploadId) {
-              try { await BB.api.cancelUpload(entry.uploadId); }
+            if (entry.resumeToken) {
+              try { await BB.api.cancelUpload(entry.resumeToken); }
               catch (cancelError) { console.warn('Unable to cancel remote upload session', cancelError); }
             }
             entry.status = 'canceled';
@@ -321,7 +306,7 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
           relative: source.relative,
           instanceId: source.instanceId,
           basePrefix: source.basePrefix,
-          uploadId: '',
+          resumeToken: '',
           uploadedBytes: 0,
           status: 'queued',
           detail: 'Queued...',
@@ -376,6 +361,7 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
         navigationSortAvailable: false,
         navigationSortField: '',
         navigationSortDirection: '',
+        modifiedTimeMode: 'relative',
         isRefreshing: false,
         isInitializing: true,
         pageSize: config.pageSize,
@@ -384,7 +370,8 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
         breadcrumbOverflowOpen: false,
         breadcrumbPopoverStyle: {},
         isDragActive: false,
-        dragDepth: 0
+        dragDepth: 0,
+        versionCountRequest: 0
       };
     },
 
@@ -393,6 +380,7 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
       currentInstance() { return this.instances.find(instance => instance.id === this.instanceId) || null; },
       otherInstances() { return this.instances.filter(instance => instance.id !== this.instanceId); },
       capabilities() { return this.currentInstance?.capabilities || {}; },
+      versioningSupported() { return this.currentInstance?.versioningSupported === true; },
       operations() { return this.currentInstance?.operations || {}; },
       canRead() { return this.can('list'); },
       canWrite() { return this.can('upload'); },
@@ -468,6 +456,7 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
       pageSize() {
         this.config.pageSize = Number(this.pageSize) || 50;
         this.localPage = 0;
+        this.$nextTick(() => this.refreshVisibleVersionCounts());
       },
       pathPrefix() {
         this.closeBreadcrumbOverflow();
@@ -649,6 +638,7 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
         BB.api.setInstance(instance.id);
         this.config.capabilities = instance.capabilities || {};
         this.config.operations = instance.operations || {};
+        this.config.versioningSupported = instance.versioningSupported === true;
         BB.runtime?.writeState('object-browser-instance', instance.id);
         const url = new URL(location.href);
         url.searchParams.set('instance', instance.id);
@@ -748,6 +738,7 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
           this.navigationSortDirection = '';
         }
         this.localPage = 0;
+        this.$nextTick(() => this.refreshVisibleVersionCounts());
       },
 
       updatePathFromHash() {
@@ -787,6 +778,7 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
       async nextPage() {
         if (this.localPage + 1 < this.localPageCount) {
           this.localPage += 1;
+          this.$nextTick(() => this.refreshVisibleVersionCounts());
           return;
         }
         if (!this.nextContinuationToken) return;
@@ -800,6 +792,7 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
       async previousPage() {
         if (this.localPage > 0) {
           this.localPage -= 1;
+          this.$nextTick(() => this.refreshVisibleVersionCounts());
           return;
         }
         if (!this.previousContinuationTokens.length) return;
@@ -843,7 +836,8 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
               dateModified: item.lastModified ? new Date(item.lastModified) : null,
               contentType: item.contentType || '',
               etag: item.etag || '',
-              url: BB.api.urlForKey(item.key)
+              url: BB.api.urlForKey(item.key),
+              versionCount: null
             };
           }).filter(row => {
             const key = row.type === 'prefix' ? row.prefix : row.key;
@@ -851,11 +845,35 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
           });
           this.pathContentTableData = rows;
           this.localPage = Math.max(0, Math.min(this.localPage, Math.max(0, Math.ceil(rows.length / this.pageSize) - 1)));
+          this.$nextTick(() => this.refreshVisibleVersionCounts());
         } catch (error) {
           this.pathContentTableData = [];
           BB.ui.toast(String(error.message || error));
         } finally {
           this.isRefreshing = false;
+        }
+      },
+
+      async refreshVisibleVersionCounts() {
+        const requestID = ++this.versionCountRequest;
+        if (!this.versioningSupported || !this.canRead) {
+          for (const row of this.pathContentTableData) if (row.type === 'content') row.versionCount = null;
+          return;
+        }
+        const instanceID = this.instanceId;
+        const keys = this.visiblePathContentTableData.filter(row => row.type === 'content' && row.key).map(row => row.key);
+        if (!keys.length) return;
+        try {
+          const response = await BB.api.versionCounts(keys, instanceID);
+          if (requestID !== this.versionCountRequest || instanceID !== this.instanceId) return;
+          const counts = response?.counts || {};
+          for (const row of this.pathContentTableData) {
+            if (row.type !== 'content' || !Object.prototype.hasOwnProperty.call(counts, row.key)) continue;
+            row.versionCount = Number(counts[row.key]?.count || 0);
+          }
+        } catch (error) {
+          if (Number(error?.status || 0) === 501) return;
+          console.warn('Unable to load object version counts', error);
         }
       },
 
@@ -865,32 +883,12 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
 
       openPreview(row) {
         if (!this.canRead) return;
-        const url = new URL('preview.html', window.location.href);
-        url.searchParams.set('instance', this.instanceId);
-        url.searchParams.set('listed', '1');
-        url.searchParams.set('size', String(Math.max(0, Number(row.size || 0))));
-        if (row.contentType) url.searchParams.set('mime', row.contentType);
-        if (row.etag) url.searchParams.set('etag', row.etag);
-        if (row.dateModified) url.searchParams.set('lastModified', row.dateModified.toUTCString());
-        if (BB.detect.resolveType(row.name || row.key || '', row.contentType || '') === 'video') {
-          const descriptor = BB.detect.videoVariantDescriptor(row.key);
-          const related = this.pathContentTableData
-            .filter(candidate => candidate.type === 'content' && candidate.key && candidate.key !== row.key)
-            .filter(candidate => {
-              if (subtitleMatchesVideo(row.key, candidate.key)) return true;
-              if (parentPrefix(candidate.key) !== parentPrefix(row.key)) return false;
-              if (BB.detect.resolveType(candidate.name || candidate.key, candidate.contentType || '') !== 'video') return false;
-              return BB.detect.videoVariantDescriptor(candidate.key).group === descriptor.group;
-            })
-            .slice(0, 32);
-          for (const candidate of related) url.searchParams.append('related', candidate.key);
-        }
-        url.hash = hashValue(row.key);
-        window.location.href = url.pathname + url.search + url.hash;
+        window.location.href = BB.api.previewPageURL(row.key, { instance: this.instanceId });
       },
 
       onRowMetadata(row) { BB.actions.showMetadata(row.key, { size: row.size, mime: row.contentType, etag: row.etag, lastModified: row.dateModified?.toUTCString?.() || '' }); },
       onRowDownload(row) { BB.actions.downloadObject(row.key, row.name); },
+      onRowVersions(row) { BB.actions.showVersions(row.key); },
       async onRowCopy(row) { if (await BB.actions.copyObject(row.key)) await this.refresh(); },
       async onRowRename(row) { if (await BB.actions.renameObject(row.key)) await this.refresh(); },
       async onRowDelete(row) { if (await BB.actions.deleteObject(row.key)) await this.refresh(); },
@@ -1140,11 +1138,18 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
         return 'now';
       },
       formatDateTime_utc(date) {
-        if (!date) return '';
-        const value = new Date(date);
-        return Number.isFinite(value.getTime())
-          ? value.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC')
-          : '';
+        return BB.runtime.formatDateTimeUTC(date);
+      },
+      formatDateTime_absolute(date) {
+        return BB.runtime.formatDateTimeUTC(date);
+      },
+      formatDateTime_display(date) {
+        return this.modifiedTimeMode === 'absolute'
+          ? this.formatDateTime_absolute(date)
+          : this.formatDateTime_relative(date);
+      },
+      toggleModifiedTimeMode() {
+        this.modifiedTimeMode = this.modifiedTimeMode === 'relative' ? 'absolute' : 'relative';
       }
     },
 

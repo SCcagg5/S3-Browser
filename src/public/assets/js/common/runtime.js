@@ -1,4 +1,4 @@
-/* Shared runtime, capability and ephemeral browser-state helpers. */
+/* Shared runtime, capability and browser-state helpers. */
 (function () {
   'use strict';
 
@@ -23,16 +23,17 @@
     return (BB.cfg && BB.cfg.runtime) || {};
   }
 
-  function persistenceEnabled() {
-    return runtimeConfig().browserPersistence === true;
+  function formatDateTimeUTC(value) {
+    if (!value) return '';
+    const date = value instanceof Date ? value : new Date(value);
+    if (!Number.isFinite(date.getTime())) return '';
+    const pad = number => String(number).padStart(2, '0');
+    return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`;
   }
 
   function readBrowserState(key) {
     const normalized = String(key || '');
-    if (!normalized) return '';
-    if (!persistenceEnabled()) return memoryState.get(normalized) || '';
-    try { return window.localStorage.getItem(normalized) || ''; }
-    catch (_) { return memoryState.get(normalized) || ''; }
+    return normalized ? (memoryState.get(normalized) || '') : '';
   }
 
   function writeBrowserState(key, value) {
@@ -41,14 +42,9 @@
     const text = value == null ? '' : String(value);
     if (text) memoryState.set(normalized, text);
     else memoryState.delete(normalized);
-    if (!persistenceEnabled()) return;
-    try {
-      if (text) window.localStorage.setItem(normalized, text);
-      else window.localStorage.removeItem(normalized);
-    } catch (_) {}
   }
 
-  function clearEphemeralState() {
+  function clearBrowserState() {
     memoryState.clear();
   }
 
@@ -118,13 +114,13 @@
       return BB.cfg.runtime;
     },
     config: runtimeConfig,
-    persistenceEnabled,
     readState: readBrowserState,
     writeState: writeBrowserState,
-    clearEphemeralState,
+    clearBrowserState,
     rootURL: applicationRoot.href,
     resolveURL,
-    resolvePath
+    resolvePath,
+    formatDateTimeUTC
   };
 
   BB.capabilities = {

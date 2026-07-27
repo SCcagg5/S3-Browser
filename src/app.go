@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"embed"
 	"encoding/json"
 	"encoding/xml"
@@ -17,6 +18,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -32,6 +34,7 @@ type application struct {
 	jobs            *jobManager
 	uploads         *uploadManager
 	sqlite          *sqliteSessionManager
+	resumeTokenKey  [32]byte
 }
 
 func newApplication(cfg appConfig) (*application, error) {
@@ -45,6 +48,9 @@ func newApplication(cfg appConfig) (*application, error) {
 		authentications: make(map[string]*sharedAuthentication, len(cfg.Authentications)),
 		instances:       make(map[string]*storageInstance, len(cfg.Buckets)),
 		publicFS:        publicFS,
+	}
+	if _, err := rand.Read(app.resumeTokenKey[:]); err != nil {
+		return nil, fmt.Errorf("generate upload resume token key: %w", err)
 	}
 	for _, authCfg := range cfg.Authentications {
 		auth, err := newSharedAuthentication(authCfg)
@@ -64,13 +70,14 @@ func newApplication(cfg appConfig) (*application, error) {
 		app.instances[bucketCfg.ID] = instance
 		app.order = append(app.order, bucketCfg.ID)
 	}
-	jobs, err := newJobManager(app, cfg.DataDir, cfg.JobHistoryLimit, cfg.Runtime.persistent())
+	app.probeVersioningSupport()
+	jobs, err := newJobManager(app, cfg.JobHistoryLimit)
 	if err != nil {
 		app.closeAuthentications()
 		return nil, err
 	}
 	app.jobs = jobs
-	uploads, err := newUploadManager(app, cfg.DataDir, cfg.Runtime.persistent())
+	uploads, err := newUploadManager(app)
 	if err != nil {
 		jobs.close()
 		app.closeAuthentications()
@@ -79,6 +86,24 @@ func newApplication(cfg appConfig) (*application, error) {
 	app.uploads = uploads
 	app.sqlite = newSQLiteSessionManager(app)
 	return app, nil
+}
+
+func (a *application) probeVersioningSupport() {
+	if a == nil || len(a.instances) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+	var wg sync.WaitGroup
+	for _, instance := range a.instances {
+		instance := instance
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			instance.probeVersioning(ctx)
+		}()
+	}
+	wg.Wait()
 }
 
 func (a *application) closeAuthentications() {
@@ -116,8 +141,8 @@ func (a *application) routes() http.Handler {
 	mux.HandleFunc("/api/delete-prefix", a.handleDeletePrefix)
 	mux.HandleFunc("/api/jobs", http.NotFound)
 	mux.HandleFunc("/api/jobs/", a.handleJobs)
+	mux.HandleFunc("/api/uploads/resume", a.handleUploads)
 	mux.HandleFunc("/api/uploads", a.handleUploads)
-	mux.HandleFunc("/api/uploads/", a.handleUploads)
 	mux.HandleFunc("/api/spreadsheet", a.handleSpreadsheet)
 	mux.HandleFunc("/api/delimited", a.handleDelimitedPage)
 	mux.HandleFunc("/api/document-count", a.handleDocumentCount)
@@ -133,11 +158,22 @@ func (a *application) routes() http.Handler {
 	mux.HandleFunc("/api/media-info", a.handleMediaInfo)
 	mux.HandleFunc("/api/structured-preview", a.handleStructuredPreview)
 	mux.HandleFunc("/api/archive-preview", a.handleArchivePreview)
+	mux.HandleFunc("/api/archive-entry", a.handleArchiveEntry)
+	mux.HandleFunc("/api/archive-entry/integrity", a.handleArchiveEntryIntegrity)
+	mux.HandleFunc("/api/archive-extract", a.handleArchiveExtract)
+	mux.HandleFunc("/api/versions", a.handleVersions)
+	mux.HandleFunc("/api/version-counts", a.handleVersionCounts)
+	mux.HandleFunc("/api/versions/restore", a.handleVersionRestore)
+	mux.HandleFunc("/api/integrity", a.handleIntegrity)
+	mux.HandleFunc("/api/inspect", a.handleInspect)
 	mux.HandleFunc("/api/image-preview", a.handleImagePreview)
 	mux.HandleFunc("/healthz", a.handleHealth)
 	mux.HandleFunc("/open/", a.handleOpenOriginal)
 	mux.Handle("/", secureStaticHandler(a.publicFS))
 	router := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if version := strings.TrimSpace(r.URL.Query().Get("version")); version != "" {
+			r = r.WithContext(withObjectVersion(r.Context(), version))
+		}
 		// Object keys are opaque. Route the gateway before ServeMux so escaped
 		// key bytes are not canonicalized as URL path segments.
 		if r.URL.Path == "/s3" {
@@ -368,7 +404,7 @@ type aggregate struct {
 }
 
 // statsEntry is one of the largest objects encountered by a recursive stats
-// job. The persisted slice is kept as a min-heap so an arbitrarily large
+// job. The bounded slice is kept as a min-heap so an arbitrarily large
 // prefix can be reduced to a bounded set without retaining every object in
 // memory. publicJob cloning sorts a copy for the frontend.
 type statsEntry struct {
@@ -378,6 +414,19 @@ type statsEntry struct {
 	MIME         string `json:"mime,omitempty"`
 	ETag         string `json:"etag,omitempty"`
 	LastModified string `json:"lastModified,omitempty"`
+}
+
+type statsTreemapNode struct {
+	Name         string             `json:"name"`
+	Path         string             `json:"path,omitempty"`
+	Bytes        int64              `json:"bytes"`
+	Count        int64              `json:"count"`
+	Kind         string             `json:"kind"`
+	Type         string             `json:"type,omitempty"`
+	MIME         string             `json:"mime,omitempty"`
+	ETag         string             `json:"etag,omitempty"`
+	LastModified string             `json:"lastModified,omitempty"`
+	Children     []statsTreemapNode `json:"children,omitempty"`
 }
 
 type statsResponse struct {
@@ -392,6 +441,8 @@ type statsResponse struct {
 	FolderLimit             int                  `json:"folderLimit,omitempty"`
 	FoldersTruncated        bool                 `json:"foldersTruncated,omitempty"`
 	FolderAggregatesOmitted int64                `json:"folderAggregatesOmitted,omitempty"`
+	TreemapThresholdBytes   int64                `json:"treemapThresholdBytes,omitempty"`
+	Treemap                 *statsTreemapNode    `json:"treemap,omitempty"`
 	Largest                 []statsEntry         `json:"largest,omitempty"`
 	Recent                  []statsEntry         `json:"recent,omitempty"`
 	Newest                  *time.Time           `json:"newest,omitempty"`
@@ -415,7 +466,7 @@ func (a *application) handleStats(w http.ResponseWriter, r *http.Request) {
 	prefix := normalizePrefix(cleanRelativeKey(r.URL.Query().Get("prefix")))
 	job, found := a.jobs.reusableStatsJob(instance.cfg.ID, prefix, time.Now().UTC())
 	if !found {
-		job, err = a.jobs.create(persistentJob{
+		job, err = a.jobs.create(jobState{
 			Type:     jobTypeStatsPrefix,
 			Instance: instance.cfg.ID,
 			Prefix:   prefix,
@@ -470,7 +521,7 @@ func (a *application) handleCopy(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, err)
 			return
 		}
-		job, err := a.jobs.create(persistentJob{Type: jobTypeCopyPrefix, Instance: instance.cfg.ID, Source: source, Target: target})
+		job, err := a.jobs.create(jobState{Type: jobTypeCopyPrefix, Instance: instance.cfg.ID, Source: source, Target: target})
 		if err != nil {
 			writeAPIError(w, err)
 			return
@@ -513,7 +564,7 @@ func (a *application) handleRename(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, err)
 			return
 		}
-		job, err := a.jobs.create(persistentJob{Type: jobTypeMovePrefix, Instance: instance.cfg.ID, Source: source, Target: target})
+		job, err := a.jobs.create(jobState{Type: jobTypeMovePrefix, Instance: instance.cfg.ID, Source: source, Target: target})
 		if err != nil {
 			writeAPIError(w, err)
 			return
@@ -560,7 +611,7 @@ func (a *application) handleDeletePrefix(w http.ResponseWriter, r *http.Request)
 		writeAPIError(w, apiError{Status: http.StatusBadRequest, Code: "invalid_prefix", Message: "refusing to delete the whole bucket; prefix is required"})
 		return
 	}
-	job, err := a.jobs.create(persistentJob{Type: jobTypeDeletePrefix, Instance: instance.cfg.ID, Prefix: prefix})
+	job, err := a.jobs.create(jobState{Type: jobTypeDeletePrefix, Instance: instance.cfg.ID, Prefix: prefix})
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -687,12 +738,13 @@ func (a *application) handleOpenOriginal(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	fullKey := instance.fullKey(key)
+	version := strings.TrimSpace(r.URL.Query().Get("version"))
 	filename := path.Base(key)
 	if filename == "." || filename == "/" || filename == "" {
 		filename = "download"
 	}
 	if r.Method == http.MethodHead {
-		response, err := instance.Head(r.Context(), fullKey)
+		response, err := instance.HeadVersion(r.Context(), fullKey, version)
 		if err != nil {
 			writeGatewayError(w, err)
 			return
@@ -706,7 +758,7 @@ func (a *application) handleOpenOriginal(w http.ResponseWriter, r *http.Request)
 		w.WriteHeader(response.StatusCode)
 		return
 	}
-	response, err := instance.Get(r.Context(), fullKey, r.Header)
+	response, err := instance.GetVersion(r.Context(), fullKey, version, r.Header)
 	if err != nil {
 		writeGatewayError(w, err)
 		return
@@ -789,6 +841,7 @@ func (a *application) handleObjectGateway(w http.ResponseWriter, r *http.Request
 		return
 	}
 	fullKey := instance.fullKey(key)
+	version := strings.TrimSpace(r.URL.Query().Get("version"))
 	preview := r.URL.Query().Get("preview") == "1"
 	rangeOnly := preview && r.URL.Query().Get("range_only") == "1"
 	switch r.Method {
@@ -806,7 +859,7 @@ func (a *application) handleObjectGateway(w http.ResponseWriter, r *http.Request
 			})
 			return
 		}
-		response, err := instance.Get(r.Context(), fullKey, r.Header)
+		response, err := instance.GetVersion(r.Context(), fullKey, version, r.Header)
 		if err != nil {
 			writeGatewayError(w, err)
 			return
@@ -829,7 +882,7 @@ func (a *application) handleObjectGateway(w http.ResponseWriter, r *http.Request
 			writeGatewayError(w, err)
 			return
 		}
-		response, err := instance.Head(r.Context(), fullKey)
+		response, err := instance.HeadVersion(r.Context(), fullKey, version)
 		if err != nil {
 			writeGatewayError(w, err)
 			return
@@ -853,6 +906,14 @@ func (a *application) handleObjectGateway(w http.ResponseWriter, r *http.Request
 	case http.MethodDelete:
 		if err := requirePermission(instance, permissionDelete); err != nil {
 			writeGatewayError(w, err)
+			return
+		}
+		if version != "" {
+			if err := instance.DeleteVersion(r.Context(), fullKey, version); err != nil {
+				writeGatewayError(w, err)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 		if err := instance.Delete(r.Context(), fullKey); err != nil {

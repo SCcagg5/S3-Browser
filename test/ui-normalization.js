@@ -19,6 +19,7 @@ const dataGridCSS = read('src/public/assets/css/data-grid.css');
 const interactionCSS = read('src/public/assets/css/interaction.css');
 const styleCSS = read('src/public/assets/css/style.css');
 const uiCSS = read('src/public/assets/css/ui.css');
+const treemapCSS = read('src/public/assets/css/treemap.css');
 const viewersCSS = read('src/public/assets/css/viewers.css');
 
 // Every statically referenced MDI icon except the CSS-ring loader must have a local SVG mask.
@@ -90,12 +91,42 @@ assert.doesNotMatch(styleCSS, /\.bb-permission-summary(?:-row|-icon|-copy)?\s*\{
 assert.doesNotMatch(componentsCSS, /\.bb-permission-summary(?:-row|-icon|-copy)?/);
 
 // The 1% threshold is global to the selected scope and the layout is squarified.
-assert.match(actions, /treemapMinimumShare = 0\.01/);
-assert.match(actions, /function treemapScopeThreshold\(totalBytes\)/);
-assert.match(actions, /const threshold = treemapScopeThreshold\(scopeTotalBytes \|\| nodeBytes\)/);
-assert.match(actions, /if \(childBytes >= threshold\)/);
+assert.match(actions, /const tree = stats\?\.treemap \|\| null/);
+assert.doesNotMatch(actions, /Files and folders below 1% of this scope/);
+assert.match(actions, /function treemapChildren\(node\)/);
 assert.match(actions, /function squarifyTreemapNodes\(/);
-assert.match(actions, /const nodes = groupedTreemapChildren\(tree, scopeTotalBytes\)/);
+assert.match(actions, /function layoutTreemapNodes\(/);
+assert.match(actions, /treemapOtherInlineMinimumHeightPixels = 26/);
+assert.match(actions, /treemapOtherStackedMinimumHeightPixels = 34/);
+assert.match(actions, /treemapOtherInlineMinimumWidthPixels = 180/);
+assert.match(actions, /function treemapOtherReadableHeight\(width\)/);
+assert.match(actions, /treemapMinimumRegularPixels = 30/);
+assert.match(actions, /treemapFolderHeaderPixels = 26/);
+assert.match(actions, /treemapBranchInsetPixels = 2/);
+assert.match(actions, /smallest horizontal strip required/);
+assert.doesNotMatch(actions, /useVerticalStrip|treemapOtherMinimumWidthPixels/);
+assert.doesNotMatch(actions, /function treemapBorderColor\(depth\)/);
+assert.doesNotMatch(actions, /function treemapColorIndex\(node\)/);
+assert.match(actions, /function statsTypeColor\(type\)/);
+assert.match(actions, /updateTreemapHover/);
+assert.doesNotMatch(actions, /updateTreemapFocus/);
+assert.doesNotMatch(uiCSS, /\.folder-treemap/);
+assert.doesNotMatch(interactionCSS, /\.folder-treemap/);
+assert.match(treemapCSS, /background:\s*none/);
+assert.match(treemapCSS, /\.folder-treemap\s*\{[^}]*background:\s*none[^}]*border:\s*0[^}]*border-radius:\s*0/s);
+assert.match(treemapCSS, /\.folder-treemap-node\s*\{[^}]*border-radius:\s*2px/s);
+assert.match(treemapCSS, /\.folder-treemap-node\.is-folder\s*\{[^}]*background:\s*#f8fafc[^}]*border:\s*1px solid #c7d0dc[^}]*border-radius:\s*2px/s);
+assert.match(treemapCSS, /\.folder-treemap-tooltip\s*\{[^}]*pointer-events:\s*none/s);
+assert.match(treemapCSS, /\.folder-treemap-tooltip\s*\{[^}]*color:\s*var\(--color-text[^}]*background:\s*var\(--color-bg-panel[^}]*border:\s*1px solid var\(--color-border/s);
+assert.match(treemapCSS, /\.folder-treemap-node\.is-folder\.is-branch > \.folder-treemap-label\s*\{[^}]*grid-template-rows:\s*12px 10px[^}]*gap:\s*0/s);
+assert.match(treemapCSS, /\.folder-treemap-node\.is-hovered/);
+assert.doesNotMatch(treemapCSS, /z-index:\s*1200/);
+assert.doesNotMatch(treemapCSS, /\.folder-treemap-focus/);
+assert.match(treemapCSS, /\.folder-treemap-label\s*\{[^}]*justify-content:\s*flex-start/s);
+assert.doesNotMatch(treemapCSS, /justify-content:\s*center/);
+assert.doesNotMatch(actions, /has-no-header/);
+assert.match(actions, /const labelName = node\.name \|\| \(kind === 'folder' \? 'Folder' : 'Unnamed'\)/);
+assert.match(actions, /const canExpandFolder = isFolder[\s\S]*drawWidth >= 80[\s\S]*drawHeight >= 84/);
 
 // PDF uses a custom canvas viewer with strict byte ranges and no browser-plugin fallback.
 assert.match(preview, /function renderPDF\(url, listedMetadata = null\)/);
@@ -122,6 +153,10 @@ assert.match(interactionCSS, /\.mdi-loading::before[\s\S]*border-top-color:\s*cu
 assert.match(interactionCSS, /modified-column-header[\s\S]*navigation-meta-right-pad/s);
 assert.match(interactionCSS, /--navigation-size-column:\s*clamp/);
 assert.match(interactionCSS, /--navigation-modified-column:\s*clamp/);
+assert.match(interactionCSS, /\.navigation-sort-icon \.mdi\s*\{[^}]*translateY\(1px\)/s);
+assert.match(interactionCSS, /\.modified-time-toggle\s*\{[^}]*background:\s*transparent[^}]*border:\s*0[^}]*border-radius:\s*0/s);
+assert.match(interactionCSS, /\.modified-time-toggle:hover,[\s\S]*background:\s*transparent[\s\S]*border:\s*0/s);
+assert.match(runtime, /function formatDateTimeUTC\(value\)/);
 assert.match(interactionCSS, /Final PDF viewport contract/);
 assert.match(interactionCSS, /height:\s*100dvh !important/);
 assert.match(interactionCSS, /grid-template-rows:\s*auto minmax\(0, 1fr\) !important/);

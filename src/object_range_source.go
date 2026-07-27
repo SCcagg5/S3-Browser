@@ -61,10 +61,15 @@ type objectRangeSource struct {
 	ctx      context.Context
 	instance *storageInstance
 	key      string
+	version  string
 	state    *objectRangeState
 }
 
 func openObjectRangeSource(ctx context.Context, instance *storageInstance, key string) (*objectRangeSource, error) {
+	return openObjectRangeSourceVersion(ctx, instance, key, "")
+}
+
+func openObjectRangeSourceVersion(ctx context.Context, instance *storageInstance, key, version string) (*objectRangeSource, error) {
 	if instance == nil || instance.backend == nil {
 		return nil, fmt.Errorf("storage instance is not initialized")
 	}
@@ -76,6 +81,7 @@ func openObjectRangeSource(ctx context.Context, instance *storageInstance, key s
 		ctx:      ctx,
 		instance: instance,
 		key:      key,
+		version:  strings.TrimSpace(version),
 		state: &objectRangeState{
 			cache:         list.New(),
 			maxCacheBytes: maxCache,
@@ -88,7 +94,7 @@ func (s *objectRangeSource) withContext(ctx context.Context) *objectRangeSource 
 	if s == nil {
 		return nil
 	}
-	return &objectRangeSource{ctx: ctx, instance: s.instance, key: s.key, state: s.state}
+	return &objectRangeSource{ctx: ctx, instance: s.instance, key: s.key, version: s.version, state: s.state}
 }
 
 func (s *objectRangeSource) Size() int64 {
@@ -313,7 +319,7 @@ func (s *objectRangeSource) fetch(start, length int64) ([]byte, objectResponse, 
 	defer func() { s.finishFlight(flightKey, flight, result, resultErr) }()
 
 	headers := s.requestHeaders(fmt.Sprintf("bytes=%d-%d", start, end))
-	response, err := s.instance.Get(s.ctx, s.instance.fullKey(s.key), headers)
+	response, err := s.instance.GetVersion(s.ctx, s.instance.fullKey(s.key), s.version, headers)
 	if err != nil {
 		resultErr = err
 		return nil, objectResponse{}, err
@@ -540,7 +546,7 @@ func (s *objectRangeSource) ReadSuffix(length int64) ([]byte, error) {
 	var resultErr error
 	defer func() { s.finishFlight(flightKey, flight, result, resultErr) }()
 
-	response, err := s.instance.Get(s.ctx, s.instance.fullKey(s.key), s.requestHeaders(fmt.Sprintf("bytes=-%d", length)))
+	response, err := s.instance.GetVersion(s.ctx, s.instance.fullKey(s.key), s.version, s.requestHeaders(fmt.Sprintf("bytes=-%d", length)))
 	if err != nil {
 		resultErr = err
 		return nil, err

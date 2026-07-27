@@ -3,12 +3,9 @@ package main
 import (
 	"container/heap"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -16,10 +13,10 @@ import (
 )
 
 const (
-	maxStatsLargestEntries = 1000
+	maxStatsLargestEntries = 100
 	maxStatsRecentEntries  = 100
 	maxStatsFolderDepth    = 5
-	statsLayoutVersion     = 3
+	statsLayoutVersion     = 4
 )
 
 type statsEntryHeap []statsEntry
@@ -101,10 +98,13 @@ func addLargestStatsEntry(entries *[]statsEntry, entry statsEntry) {
 }
 
 const (
-	jobTypeCopyPrefix   = "copy_prefix"
-	jobTypeMovePrefix   = "move_prefix"
-	jobTypeDeletePrefix = "delete_prefix"
-	jobTypeStatsPrefix  = "stats_prefix"
+	jobTypeCopyPrefix            = "copy_prefix"
+	jobTypeMovePrefix            = "move_prefix"
+	jobTypeDeletePrefix          = "delete_prefix"
+	jobTypeStatsPrefix           = "stats_prefix"
+	jobTypeIntegrity             = "integrity"
+	jobTypeExtractArchive        = "extract_archive"
+	jobTypeArchiveEntryIntegrity = "archive_entry_integrity"
 
 	jobStatusQueued    = "queued"
 	jobStatusRunning   = "running"
@@ -112,6 +112,12 @@ const (
 	jobStatusCompleted = "completed"
 	jobStatusFailed    = "failed"
 	jobStatusCanceled  = "canceled"
+
+	// Jobs are held only in process memory. Keep the active set deliberately
+	// small so a burst of expensive scans cannot exhaust a low-memory server.
+	maxActiveJobs  = 4
+	jobWorkerCount = 2
+	jobQueueSize   = 8
 )
 
 var (
@@ -119,53 +125,70 @@ var (
 	errJobCanceled = errors.New("job canceled")
 )
 
-type persistentJob struct {
-	ID              string         `json:"id"`
-	Type            string         `json:"type"`
-	Instance        string         `json:"instance"`
-	Source          string         `json:"source,omitempty"`
-	Target          string         `json:"target,omitempty"`
-	Prefix          string         `json:"prefix,omitempty"`
-	Status          string         `json:"status"`
-	Processed       int64          `json:"processed"`
-	StorageRequests int64          `json:"storage_requests,omitempty"`
-	StorageBytes    int64          `json:"storage_bytes,omitempty"`
-	LastKey         string         `json:"last_key,omitempty"`
-	Stats           *statsResponse `json:"stats,omitempty"`
-	Error           string         `json:"error,omitempty"`
-	CreatedAt       time.Time      `json:"created_at"`
-	UpdatedAt       time.Time      `json:"updated_at"`
-	StartedAt       *time.Time     `json:"started_at,omitempty"`
-	EndedAt         *time.Time     `json:"ended_at,omitempty"`
+type jobState struct {
+	ID                           string                        `json:"id"`
+	Type                         string                        `json:"type"`
+	Instance                     string                        `json:"instance"`
+	TargetInstance               string                        `json:"target_instance,omitempty"`
+	Source                       string                        `json:"source,omitempty"`
+	Version                      string                        `json:"version,omitempty"`
+	Target                       string                        `json:"target,omitempty"`
+	Entries                      []string                      `json:"entries,omitempty"`
+	Prefix                       string                        `json:"prefix,omitempty"`
+	Status                       string                        `json:"status"`
+	Processed                    int64                         `json:"processed"`
+	StorageRequests              int64                         `json:"storage_requests,omitempty"`
+	StorageBytes                 int64                         `json:"storage_bytes,omitempty"`
+	LastKey                      string                        `json:"last_key,omitempty"`
+	Stats                        *statsResponse                `json:"stats,omitempty"`
+	IntegrityRequest             *integrityRequest             `json:"integrity_request,omitempty"`
+	Integrity                    *integrityResult              `json:"integrity,omitempty"`
+	ArchiveExtract               *archiveExtractResult         `json:"archive_extract,omitempty"`
+	ArchiveEntryIntegrityRequest *archiveEntryIntegrityRequest `json:"archive_entry_integrity_request,omitempty"`
+	ArchiveEntryIntegrity        *archiveEntryIntegrityResult  `json:"archive_entry_integrity,omitempty"`
+	Error                        string                        `json:"error,omitempty"`
+	CreatedAt                    time.Time                     `json:"created_at"`
+	UpdatedAt                    time.Time                     `json:"updated_at"`
+	StartedAt                    *time.Time                    `json:"started_at,omitempty"`
+	EndedAt                      *time.Time                    `json:"ended_at,omitempty"`
 }
 
 type publicJob struct {
-	ID              string         `json:"id"`
-	Type            string         `json:"type"`
-	Instance        string         `json:"instance"`
-	Source          string         `json:"source,omitempty"`
-	Target          string         `json:"target,omitempty"`
-	Prefix          string         `json:"prefix,omitempty"`
-	Status          string         `json:"status"`
-	Processed       int64          `json:"processed"`
-	StorageRequests int64          `json:"storageRequests,omitempty"`
-	StorageBytes    int64          `json:"storageBytes,omitempty"`
-	LastKey         string         `json:"lastKey,omitempty"`
-	Stats           *statsResponse `json:"stats,omitempty"`
-	Error           string         `json:"error,omitempty"`
-	CreatedAt       time.Time      `json:"createdAt"`
-	UpdatedAt       time.Time      `json:"updatedAt"`
-	StartedAt       *time.Time     `json:"startedAt,omitempty"`
-	EndedAt         *time.Time     `json:"endedAt,omitempty"`
+	ID                    string                       `json:"id"`
+	Type                  string                       `json:"type"`
+	Instance              string                       `json:"instance"`
+	TargetInstance        string                       `json:"targetInstance,omitempty"`
+	Source                string                       `json:"source,omitempty"`
+	Version               string                       `json:"version,omitempty"`
+	Target                string                       `json:"target,omitempty"`
+	Entries               []string                     `json:"entries,omitempty"`
+	Prefix                string                       `json:"prefix,omitempty"`
+	Status                string                       `json:"status"`
+	Processed             int64                        `json:"processed"`
+	StorageRequests       int64                        `json:"storageRequests,omitempty"`
+	StorageBytes          int64                        `json:"storageBytes,omitempty"`
+	LastKey               string                       `json:"lastKey,omitempty"`
+	Stats                 *statsResponse               `json:"stats,omitempty"`
+	Integrity             *integrityResult             `json:"integrity,omitempty"`
+	ArchiveExtract        *archiveExtractResult        `json:"archiveExtract,omitempty"`
+	ArchiveEntryIntegrity *archiveEntryIntegrityResult `json:"archiveEntryIntegrity,omitempty"`
+	Error                 string                       `json:"error,omitempty"`
+	CreatedAt             time.Time                    `json:"createdAt"`
+	UpdatedAt             time.Time                    `json:"updatedAt"`
+	StartedAt             *time.Time                   `json:"startedAt,omitempty"`
+	EndedAt               *time.Time                   `json:"endedAt,omitempty"`
 }
 
-func (j persistentJob) public() publicJob {
-	return publicJob{
+func (j jobState) public() publicJob {
+	result := publicJob{
 		ID:              j.ID,
 		Type:            j.Type,
 		Instance:        j.Instance,
+		TargetInstance:  j.TargetInstance,
 		Source:          j.Source,
+		Version:         j.Version,
 		Target:          j.Target,
+		Entries:         append([]string(nil), j.Entries...),
 		Prefix:          j.Prefix,
 		Status:          j.Status,
 		Processed:       j.Processed,
@@ -179,6 +202,14 @@ func (j persistentJob) public() publicJob {
 		StartedAt:       cloneTimePointer(j.StartedAt),
 		EndedAt:         cloneTimePointer(j.EndedAt),
 	}
+	// Analysis results can be large. Keep progress responses compact and expose
+	// the immutable result only after the job reaches the completed state.
+	if j.Status == jobStatusCompleted {
+		result.Integrity = cloneIntegrityResult(j.Integrity)
+		result.ArchiveExtract = cloneArchiveExtractResult(j.ArchiveExtract)
+		result.ArchiveEntryIntegrity = cloneArchiveEntryIntegrityResult(j.ArchiveEntryIntegrity)
+	}
+	return result
 }
 
 func cloneStats(stats *statsResponse) *statsResponse {
@@ -188,6 +219,7 @@ func cloneStats(stats *statsResponse) *statsResponse {
 	copyStats := *stats
 	copyStats.ByType = cloneAggregateMap(stats.ByType)
 	copyStats.ByFolder = cloneAggregateMap(stats.ByFolder)
+	copyStats.Treemap = cloneStatsTreemapNode(stats.Treemap)
 	copyStats.Largest = append([]statsEntry(nil), stats.Largest...)
 	copyStats.Recent = append([]statsEntry(nil), stats.Recent...)
 	copyStats.Newest = cloneTimePointer(stats.Newest)
@@ -215,6 +247,23 @@ func cloneStatsForPublic(stats *statsResponse) *statsResponse {
 	return copyStats
 }
 
+func cloneStatsTreemapNode(node *statsTreemapNode) *statsTreemapNode {
+	if node == nil {
+		return nil
+	}
+	copyNode := *node
+	if len(node.Children) > 0 {
+		copyNode.Children = make([]statsTreemapNode, len(node.Children))
+		for index := range node.Children {
+			child := cloneStatsTreemapNode(&node.Children[index])
+			if child != nil {
+				copyNode.Children[index] = *child
+			}
+		}
+	}
+	return &copyNode
+}
+
 func cloneAggregateMap(source map[string]aggregate) map[string]aggregate {
 	if source == nil {
 		return nil
@@ -226,102 +275,45 @@ func cloneAggregateMap(source map[string]aggregate) map[string]aggregate {
 	return out
 }
 
-func clonePersistentJob(job persistentJob) persistentJob {
+func cloneJobState(job jobState) jobState {
 	job.Stats = cloneStats(job.Stats)
+	job.IntegrityRequest = cloneIntegrityRequest(job.IntegrityRequest)
+	job.Integrity = cloneIntegrityResult(job.Integrity)
+	job.Entries = append([]string(nil), job.Entries...)
+	job.ArchiveExtract = cloneArchiveExtractResult(job.ArchiveExtract)
+	job.ArchiveEntryIntegrityRequest = cloneArchiveEntryIntegrityRequest(job.ArchiveEntryIntegrityRequest)
+	job.ArchiveEntryIntegrity = cloneArchiveEntryIntegrityResult(job.ArchiveEntryIntegrity)
 	job.StartedAt = cloneTimePointer(job.StartedAt)
 	job.EndedAt = cloneTimePointer(job.EndedAt)
 	return job
 }
 
-const maxPersistedJobBytes = int64(64 << 20)
-
 type jobManager struct {
 	app          *application
-	dir          string
 	ctx          context.Context
 	cancel       context.CancelFunc
 	queue        chan string
 	mu           sync.RWMutex
-	jobs         map[string]*persistentJob
+	jobs         map[string]*jobState
 	lockMu       sync.Mutex
 	locks        map[string]*sync.Mutex
+	activeMu     sync.Mutex
+	activeCancel map[string]context.CancelFunc
 	wg           sync.WaitGroup
 	historyLimit int
 }
 
-func newJobManager(app *application, dataDir string, historyLimit int, persistent bool) (*jobManager, error) {
+func newJobManager(app *application, historyLimit int) (*jobManager, error) {
 	if historyLimit <= 0 {
 		return nil, fmt.Errorf("job history limit must be positive")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	manager := &jobManager{
 		app: app, historyLimit: historyLimit, ctx: ctx, cancel: cancel,
-		queue: make(chan string, 1024), jobs: make(map[string]*persistentJob), locks: make(map[string]*sync.Mutex),
+		queue: make(chan string, jobQueueSize), jobs: make(map[string]*jobState), locks: make(map[string]*sync.Mutex),
+		activeCancel: make(map[string]context.CancelFunc),
 	}
-	if persistent {
-		if strings.TrimSpace(dataDir) == "" {
-			cancel()
-			return nil, fmt.Errorf("persistent job state requires a data directory")
-		}
-		manager.dir = filepath.Join(dataDir, "jobs")
-		if err := os.MkdirAll(manager.dir, 0o700); err != nil {
-			cancel()
-			return nil, fmt.Errorf("create job state directory: %w", err)
-		}
-		entries, err := os.ReadDir(manager.dir)
-		if err != nil {
-			cancel()
-			return nil, fmt.Errorf("read job state directory: %w", err)
-		}
-		var recoverIDs []string
-		for _, entry := range entries {
-			if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
-				continue
-			}
-			data, err := readBoundedFile(filepath.Join(manager.dir, entry.Name()), maxPersistedJobBytes)
-			if err != nil {
-				cancel()
-				return nil, fmt.Errorf("read job state %q: %w", entry.Name(), err)
-			}
-			var job persistentJob
-			if err := json.Unmarshal(data, &job); err != nil {
-				cancel()
-				return nil, fmt.Errorf("decode job state %q: %w", entry.Name(), err)
-			}
-			if job.ID == "" || job.Instance == "" || job.Type == "" {
-				cancel()
-				return nil, fmt.Errorf("job state %q is incomplete", entry.Name())
-			}
-			if _, ok := app.instances[job.Instance]; !ok {
-				quarantineUnknownState(manager.dir, entry.Name(), "job", job.Instance)
-				continue
-			}
-			if job.Status == jobStatusRunning {
-				job.Status = jobStatusQueued
-				job.Error = ""
-				job.UpdatedAt = time.Now().UTC()
-				recoverIDs = append(recoverIDs, job.ID)
-			} else if job.Status == jobStatusQueued {
-				recoverIDs = append(recoverIDs, job.ID)
-			}
-			copyJob := clonePersistentJob(job)
-			manager.jobs[job.ID] = &copyJob
-			if job.Status == jobStatusQueued {
-				if err := manager.persist(job); err != nil {
-					cancel()
-					return nil, err
-				}
-			}
-		}
-		if err := manager.pruneHistory(); err != nil {
-			cancel()
-			return nil, err
-		}
-		for _, id := range recoverIDs {
-			manager.enqueue(id)
-		}
-	}
-	for worker := 0; worker < 2; worker++ {
+	for worker := 0; worker < jobWorkerCount; worker++ {
 		manager.wg.Add(1)
 		go manager.worker()
 	}
@@ -336,6 +328,36 @@ func (m *jobManager) close() {
 	m.wg.Wait()
 }
 
+func (m *jobManager) setActiveCancel(id string, cancel context.CancelFunc) {
+	if m == nil || cancel == nil {
+		return
+	}
+	m.activeMu.Lock()
+	m.activeCancel[id] = cancel
+	m.activeMu.Unlock()
+}
+
+func (m *jobManager) clearActiveCancel(id string) {
+	if m == nil {
+		return
+	}
+	m.activeMu.Lock()
+	delete(m.activeCancel, id)
+	m.activeMu.Unlock()
+}
+
+func (m *jobManager) cancelActive(id string) {
+	if m == nil {
+		return
+	}
+	m.activeMu.Lock()
+	cancel := m.activeCancel[id]
+	m.activeMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
 func (m *jobManager) jobLock(id string) *sync.Mutex {
 	m.lockMu.Lock()
 	defer m.lockMu.Unlock()
@@ -347,56 +369,21 @@ func (m *jobManager) jobLock(id string) *sync.Mutex {
 	return lock
 }
 
-func (m *jobManager) get(id string) (persistentJob, bool) {
+func (m *jobManager) get(id string) (jobState, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	job, ok := m.jobs[id]
 	if !ok {
-		return persistentJob{}, false
+		return jobState{}, false
 	}
-	return clonePersistentJob(*job), true
+	return cloneJobState(*job), true
 }
 
-func (m *jobManager) put(job persistentJob) error {
-	copyJob := clonePersistentJob(job)
+func (m *jobManager) put(job jobState) error {
+	copyJob := cloneJobState(job)
 	m.mu.Lock()
 	m.jobs[job.ID] = &copyJob
 	m.mu.Unlock()
-	return m.persist(job)
-}
-
-func (m *jobManager) persist(job persistentJob) error {
-	if m == nil || strings.TrimSpace(m.dir) == "" {
-		return nil
-	}
-	data, err := json.MarshalIndent(job, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode job state: %w", err)
-	}
-	temporary, err := os.CreateTemp(m.dir, job.ID+"-*.tmp")
-	if err != nil {
-		return fmt.Errorf("create temporary job state: %w", err)
-	}
-	temporaryName := temporary.Name()
-	defer os.Remove(temporaryName)
-	if err := temporary.Chmod(0o600); err != nil {
-		temporary.Close()
-		return fmt.Errorf("protect job state: %w", err)
-	}
-	if _, err := temporary.Write(data); err != nil {
-		temporary.Close()
-		return fmt.Errorf("write job state: %w", err)
-	}
-	if err := temporary.Sync(); err != nil {
-		temporary.Close()
-		return fmt.Errorf("sync job state: %w", err)
-	}
-	if err := temporary.Close(); err != nil {
-		return fmt.Errorf("close job state: %w", err)
-	}
-	if err := os.Rename(temporaryName, filepath.Join(m.dir, job.ID+".json")); err != nil {
-		return fmt.Errorf("replace job state: %w", err)
-	}
 	return nil
 }
 
@@ -414,7 +401,7 @@ func (m *jobManager) pruneHistory() error {
 		return nil
 	}
 	m.mu.Lock()
-	terminal := make([]*persistentJob, 0, len(m.jobs))
+	terminal := make([]*jobState, 0, len(m.jobs))
 	for _, job := range m.jobs {
 		if terminalJobStatus(job.Status) {
 			terminal = append(terminal, job)
@@ -430,24 +417,18 @@ func (m *jobManager) pruneHistory() error {
 		m.mu.Unlock()
 		return nil
 	}
-	remove := append([]*persistentJob(nil), terminal[m.historyLimit:]...)
+	remove := append([]*jobState(nil), terminal[m.historyLimit:]...)
 	for _, job := range remove {
 		delete(m.jobs, job.ID)
 	}
 	m.mu.Unlock()
 
-	var firstErr error
 	for _, job := range remove {
-		if strings.TrimSpace(m.dir) != "" {
-			if err := os.Remove(filepath.Join(m.dir, job.ID+".json")); err != nil && !errors.Is(err, os.ErrNotExist) && firstErr == nil {
-				firstErr = fmt.Errorf("remove expired job state %q: %w", job.ID, err)
-			}
-		}
 		m.lockMu.Lock()
 		delete(m.locks, job.ID)
 		m.lockMu.Unlock()
 	}
-	return firstErr
+	return nil
 }
 
 const (
@@ -455,14 +436,14 @@ const (
 	statsResultReuseTTL = 30 * time.Second
 )
 
-func (m *jobManager) reusableStatsJob(instance, prefix string, now time.Time) (persistentJob, bool) {
+func (m *jobManager) reusableStatsJob(instance, prefix string, now time.Time) (jobState, bool) {
 	if m == nil {
-		return persistentJob{}, false
+		return jobState{}, false
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	var active *persistentJob
-	var completed *persistentJob
+	var active *jobState
+	var completed *jobState
 	for _, candidate := range m.jobs {
 		if candidate.Type != jobTypeStatsPrefix || candidate.Instance != instance || candidate.Prefix != prefix {
 			continue
@@ -470,7 +451,7 @@ func (m *jobManager) reusableStatsJob(instance, prefix string, now time.Time) (p
 		switch candidate.Status {
 		case jobStatusQueued, jobStatusRunning:
 			if active == nil || candidate.UpdatedAt.After(active.UpdatedAt) {
-				copyCandidate := clonePersistentJob(*candidate)
+				copyCandidate := cloneJobState(*candidate)
 				active = &copyCandidate
 			}
 		case jobStatusCompleted:
@@ -478,7 +459,7 @@ func (m *jobManager) reusableStatsJob(instance, prefix string, now time.Time) (p
 				continue
 			}
 			if completed == nil || candidate.UpdatedAt.After(completed.UpdatedAt) {
-				copyCandidate := clonePersistentJob(*candidate)
+				copyCandidate := cloneJobState(*candidate)
 				completed = &copyCandidate
 			}
 		}
@@ -489,10 +470,10 @@ func (m *jobManager) reusableStatsJob(instance, prefix string, now time.Time) (p
 	if active != nil {
 		return *active, true
 	}
-	return persistentJob{}, false
+	return jobState{}, false
 }
 
-func (m *jobManager) waitForTerminal(ctx context.Context, id string, maximum time.Duration) (persistentJob, bool) {
+func (m *jobManager) waitForTerminal(ctx context.Context, id string, maximum time.Duration) (jobState, bool) {
 	if maximum <= 0 {
 		job, ok := m.get(id)
 		return job, ok && terminalJobStatus(job.Status)
@@ -504,7 +485,7 @@ func (m *jobManager) waitForTerminal(ctx context.Context, id string, maximum tim
 	for {
 		job, ok := m.get(id)
 		if !ok {
-			return persistentJob{}, false
+			return jobState{}, false
 		}
 		if terminalJobStatus(job.Status) || job.Status == jobStatusPaused {
 			return job, true
@@ -519,13 +500,25 @@ func (m *jobManager) waitForTerminal(ctx context.Context, id string, maximum tim
 	}
 }
 
-func (m *jobManager) create(job persistentJob) (persistentJob, error) {
-	if _, ok := m.app.instances[job.Instance]; !ok {
-		return persistentJob{}, apiError{Status: http.StatusNotFound, Code: "unknown_instance", Message: "storage instance was not found"}
+func (m *jobManager) activeJobCountLocked(excludeID string) int {
+	active := 0
+	for id, existing := range m.jobs {
+		if id == excludeID || existing == nil || terminalJobStatus(existing.Status) {
+			continue
+		}
+		active++
 	}
+	return active
+}
+
+func (m *jobManager) create(job jobState) (jobState, error) {
+	if _, ok := m.app.instances[job.Instance]; !ok {
+		return jobState{}, apiError{Status: http.StatusNotFound, Code: "unknown_instance", Message: "storage instance was not found"}
+	}
+	_ = m.pruneHistory()
 	id, err := newStateID("job")
 	if err != nil {
-		return persistentJob{}, err
+		return jobState{}, err
 	}
 	now := time.Now().UTC()
 	job.ID = id
@@ -536,9 +529,18 @@ func (m *jobManager) create(job persistentJob) (persistentJob, error) {
 	if job.Type == jobTypeStatsPrefix && job.Stats == nil {
 		job.Stats = newStatsResponseWithLimit(job.Instance, job.Prefix, m.app.config.Runtime.MaxStatsFolders)
 	}
-	if err := m.put(job); err != nil {
-		return persistentJob{}, err
+	copyJob := cloneJobState(job)
+	m.mu.Lock()
+	if m.activeJobCountLocked("") >= maxActiveJobs {
+		m.mu.Unlock()
+		return jobState{}, apiError{
+			Status:  http.StatusTooManyRequests,
+			Code:    "job_limit_reached",
+			Message: fmt.Sprintf("the server is already running or queuing %d background jobs", maxActiveJobs),
+		}
 	}
+	m.jobs[job.ID] = &copyJob
+	m.mu.Unlock()
 	m.enqueue(job.ID)
 	return job, nil
 }
@@ -586,7 +588,16 @@ func (m *jobManager) run(id string) {
 	}
 
 	budget := newResourceBudget(m.app.config.Runtime)
-	jobContext := withResourceBudget(m.ctx, budget)
+	if job.Type == jobTypeIntegrity || job.Type == jobTypeExtractArchive || job.Type == jobTypeArchiveEntryIntegrity {
+		budget = newBackgroundResourceBudget(m.app.config.Runtime)
+	}
+	runContext, runCancel := context.WithCancel(m.ctx)
+	m.setActiveCancel(id, runCancel)
+	defer func() {
+		runCancel()
+		m.clearActiveCancel(id)
+	}()
+	jobContext := withResourceBudget(runContext, budget)
 	err := m.execute(jobContext, &job)
 	usage := budget.usage()
 	job.StorageRequests = usage.StorageRequests
@@ -620,6 +631,7 @@ func (m *jobManager) run(id string) {
 		job.Error = ""
 		if job.Stats != nil && job.StartedAt != nil {
 			job.Stats.TookMS = end.Sub(*job.StartedAt).Milliseconds()
+			job.Stats.TreemapThresholdBytes, job.Stats.Treemap = buildStatsTreemap(job.Stats)
 		}
 	}
 	_ = m.put(job)
@@ -640,7 +652,7 @@ func publicJobError(err error) string {
 	return publicStorageError(err)
 }
 
-func (m *jobManager) execute(ctx context.Context, job *persistentJob) error {
+func (m *jobManager) execute(ctx context.Context, job *jobState) error {
 	instance := m.app.instances[job.Instance]
 	switch job.Type {
 	case jobTypeCopyPrefix:
@@ -679,7 +691,7 @@ func (m *jobManager) execute(ctx context.Context, job *persistentJob) error {
 		if err := requirePermission(instance, permissionRead); err != nil {
 			return err
 		}
-		// Older persisted statistics did not retain exact aggregates for every
+		// Older in-memory statistics did not retain exact aggregates for every
 		// displayed folder level. Restart those jobs once so local "Others"
 		// rectangles can report exact byte and object totals.
 		if job.Stats == nil || job.Stats.LayoutVersion != statsLayoutVersion {
@@ -734,6 +746,15 @@ func (m *jobManager) execute(ctx context.Context, job *persistentJob) error {
 			}
 			return nil
 		})
+	case jobTypeIntegrity:
+		if err := requirePermission(instance, permissionRead); err != nil {
+			return err
+		}
+		return runIntegrityAnalysis(ctx, m, job)
+	case jobTypeExtractArchive:
+		return runArchiveExtraction(ctx, m, job)
+	case jobTypeArchiveEntryIntegrity:
+		return runArchiveEntryIntegrity(ctx, m, job)
 	default:
 		return fmt.Errorf("unknown job type %q", job.Type)
 	}
@@ -792,7 +813,241 @@ func addStatsFolderAggregatesLimited(stats *statsResponse, prefix, relative stri
 	}
 }
 
-func (m *jobManager) runObjectJob(ctx context.Context, job *persistentJob, instance *storageInstance, operation func(context.Context, objectInfo, string) error) error {
+type statsTreemapBuilder struct {
+	node           statsTreemapNode
+	children       map[string]*statsTreemapBuilder
+	folder         bool
+	aggregateKnown bool
+}
+
+func newStatsTreemapFolder(name, path string) *statsTreemapBuilder {
+	return &statsTreemapBuilder{
+		node:     statsTreemapNode{Name: name, Path: path, Kind: "folder", Type: "folder"},
+		children: make(map[string]*statsTreemapBuilder),
+		folder:   true,
+	}
+}
+
+func statsTreemapRootName(prefix string) string {
+	trimmed := strings.Trim(strings.TrimSpace(prefix), "/")
+	if trimmed == "" {
+		return "/"
+	}
+	parts := strings.Split(trimmed, "/")
+	return parts[len(parts)-1]
+}
+
+func normalizedStatsTreemapPath(value, prefix string) string {
+	clean := strings.TrimLeft(strings.TrimSpace(value), "/")
+	if clean == "" || clean == "(root)" {
+		return ""
+	}
+	cleanPrefix := normalizePrefix(cleanRelativeKey(prefix))
+	if cleanPrefix != "" && strings.HasPrefix(clean, cleanPrefix) {
+		clean = strings.TrimPrefix(clean, cleanPrefix)
+	}
+	return normalizePrefix(clean)
+}
+
+func ensureStatsTreemapFolder(root *statsTreemapBuilder, parts []string, prefix string) *statsTreemapBuilder {
+	parent := root
+	pathValue := normalizePrefix(cleanRelativeKey(prefix))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		pathValue += part + "/"
+		key := "folder:" + part
+		child := parent.children[key]
+		if child == nil {
+			child = newStatsTreemapFolder(part, pathValue)
+			parent.children[key] = child
+		}
+		parent = child
+	}
+	return parent
+}
+
+func finalizeStatsTreemapBuilder(node *statsTreemapBuilder) {
+	if node == nil {
+		return
+	}
+	var childBytes int64
+	var childCount int64
+	for _, child := range node.children {
+		finalizeStatsTreemapBuilder(child)
+		childBytes += maxInt64(0, child.node.Bytes)
+		childCount += maxInt64(0, child.node.Count)
+	}
+	if node.folder {
+		if !node.aggregateKnown {
+			node.node.Bytes = childBytes
+			node.node.Count = childCount
+		} else {
+			node.node.Bytes = maxInt64(node.node.Bytes, childBytes)
+			node.node.Count = maxInt64(node.node.Count, childCount)
+		}
+	}
+}
+
+func statsTreemapThreshold(totalBytes int64) int64 {
+	if totalBytes <= 0 {
+		return 0
+	}
+	// Ceiling division keeps objects that are exactly one percent visible while
+	// avoiding floating-point differences between the backend and browser.
+	return (totalBytes + 99) / 100
+}
+
+func materializeStatsTreemap(node *statsTreemapBuilder, threshold int64) statsTreemapNode {
+	result := node.node
+	if !node.folder {
+		return result
+	}
+
+	children := make([]*statsTreemapBuilder, 0, len(node.children))
+	for _, child := range node.children {
+		if child != nil && child.node.Bytes > 0 {
+			children = append(children, child)
+		}
+	}
+	sort.SliceStable(children, func(i, j int) bool {
+		if children[i].node.Bytes != children[j].node.Bytes {
+			return children[i].node.Bytes > children[j].node.Bytes
+		}
+		return children[i].node.Name < children[j].node.Name
+	})
+
+	var listedBytes int64
+	var listedCount int64
+	for _, child := range children {
+		listedBytes += maxInt64(0, child.node.Bytes)
+		listedCount += maxInt64(0, child.node.Count)
+	}
+	otherBytes := maxInt64(0, result.Bytes-listedBytes)
+	otherCount := maxInt64(0, result.Count-listedCount)
+	visible := make([]statsTreemapNode, 0, len(children)+1)
+	for _, child := range children {
+		if threshold == 0 || child.node.Bytes >= threshold {
+			visible = append(visible, materializeStatsTreemap(child, threshold))
+			continue
+		}
+		otherBytes += maxInt64(0, child.node.Bytes)
+		otherCount += maxInt64(0, child.node.Count)
+	}
+	if otherBytes > 0 || otherCount > 0 {
+		visible = append(visible, statsTreemapNode{
+			Name: "Others", Path: result.Path, Bytes: otherBytes, Count: otherCount,
+			Kind: "other", Type: "other",
+		})
+	}
+	sort.SliceStable(visible, func(i, j int) bool {
+		if visible[i].Bytes != visible[j].Bytes {
+			return visible[i].Bytes > visible[j].Bytes
+		}
+		return visible[i].Name < visible[j].Name
+	})
+
+	// Contract every folder chain that does not introduce a real branch. This
+	// is deliberately a backend responsibility so every client receives the
+	// same semantic tree and cannot render redundant single-child rectangles.
+	for len(visible) == 1 {
+		only := visible[0]
+		switch {
+		case only.Kind == "folder" && len(only.Children) > 0:
+			visible = append([]statsTreemapNode(nil), only.Children...)
+		case only.Kind == "file":
+			// Preserve the only meaningful filename and action target instead of
+			// replacing it with an otherwise uninformative root rectangle.
+			result.Name = only.Name
+			result.Path = only.Path
+			result.Kind = only.Kind
+			result.Type = only.Type
+			result.MIME = only.MIME
+			result.ETag = only.ETag
+			result.LastModified = only.LastModified
+			result.Children = nil
+			return result
+		default:
+			// A sole Others node adds no information. The parent already carries
+			// the exact byte and object totals.
+			visible = nil
+		}
+	}
+	result.Children = visible
+	return result
+}
+
+func buildStatsTreemap(stats *statsResponse) (int64, *statsTreemapNode) {
+	if stats == nil {
+		return 0, nil
+	}
+	prefix := normalizePrefix(cleanRelativeKey(stats.Prefix))
+	root := newStatsTreemapFolder(statsTreemapRootName(prefix), prefix)
+	root.node.Bytes = maxInt64(0, stats.TotalBytes)
+	root.node.Count = maxInt64(0, stats.Count)
+	root.aggregateKnown = true
+
+	folderPaths := make([]string, 0, len(stats.ByFolder))
+	for folderPath := range stats.ByFolder {
+		folderPaths = append(folderPaths, folderPath)
+	}
+	sort.SliceStable(folderPaths, func(i, j int) bool {
+		left := normalizedStatsTreemapPath(folderPaths[i], prefix)
+		right := normalizedStatsTreemapPath(folderPaths[j], prefix)
+		leftDepth := strings.Count(left, "/")
+		rightDepth := strings.Count(right, "/")
+		if leftDepth != rightDepth {
+			return leftDepth < rightDepth
+		}
+		return left < right
+	})
+	for _, folderPath := range folderPaths {
+		relative := normalizedStatsTreemapPath(folderPath, prefix)
+		parts := strings.Split(strings.Trim(relative, "/"), "/")
+		if relative == "" || len(parts) == 0 {
+			continue
+		}
+		folder := ensureStatsTreemapFolder(root, parts, prefix)
+		aggregateValue := stats.ByFolder[folderPath]
+		folder.node.Bytes = maxInt64(0, aggregateValue.Bytes)
+		folder.node.Count = maxInt64(0, aggregateValue.Count)
+		folder.aggregateKnown = true
+	}
+
+	for _, entry := range stats.Largest {
+		fullPath := strings.TrimLeft(strings.TrimSpace(entry.Path), "/")
+		if fullPath == "" || (prefix != "" && !strings.HasPrefix(fullPath, prefix)) {
+			continue
+		}
+		relative := fullPath
+		if prefix != "" {
+			relative = strings.TrimPrefix(fullPath, prefix)
+		}
+		parts := strings.Split(strings.Trim(relative, "/"), "/")
+		if len(parts) == 0 || parts[0] == "" {
+			continue
+		}
+		fileName := parts[len(parts)-1]
+		parent := ensureStatsTreemapFolder(root, parts[:len(parts)-1], prefix)
+		parent.children["file:"+fileName] = &statsTreemapBuilder{
+			node: statsTreemapNode{
+				Name: fileName, Path: fullPath, Bytes: maxInt64(0, entry.Bytes), Count: 1,
+				Kind: "file", Type: entry.Type, MIME: entry.MIME, ETag: entry.ETag,
+				LastModified: entry.LastModified,
+			},
+			children: make(map[string]*statsTreemapBuilder),
+		}
+	}
+
+	finalizeStatsTreemapBuilder(root)
+	threshold := statsTreemapThreshold(root.node.Bytes)
+	tree := materializeStatsTreemap(root, threshold)
+	return threshold, &tree
+}
+
+func (m *jobManager) runObjectJob(ctx context.Context, job *jobState, instance *storageInstance, operation func(context.Context, objectInfo, string) error) error {
 	prefix := job.Prefix
 	if prefix == "" {
 		prefix = job.Source
@@ -903,38 +1158,53 @@ func forEachObjectAfter(ctx context.Context, instance *storageInstance, prefix, 
 	}
 }
 
-func (m *jobManager) changeStatus(id, action string) (persistentJob, error) {
-	job, ok := m.get(id)
-	if !ok {
-		return persistentJob{}, apiError{Status: http.StatusNotFound, Code: "job_not_found", Message: "job was not found"}
-	}
+func (m *jobManager) changeStatus(id, action string) (jobState, error) {
 	now := time.Now().UTC()
+	m.mu.Lock()
+	stored := m.jobs[id]
+	if stored == nil {
+		m.mu.Unlock()
+		return jobState{}, apiError{Status: http.StatusNotFound, Code: "job_not_found", Message: "job was not found"}
+	}
+	job := cloneJobState(*stored)
 	switch action {
 	case "pause":
 		if job.Status != jobStatusQueued && job.Status != jobStatusRunning {
-			return persistentJob{}, apiError{Status: http.StatusConflict, Code: "job_not_active", Message: "only queued or running jobs can be paused"}
+			m.mu.Unlock()
+			return jobState{}, apiError{Status: http.StatusConflict, Code: "job_not_active", Message: "only queued or running jobs can be paused"}
 		}
 		job.Status = jobStatusPaused
 	case "resume":
 		if job.Status != jobStatusPaused && job.Status != jobStatusFailed {
-			return persistentJob{}, apiError{Status: http.StatusConflict, Code: "job_not_resumable", Message: "only paused or failed jobs can be resumed"}
+			m.mu.Unlock()
+			return jobState{}, apiError{Status: http.StatusConflict, Code: "job_not_resumable", Message: "only paused or failed jobs can be resumed"}
+		}
+		if m.activeJobCountLocked(job.ID) >= maxActiveJobs {
+			m.mu.Unlock()
+			return jobState{}, apiError{Status: http.StatusTooManyRequests, Code: "job_limit_reached", Message: fmt.Sprintf("the server is already running or queuing %d background jobs", maxActiveJobs)}
 		}
 		job.Status = jobStatusQueued
 		job.Error = ""
 		job.EndedAt = nil
 	case "cancel":
 		if job.Status == jobStatusCompleted || job.Status == jobStatusCanceled {
+			m.mu.Unlock()
 			return job, nil
 		}
 		job.Status = jobStatusCanceled
 		job.Error = ""
 		job.EndedAt = &now
 	default:
-		return persistentJob{}, apiError{Status: http.StatusBadRequest, Code: "invalid_job_action", Message: "unknown job action"}
+		m.mu.Unlock()
+		return jobState{}, apiError{Status: http.StatusBadRequest, Code: "invalid_job_action", Message: "unknown job action"}
 	}
 	job.UpdatedAt = now
-	if err := m.put(job); err != nil {
-		return persistentJob{}, err
+	copyJob := cloneJobState(job)
+	m.jobs[id] = &copyJob
+	m.mu.Unlock()
+
+	if action == "pause" || action == "cancel" {
+		m.cancelActive(id)
 	}
 	if action == "cancel" {
 		_ = m.pruneHistory()

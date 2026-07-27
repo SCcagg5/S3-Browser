@@ -345,6 +345,16 @@
     search.setAttribute('aria-label', 'Filter archive entries');
     const summary = document.createElement('span');
     summary.className = 'data-preview-summary';
+    const selectionSummary = document.createElement('span');
+    selectionSummary.className = 'archive-selection-summary';
+    const extractButton = document.createElement('button');
+    extractButton.type = 'button';
+    extractButton.className = 'bb-btn archive-extract-selected';
+    extractButton.textContent = 'Extract selected';
+    const clearButton = document.createElement('button');
+    clearButton.type = 'button';
+    clearButton.className = 'bb-btn archive-clear-selection';
+    clearButton.textContent = 'Clear';
     const pageSizeLabel = document.createElement('label');
     pageSizeLabel.className = 'data-page-size archive-page-size';
     const pageSizeCaption = document.createElement('span');
@@ -359,7 +369,11 @@
       pageSizeSelect.appendChild(option);
     });
     pageSizeLabel.append(pageSizeCaption, pageSizeSelect);
-    toolbar.append(search, summary, pageSizeLabel);
+    const canWrite = !BB.capabilities || BB.capabilities.actionable(BB.cfg || {}, 'write');
+    const selectionActions = document.createElement('div');
+    selectionActions.className = 'archive-selection-actions';
+    if (canWrite) selectionActions.append(selectionSummary, extractButton, clearButton);
+    toolbar.append(search, summary, selectionActions, pageSizeLabel);
 
     const scroller = document.createElement('div');
     scroller.className = 'data-table-scroll archive-entry-scroll';
@@ -367,13 +381,13 @@
     table.className = 'data-table archive-entry-table';
     const colgroup = document.createElement('colgroup');
     [
-      ['archive-col-name', '30%'],
-      ['archive-col-type', '8%'],
-      ['archive-col-compressed', '11%'],
-      ['archive-col-size', '11%'],
+      ['archive-col-select', '4%'],
+      ['archive-col-name', '34%'],
+      ['archive-col-compressed', '12%'],
+      ['archive-col-size', '12%'],
       ['archive-col-method', '10%'],
       ['archive-col-modified', '20%'],
-      ['archive-col-crc', '10%']
+      ['archive-col-actions', '8%']
     ].forEach(([className, width]) => {
       const column = document.createElement('col');
       column.className = className;
@@ -381,7 +395,27 @@
       colgroup.appendChild(column);
     });
     const head = document.createElement('thead');
-    head.innerHTML = '<tr><th class="archive-cell-name">Name</th><th class="archive-cell-type">Type</th><th class="archive-cell-compressed is-numeric">Compressed</th><th class="archive-cell-size is-numeric">Size</th><th class="archive-cell-method">Method</th><th class="archive-cell-modified">Modified</th><th class="archive-cell-crc">CRC32</th></tr>';
+    const headRow = document.createElement('tr');
+    const selectHead = document.createElement('th');
+    selectHead.className = 'archive-cell-select';
+    const selectVisible = document.createElement('input');
+    selectVisible.type = 'checkbox';
+    selectVisible.setAttribute('aria-label', 'Select visible archive entries');
+    selectHead.appendChild(selectVisible);
+    [
+      ['archive-cell-name', 'Name'],
+      ['archive-cell-compressed is-numeric', 'Compressed'], ['archive-cell-size is-numeric', 'Size'],
+      ['archive-cell-method', 'Method'], ['archive-cell-modified', 'Modified'],
+      ['archive-cell-actions', '']
+    ].forEach(([className, label]) => {
+      const cell = document.createElement('th');
+      cell.className = className;
+      cell.textContent = label;
+      if (className === 'archive-cell-actions') cell.setAttribute('aria-label', 'Actions');
+      headRow.appendChild(cell);
+    });
+    headRow.prepend(selectHead);
+    head.appendChild(headRow);
     const body = document.createElement('tbody');
     table.append(colgroup, head, body);
     scroller.appendChild(table);
@@ -403,7 +437,60 @@
 
     let page = 0;
     let pageSize = 100;
-    const allEntries = Array.from(payload.entries || []);
+    let currentVisible = [];
+    const selected = new Set();
+    const allEntries = Array.from(payload.entries || []).filter(entry => entry && entry.name);
+    const selectable = entry => !entry.encrypted;
+
+    const defaultTarget = () => {
+      const filename = text(payload.key).split('/').pop() || 'archive';
+      const base = filename.replace(/\.[^.]+$/, '') || 'archive';
+      return `${base}/`;
+    };
+
+    const updateSelection = () => {
+      const count = selected.size;
+      selectionSummary.textContent = count ? `${count.toLocaleString()} selected` : '';
+      extractButton.disabled = count === 0;
+      clearButton.disabled = count === 0;
+      const visibleFiles = currentVisible.filter(selectable);
+      const selectedVisible = visibleFiles.filter(entry => selected.has(entry.name)).length;
+      selectVisible.checked = visibleFiles.length > 0 && selectedVisible === visibleFiles.length;
+      selectVisible.indeterminate = selectedVisible > 0 && selectedVisible < visibleFiles.length;
+      selectVisible.disabled = !canWrite || visibleFiles.length === 0;
+    };
+
+    const resolveJob = async (created, label) => {
+      if (created?.status === 'completed') return created;
+      if (!BB.actions?.waitForJob) throw new Error('Background job controls are unavailable.');
+      return BB.actions.waitForJob(created, label);
+    };
+
+    const extractEntries = async entries => {
+      if (!entries.length) return;
+      const target = await BB.ui.prompt({
+        title: 'Extract archive entries',
+        message: 'Destination prefix in the current bucket:',
+        defaultValue: defaultTarget()
+      });
+      if (target === null) return;
+      try {
+        const created = await BB.api.extractArchive(payload.key, entries, {
+          instance: payload.instance,
+          version: payload.version || '',
+          target: String(target || '').replace(/^\/+/, '')
+        });
+        const completed = await resolveJob(created, 'Extracting archive entries');
+        if (completed.status === 'completed') {
+          const result = completed.archiveExtract || {};
+          BB.ui.toast(`${Number(result.extracted || entries.length).toLocaleString()} archive entr${entries.length === 1 ? 'y' : 'ies'} extracted.`, { status: 'success', duration: 5000 });
+          entries.forEach(name => selected.delete(name));
+          updateSelection();
+        }
+      } catch (error) {
+        BB.ui.alert({ title: 'Archive extraction failed', message: String(error?.message || error) });
+      }
+    };
 
     const render = () => {
       const query = search.value.trim().toLowerCase();
@@ -413,23 +500,33 @@
       const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
       page = Math.max(0, Math.min(page, pages - 1));
       const start = page * pageSize;
-      const visible = filtered.slice(start, start + pageSize);
+      currentVisible = filtered.slice(start, start + pageSize);
       body.replaceChildren();
-      visible.forEach(entry => {
+      currentVisible.forEach(entry => {
         const row = document.createElement('tr');
+        const select = document.createElement('td');
+        select.className = 'archive-cell-select';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = selected.has(entry.name);
+        checkbox.disabled = !canWrite || !selectable(entry);
+        checkbox.setAttribute('aria-label', `Select ${entry.name}`);
+        checkbox.addEventListener('change', () => {
+          if (checkbox.checked) selected.add(entry.name);
+          else selected.delete(entry.name);
+          updateSelection();
+        });
+        select.appendChild(checkbox);
         const name = document.createElement('td');
         name.className = 'archive-cell-name';
         const nameContent = document.createElement('div');
         nameContent.className = 'archive-entry-name';
         const icon = document.createElement('i');
-        icon.className = `mdi mdi-${entry.type === 'Folder' ? 'folder' : entry.type === 'Symlink' ? 'subdirectory-arrow-right' : 'file-outline'}`;
+        icon.className = 'mdi mdi-file-outline';
         const value = document.createElement('span');
         value.textContent = entry.name;
         nameContent.append(icon, value);
         name.appendChild(nameContent);
-        const type = document.createElement('td');
-        type.className = 'archive-cell-type';
-        type.textContent = entry.type;
         const compressed = document.createElement('td');
         compressed.className = 'archive-cell-compressed is-numeric';
         compressed.textContent = formatBytes(entry.compressedSize);
@@ -442,13 +539,57 @@
         const modified = document.createElement('td');
         modified.className = 'archive-cell-modified';
         modified.textContent = entry.modified || '';
-        const crc = document.createElement('td');
-        crc.className = 'archive-cell-crc is-monospace';
-        crc.textContent = entry.crc32 || '';
-        row.append(name, type, compressed, size, method, modified, crc);
+        const actions = document.createElement('td');
+        actions.className = 'archive-cell-actions';
+        if (selectable(entry)) {
+          const menu = document.createElement('div');
+          menu.className = 'bb-menu archive-entry-menu';
+          const trigger = document.createElement('button');
+          trigger.type = 'button';
+          trigger.className = 'bb-kebab';
+          trigger.title = 'Options';
+          trigger.setAttribute('aria-label', `Options for ${entry.name}`);
+          trigger.setAttribute('aria-haspopup', 'menu');
+          trigger.setAttribute('aria-expanded', 'false');
+          trigger.innerHTML = '<i class="mdi mdi-dots-vertical" aria-hidden="true"></i>';
+
+          const popover = document.createElement('div');
+          popover.className = 'bb-menu-popover';
+          const list = document.createElement('div');
+          list.className = 'bb-menu-list';
+
+          const preview = document.createElement('a');
+          preview.className = 'bb-menu-item';
+          preview.innerHTML = '<i class="mdi mdi-eye-outline" aria-hidden="true"></i><span>Open</span>';
+          preview.href = BB.api.previewPageURL(payload.key, {
+            instance: payload.instance,
+            version: payload.version || '',
+            entry: entry.name
+          });
+
+          const download = document.createElement('a');
+          download.className = 'bb-menu-item';
+          download.innerHTML = '<i class="mdi mdi-download" aria-hidden="true"></i><span>Download</span>';
+          download.href = BB.api.archiveEntryURL(payload.key, entry.name, { inline: false, instance: payload.instance, version: payload.version || '' });
+          download.download = entry.name.split('/').pop() || 'archive-entry';
+          list.append(preview, download);
+
+          if (canWrite) {
+            const extract = document.createElement('button');
+            extract.type = 'button';
+            extract.className = 'bb-menu-item';
+            extract.innerHTML = '<i class="mdi mdi-archive-arrow-down-outline" aria-hidden="true"></i><span>Extract</span>';
+            extract.addEventListener('click', () => extractEntries([entry.name]));
+            list.appendChild(extract);
+          }
+          popover.appendChild(list);
+          menu.append(trigger, popover);
+          actions.appendChild(menu);
+        }
+        row.append(select, name, compressed, size, method, modified, actions);
         body.appendChild(row);
       });
-      const end = Math.min(filtered.length, start + visible.length);
+      const end = Math.min(filtered.length, start + currentVisible.length);
       summary.textContent = filtered.length ? `${(start + 1).toLocaleString()}-${end.toLocaleString()} of ${filtered.length.toLocaleString()}` : '0 entries';
       pageLabel.textContent = `${page + 1} / ${pages}`;
       previous.disabled = page <= 0;
@@ -457,11 +598,21 @@
       previous.classList.toggle('is-pagination-placeholder', !multiple);
       next.classList.toggle('is-pagination-placeholder', !multiple);
       pageLabel.style.visibility = multiple ? '' : 'hidden';
+      updateSelection();
     };
     search.addEventListener('input', () => { page = 0; render(); });
     pageSizeSelect.addEventListener('change', () => { pageSize = Number(pageSizeSelect.value) || 100; page = 0; render(); });
     previous.addEventListener('click', () => { page--; render(); });
     next.addEventListener('click', () => { page++; render(); });
+    selectVisible.addEventListener('change', () => {
+      currentVisible.filter(selectable).forEach(entry => {
+        if (selectVisible.checked) selected.add(entry.name);
+        else selected.delete(entry.name);
+      });
+      render();
+    });
+    extractButton.addEventListener('click', () => extractEntries(Array.from(selected).sort()));
+    clearButton.addEventListener('click', () => { selected.clear(); render(); });
     render();
     root.append(toolbar, scroller, pagination);
     return root;

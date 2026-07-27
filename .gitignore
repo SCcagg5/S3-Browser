@@ -8,6 +8,4 @@ secrets/
 service-account*.json
 test/garage/volume/
 
-.s3-browser-data/
-
 !test/config.hcl

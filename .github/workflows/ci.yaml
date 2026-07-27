@@ -49,6 +49,7 @@ jobs:
         working-directory: .
         run: |
           node test/frontend-smoke.js
+          node test/advanced-object-tools.js
           node test/ui-normalization.js
           node test/json-coloring.js
           node test/json-viewer.js
@@ -78,6 +79,10 @@ jobs:
           fi
           if grep -R --include='*.go' -E 'os\.(Getenv|LookupEnv)|ProxyFromEnvironment' src; then
             echo "runtime configuration and provider clients must not use process environment variables" >&2
+            exit 1
+          fi
+          if grep -R --include='*.go' --exclude='*_test.go' -E 'os\.(Create|Mkdir|MkdirAll|WriteFile|OpenFile|Remove|RemoveAll|Rename)|CreateTemp|MkdirTemp' src; then
+            echo "runtime source must not write application state to the local filesystem" >&2
             exit 1
           fi
           if find . -type f \( -iname '*.ttf' -o -iname '*.otf' -o -iname '*.woff' -o -iname '*.woff2' -o -iname '*.eot' \) | grep -q .; then

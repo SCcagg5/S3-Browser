@@ -1,59 +1,63 @@
 # Configuration
 
-The application accepts one HCL file through `-config <path>` or `-c <path>`. It does not read runtime settings or credentials from environment variables.
+The application accepts one HCL file through `-c <path>` or `-config <path>`. Runtime settings and provider credentials are not read from environment variables.
 
-The supported top-level blocks are:
+Supported top-level blocks:
 
-- one optional `server` block;
+- zero or one `server` block;
 - one or more `auth "id"` blocks;
 - one or more `bucket "id"` blocks.
 
-Unknown blocks and unknown attributes are rejected. Nested blocks are not accepted. The configuration file is limited to 4 MiB.
+Unknown blocks, attributes, nested blocks, and wrong value types are rejected. The HCL file is limited to 4 MiB. Individual secret files are limited to 1 MiB; a GCS service-account file is bounded separately by the provider parser.
 
-## `server`
+## Server block
 
 ```hcl
 server {
-  listen     = "127.0.0.1:8080"
-  state_mode = "ephemeral"
-  log_mode   = "anonymous"
+  listen            = ":8080"
+  job_history_limit = 10
+  access_mode       = "inherit_credentials"
+  log_mode          = "anonymous"
+
+  memory_limit_bytes = 67108864
+
+  max_storage_bytes_per_request       = 274877906944
+  max_storage_requests_per_request    = 4096
+  max_range_cache_bytes               = 8388608
+  max_concurrent_storage_requests     = 4
+  max_concurrent_requests_per_storage = 2
+
+  session_ttl_seconds = 1200
+  max_stats_folders   = 1000
+  max_archive_entries = 10000
+
+  max_background_storage_bytes    = 274877906944
+  max_background_storage_requests = 100000
 }
 ```
 
 | Attribute | Default | Description |
 |---|---:|---|
-| `listen` | `:8080` | Numeric `host:port` address used by the HTTP server. URL syntax is rejected. |
-| `access_mode` | `inherit_credentials` | `inherit_credentials` or `force_read_only`. The latter blocks every mutation regardless of provider rights. |
-| `state_mode` | `ephemeral` | `ephemeral` or `persistent`. |
-| `data_dir` | none | Required only for persistent state. Relative paths are resolved from the configuration file directory. |
-| `job_history_limit` | `100` | Maximum retained job records in persistent mode. |
-| `log_mode` | `anonymous` | `anonymous` avoids object keys in request logs; `detailed` is intended for controlled diagnostics. |
-| `browser_persistence` | `false` | Allows selected browser state to use local storage. Requires persistent state mode. |
-| `allow_full_object_fallback` | `false` | Allows only explicitly bounded reader fallbacks. It never permits an unbounded PDF gateway request. |
-| `memory_limit_bytes` | Go default | Optional Go memory limit. Minimum 32 MiB. |
-| `max_storage_bytes_per_request` | 2 GiB | Maximum provider bytes charged to one HTTP request budget. |
-| `max_storage_requests_per_request` | `4096` | Maximum provider requests charged to one HTTP request budget. |
-| `max_temp_bytes_per_session` | 512 MiB | Maximum temporary bytes for one preview or processing session. |
-| `max_range_cache_bytes` | 32 MiB | Maximum in-memory range cache. |
-| `max_concurrent_storage_requests` | `8` | Global provider request concurrency. |
-| `max_concurrent_requests_per_storage` | `4` | Concurrency for one configured bucket. |
-| `session_ttl_seconds` | `1200` | Idle lifetime for temporary preview sessions. |
-| `max_stats_folders` | `10000` | Maximum folder aggregates retained by a statistics job. |
-| `max_archive_entries` | `100000` | Maximum deterministic archive entries returned by archive inspection. |
+| `listen` | `:8080` | Numeric `host:port` listen address. URL syntax is rejected. |
+| `job_history_limit` | `10` | Number of terminal job results retained in process memory. Valid range: 1-20. |
+| `access_mode` | `inherit_credentials` | `inherit_credentials` or `force_read_only`. |
+| `log_mode` | `anonymous` | `anonymous` avoids object keys in request logs; `detailed` is for controlled diagnostics. |
+| `allow_full_object_fallback` | `false` | Allows explicitly implemented parser fallbacks that require a complete object. It never changes strict Range validation into an implicit oversized response. |
+| `memory_limit_bytes` | `0` | Optional Go soft memory limit. `0` leaves the Go runtime default unchanged. |
+| `max_storage_bytes_per_request` | 256 GiB | Provider bytes allowed for one interactive HTTP request. |
+| `max_storage_requests_per_request` | `4096` | Provider calls allowed for one interactive HTTP request. |
+| `max_range_cache_bytes` | 8 MiB | Maximum in-memory cache used by a range reader session. |
+| `max_concurrent_storage_requests` | `4` | Global provider-request concurrency. |
+| `max_concurrent_requests_per_storage` | `2` | Provider-request concurrency for one bucket. |
+| `session_ttl_seconds` | `1200` | In-memory preview/session TTL. |
+| `max_stats_folders` | `1000` | Maximum exact folder aggregates retained by one Insights result. |
+| `max_archive_entries` | `10000` | Maximum deterministic central-directory entries and selected archive members. |
+| `max_background_storage_bytes` | 256 GiB | Provider-byte budget for an explicit full-object job. |
+| `max_background_storage_requests` | `100000` | Provider-call budget for an explicit background job. |
 
-The backend has no public-path setting. It always serves routes from `/`. A reverse proxy may expose the application at a prefix only when it removes that prefix before forwarding requests. The frontend resolves all URLs relative to `document.baseURI`.
+The server never creates a data directory. All sessions and jobs are memory-only. At most four jobs may be active or queued at once.
 
-## `auth`
-
-An authentication block owns provider credentials, endpoint configuration, one HTTP connection pool, and renewable token state. Any number of buckets can reference it.
-
-Identifiers must match:
-
-```text
-[A-Za-z0-9][A-Za-z0-9._-]*
-```
-
-### S3-compatible storage
+## S3 authentication
 
 ```hcl
 auth "primary-s3" {
@@ -64,24 +68,20 @@ auth "primary-s3" {
   access_key_id_file     = "/run/secrets/s3-access-key-id"
   secret_access_key_file = "/run/secrets/s3-secret-access-key"
   session_token_file     = "/run/secrets/s3-session-token"
+  insecure_skip_verify   = false
 }
 ```
 
-Supported modes:
+S3 modes:
 
-- `access_key`: requires an access key ID and secret access key;
-- `anonymous`: accepts no access credentials.
+- `access_key`: requires `access_key_id` or `access_key_id_file` and `secret_access_key` or `secret_access_key_file`; `session_token` is optional.
+- `anonymous`: rejects access-key fields.
 
-Every secret can be provided directly or through a file:
+Every secret can be supplied directly or through its `_file` form, never both. File paths relative to the HCL file are resolved from the HCL directory.
 
-```hcl
-access_key_id      = "..."
-access_key_id_file = "/run/secrets/..."
-```
+The endpoint must use HTTP or HTTPS and may not contain credentials, a query string, or a fragment. Redirects and process environment proxies are disabled.
 
-Only one form may be used for a given secret. Secret files are read once during startup, are limited to 1 MiB, and are trimmed before use.
-
-### Google Cloud Storage
+## GCS authentication
 
 ```hcl
 auth "gcs-service-account" {
@@ -91,94 +91,41 @@ auth "gcs-service-account" {
 }
 ```
 
-Supported modes:
+GCS modes:
 
 - `service_account`: requires `credentials_file`;
-- `anonymous`: performs unsigned public requests.
+- `anonymous`: rejects `credentials_file`.
 
-The default endpoint is `https://storage.googleapis.com`. A custom `endpoint` can be supplied for a compatible test service.
+If omitted, the GCS endpoint defaults to `https://storage.googleapis.com`.
 
-### TLS testing option
-
-`insecure_skip_verify = true` disables certificate verification for the provider connection. Use it only for isolated local test services. It is never enabled by default.
-
-## `bucket`
+## Bucket block
 
 ```hcl
-bucket "documents" {
-  name           = "Documents"
+bucket "archive" {
+  name           = "Archive"
   auth           = "primary-s3"
-  bucket         = "company-documents"
-  permissions    = ["read", "write", "delete"]
-  root_prefix    = "tenant-a/"
-  max_scan_pages = 15
-}
-```
-
-| Attribute | Required | Default | Description |
-|---|---:|---:|---|
-| `name` | no | block identifier | Display name. |
-| `auth` | yes | none | Identifier of an `auth` block. |
-| `bucket` | yes | none | Provider bucket name. |
-| `permissions` | no | provider inheritance | Optional application ceiling containing `read`, `write`, and/or `delete`. Omitting it leaves capabilities tentatively available until the provider denies an operation. |
-| `root_prefix` | no | empty | Prefix exposed as the root of this configured bucket. |
-| `max_scan_pages` | no | `1` | Maximum provider listing pages combined into one navigation batch. `0` means unlimited. Each provider request asks for up to 1,000 entries. |
-
-A bucket never inherits another bucket's permission list or listing scan limit even when both use the same authentication.
-
-### Listing and sorting behavior
-
-`max_scan_pages` controls backend work, not a frontend setting. Its value is never returned to or displayed by the browser.
-
-Examples for a provider that returns 1,000 entries per page:
-
-```text
-max_scan_pages = 1   -> at most 1,000 entries in one batch
-max_scan_pages = 15  -> at most 15,000 entries in one batch
-max_scan_pages = 0   -> continue until the provider reports the end
-```
-
-Global sorting by Name, Size, or Last modified is enabled only when the backend reaches the actual end of the current folder listing. If the scan limit is reached first, the frontend keeps provider-order navigation and continues with the returned continuation token.
-
-Folders participate in global sorting with numeric Size `0` and Last modified `0`.
-
-## Shared authentication example
-
-```hcl
-auth "shared" {
-  provider               = "s3"
-  mode                   = "access_key"
-  endpoint               = "https://objects.example.com"
-  region                 = "eu-central-1"
-  access_key_id_file     = "/run/secrets/object-key"
-  secret_access_key_file = "/run/secrets/object-secret"
-}
-
-bucket "team-write" {
-  auth           = "shared"
-  bucket         = "team-documents"
-  permissions    = ["read", "write", "delete"]
-  max_scan_pages = 15
-}
-
-bucket "audit-read-only" {
-  auth           = "shared"
-  bucket         = "audit-archive"
+  bucket         = "archive"
+  root_prefix    = "published/"
   permissions    = ["read"]
-  max_scan_pages = 0
+  max_scan_pages = 15
 }
 ```
 
-## Validation behavior
+| Attribute | Default | Description |
+|---|---:|---|
+| `name` | block id | Frontend display name. |
+| `auth` | required | Referenced authentication id. |
+| `bucket` | required | Provider bucket name. |
+| `root_prefix` | empty | Virtual root exposed by the application. |
+| `permissions` | omitted | Optional application ceiling containing `read`, `write`, and/or `delete`. |
+| `max_scan_pages` | `1` | Maximum 1,000-entry provider listing pages combined in navigation. `0` means no page-count limit. |
 
-Startup fails before serving traffic when:
+`read` permits list, preview, details, inspection, version listing, and download. `write` permits upload and destination-side object creation. `delete` permits deletion and the source side of move/rename. Provider policy and retention rules still apply.
 
-- the HCL syntax is invalid;
-- an attribute has the wrong type;
-- an identifier is duplicated or malformed;
-- a bucket references an unknown authentication;
-- required provider fields are missing;
-- two secret sources are supplied for the same value;
-- a persistent state configuration lacks `data_dir`;
-- a listen address is invalid;
-- a numeric resource limit is outside its accepted range.
+## Version capability probe
+
+A single bounded version-list request is made for every bucket when the application starts. Any error marks version browsing unavailable for that bucket. This includes providers such as Garage that return HTTP 501 for the version-list API. The result is process-local and is exposed only as a boolean capability; the HCL file does not need a versioning flag.
+
+## Public path
+
+There is no public-path attribute. The frontend resolves URLs relative to `document.baseURI`. A reverse proxy can mount the application under any path by stripping the public prefix before forwarding requests to the backend.

@@ -1,54 +1,89 @@
 # Preview and metadata behavior
 
-## Deterministic-by-default rule
+## General rules
 
-The application displays metadata automatically only when it can obtain the complete value deterministically from a small, bounded part of the object, such as:
+A preview may read only deterministic, bounded format structures by default. Exact values that require a complete scan are absent until the user starts an explicit operation. Partial inventories are never presented as complete.
 
-- a fixed header;
-- a footer or trailer;
-- an internal index;
-- a ZIP central directory;
-- a small Office property entry;
-- a provider object header.
+Preview code does not fetch URLs referenced inside documents. HTML-like content is sanitized, SVG active content is blocked, and external EPUB/email resources are displayed only as text.
 
-It does not present partial scans as complete information. A value that requires a full scan is hidden until the user explicitly starts the corresponding operation. The result is shown only when that operation completes.
+Selecting an immutable object version updates Preview, Details, Open original, Inspect, and Verify integrity to use that exact provider version or generation.
 
 ## PDF
 
-PDF preview uses local PDF.js, a worker, a controlled canvas, and `PDFDataRangeTransport` over exact same-origin ranges. Streaming and automatic full-document fetching are disabled. The current page is rendered and only bounded adjacent state is retained.
+PDF uses the local PDF.js ESM module and worker, a canvas controlled by the application, a custom `PDFDataRangeTransport`, and strict same-origin Range requests.
 
-The object gateway requires finite PDF ranges and rejects unbounded, suffix-only, multi-range, or oversized range requests.
+- no iframe, embed, object element, or native-browser fallback;
+- streaming and automatic whole-file fetching are disabled;
+- the page count comes from the parsed PDF structure;
+- only the current page and a bounded next-page cache are retained;
+- page and zoom controls operate on the PDF.js document;
+- the viewer is constrained to the viewport after accounting for the application header and PDF controls.
+
+Required release assets:
+
+```text
+src/public/assets/vendor/pdfjs/4.10.38/pdf.min.mjs
+src/public/assets/vendor/pdfjs/4.10.38/pdf.worker.min.mjs
+```
 
 ## Office Open XML
 
-DOCX, DOCM, DOTX, DOTM, XLSX, XLSM, XLTX, XLTM, XLAM, PPTX, PPTM, POTX, POTM, PPSX, PPSM, PPAM, SLDX, SLDM, VSDX, VSDM, VSSX, VSSM, VSTX, and VSTM use the ZIP central directory plus targeted property files.
+Word, Excel, PowerPoint, and Visio package metadata comes from the ZIP central directory and small known package members such as `docProps/core.xml`, `docProps/app.xml`, and `docProps/custom.xml`.
 
-Workbook row and column counts are not claimed from an unreliable formatted dimension. Exact active-sheet dimensions remain behind an explicit scan.
+Word preview renders semantic paragraphs, headings, lists, links, and tables. Excel-family preview uses the shared DataGrid and loads workbook structures and selected worksheet data through range-backed ZIP access. PowerPoint and Visio currently expose deterministic metadata rather than a pixel-identical renderer.
 
-## Structured personal-information formats
+Worksheet row/column totals that require a full active-sheet scan appear only after the explicit scan action completes.
 
-VCF/vCard, ICS/IFB, EML/MIME/MHTML, certificates, requests, and public or private key files have structured previews plus a raw-data view. Email HTML is not executed. External images, styles, scripts, tracking pixels, and URLs are never fetched.
+## Tabular data
 
-## Images and media
+Delimited text, Excel-family worksheets, SQLite, JSONL/NDJSON, and Parquet views use shared grid behavior:
 
-Supported browser image, audio, and video types use same-origin object URLs. Audio and video use `preload="metadata"`. SVG is served under restrictive content security headers and cannot load external resources.
+- consistent filters, sorting, pagination, loading, empty, and error states;
+- right-aligned tabular numbers;
+- bounded page sizes;
+- full available width;
+- no full dataset materialization solely for initial display.
 
-## Archives
+SQLite reads remote database pages through exact ranges. A row total is not treated as zero when it is unknown.
 
-ZIP and ZIP-derived formats use the complete central directory, without extracting contained files:
+## JSON
 
-- ZIP, JAR, WAR, EAR;
-- APK, AAR, XPI, CRX, VSIX;
-- EPUB.
+Raw, beautified, summary, and tree views are distinct modes. Exact line/page totals are shown only after an explicit complete count. The count action is not shown in tree mode, and no status label is displayed after completion beyond the exact totals.
 
-The archive preview omits the separate Details summary. EPUB may show a Publication section, followed by Contents; other supported ZIP-derived formats show Contents directly. The preview uses the same maximum width as the main object navigation. The entry grid offers 100, 250, 500, and 1,000 rows per page and uses one shared column-width contract for headers and data.
+## Structured text
 
-Formats without a deterministic central inventory, such as TAR, RAR, and 7z, are not partially listed by default.
+The structured viewer covers vCard/VCF, iCalendar/IFB, EML/MIME/MHTML, certificates, certificate requests, public/private key files, and related deterministic metadata.
 
-## Tabular formats
+Certificate and key previews provide structured fields plus a Raw tab. Binary content is represented as Base64. Raw private-key content is visible only because this is an explicit product requirement; it is never sent to a third party.
 
-CSV, TSV, PSV, XLSX, XLSM, SQLite, JSONL/NDJSON, and Parquet-compatible views use shared grid primitives. Column filtering, sorting, pagination, loading, empty, and error states are normalized.
+Email HTML is not injected as active content. Attachments are listed without automatically decoding or fetching external resources.
 
-## Open original
+## Images, audio, and video
 
-The original-object endpoint returns the real file name through `Content-Disposition`. Browser-displayable content is served inline; other content is served as an attachment with the correct object name. Folder archives use the folder name rather than a generic gateway name.
+Supported browser image formats use the existing local image viewer. SVG is served with restrictive security headers. Audio and video use the same-origin object gateway and `preload="metadata"`; codec support depends on the browser.
+
+## ZIP-compatible packages
+
+ZIP, JAR, WAR, EAR, APK, AAR, XPI, CRX, VSIX, and EPUB use the exact central directory. The preview displays only deterministic package/publication information and the complete Contents table.
+
+Contents use page-level vertical scrolling and horizontal scrolling only when required. Entries can be opened, downloaded, verified, or selected for extraction. No URL contained in an archive or EPUB is followed.
+
+Formats without a deterministic central inventory, such as TAR, RAR, and 7z, are not partially inventoried by default.
+
+## Per-object integrity
+
+Verify integrity is an explicit complete-object stream. It reports SHA-256 and provider-comparison hashes without retaining object bytes. Composite provider values are displayed but are not falsely compared with a whole-object digest. The action is available only in the Advanced tab of Details and starts only after an explicit click. Its result is rendered in that tab.
+
+There is no global checksum export and no global duplicate scan.
+
+## Technical inspection
+
+Inspect is available only in the Advanced tab of Details and starts only after an explicit click. Its result is rendered in that tab. It reads deterministic object metadata, the first 64 KiB, and when useful the final 64 KiB. It reports:
+
+- declared and detected MIME/type;
+- safe provider headers and checksums;
+- recognized structural markers;
+- bounded hexadecimal and ASCII probes;
+- exact provider requests and bytes consumed.
+
+Credential-bearing headers are removed before the response reaches the frontend.

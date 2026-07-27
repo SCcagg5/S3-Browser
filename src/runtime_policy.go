@@ -14,63 +14,58 @@ const (
 	accessModeInheritCredentials = "inherit_credentials"
 	accessModeForceReadOnly      = "force_read_only"
 
-	stateModeEphemeral  = "ephemeral"
-	stateModePersistent = "persistent"
-
 	logModeAnonymous = "anonymous"
 	logModeDetailed  = "detailed"
 )
 
 const (
-	defaultMaxStorageBytesPerRequest    = int64(2 << 30)
+	defaultMaxStorageBytesPerRequest    = int64(256 << 30)
 	defaultMaxStorageRequestsPerRequest = int64(4096)
-	defaultMaxTempBytesPerSession       = int64(512 << 20)
-	defaultMaxRangeCacheBytes           = int64(32 << 20)
-	defaultMaxConcurrentStorageRequests = 8
-	defaultMaxConcurrentPerStorage      = 4
+	defaultMaxRangeCacheBytes           = int64(8 << 20)
+	defaultMaxConcurrentStorageRequests = 4
+	defaultMaxConcurrentPerStorage      = 2
 	defaultSessionTTLSeconds            = 20 * 60
-	defaultMaxStatsFolders              = 10000
-	defaultMaxArchiveEntries            = 100000
+	defaultMaxStatsFolders              = 1000
+	defaultMaxArchiveEntries            = 10000
+	defaultMaxBackgroundStorageBytes    = int64(256 << 30)
+	defaultMaxBackgroundStorageRequests = int64(100000)
 )
 
 type runtimePolicy struct {
 	AccessMode                    string `json:"accessMode"`
-	StateMode                     string `json:"stateMode"`
-	BrowserPersistence            bool   `json:"browserPersistence"`
 	AllowFullObjectFallback       bool   `json:"allowFullObjectFallback"`
 	LogMode                       string `json:"logMode"`
 	MemoryLimitBytes              int64  `json:"memoryLimitBytes,omitempty"`
 	MaxStorageBytesPerRequest     int64  `json:"maxStorageBytesPerRequest"`
 	MaxStorageRequestsPerRequest  int64  `json:"maxStorageRequestsPerRequest"`
-	MaxTempBytesPerSession        int64  `json:"maxTempBytesPerSession"`
 	MaxRangeCacheBytes            int64  `json:"maxRangeCacheBytes"`
 	MaxConcurrentStorageRequests  int    `json:"maxConcurrentStorageRequests"`
 	MaxConcurrentRequestsPerStore int    `json:"maxConcurrentRequestsPerStorage"`
 	SessionTTLSeconds             int    `json:"sessionTTLSeconds"`
 	MaxStatsFolders               int    `json:"maxStatsFolders"`
 	MaxArchiveEntries             int    `json:"maxArchiveEntries"`
+	MaxBackgroundStorageBytes     int64  `json:"-"`
+	MaxBackgroundStorageRequests  int64  `json:"-"`
 }
 
 func defaultRuntimePolicy() runtimePolicy {
 	return runtimePolicy{
 		AccessMode:                    accessModeInheritCredentials,
-		StateMode:                     stateModeEphemeral,
-		BrowserPersistence:            false,
 		AllowFullObjectFallback:       false,
 		LogMode:                       logModeAnonymous,
 		MaxStorageBytesPerRequest:     defaultMaxStorageBytesPerRequest,
 		MaxStorageRequestsPerRequest:  defaultMaxStorageRequestsPerRequest,
-		MaxTempBytesPerSession:        defaultMaxTempBytesPerSession,
 		MaxRangeCacheBytes:            defaultMaxRangeCacheBytes,
 		MaxConcurrentStorageRequests:  defaultMaxConcurrentStorageRequests,
 		MaxConcurrentRequestsPerStore: defaultMaxConcurrentPerStorage,
 		SessionTTLSeconds:             defaultSessionTTLSeconds,
 		MaxStatsFolders:               defaultMaxStatsFolders,
 		MaxArchiveEntries:             defaultMaxArchiveEntries,
+		MaxBackgroundStorageBytes:     defaultMaxBackgroundStorageBytes,
+		MaxBackgroundStorageRequests:  defaultMaxBackgroundStorageRequests,
 	}
 }
 
-func (p runtimePolicy) persistent() bool    { return p.StateMode == stateModePersistent }
 func (p runtimePolicy) forceReadOnly() bool { return p.AccessMode == accessModeForceReadOnly }
 func (p runtimePolicy) sessionTTL() time.Duration {
 	seconds := p.SessionTTLSeconds
@@ -103,6 +98,18 @@ func newResourceBudget(policy runtimePolicy) *resourceBudget {
 		maxBytes:    policy.MaxStorageBytesPerRequest,
 		startedAt:   time.Now().UTC(),
 	}
+}
+
+func newBackgroundResourceBudget(policy runtimePolicy) *resourceBudget {
+	maximumRequests := policy.MaxBackgroundStorageRequests
+	if maximumRequests <= 0 {
+		maximumRequests = defaultMaxBackgroundStorageRequests
+	}
+	maximumBytes := policy.MaxBackgroundStorageBytes
+	if maximumBytes <= 0 {
+		maximumBytes = defaultMaxBackgroundStorageBytes
+	}
+	return &resourceBudget{maxRequests: maximumRequests, maxBytes: maximumBytes, startedAt: time.Now().UTC()}
 }
 
 func withResourceBudget(ctx context.Context, budget *resourceBudget) context.Context {

@@ -300,6 +300,25 @@ func (m *memoryBackend) UploadPart(_ context.Context, _ string, uploadID string,
 	return fmt.Sprintf("etag-%d", partNumber), nil
 }
 
+func (m *memoryBackend) ListMultipartParts(_ context.Context, _ string, uploadID string) ([]multipartPart, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	upload := m.multipart[uploadID]
+	if upload == nil {
+		return nil, &upstreamError{StatusCode: http.StatusNotFound, Code: "NoSuchUpload", Message: "multipart upload not found"}
+	}
+	partNumbers := make([]int, 0, len(upload.parts))
+	for partNumber := range upload.parts {
+		partNumbers = append(partNumbers, partNumber)
+	}
+	sort.Ints(partNumbers)
+	parts := make([]multipartPart, 0, len(partNumbers))
+	for _, partNumber := range partNumbers {
+		parts = append(parts, multipartPart{PartNumber: partNumber, ETag: fmt.Sprintf("etag-%d", partNumber), Size: int64(len(upload.parts[partNumber]))})
+	}
+	return parts, nil
+}
+
 func (m *memoryBackend) CompleteMultipart(_ context.Context, _ string, uploadID string, parts []s3CompletedPart) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -332,12 +351,21 @@ func testApplication(t *testing.T) (*application, *memoryBackend, *memoryBackend
 		"tenant/a//./../b\\c":           "opaque",
 	})
 	makeInstance := func(id string, backend *memoryBackend, root string, permissions ...string) *storageInstance {
-		cfg := bucketConfig{ID: id, Name: id, Provider: "s3", Bucket: id + "-bucket", Region: "test", RootPrefix: root, PermissionsDefined: true, Permissions: permissions}
+		cfg := bucketConfig{
+			ID: id, Name: id, AuthID: "test-auth", Provider: "s3", Bucket: id + "-bucket", Region: "test",
+			RootPrefix: root, PermissionsDefined: true, Permissions: permissions,
+		}
 		return &storageInstance{cfg: cfg, backend: backend, caps: initialCapabilities(cfg)}
 	}
 	publicFS := fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok"), Mode: fs.FileMode(0o444)}}
 	app := &application{
-		config: appConfig{DataDir: t.TempDir()},
+		config: appConfig{JobHistoryLimit: 10, Runtime: defaultRuntimePolicy()},
+		authentications: map[string]*sharedAuthentication{
+			"test-auth": {
+				cfg:     authConfig{ID: "test-auth", Provider: "s3", Mode: "access_key"},
+				s3Creds: s3Credentials{AccessKeyID: "test-key", SecretAccessKey: "stable-test-secret"},
+			},
+		},
 		instances: map[string]*storageInstance{
 			"readonly": makeInstance("readonly", readOnly, "", permissionRead),
 			"rw":       makeInstance("rw", readWrite, "tenant/", permissionRead, permissionWrite, permissionDelete),
@@ -346,15 +374,16 @@ func testApplication(t *testing.T) (*application, *memoryBackend, *memoryBackend
 		publicFS: publicFS,
 	}
 	var err error
-	app.jobs, err = newJobManager(app, app.config.DataDir, 100, true)
+	app.jobs, err = newJobManager(app, app.config.JobHistoryLimit)
 	if err != nil {
 		t.Fatal(err)
 	}
-	app.uploads, err = newUploadManager(app, app.config.DataDir, true)
+	app.uploads, err = newUploadManager(app)
 	if err != nil {
 		app.jobs.close()
 		t.Fatal(err)
 	}
+	app.sqlite = newSQLiteSessionManager(app)
 	t.Cleanup(app.close)
 	return app, readOnly, readWrite
 }
@@ -922,7 +951,7 @@ func TestApplicationReusesAuthenticationAcrossBuckets(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	defer server.Close()
 	cfg, err := decodeConfig(`
-server { state_mode = "ephemeral" }
+server {}
 
 auth "shared" {
   provider = "s3"

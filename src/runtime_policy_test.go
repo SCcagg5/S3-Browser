@@ -1,38 +1,38 @@
 package main
 
 import (
-	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
-func TestDefaultConfigurationIsEphemeralAndDoesNotCreateState(t *testing.T) {
+func TestDefaultRuntimeIsStatelessAndBounded(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	cfg, err := decodeConfig(minimalTestConfig("ephemeral"), filepath.Join(root, "config.hcl"), root)
+	cfg, err := decodeConfig(minimalTestConfig("stateless"), filepath.Join(root, "config.hcl"), root)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cfg.Runtime.AccessMode != accessModeInheritCredentials {
 		t.Fatalf("access mode = %q", cfg.Runtime.AccessMode)
 	}
-	if cfg.Runtime.StateMode != stateModeEphemeral || cfg.DataDir != "" {
-		t.Fatalf("state mode/data dir = %q / %q", cfg.Runtime.StateMode, cfg.DataDir)
+	if cfg.JobHistoryLimit != 10 {
+		t.Fatalf("job history limit = %d", cfg.JobHistoryLimit)
 	}
-	app, err := newApplication(cfg)
-	if err != nil {
-		t.Fatal(err)
+	if cfg.Runtime.MaxRangeCacheBytes != 8<<20 {
+		t.Fatalf("range cache = %d", cfg.Runtime.MaxRangeCacheBytes)
 	}
-	defer app.close()
-	if app.jobs == nil || app.jobs.dir != "" {
-		t.Fatalf("job manager persisted to %q", app.jobs.dir)
+	if cfg.Runtime.MaxConcurrentStorageRequests != 4 || cfg.Runtime.MaxConcurrentRequestsPerStore != 2 {
+		t.Fatalf("concurrency = %d / %d", cfg.Runtime.MaxConcurrentStorageRequests, cfg.Runtime.MaxConcurrentRequestsPerStore)
 	}
-	if app.uploads == nil || app.uploads.dir != "" {
-		t.Fatalf("upload manager persisted to %q", app.uploads.dir)
+}
+
+func TestJobAndUploadManagersAreMemoryOnly(t *testing.T) {
+	app, _, _ := testApplication(t)
+	if app.jobs == nil || app.uploads == nil {
+		t.Fatal("in-memory managers were not initialized")
 	}
-	if _, err := os.Stat(filepath.Join(root, ".s3-browser-data")); !os.IsNotExist(err) {
-		t.Fatalf("default startup created persistent state: %v", err)
+	if app.jobs.jobs == nil || app.uploads.uploads == nil {
+		t.Fatal("manager maps were not initialized")
 	}
 }
 
@@ -51,27 +51,6 @@ func TestForceReadOnlyIsAnAdministrativeCeiling(t *testing.T) {
 		}
 	}
 }
-
-func TestPersistentStateRequiresExplicitModeAndDirectory(t *testing.T) {
-	t.Parallel()
-	root := t.TempDir()
-	withoutMode := `server { data_dir = "./state" }
-` + minimalTestConfig("persistent")
-	if _, err := decodeConfig(withoutMode, filepath.Join(root, "config.hcl"), root); err == nil || !strings.Contains(err.Error(), "data_dir requires state_mode") {
-		t.Fatalf("unexpected error = %v", err)
-	}
-
-	withMode := `server { state_mode = "persistent" data_dir = "./state" }
-` + minimalTestConfig("persistent")
-	cfg, err := decodeConfig(withMode, filepath.Join(root, "config.hcl"), root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Runtime.StateMode != stateModePersistent || cfg.DataDir != filepath.Join(root, "state") {
-		t.Fatalf("state mode/data dir = %q / %q", cfg.Runtime.StateMode, cfg.DataDir)
-	}
-}
-
 func minimalTestConfig(id string) string {
 	return `
 auth "public" {

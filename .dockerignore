@@ -1,7 +1,5 @@
-# Local build outputs and runtime state.
+# Local build outputs.
 src/s3-browser
-.s3-browser-data/
-test/garage/volume/
 *.zip
 
 # Local credentials and developer overrides.
@@ -11,5 +9,6 @@ secrets/
 *.key
 service-account*.json
 
-# Repository metadata is not needed in image builds.
+# Repository metadata and workstation files are not needed in image builds.
 .git/
+.DS_Store

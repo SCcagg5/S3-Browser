@@ -89,16 +89,13 @@ func isHTTPOrigin(origin *url.URL) bool {
 
 func publicRuntimeInfo(policy runtimePolicy) map[string]any {
 	return map[string]any{
-		"ephemeral":              !policy.persistent(),
-		"browserPersistence":     policy.BrowserPersistence,
-		"forceReadOnly":          policy.forceReadOnly(),
-		"fullObjectFallback":     policy.AllowFullObjectFallback,
-		"sessionTTLSeconds":      policy.SessionTTLSeconds,
-		"maxStorageBytes":        policy.MaxStorageBytesPerRequest,
-		"maxStorageRequests":     policy.MaxStorageRequestsPerRequest,
-		"maxRangeCacheBytes":     policy.MaxRangeCacheBytes,
-		"maxTempBytesPerSession": policy.MaxTempBytesPerSession,
-		"maxArchiveEntries":      policy.MaxArchiveEntries,
+		"forceReadOnly":      policy.forceReadOnly(),
+		"fullObjectFallback": policy.AllowFullObjectFallback,
+		"sessionTTLSeconds":  policy.SessionTTLSeconds,
+		"maxStorageBytes":    policy.MaxStorageBytesPerRequest,
+		"maxStorageRequests": policy.MaxStorageRequestsPerRequest,
+		"maxRangeCacheBytes": policy.MaxRangeCacheBytes,
+		"maxArchiveEntries":  policy.MaxArchiveEntries,
 	}
 }
 

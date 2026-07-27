@@ -52,9 +52,16 @@ if [ "$USER_VALUE" != "65532:65532" ]; then
   exit 1
 fi
 
+VOLUMES_VALUE=$(docker image inspect --format '{{json .Config.Volumes}}' "$IMAGE")
+if [ "$VOLUMES_VALUE" != "null" ] && [ "$VOLUMES_VALUE" != "{}" ]; then
+  echo "scratch image must not declare writable application volumes, got $VOLUMES_VALUE" >&2
+  exit 1
+fi
+
 docker run \
   --detach \
   --name "$CONTAINER" \
+  --read-only \
   --volume "$ROOT/test/config.hcl:/config/config.hcl:ro" \
   "$IMAGE" >/dev/null
 
