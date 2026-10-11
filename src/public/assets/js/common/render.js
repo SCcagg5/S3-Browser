@@ -14,7 +14,6 @@
     'form', 'input', 'button', 'textarea', 'select', 'option', 'dialog', 'audio', 'video', 'source', 'track',
     'link', 'meta', 'base', 'svg', 'math'
   ]);
-  const xhtml = 'http://www.w3.org/1999/xhtml';
   const urlAttributes = new Set(['href', 'src', 'xlink:href', 'action', 'formaction', 'poster', 'background', 'cite']);
   // Names the page's own scripts and stylesheets rely on must never be settable from content (DOM clobbering,
   // lookalike dialogs): ids, names and classes are dropped, except the language class of a code block.
@@ -37,11 +36,11 @@
     while (walker.nextNode()) elements.push(walker.currentNode);
     for (const element of elements) {
       // Elements inside SVG or MathML report a lower-case tagName, so judge by localName and namespace: only
-      // plain HTML elements survive.
+      // HTML elements survive (SVG and MathML elements are not HTMLElement instances).
       const name = element.localName.toLowerCase();
       // GitHub-style task lists render a disabled checkbox. It is rebuilt from scratch so that nothing the
       // source controlled (name, value, form attributes, handlers) survives; every other input stays blocked.
-      if (name === 'input' && element.namespaceURI === xhtml && String(element.getAttribute('type') || '').toLowerCase() === 'checkbox' && element.parentElement && element.parentElement.localName === 'li') {
+      if (name === 'input' && element instanceof HTMLElement && String(element.getAttribute('type') || '').toLowerCase() === 'checkbox' && element.parentElement && element.parentElement.localName === 'li') {
         const checked = element.hasAttribute('checked');
         for (const attribute of Array.from(element.attributes)) element.removeAttribute(attribute.name);
         element.setAttribute('type', 'checkbox');
@@ -50,7 +49,7 @@
         if (checked) element.setAttribute('checked', '');
         continue;
       }
-      if (element.namespaceURI !== xhtml || blockedTags.has(name)) {
+      if (!(element instanceof HTMLElement) || blockedTags.has(name)) {
         element.remove();
         continue;
       }
