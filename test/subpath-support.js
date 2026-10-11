@@ -10,7 +10,7 @@ const vm = require('node:vm');
 const root = path.resolve(__dirname, '..');
 const read = relative => fs.readFileSync(path.join(root, relative), 'utf8');
 
-const index = read('src/public/index.html');
+const index = read('src/public/index.html') + read('src/frontend/app.template.html');
 const preview = read('src/public/preview.html');
 const runtime = read('src/public/assets/js/common/runtime.js');
 const api = read('src/public/assets/js/common/api.js');

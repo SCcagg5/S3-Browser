@@ -7,7 +7,7 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const read = relative => fs.readFileSync(path.join(root, relative), 'utf8');
 
-const index = read('src/public/index.html');
+const index = read('src/public/index.html') + read('src/frontend/app.template.html');
 const previewHTML = read('src/public/preview.html');
 const app = read('src/public/assets/js/app.js');
 const preview = read('src/public/assets/js/preview.js');
@@ -15,7 +15,7 @@ const api = read('src/public/assets/js/common/api.js');
 const actions = read('src/public/assets/js/common/actions.js');
 const downloads = read('src/public/assets/js/common/download-manager.js');
 const structured = read('src/public/assets/js/common/structured-viewers.js');
-const css = read('src/public/assets/css/interaction.css');
+const css = ['ui', 'preview', 'browser'].map(name => read(`src/public/assets/css/${name}.css`)).join('\n');
 
 // Download state is page-local and uses exact same-origin byte ranges.
 for (const html of [index, previewHTML]) assert.match(html, /assets\/js\/common\/download-manager\.js/);
@@ -61,9 +61,9 @@ assert.match(actions, /modal\?\.classList\.add\('bb-modal--details'\)/);
 assert.doesNotMatch(actions, /function verifyIntegrity\(/);
 assert.doesNotMatch(actions, /function inspectObject\(/);
 assert.doesNotMatch(actions, /bb-inspection/);
-assert.match(css, /\.bb-modal\.bb-modal--details\s*\{[^}]*900px/s);
+assert.match(css, /\.bb-modal\.bb-modal--details\s*\{[^}]*56\.25rem/s);
 assert.match(css, /\.bb-overlay\.bb-overlay--top-anchored\s*\{/);
-assert.match(css, /\.bb-details--file \.bb-details-body \{[^}]*height:\s*auto;[^}]*min-height:\s*0;[^}]*max-height:\s*min\(calc\(68vh \/ var\(--browser-ui-scale-active\)\), 680px\)/s);
+assert.match(css, /\.bb-details--file \.bb-details-body \{[^}]*height:\s*auto;[^}]*min-height:\s*0;[^}]*max-height:\s*min\(68vh, 42\.5rem\)/s);
 assert.match(css, /\.bb-details-tool-card\s*\{/);
 assert.match(css, /\.bb-details-tool-status\.is-success/);
 assert.match(css, /\.bb-details-tool-result\.is-previous/);

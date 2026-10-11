@@ -45,6 +45,12 @@ jobs:
             node --check "$file"
           done
 
+      - name: Precompiled template is current
+        working-directory: tools
+        run: |
+          npm ci --no-audit --no-fund
+          npm run check
+
       - name: Frontend smoke tests
         working-directory: .
         run: |
@@ -58,6 +64,7 @@ jobs:
           node test/sqlite-viewer.js
           node test/office-metadata.js
           node test/subpath-support.js
+          node test/design-system.js
 
       - name: Shell syntax
         working-directory: .
@@ -85,7 +92,7 @@ jobs:
             echo "runtime source must not write application state to the local filesystem" >&2
             exit 1
           fi
-          if find . -type f \( -iname '*.ttf' -o -iname '*.otf' -o -iname '*.woff' -o -iname '*.woff2' -o -iname '*.eot' \) | grep -q .; then
+          if find . -name node_modules -prune -o -type f \( -iname '*.ttf' -o -iname '*.otf' -o -iname '*.woff' -o -iname '*.woff2' -o -iname '*.eot' \) -print | grep -q .; then
             echo "font binaries must not be shipped" >&2
             exit 1
           fi

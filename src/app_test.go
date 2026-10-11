@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -394,11 +395,16 @@ func TestEmbeddedFrontendKeepsFlatOriginalStyleTable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	html := string(data)
+	// The object browser's markup lives in a template that is compiled ahead of time (tools/build-template.mjs).
+	template, err := os.ReadFile("frontend/app.template.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(data) + string(template)
 	for _, required := range []string{
 		"assets/css/icons.css",
 		"class=\"storage-switcher\"",
-		"icon=\"folder\"",
+		"mdi mdi-folder\"",
 	} {
 		if !strings.Contains(html, required) {
 			t.Fatalf("embedded index is missing %q", required)
@@ -805,6 +811,21 @@ func TestApplicationCSPAllowsOnlySameOriginEmbeddedPDFs(t *testing.T) {
 	}
 	if strings.Contains(policy, "object-src *") || strings.Contains(policy, "object-src https:") || strings.Contains(policy, "object-src 'self'") {
 		t.Fatalf("CSP is too broad: %q", policy)
+	}
+}
+
+// The browser page ships a precompiled template, so scripts never need eval-style evaluation.
+func TestApplicationCSPForbidsScriptEvaluation(t *testing.T) {
+	t.Parallel()
+	app, _, _ := testApplication(t)
+	recorder := httptest.NewRecorder()
+	app.routes().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/", nil))
+	policy := recorder.Header().Get("Content-Security-Policy")
+	if strings.Contains(policy, "unsafe-eval") || strings.Contains(policy, "unsafe-inline'; style") {
+		t.Fatalf("CSP allows script evaluation: %q", policy)
+	}
+	if !strings.Contains(policy, "script-src 'self';") {
+		t.Fatalf("CSP = %q, want script-src limited to the same origin", policy)
 	}
 }
 

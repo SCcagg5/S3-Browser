@@ -1542,7 +1542,7 @@ func (a *application) handleStorageFrontend(w http.ResponseWriter, r *http.Reque
 	}
 	relative := strings.TrimPrefix(r.URL.Path, "/-/")
 	if relative == "" {
-		http.NotFound(w, r)
+		a.notFoundPage(w, r)
 		return
 	}
 	trailingSlash := strings.HasSuffix(r.URL.Path, "/")
@@ -1574,7 +1574,7 @@ func (a *application) handleStorageFrontend(w http.ResponseWriter, r *http.Reque
 	legacyID := segments[0]
 	legacy, ok := a.instances[legacyID]
 	if !ok || legacy == nil {
-		http.NotFound(w, r)
+		a.notFoundPage(w, r)
 		return
 	}
 	escapedRelative := strings.TrimPrefix(r.URL.EscapedPath(), "/-/")
@@ -1609,6 +1609,29 @@ func frontendBaseHref(requestPath string) string {
 	return strings.Repeat("../", depth)
 }
 
+// notFoundPage answers a browser navigation to an unknown address with the styled 404 page, and every other
+// request (assets, API clients) with the plain "404 page not found".
+func (a *application) notFoundPage(w http.ResponseWriter, r *http.Request) {
+	notFoundPage(w, r, a.publicFS)
+}
+
+func notFoundPage(w http.ResponseWriter, r *http.Request, root fs.FS) {
+	if r.Method != http.MethodGet || !strings.Contains(r.Header.Get("Accept"), "text/html") {
+		http.NotFound(w, r)
+		return
+	}
+	data, err := fs.ReadFile(root, "404.html")
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	data = bytes.ReplaceAll(data, []byte(frontendBasePlaceholder), []byte(frontendBaseHref(r.URL.Path)))
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusNotFound)
+	_, _ = w.Write(data)
+}
+
 func serveEmbeddedFrontend(w http.ResponseWriter, r *http.Request, root fs.FS, requested, baseHref string) {
 	name := strings.TrimPrefix(requested, "/")
 	data, err := fs.ReadFile(root, name)
@@ -1619,9 +1642,8 @@ func serveEmbeddedFrontend(w http.ResponseWriter, r *http.Request, root fs.FS, r
 	if bytes.Contains(data, []byte(frontendBasePlaceholder)) {
 		data = bytes.ReplaceAll(data, []byte(frontendBasePlaceholder), []byte(baseHref))
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-cache")
-	http.ServeContent(w, r, path.Base(requested), time.Time{}, bytes.NewReader(data))
+	data = versionHTML(data, frontendVersion(root))
+	serveFrontendData(w, r, path.Base(requested), "text/html; charset=utf-8", "no-cache", data)
 }
 
 func secureStaticHandler(root fs.FS) http.Handler {
@@ -1652,38 +1674,33 @@ func secureStaticHandler(root fs.FS) http.Handler {
 
 func serveEmbeddedFile(w http.ResponseWriter, r *http.Request, root fs.FS, requested string) {
 	name := strings.TrimPrefix(requested, "/")
-	file, err := root.Open(name)
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	defer file.Close()
-	info, err := file.Stat()
+	info, err := fs.Stat(root, name)
 	if err != nil || info.IsDir() {
-		http.NotFound(w, r)
+		notFoundPage(w, r, root)
 		return
 	}
-	extension := strings.ToLower(path.Ext(requested))
-	if extension == ".mjs" {
-		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-	} else if contentType := mime.TypeByExtension(extension); contentType != "" {
-		w.Header().Set("Content-Type", contentType)
-	}
-	if strings.HasPrefix(requested, "/assets/") {
-		w.Header().Set("Cache-Control", "public, max-age=3600")
-	} else {
-		w.Header().Set("Cache-Control", "no-cache")
-	}
-	if seeker, ok := file.(io.ReadSeeker); ok {
-		http.ServeContent(w, r, info.Name(), time.Time{}, seeker)
-		return
-	}
-	data, err := io.ReadAll(file)
+	data, err := fs.ReadFile(root, name)
 	if err != nil {
 		http.Error(w, "read embedded file", http.StatusInternalServerError)
 		return
 	}
-	http.ServeContent(w, r, info.Name(), time.Time{}, bytes.NewReader(data))
+	extension := strings.ToLower(path.Ext(requested))
+	contentType := mime.TypeByExtension(extension)
+	if extension == ".mjs" {
+		contentType = "text/javascript; charset=utf-8"
+	}
+	version := frontendVersion(root)
+	if extension == ".css" {
+		data = versionCSS(data, version)
+	}
+	// Vendored libraries live under a versioned path, so their bytes never change for a given URL. First-party
+	// files are cacheable for a year when the request carries the fingerprint of this build (the pages add it to
+	// every URL); without it they are revalidated with a content ETag, so a 304 is the worst case.
+	cacheControl := "no-cache"
+	if strings.HasPrefix(requested, "/assets/vendor/") || r.URL.Query().Get("v") == version {
+		cacheControl = "public, max-age=31536000, immutable"
+	}
+	serveFrontendData(w, r, info.Name(), contentType, cacheControl, data)
 }
 
 func securityHeadersMiddleware(next http.Handler) http.Handler {
@@ -1694,7 +1711,7 @@ func securityHeadersMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
 		w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
 		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; base-uri 'self'; connect-src 'self'; font-src 'self'; frame-ancestors 'self'; img-src 'self' data: blob:; media-src 'self' blob:; object-src 'none'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; base-uri 'self'; connect-src 'self'; font-src 'self'; frame-ancestors 'self'; img-src 'self' data: blob:; media-src 'self' blob:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:")
 		if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/s3" {
 			w.Header().Set("Cache-Control", "private, no-store")
 		}

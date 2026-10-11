@@ -10,7 +10,7 @@ const read = relative => fs.readFileSync(path.join(root, relative), 'utf8');
 const viewer = read('src/public/assets/js/common/json-viewer.js');
 const api = read('src/public/assets/js/common/api.js');
 const render = read('src/public/assets/js/common/render.js');
-const css = read('src/public/assets/css/style.css');
+const css = read('src/public/assets/css/preview.css');
 const app = read('src/app.go');
 
 assert.match(viewer, /createModeButton\('raw', 'Raw'/);
@@ -28,7 +28,7 @@ assert.match(viewer, /Lines \$\{lineStart\.toLocaleString\(\)\}–\$\{lineEnd\.t
 assert.match(viewer, /json-active-pager/);
 assert.match(viewer, /Count lines and pages/);
 assert.match(viewer, /view\.summaryState === 'loading'/);
-assert.match(viewer, /countButton\.hidden = activeMode === 'tree' \|\| view\.summaryState === 'ready'/);
+assert.match(viewer, /const hide = activeMode === 'tree' \|\| view\.summaryState === 'ready'/);
 assert.doesNotMatch(viewer, /Totals ready/);
 assert.match(viewer, /element\$\{numeric === 1 \? '' : 's'\}/);
 assert.match(viewer, /initialPayload: payload\.node\?\.container \? payload : null/);

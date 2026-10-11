@@ -7,7 +7,7 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const read = relative => fs.readFileSync(path.join(root, relative), 'utf8');
 
-const index = read('src/public/index.html');
+const index = read('src/public/index.html') + read('src/frontend/app.template.html');
 const previewHTML = read('src/public/preview.html');
 const app = read('src/public/assets/js/app.js');
 const preview = read('src/public/assets/js/preview.js');
@@ -17,14 +17,18 @@ const menu = read('src/public/assets/js/common/menu.js');
 const tabular = read('src/public/assets/js/common/tabular.js');
 const iconsCSS = read('src/public/assets/css/icons.css');
 const tokensCSS = read('src/public/assets/css/tokens.css');
-const componentsCSS = read('src/public/assets/css/components.css');
-const dataGridCSS = read('src/public/assets/css/data-grid.css');
-const interactionCSS = read('src/public/assets/css/interaction.css');
-const styleCSS = read('src/public/assets/css/style.css');
-const uiCSS = read('src/public/assets/css/ui.css');
+const cssRead = name => read(`src/public/assets/css/${name}.css`);
+// Each stylesheet is asserted on its own so a contract cannot be satisfied by a different layer.
+const cssBase = cssRead('base');
+const cssUi = cssRead('ui');
+const cssTreemap = cssRead('treemap');
+const cssBrowser = cssRead('browser');
+const cssPreview = cssRead('preview');
+const cssMarkdown = cssRead('markdown');
+const cssSyntax = cssRead('syntax');
+const cssA11y = cssRead('a11y');
+const appCSS = [cssBase, cssUi, cssTreemap, cssBrowser, cssPreview, cssMarkdown, cssSyntax, cssA11y].join('\n');
 const uiJS = read('src/public/assets/js/common/ui.js');
-const treemapCSS = read('src/public/assets/css/treemap.css');
-const viewersCSS = read('src/public/assets/css/viewers.css');
 
 // Every statically referenced MDI icon except the CSS-ring loader must have a local SVG mask.
 const iconSources = [];
@@ -66,7 +70,7 @@ const initialShellIcons = [
   'chevron-down'
 ];
 for (const icon of initialShellIcons) {
-  assert.ok(index.includes(`<link rel="preload" as="image" type="image/svg+xml" href="assets/icons/mdi/${icon}.svg" fetchpriority="high" data-bb-initial-icon />`), `missing initial icon preload: ${icon}`);
+  assert.ok(index.includes(`<link rel="preload" as="image" type="image/svg+xml" crossorigin="anonymous" href="assets/icons/mdi/${icon}.svg" fetchpriority="high" data-bb-initial-icon />`), `missing initial icon preload: ${icon}`);
 }
 assert.match(app, /function preloadInitialShellIcons\(\)/);
 assert.match(app, /document\.querySelectorAll\('link\[data-bb-initial-icon\]'\)/);
@@ -77,43 +81,39 @@ assert.doesNotMatch(app, /app\.use\(Buefy\.default[^;]+;\s*app\.mount\('#root'\)
 for (const source of [index, previewHTML, app, preview, actions]) {
   assert.doesNotMatch(source, /mdi-chevron-down/, 'downward disclosures must not use an icon element');
 }
-assert.match(interactionCSS, /\.select:not\(\.is-multiple\):not\(\.is-loading\)::after,\s*\n\.has-bb-chevron::after\s*\{/);
-assert.match(interactionCSS, /chevron-down\.svg/);
-assert.equal((interactionCSS.match(/\.has-bb-chevron::after/g) || []).length, 3);
+assert.match(cssUi, /\.select:not\(\.is-multiple\):not\(\.is-loading\)::after,\s*\n\.has-bb-chevron::after\s*\{/);
+assert.match(cssPreview, /chevron-down\.svg/);
+assert.ok((appCSS.match(/\.has-bb-chevron::after/g) || []).length >= 1);
 assert.match(index, /storage-switcher-trigger has-bb-chevron/);
-assert.match(index, /class="has-bb-chevron" icon-pack="mdi" icon-left="cogs"/);
-assert.match(index, /class="has-bb-chevron" icon-pack="mdi" icon-left="plus"/);
+assert.match(index, /class="btn has-bb-chevron bb-menu-trigger"[^>]*>\s*<i class="mdi mdi-cogs"/);
+assert.match(index, /class="btn btn-primary has-bb-chevron bb-menu-trigger"[^>]*>\s*<i class="mdi mdi-plus"/);
 
 // The modal close button keeps its dedicated contract and is excluded from shared controls.
-assert.match(componentsCSS, /\.bb-btn:not\(\.bb-modal-x\)/);
-assert.match(uiCSS, /\.bb-modal-html > \.bb-modal-x\s*\{[^}]*position:\s*absolute[^}]*top:\s*-\.55rem[^}]*right:\s*-\.55rem[^}]*width:\s*2\.25rem[^}]*height:\s*2\.25rem/s);
-assert.match(uiCSS, /\.bb-modal-x:hover\s*\{[^}]*color:\s*red[^}]*background-color:\s*transparent !important/s);
-const interactionRules = interactionCSS.replace(/\/\*[\s\S]*?\*\//g, '');
-assert.doesNotMatch(interactionRules, /bb-modal-x/);
+assert.match(cssUi, /\.btn\s*\{[^}]*min-height:\s*var\(--control-height-md\)/s);
+assert.doesNotMatch(appCSS, /\.bb-btn|\.icon-btn|\.data-tool-button/);
+assert.match(cssUi, /\.bb-modal-html > \.bb-modal-x\s*\{[^}]*position:\s*absolute[^}]*top:\s*-\.55rem[^}]*right:\s*-\.55rem[^}]*width:\s*2\.25rem[^}]*height:\s*2\.25rem/s);
+assert.match(cssUi, /\.bb-modal-x:hover:not\(:disabled\)\s*\{[^}]*color:\s*var\(--color-danger\)[^}]*background:\s*transparent/s);
 
 // Context-menu geometry is the single dropdown surface contract.
-assert.match(interactionCSS, /\.bb-menu-popover,\s*\n\.dropdown-content,\s*\n\.breadcrumb-overflow-popover\s*\{/);
-assert.match(interactionCSS, /\.bb-menu-item,\s*\n\.dropdown-item,/);
-assert.match(interactionCSS, /min-height:\s*34px/);
-assert.match(interactionCSS, /border-radius:\s*6px/);
-assert.match(interactionCSS, /background:\s*#f3f4f6/);
+assert.match(cssUi, /\.bb-menu-item,\s*\.breadcrumb-overflow-item\s*\{[^}]*min-height:\s*var\(--control-height-md\)/s);
+assert.match(cssBrowser, /border-radius:\s*var\(--radius-sm\)/);
+assert.match(cssBrowser, /background:\s*var\(--color-bg-hover\)/);
 
 // One original sheet-tab visual is reused everywhere; no second DataGrid override.
-assert.match(styleCSS, /\.spreadsheet-tab\s*\{[^}]*height:\s*34px[^}]*background:\s*#f8fafc[^}]*border-radius:\s*7px 7px 0 0/s);
-assert.match(styleCSS, /\.spreadsheet-tab\.is-active\s*\{[^}]*background:\s*#fff[^}]*box-shadow:\s*inset 0 -2px 0 var\(--primary-color\)/s);
-assert.doesNotMatch(dataGridCSS, /\.spreadsheet-tab\s*\{/);
-assert.doesNotMatch(interactionCSS, /\.spreadsheet-tab\s*\{/);
-assert.doesNotMatch(uiCSS, /\.folder-insights-tabs \.spreadsheet-tab/);
+assert.match(cssUi, /\.spreadsheet-tab\s*\{[^}]*height:\s*var\(--control-height-sm\)[^}]*background:\s*var\(--color-bg-subtle\)[^}]*border-radius:\s*var\(--radius-md\) var\(--radius-md\) 0 0/s);
+assert.match(cssUi, /\.spreadsheet-tab\.is-active\s*\{[^}]*background:\s*var\(--color-bg-panel\)[^}]*box-shadow:\s*inset 0 -2px 0 var\(--color-primary\)/s);
+assert.doesNotMatch(cssRead('browser'), /\.spreadsheet-tab\s*\{/);
+assert.doesNotMatch(appCSS, /\.folder-insights-tabs \.spreadsheet-tab/);
 
 // Permission results stay compact and neutral while unknown.
-assert.match(runtime, /default: return 'On use'/);
-assert.match(app, /stateName === 'denied' \? 'Denied' : 'On use'/);
+assert.match(runtime, /default: return 'Checked on use'/);
+assert.match(app, /stateName === 'denied' \? 'Denied' : 'Checked on use'/);
 assert.doesNotMatch(app, /Available, verified when used/);
-assert.match(interactionCSS, /\.bb-permission-result\s*\{[^}]*white-space:\s*nowrap/s);
-assert.match(interactionCSS, /\.bb-permission-result\.is-unknown\s*\{[^}]*background:\s*#f2f4f7[^}]*border-color:\s*#d0d5dd/s);
-assert.match(interactionCSS, /\.bb-permission-summary-icon\.is-allowed\s*\{[^}]*color:\s*var\(--primary-color/);
-assert.doesNotMatch(styleCSS, /\.bb-permission-summary(?:-row|-icon|-copy)?\s*\{/);
-assert.doesNotMatch(componentsCSS, /\.bb-permission-summary(?:-row|-icon|-copy)?/);
+assert.match(cssBrowser, /\.bb-permission-result\s*\{[^}]*white-space:\s*nowrap/s);
+assert.match(cssBrowser, /\.bb-permission-result\.is-unknown\s*\{[^}]*background:\s*var\(--color-bg-inset\)[^}]*border-color:\s*var\(--color-border-strong\)/s);
+assert.match(cssBrowser, /\.bb-permission-summary-icon\.is-allowed\s*\{[^}]*color:\s*var\(--color-primary/);
+assert.doesNotMatch(cssRead('preview'), /\.bb-permission-summary(?:-row|-icon|-copy)?\s*\{/);
+assert.doesNotMatch(cssRead('ui'), /\.bb-permission-summary(?:-row|-icon|-copy)?/);
 
 // The 1% threshold is global to the selected scope and the layout is squarified.
 assert.match(actions, /const tree = stats\?\.treemap \|\| null/);
@@ -135,20 +135,19 @@ assert.doesNotMatch(actions, /function treemapColorIndex\(node\)/);
 assert.match(actions, /function statsTypeColor\(type\)/);
 assert.match(actions, /updateTreemapHover/);
 assert.doesNotMatch(actions, /updateTreemapFocus/);
-assert.doesNotMatch(uiCSS, /\.folder-treemap/);
-assert.doesNotMatch(interactionCSS, /\.folder-treemap/);
-assert.match(treemapCSS, /background:\s*none/);
-assert.match(treemapCSS, /\.folder-treemap\s*\{[^}]*background:\s*none[^}]*border:\s*0[^}]*border-radius:\s*0/s);
-assert.match(treemapCSS, /\.folder-treemap-node\s*\{[^}]*border-radius:\s*2px/s);
-assert.match(treemapCSS, /\.folder-treemap-node\.is-folder\s*\{[^}]*background:\s*#f8fafc[^}]*border:\s*1px solid #c7d0dc[^}]*border-radius:\s*2px/s);
-assert.match(treemapCSS, /\.folder-treemap-tooltip\s*\{[^}]*pointer-events:\s*none/s);
-assert.match(treemapCSS, /\.folder-treemap-tooltip\s*\{[^}]*color:\s*var\(--color-text[^}]*background:\s*var\(--color-bg-panel[^}]*border:\s*1px solid var\(--color-border/s);
-assert.match(treemapCSS, /\.folder-treemap-node\.is-folder\.is-branch > \.folder-treemap-label\s*\{[^}]*grid-template-rows:\s*12px 10px[^}]*gap:\s*0/s);
-assert.match(treemapCSS, /\.folder-treemap-node\.is-hovered/);
-assert.doesNotMatch(treemapCSS, /z-index:\s*1200/);
-assert.doesNotMatch(treemapCSS, /\.folder-treemap-focus/);
-assert.match(treemapCSS, /\.folder-treemap-label\s*\{[^}]*justify-content:\s*flex-start/s);
-assert.doesNotMatch(treemapCSS, /justify-content:\s*center/);
+assert.doesNotMatch(cssRead('ui') + cssRead('browser') + cssRead('preview'), /\.folder-treemap/);
+assert.match(cssTreemap, /background:\s*none/);
+assert.match(cssTreemap, /\.folder-treemap\s*\{[^}]*background:\s*none[^}]*border:\s*0[^}]*border-radius:\s*0/s);
+assert.match(cssTreemap, /\.folder-treemap-node\s*\{[^}]*border-radius:\s*2px/s);
+assert.match(cssTreemap, /\.folder-treemap-node\.is-folder\s*\{[^}]*background:\s*var\(--color-bg-subtle\)[^}]*border:\s*1px solid var\(--color-border-strong\)[^}]*border-radius:\s*2px/s);
+assert.match(cssTreemap, /\.folder-treemap-tooltip\s*\{[^}]*pointer-events:\s*none/s);
+assert.match(cssTreemap, /\.folder-treemap-tooltip\s*\{[^}]*color:\s*var\(--color-text[^}]*background:\s*var\(--color-bg-panel[^}]*border:\s*1px solid var\(--color-border/s);
+assert.match(cssTreemap, /\.folder-treemap-node\.is-folder\.is-branch > \.folder-treemap-label\s*\{[^}]*grid-template-rows:\s*\.75rem \.625rem[^}]*gap:\s*0/s);
+assert.match(cssTreemap, /\.folder-treemap-node\.is-hovered/);
+assert.doesNotMatch(cssTreemap, /z-index:\s*1200/);
+assert.doesNotMatch(cssTreemap, /\.folder-treemap-focus/);
+assert.match(cssTreemap, /\.folder-treemap-label\s*\{[^}]*justify-content:\s*flex-start/s);
+assert.doesNotMatch(cssTreemap, /justify-content:\s*center/);
 assert.doesNotMatch(actions, /has-no-header/);
 assert.match(actions, /const labelName = node\.name \|\| \(kind === 'folder' \? 'Folder' : 'Unnamed'\)/);
 assert.match(actions, /const canExpandFolder = isFolder[\s\S]*drawWidth >= 80[\s\S]*drawHeight >= 84/);
@@ -170,53 +169,42 @@ assert.doesNotMatch(preview, /root: wrapper/);
 assert.match(preview, /wrapper\.dataset\.renderer = 'pdfjs-canvas'/);
 assert.doesNotMatch(preview, /browser-fallback/);
 assert.match(preview, /searchParams\.set\('range_only', '1'\)/);
-assert.doesNotMatch(preview + viewersCSS, /pdf-custom-status|Still loading page/);
-assert.match(viewersCSS, /\.pdf-custom-preview:fullscreen\s*\{[^}]*height:\s*calc\(100vh \/ var\(--browser-ui-scale-active\)\)/s);
-assert.match(viewersCSS, /\.viewer\[data-preview-type="word"\] > \.bb-menu-constrain\s*\{[^}]*max-width:\s*var\(--browser-container-max\)/s);
-assert.match(viewersCSS, /\.word-document\s*\{[^}]*width:\s*100%[^}]*max-width:\s*100%/s);
-assert.match(interactionCSS, /\.mdi-loading::before[\s\S]*border-top-color:\s*currentColor[\s\S]*animation:\s*bb-loader-spin/s);
-assert.match(interactionCSS, /modified-column-header[\s\S]*navigation-meta-right-pad/s);
-assert.match(interactionCSS, /--navigation-size-column:\s*clamp/);
-assert.match(interactionCSS, /--navigation-modified-column:\s*clamp/);
-assert.match(interactionCSS, /\.navigation-sort-icon \.mdi\s*\{[^}]*translateY\(1\.5px\)/s);
-assert.match(interactionCSS, /\.modified-time-toggle\s*\{[^}]*background:\s*transparent[^}]*border:\s*0[^}]*border-radius:\s*0/s);
-assert.match(interactionCSS, /\.modified-time-toggle:hover,[\s\S]*background:\s*transparent[\s\S]*border:\s*0/s);
-assert.match(tokensCSS, /--browser-ui-scale:\s*\.8/);
-assert.match(tokensCSS, /--browser-ui-scale-active:\s*1/);
-assert.match(tokensCSS, /:root\s*\{[^}]*--browser-ui-scale-active:\s*var\(--browser-ui-scale\)/s);
-assert.match(tokensCSS, /body\s*\{[^}]*zoom:\s*var\(--browser-ui-scale-active\)/s);
+assert.doesNotMatch(preview + cssPreview, /pdf-custom-status|Still loading page/);
+assert.match(cssPreview, /\.pdf-custom-preview:fullscreen\s*\{[^}]*height:\s*100vh/s);
+assert.match(cssPreview, /\.viewer\[data-preview-type="word"\] > \.bb-menu-constrain\s*\{[^}]*max-width:\s*var\(--container-max\)/s);
+assert.match(cssPreview, /\.word-document\s*\{[^}]*width:\s*100%[^}]*max-width:\s*100%/s);
+assert.match(iconsCSS, /\.mdi-loading::before[\s\S]*border-top-color:\s*currentColor[\s\S]*animation:\s*bb-spin/s);
+assert.match(cssBrowser, /\.modified-column-header[\s\S]*var\(--col-modified\)/s);
+assert.match(cssBrowser, /--col-size:/);
+assert.match(cssBrowser, /--col-modified:/);
+assert.match(cssBrowser, /\.navigation-sort-icon\s*\{[^}]*width:\s*1rem[^}]*height:\s*1rem/s);
+assert.match(cssBrowser, /\.modified-time-toggle\s*\{[^}]*background:\s*transparent[^}]*border:\s*0/s);
+assert.match(cssBrowser, /\.modified-time-toggle:hover,\s*\.modified-time-toggle\.is-absolute\s*\{[^}]*color:\s*var\(--color-primary\)/s);
+// The interface renders at true size: no body zoom and no viewport compensation.
+assert.doesNotMatch(tokensCSS, /zoom\s*:/);
 assert.doesNotMatch(tokensCSS, /body:not\(\.preview-page\)/);
 assert.doesNotMatch(tokensCSS, /html \{ font-size:\s*80%/);
-for (const css of [styleCSS, uiCSS, viewersCSS, interactionCSS]) {
-  const uncompensated = css.replace(/calc\((?:\d+(?:\.\d+)?|\.\d+)(?:dvh|svh|lvh|vh|vw) \/ var\(--browser-ui-scale-active\)\)/g, '');
-  assert.doesNotMatch(uncompensated, /(?:^|[^a-z0-9.-])(?:\d+(?:\.\d+)?|\.\d+)(?:dvh|svh|lvh|vh|vw)\b/i);
+for (const css of [tokensCSS, appCSS]) {
+  assert.doesNotMatch(css, /--browser-ui-scale/);
+  assert.doesNotMatch(css, /(?:^|[;{\s])zoom\s*:/);
   assert.doesNotMatch(css, /\.calc\(/);
 }
-assert.match(runtime, /function interfaceScale\(\)/);
-assert.match(runtime, /function toLayoutPixels\(value\)/);
-assert.match(runtime, /function layoutRect\(target\)/);
-assert.match(runtime, /function layoutViewport\(\)/);
-assert.match(runtime, /BB\.viewport = \{/);
-assert.match(menu, /BB\.viewport\?\.rect\(icon\)/);
-assert.match(menu, /BB\.viewport\?\.toLayoutPixels\(anchorPoint\.x\)/);
-assert.match(app, /const viewport = BB\.viewport\?\.size\(\)/);
-assert.match(preview, /BB\.viewport\?\.rect\(bar\)/);
-assert.match(actions, /BB\.viewport\?\.rect\(map\)/);
-assert.match(tabular, /BB\.viewport\?\.toLayoutPixels\(event\.clientX\)/);
+assert.doesNotMatch(runtime, /BB\.viewport|interfaceScale|toLayoutPixels|layoutRect/);
+for (const source of [menu, app, preview, actions, tabular]) assert.doesNotMatch(source, /BB\.viewport/);
 assert.doesNotMatch(index, /<b-dropdown[^>]*append-to-body[^>]*>\s*<template #trigger>\s*<b-button[^>]*icon-left="cogs"/s);
 assert.doesNotMatch(index, /<b-dropdown[^>]*append-to-body[^>]*>\s*<template #trigger>\s*<b-button[^>]*icon-left="plus"/s);
-assert.match(interactionCSS, /\.modified-header-controls\s*\{[^}]*display:\s*grid[^}]*grid-template-columns:\s*1\.5rem minmax\(max-content, 1fr\)[^}]*column-gap:\s*\.5rem/s);
-assert.match(interactionCSS, /\.modified-time-toggle\s*\{[^}]*margin:\s*0[^}]*background:\s*transparent[^}]*border:\s*0/s);
+assert.match(cssBrowser, /\.modified-header-controls\s*\{[^}]*display:\s*flex[^}]*gap:\s*var\(--space-2\)/s);
+assert.match(cssBrowser, /\.modified-time-toggle\s*\{[^}]*padding:\s*0[^}]*background:\s*transparent[^}]*border:\s*0/s);
 assert.match(runtime, /function formatDateTimeUTC\(value\)/);
-assert.match(interactionCSS, /Final PDF viewport contract/);
-assert.match(interactionCSS, /height:\s*calc\(100dvh \/ var\(--browser-ui-scale-active\)\) !important/);
-assert.match(interactionCSS, /grid-template-rows:\s*auto minmax\(0, 1fr\) !important/);
+assert.match(cssPreview, /Final PDF viewport contract/);
+assert.match(cssPreview, /height:\s*100dvh/);
+assert.match(cssPreview, /grid-template-rows:\s*auto minmax\(0, 1fr\)/);
 assert.doesNotMatch(index, /label="Size" width=/);
 assert.doesNotMatch(index, /label="Last modified" width=/);
-assert.match(interactionCSS, /--navigation-modified-column:\s*clamp\(11\.75rem, calc\(15vw \/ var\(--browser-ui-scale-active\)\), 13\.25rem\)/);
-assert.match(interactionCSS, /\.modified-header-controls \.navigation-sort-button > span:first-child\s*\{[^}]*min-width:\s*max-content[^}]*overflow:\s*visible/s);
-assert.match(interactionCSS, /th\.modified-column-header \.th-wrap\s*\{[^}]*padding-right:\s*0 !important/s);
-assert.match(uiCSS, /\.bb-details-body > \.bb-details-section\s*\{[^}]*padding-bottom:/s);
+assert.match(cssBrowser, /--col-modified:\s*13rem/);
+assert.match(cssBrowser, /\.browser-card \.table thead th\s*\{[^}]*white-space:\s*nowrap/s);
+assert.doesNotMatch(index, /th-wrap/);
+assert.match(cssUi, /\.bb-details-body > \.bb-details-section\s*\{[^}]*padding-bottom:/s);
 assert.match(iconsCSS, /\.mdi-arrow-up\s*\{[^}]*arrow-up\.svg/);
 assert.match(iconsCSS, /\.mdi-arrow-down\s*\{[^}]*arrow-down\.svg/);
 assert.equal(fs.existsSync(path.join(root, 'src/public/assets/icons/mdi/arrow-up.svg')), true);
@@ -229,13 +217,13 @@ assert.match(preview, /fetch\(rangeURL,/);
 
 
 // Modal overlays sit below the old centered Insights position while sharing one top edge.
-assert.match(interactionCSS, /--bb-modal-top-offset:\s*clamp\(2rem, calc\(15vh \/ var\(--browser-ui-scale-active\)\), 11rem\)/);
-assert.match(interactionCSS, /padding:\s*var\(--bb-modal-top-offset\) 1rem 1rem/);
-assert.match(interactionCSS, /bb-modal--details,[\s\S]*bb-modal--insights/);
+assert.match(cssUi, /--bb-modal-top-offset:\s*clamp\(1\.5rem, 7vh, 5rem\)/);
+assert.match(cssUi, /padding:\s*var\(--bb-modal-top-offset\) var\(--space-4\) var\(--space-4\)/);
+assert.match(cssUi, /bb-modal--details,[\s\S]*bb-modal--insights/);
 
 // Opening any modal locks both scrolling elements, including nested overlays.
-assert.match(uiCSS, /html\.bb-no-scroll,[\s\S]*body\.bb-no-scroll\s*\{[^}]*overflow:\s*hidden !important[^}]*overscroll-behavior:\s*none[^}]*scrollbar-gutter:\s*auto !important/);
-assert.match(uiCSS, /\.bb-overlay\s*\{[^}]*overscroll-behavior:\s*contain/s);
+assert.match(cssUi, /html\.bb-no-scroll,[\s\S]*body\.bb-no-scroll\s*\{[^}]*overflow:\s*hidden !important[^}]*overscroll-behavior:\s*none[^}]*scrollbar-gutter:\s*auto !important/);
+assert.match(cssUi, /\.bb-overlay\s*\{[^}]*overscroll-behavior:\s*contain/s);
 assert.match(uiJS, /let scrollLockDepth = 0/);
 assert.match(uiJS, /document\.documentElement/);
 assert.match(uiJS, /root\.classList\.add\('bb-no-scroll'\)/);
@@ -243,17 +231,16 @@ assert.match(uiJS, /body\.classList\.add\('bb-no-scroll'\)/);
 assert.match(uiJS, /if \(scrollLockDepth > 0\) return/);
 assert.match(uiJS, /window\.scrollTo\(previous\.scrollX, previous\.scrollY\)/);
 assert.match(uiJS, /window\.innerWidth[\s\S]*root\.clientWidth/);
-assert.match(uiJS, /BB\.viewport\?\.toLayoutPixels/);
-assert.match(uiJS, /body\.style\.paddingRight = `\$\{computedBodyPaddingRight \+ layoutScrollbarWidth\}px`/);
+assert.doesNotMatch(uiJS, /BB\.viewport/);
+assert.match(uiJS, /body\.style\.paddingRight = `\$\{computedBodyPaddingRight \+ scrollbarWidth\}px`/);
 assert.match(uiJS, /root\.style\.scrollbarGutter = 'auto'/);
 assert.match(uiJS, /body\.style\.paddingRight = previous\?\.bodyPaddingRight \|\| ''/);
-assert.match(interactionCSS, /bb-overlay\.bb-overlay--top-anchored[\s\S]*overflow:\s*hidden[\s\S]*scrollbar-gutter:\s*auto/);
+assert.match(cssUi, /bb-overlay\.bb-overlay--top-anchored[\s\S]*overflow:\s*hidden[\s\S]*scrollbar-gutter:\s*auto/);
 
-// The final interaction layer is loaded after all other component CSS.
-for (const html of [index, previewHTML]) {
-  const interaction = html.indexOf('assets/css/interaction.css');
-  assert.ok(interaction > html.indexOf('assets/css/viewers.css'));
-  assert.ok(interaction > html.indexOf('assets/css/data-grid.css'));
-}
+// Each page loads its own layer last, after the shared layers.
+assert.ok(index.indexOf('assets/css/browser.css') > index.indexOf('assets/css/ui.css'));
+assert.ok(previewHTML.indexOf('assets/css/preview.css') > previewHTML.indexOf('assets/css/ui.css'));
+assert.doesNotMatch(index, /assets\/css\/(preview|viewers|style|interaction)\.css/);
+assert.doesNotMatch(previewHTML, /assets\/css\/(browser|treemap)\.css/);
 
 console.log(`UI normalization tests passed (${usedIcons.size} local icons checked)`);

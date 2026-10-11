@@ -1,3 +1,68 @@
+/*
+ * Reset and element defaults. Every colour comes from tokens.css.
+ */
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+html {
+  min-width: 300px; /* floor for tiny viewports; deliberately not rem so large text never forces sideways scrolling */
+  min-height: 100%;
+  overflow-y: auto;
+  font-size: 100%;
+  background-color: var(--color-bg-page);
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body, blockquote, dd, dl, dt, fieldset, figure, h1, h2, h3, h4, h5, h6, hr, iframe, legend, li, ol, p, pre, textarea, ul {
+  margin: 0;
+  padding: 0;
+}
+
+h1, h2, h3, h4, h5, h6 { font-size: 100%; font-weight: 400; }
+button, input, select, textarea { margin: 0; }
+img, video { height: auto; max-width: 100%; }
+table { border-collapse: collapse; border-spacing: 0; }
+td, th { padding: 0; vertical-align: top; text-align: inherit; }
+article, aside, figure, footer, header, hgroup, main, section { display: block; }
+input[type="checkbox"], input[type="radio"] { vertical-align: baseline; }
+/* The hidden attribute must win over any component display rule. */
+[v-cloak], [hidden], .is-hidden, .is-hidden-input { display: none !important; }
+small { font-size: max(.875em, var(--font-size-xs)); }
+span { font-style: inherit; font-weight: inherit; }
+strong { color: var(--color-text-strong); font-weight: 700; }
+th { color: var(--color-text-strong); }
+a { color: var(--color-primary); cursor: pointer; text-decoration: none; }
+/* Inline links are underlined: colour alone is not enough to tell them from the text around them. */
+a:not([class]) { text-decoration: underline; text-underline-offset: .18em; }
+
+code {
+  padding: .25em .5em;
+  color: var(--color-danger);
+  background-color: var(--color-bg-inset);
+  font-size: max(.875em, var(--font-size-xs));
+  font-weight: 400;
+}
+
+pre {
+  padding: var(--space-5) var(--space-6);
+  overflow-x: auto;
+  color: var(--color-text);
+  background-color: var(--color-bg-inset);
+  font-size: max(.875em, var(--font-size-xs));
+  white-space: pre;
+  word-wrap: normal;
+  -webkit-overflow-scrolling: touch;
+}
+
+pre code {
+  padding: 0;
+  color: currentColor;
+  background-color: transparent;
+  font-size: 1em;
+}
+
 html,
 body,
 button,
@@ -8,6 +73,9 @@ textarea {
 }
 
 body {
+  width: 100%;
+  min-height: 100vh;
+  margin: 0;
   color: var(--color-text);
   background: var(--color-bg-page);
   font-size: var(--font-size-md);
@@ -24,7 +92,7 @@ samp,
 .bb-pre,
 .code-source,
 .code-line-numbers {
-  font-family: var(--font-mono) !important;
+  font-family: var(--font-mono);
 }
 
 button,
@@ -36,28 +104,7 @@ textarea {
   -webkit-tap-highlight-color: transparent;
 }
 
-button:focus-visible,
-[role="button"]:focus-visible,
-a:focus-visible,
-input:focus-visible,
-select:focus-visible,
-textarea:focus-visible {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
-}
-
 ::selection {
   color: var(--color-text);
-  background: #cfe7ff;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    scroll-behavior: auto !important;
-    animation-duration: .01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: .01ms !important;
-  }
+  background: var(--color-selection);
 }

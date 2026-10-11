@@ -7,12 +7,19 @@
   const MERMAID_DISPLAY_MAX_HEIGHT = 500;
   let mermaidInitialized = false;
   let mermaidSequence = 0;
+  // Untrusted Markdown may contain raw HTML. Anything that can run code, load another document, restyle the page
+  // or impersonate application UI is removed; what is left is ordinary content.
   const blockedTags = new Set([
-    'SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'FRAME', 'FRAMESET',
-    'FORM', 'INPUT', 'BUTTON', 'TEXTAREA', 'SELECT', 'OPTION',
-    'LINK', 'META', 'BASE', 'SVG', 'MATH'
+    'script', 'style', 'iframe', 'frame', 'frameset', 'object', 'embed', 'applet', 'noscript', 'template', 'portal',
+    'form', 'input', 'button', 'textarea', 'select', 'option', 'dialog', 'audio', 'video', 'source', 'track',
+    'link', 'meta', 'base', 'svg', 'math'
   ]);
-  const urlAttributes = new Set(['href', 'src', 'xlink:href', 'action', 'formaction', 'poster']);
+  const xhtml = 'http://www.w3.org/1999/xhtml';
+  const urlAttributes = new Set(['href', 'src', 'xlink:href', 'action', 'formaction', 'poster', 'background', 'cite']);
+  // Names the page's own scripts and stylesheets rely on must never be settable from content (DOM clobbering,
+  // lookalike dialogs): ids, names and classes are dropped, except the language class of a code block.
+  const droppedAttributes = new Set(['style', 'srcdoc', 'srcset', 'id', 'name', 'ping', 'form', 'slot', 'is', 'popover']);
+  const codeLanguageClass = /^(?:language|lang)-[\w+#.-]+$/;
 
   function safeURL(value, allowDataImages = false) {
     const compact = String(value || '').trim().replace(/[\u0000-\u001f\u007f\s]+/g, '');
@@ -29,19 +36,36 @@
     const elements = [];
     while (walker.nextNode()) elements.push(walker.currentNode);
     for (const element of elements) {
-      if (blockedTags.has(element.tagName)) {
+      // Elements inside SVG or MathML report a lower-case tagName, so judge by localName and namespace: only
+      // plain HTML elements survive.
+      const name = element.localName.toLowerCase();
+      // GitHub-style task lists render a disabled checkbox. It is rebuilt from scratch so that nothing the
+      // source controlled (name, value, form attributes, handlers) survives; every other input stays blocked.
+      if (name === 'input' && element.namespaceURI === xhtml && String(element.getAttribute('type') || '').toLowerCase() === 'checkbox' && element.parentElement && element.parentElement.localName === 'li') {
+        const checked = element.hasAttribute('checked');
+        for (const attribute of Array.from(element.attributes)) element.removeAttribute(attribute.name);
+        element.setAttribute('type', 'checkbox');
+        element.setAttribute('disabled', '');
+        element.setAttribute('aria-label', checked ? 'Completed task' : 'Open task');
+        if (checked) element.setAttribute('checked', '');
+        continue;
+      }
+      if (element.namespaceURI !== xhtml || blockedTags.has(name)) {
         element.remove();
         continue;
       }
       for (const attribute of Array.from(element.attributes)) {
-        const name = attribute.name.toLowerCase();
-        if (name.startsWith('on') || name === 'style' || name === 'srcdoc') {
+        const attributeName = attribute.name.toLowerCase();
+        if (attributeName.startsWith('on') || droppedAttributes.has(attributeName)) {
           element.removeAttribute(attribute.name);
-        } else if (urlAttributes.has(name) && !safeURL(attribute.value, options.allowDataImages === true && element.tagName === 'IMG')) {
+        } else if (attributeName === 'class') {
+          const keep = name === 'code' && attribute.value.split(/\s+/).filter(Boolean).every(token => codeLanguageClass.test(token));
+          if (!keep) element.removeAttribute(attribute.name);
+        } else if (urlAttributes.has(attributeName) && !safeURL(attribute.value, options.allowDataImages === true && name === 'img')) {
           element.removeAttribute(attribute.name);
         }
       }
-      if (element.tagName === 'A' && element.getAttribute('target') === '_blank') {
+      if (name === 'a' && element.getAttribute('target') === '_blank') {
         element.setAttribute('rel', 'noopener noreferrer');
       }
     }
@@ -264,17 +288,18 @@
 
   function loadMermaid() {
     if (window.mermaid) return Promise.resolve(window.mermaid);
-    return Promise.reject(new Error('The optional Mermaid renderer is not embedded in this build. The diagram source remains available below.'));
+    return Promise.reject(Object.assign(new Error('Diagrams are not rendered in this build. The source is shown below.'), { unavailable: true }));
   }
 
   function renderMermaidFailure(figure, source, error) {
-    figure.classList.add('is-error');
+    // A renderer that simply is not part of this build is a limitation, not an error: keep it neutral.
+    figure.classList.add(error?.unavailable ? 'is-unavailable' : 'is-error');
     const message = document.createElement('div');
     message.className = 'mermaid-preview-error';
     const icon = document.createElement('i');
     icon.className = 'mdi mdi-alert-circle-outline';
     const text = document.createElement('span');
-    text.textContent = `Mermaid preview unavailable: ${String(error?.message || error || 'unknown error')}`;
+    text.textContent = error?.unavailable ? String(error.message) : `Mermaid preview unavailable: ${String(error?.message || error || 'unknown error')}`;
     message.append(icon, text);
 
     const details = document.createElement('details');
@@ -385,6 +410,21 @@
     }
   }
 
+  // Wide tables and code blocks scroll sideways, so keyboard users must be able to focus them.
+  function makeScrollableRegionsFocusable(root) {
+    root.querySelectorAll('table').forEach((table) => {
+      if (table.parentElement && table.parentElement.classList.contains('md-table-scroll')) return;
+      const region = document.createElement('div');
+      region.className = 'md-table-scroll';
+      region.tabIndex = 0;
+      region.setAttribute('role', 'region');
+      region.setAttribute('aria-label', 'Table');
+      table.replaceWith(region);
+      region.appendChild(table);
+    });
+    root.querySelectorAll('pre').forEach((pre) => { pre.tabIndex = 0; });
+  }
+
   function renderMarkdown(markdown) {
     const parsed = window.marked ? window.marked.parse(markdown || '') : String(markdown || '');
     const wrapper = document.createElement('div');
@@ -394,6 +434,20 @@
     try {
       if (window.hljs) wrapper.querySelectorAll('pre code:not(.language-mermaid):not(.lang-mermaid)').forEach(element => window.hljs.highlightElement(element));
     } catch (_) {}
+    makeScrollableRegionsFocusable(wrapper);
+    // The page header already carries the document's <h1>: keep the Markdown outline one level below it.
+    wrapper.querySelectorAll('h1, h2, h3, h4, h5, h6').forEach(heading => {
+      heading.setAttribute('aria-level', String(Math.min(6, Number(heading.tagName.slice(1)) + 1)));
+    });
+    // Relative images cannot be resolved inside an object store: say so instead of showing a broken-image glyph.
+    wrapper.querySelectorAll('img').forEach(image => {
+      image.addEventListener('error', () => {
+        const note = document.createElement('span');
+        note.className = 'md-image-missing';
+        note.textContent = image.alt ? `Image unavailable: ${image.alt}` : 'Image unavailable';
+        image.replaceWith(note);
+      }, { once: true });
+    });
     return wrapper;
   }
 

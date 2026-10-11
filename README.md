@@ -132,6 +132,7 @@ The application never downloads these files at runtime.
 - [Architecture](docs/ARCHITECTURE.md)
 - [Preview and metadata behavior](docs/PREVIEWS.md)
 - [Security model](docs/SECURITY.md)
+- [Frontend design system](docs/FRONTEND.md)
 - [Development and validation](docs/DEVELOPMENT.md)
 
 ## License

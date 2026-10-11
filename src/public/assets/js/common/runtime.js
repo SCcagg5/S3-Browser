@@ -92,42 +92,30 @@
     return (BB.cfg && BB.cfg.runtime) || {};
   }
 
-  function interfaceScale() {
-    const styles = getComputedStyle(document.documentElement);
-    const configured = Number.parseFloat(styles.getPropertyValue('--browser-ui-scale-active'));
-    return Number.isFinite(configured) && configured > 0 ? configured : 1;
+  // English digit grouping and relative phrases, written out instead of using Intl: the first Intl formatter
+  // built on a page loads the locale data (about 20ms of main-thread time), which would land inside the first
+  // render of the listing. Output is identical to Intl.NumberFormat('en-US') and
+  // Intl.RelativeTimeFormat('en', { numeric: 'auto' }) for the values the listing produces.
+  function groupDigits(number) {
+    return String(number).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   }
 
-  function toLayoutPixels(value) {
-    const numeric = Number(value);
-    return Number.isFinite(numeric) ? numeric / interfaceScale() : 0;
-  }
+  const RELATIVE_WORDS = {
+    second: { 0: 'now' },
+    minute: { 0: 'this minute' },
+    hour: { 0: 'this hour' },
+    day: { '-1': 'yesterday', 0: 'today', 1: 'tomorrow' },
+    week: { '-1': 'last week', 0: 'this week', 1: 'next week' },
+    month: { '-1': 'last month', 0: 'this month', 1: 'next month' },
+    year: { '-1': 'last year', 0: 'this year', 1: 'next year' }
+  };
 
-  function layoutRect(target) {
-    const source = typeof target?.getBoundingClientRect === 'function'
-      ? target.getBoundingClientRect()
-      : target;
-    const scale = interfaceScale();
-    const left = Number(source?.left || 0) / scale;
-    const top = Number(source?.top || 0) / scale;
-    const width = Number(source?.width || 0) / scale;
-    const height = Number(source?.height || 0) / scale;
-    return {
-      left,
-      top,
-      right: left + width,
-      bottom: top + height,
-      width,
-      height
-    };
-  }
-
-  function layoutViewport() {
-    const scale = interfaceScale();
-    return {
-      width: window.innerWidth / scale,
-      height: window.innerHeight / scale
-    };
+  function formatRelativeTime(value, unit) {
+    const word = RELATIVE_WORDS[unit] && RELATIVE_WORDS[unit][value];
+    if (word) return word;
+    const amount = Math.abs(value);
+    const label = `${groupDigits(amount)} ${unit}${amount === 1 ? '' : 's'}`;
+    return value < 0 ? `${label} ago` : `in ${label}`;
   }
 
   function formatDateTimeUTC(value) {
@@ -206,7 +194,7 @@
     switch (normalizeState(value)) {
       case 'allowed': return 'Allowed';
       case 'denied': return 'Denied';
-      default: return 'On use';
+      default: return 'Checked on use';
     }
   }
 
@@ -232,14 +220,9 @@
     storageRoute: currentStorageRoute,
     browserPageURL,
     previewPageURL,
-    formatDateTimeUTC
-  };
-
-  BB.viewport = {
-    scale: interfaceScale,
-    toLayoutPixels,
-    rect: layoutRect,
-    size: layoutViewport
+    formatDateTimeUTC,
+    groupDigits,
+    formatRelativeTime
   };
 
   BB.capabilities = {

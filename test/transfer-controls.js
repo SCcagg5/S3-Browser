@@ -29,7 +29,7 @@ class FakeElement {
     this.children = [];
     this.parentNode = null;
     this.dataset = {};
-    this.style = {};
+    this.style = { setProperty(name, value) { this[name] = value; }, removeProperty(name) { delete this[name]; } };
     this.attributes = new Map();
     this.listeners = new Map();
     this.hidden = false;

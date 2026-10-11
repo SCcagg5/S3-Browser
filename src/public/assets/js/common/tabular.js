@@ -3,11 +3,17 @@
   'use strict';
 
   const BB = (window.BB = window.BB || {});
+  // Re-render a viewer region without dropping keyboard focus (see BB.ui.replaceContent).
+  function swapContent(root, ...nodes) {
+    if (BB.ui && BB.ui.replaceContent) BB.ui.replaceContent(root, ...nodes);
+    else root.replaceChildren(...nodes);
+  }
   const MAX_TEXT_BYTES = 32 * 1024 * 1024;
   const MAX_SPREADSHEET_BYTES = 64 * 1024 * 1024;
   const MAX_ROWS = 100000;
   const MAX_COLUMNS = 200;
   const DEFAULT_PAGE_SIZE = 100;
+  let gridPanelSequence = 0;
   const PAGE_SIZE_OPTIONS = [100, 250, 500, 1000];
   const COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
   const NUMBER_PATTERN = /^[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:e[+-]?\d+)?$/i;
@@ -338,6 +344,20 @@
       const cell = event.target.closest?.('tbody td, tbody th.data-row-number');
       if (cell) activate(cell);
     });
+    // The grid is reachable from the keyboard: one cell is the tab stop, and it follows focus (roving tabindex).
+    requestAnimationFrame(() => {
+      const first = cells().find(cell => cell.tagName === 'TD');
+      if (first && !active) first.tabIndex = 0;
+    });
+    table.addEventListener('focusin', event => {
+      const cell = event.target.closest?.('tbody td, tbody th.data-row-number');
+      if (!cell || cell === active) return;
+      if (active) { active.classList.remove('is-active-cell'); active.tabIndex = -1; }
+      else table.querySelectorAll('tbody [tabindex="0"]').forEach(other => { if (other !== cell) other.tabIndex = -1; });
+      active = cell;
+      active.classList.add('is-active-cell');
+      active.tabIndex = 0;
+    });
     table.addEventListener('keydown', event => {
       const cell = event.target.closest?.('tbody td, tbody th.data-row-number') || active;
       if (!cell) return;
@@ -359,35 +379,79 @@
     });
   }
 
+  // Column resizing works with a pointer drag, with the Arrow/Home/End keys on the focused separator, and a
+  // double click restores the automatic width. The keyboard and double click give a path that needs no dragging.
+  const COLUMN_MIN_WIDTH = 64;
+  const COLUMN_MAX_WIDTH = 720;
   function installColumnResizer(handle, table, columnIndex) {
+    const header = handle.parentElement;
+    const applyWidth = width => {
+      const bounded = Math.round(Math.max(COLUMN_MIN_WIDTH, Math.min(COLUMN_MAX_WIDTH, width)));
+      for (const row of table.rows) {
+        const cell = row.cells[columnIndex];
+        if (cell) {
+          cell.style.width = `${bounded}px`;
+          cell.style.minWidth = `${bounded}px`;
+          cell.style.maxWidth = `${bounded}px`;
+        }
+      }
+      handle.setAttribute('aria-valuenow', String(bounded));
+      return bounded;
+    };
+    const currentWidth = () => Math.max(COLUMN_MIN_WIDTH, header.getBoundingClientRect().width);
+    handle.tabIndex = 0;
+    handle.setAttribute('aria-valuemin', String(COLUMN_MIN_WIDTH));
+    handle.setAttribute('aria-valuemax', String(COLUMN_MAX_WIDTH));
+    // A focusable separator must expose its value. The header is not laid out yet, so start from the default
+    // width and report the measured one as soon as the handle can be reached.
+    handle.setAttribute('aria-valuenow', '160');
+    const reportWidth = () => handle.setAttribute('aria-valuenow', String(Math.round(currentWidth())));
+    handle.addEventListener('focus', reportWidth);
+    requestAnimationFrame(() => { if (header.isConnected) reportWidth(); });
+
+    handle.addEventListener('keydown', event => {
+      const step = event.shiftKey ? 64 : 16;
+      let width = null;
+      if (event.key === 'ArrowLeft') width = currentWidth() - step;
+      else if (event.key === 'ArrowRight') width = currentWidth() + step;
+      else if (event.key === 'Home') width = COLUMN_MIN_WIDTH;
+      else if (event.key === 'End') width = COLUMN_MAX_WIDTH;
+      if (width == null) return;
+      event.preventDefault();
+      event.stopPropagation();
+      applyWidth(width);
+    });
+
+    handle.addEventListener('dblclick', event => {
+      event.preventDefault();
+      for (const row of table.rows) {
+        const cell = row.cells[columnIndex];
+        if (cell) { cell.style.width = ''; cell.style.minWidth = ''; cell.style.maxWidth = ''; }
+      }
+      handle.setAttribute('aria-valuenow', String(Math.round(currentWidth())));
+    });
+
     handle.addEventListener('pointerdown', event => {
       event.preventDefault();
-      const header = handle.parentElement;
-      const startX = BB.viewport?.toLayoutPixels(event.clientX) ?? event.clientX;
-      const startWidth = Math.max(64, (BB.viewport?.rect(header) || header.getBoundingClientRect()).width);
+      const startX = event.clientX;
+      const startWidth = currentWidth();
       handle.setPointerCapture?.(event.pointerId);
       document.body.classList.add('is-resizing-data-column');
-      const move = moveEvent => {
-        const currentX = BB.viewport?.toLayoutPixels(moveEvent.clientX) ?? moveEvent.clientX;
-        const width = Math.max(64, Math.min(720, startWidth + currentX - startX));
-        for (const row of table.rows) {
-          const cell = row.cells[columnIndex];
-          if (cell) {
-            cell.style.width = `${Math.round(width)}px`;
-            cell.style.minWidth = `${Math.round(width)}px`;
-            cell.style.maxWidth = `${Math.round(width)}px`;
-          }
-        }
-      };
+      const move = moveEvent => applyWidth(startWidth + moveEvent.clientX - startX);
+      // Every way a drag can end must clear the drag state: release, cancel, lost capture and losing focus.
       const finish = () => {
         document.body.classList.remove('is-resizing-data-column');
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', finish);
         window.removeEventListener('pointercancel', finish);
+        handle.removeEventListener('lostpointercapture', finish);
+        window.removeEventListener('blur', finish);
       };
       window.addEventListener('pointermove', move);
       window.addEventListener('pointerup', finish, { once: true });
       window.addEventListener('pointercancel', finish, { once: true });
+      handle.addEventListener('lostpointercapture', finish, { once: true });
+      window.addEventListener('blur', finish, { once: true });
     });
   }
 
@@ -415,6 +479,7 @@
     toolbar.className = 'data-preview-toolbar';
     const summary = document.createElement('span');
     summary.className = 'data-preview-summary';
+    summary.setAttribute('role', 'status');
     const totalKnown = Number.isFinite(totalRows);
     const knownTotal = totalKnown ? Math.max(0, Number(totalRows)) : null;
     const sourceTotalKnown = Number.isFinite(sourceTotalRows);
@@ -444,7 +509,7 @@
       if (allowFilters) {
         const filterToggle = document.createElement('button');
         filterToggle.type = 'button';
-        filterToggle.className = `data-tool-button${queryTools.showFilters || activeColumnFilters ? ' is-active' : ''}`;
+        filterToggle.className = `btn btn-sm${queryTools.showFilters || activeColumnFilters ? ' is-active' : ''}`;
         filterToggle.append(createIcon('filter-variant'), document.createTextNode(activeColumnFilters ? `Filters (${activeColumnFilters})` : 'Filters'));
         filterToggle.setAttribute('aria-pressed', queryTools.showFilters ? 'true' : 'false');
         filterToggle.addEventListener('click', queryTools.onToggleFilters);
@@ -456,7 +521,7 @@
       if (queryTools.showClear !== false) {
         clear = document.createElement('button');
         clear.type = 'button';
-        clear.className = 'data-tool-button';
+        clear.className = 'btn btn-sm';
         clear.disabled = !hasQuery;
         clear.title = 'Clear column filters and sorting';
         clear.append(createIcon('filter-remove-outline'), document.createTextNode('Clear'));
@@ -483,7 +548,7 @@
       if (typeof queryTools.onCount === 'function') {
         const count = document.createElement('button');
         count.type = 'button';
-        count.className = 'data-tool-button';
+        count.className = 'btn btn-sm';
         count.disabled = !!queryTools.counting;
         count.append(createIcon(queryTools.counting ? 'loading mdi-spin' : 'counter'), document.createTextNode(queryTools.countLabel || 'Count rows'));
         count.addEventListener('click', queryTools.onCount);
@@ -499,7 +564,7 @@
       const totalPages = totalKnown ? Math.max(1, Math.ceil(knownTotal / pageSize)) : null;
       const previous = document.createElement('button');
       previous.type = 'button';
-      previous.className = 'bb-btn';
+      previous.className = 'btn btn-sm';
       previous.title = 'Previous page';
       previous.setAttribute('aria-label', 'Previous page');
       previous.appendChild(createIcon('chevron-left'));
@@ -513,7 +578,7 @@
         : `Page ${(page + 1).toLocaleString()}`;
       const next = document.createElement('button');
       next.type = 'button';
-      next.className = 'bb-btn';
+      next.className = 'btn btn-sm';
       next.title = 'Next page';
       next.setAttribute('aria-label', 'Next page');
       next.appendChild(createIcon('chevron-right'));
@@ -538,9 +603,19 @@
 
     const scroller = document.createElement('div');
     scroller.className = 'data-table-scroll';
+    const sheetTabs = beforeTable ? Array.from(beforeTable.querySelectorAll('[role="tab"]')) : [];
+    if (sheetTabs.length) {
+      // Sheet / table tabs all drive this one region: expose it as their tab panel.
+      scroller.id = `bb-grid-panel-${++gridPanelSequence}`;
+      scroller.setAttribute('role', 'tabpanel');
+      const selected = sheetTabs.find(tab => tab.getAttribute('aria-selected') === 'true') || sheetTabs[0];
+      if (selected.id) scroller.setAttribute('aria-labelledby', selected.id);
+      sheetTabs.forEach(tab => tab.setAttribute('aria-controls', scroller.id));
+    }
     const table = document.createElement('table');
     table.className = 'data-table bb-data-grid-table';
     table.setAttribute('role', 'grid');
+    table.setAttribute('aria-label', 'Data rows');
     table.setAttribute('aria-colcount', String(headers.length + 1));
     if (totalKnown) table.setAttribute('aria-rowcount', String(knownTotal + 1));
     const columnKinds = inferColumnKinds(rows, headers.length);
@@ -597,7 +672,8 @@
       resizeHandle.className = 'data-column-resizer';
       resizeHandle.setAttribute('role', 'separator');
       resizeHandle.setAttribute('aria-orientation', 'vertical');
-      resizeHandle.title = `Resize ${header}`;
+      resizeHandle.setAttribute('aria-label', `Resize ${header} column`);
+      resizeHandle.title = `Resize ${header} (drag, or use the arrow keys; double click resets)`;
       cell.appendChild(resizeHandle);
       installColumnResizer(resizeHandle, table, columnIndex + 1);
       headRow.appendChild(cell);
@@ -683,7 +759,7 @@
       const noteParts = Array.isArray(extraNotes) ? extraNotes.filter(Boolean) : [];
       if (parsed.truncatedRows) noteParts.push(`Preview limited to the first ${MAX_ROWS.toLocaleString()} rows.`);
       if (parsed.truncatedColumns) noteParts.push(`Preview limited to the first ${MAX_COLUMNS} columns.`);
-      root.replaceChildren(renderTable({
+      swapContent(root, renderTable({
         headers: parsed.headers,
         rows: pageEntries.map(entry => entry.row),
         rowNumbers: pageEntries.map(entry => parsed.rowNumbers?.[entry.sourceIndex] ?? (Number(parsed.rowNumberOffset || 0) + entry.sourceIndex + 1)),
@@ -784,7 +860,7 @@
       const node = document.createElement('div');
       node.className = 'preview-loading data-loading';
       node.append(createIcon('loading mdi-spin'), document.createTextNode(label));
-      root.replaceChildren(node);
+      swapContent(root, node);
     }
 
     function resetPages() {
@@ -839,7 +915,7 @@
       if (!result) return false;
       const matches = Array.from(result.matches || []);
       const note = `Search scanned ${Number(result.bytesScanned || 0).toLocaleString()} bytes across the complete document. ${Number(result.total || 0).toLocaleString()} match${Number(result.total || 0) === 1 ? '' : 'es'} found${result.truncated ? '; only the first results are retained' : ''}.`;
-      root.replaceChildren(renderTable({
+      swapContent(root, renderTable({
         headers: ['Match'],
         rows: matches.map(match => [String(match.snippet || '')]),
         rowNumbers: matches.map(match => Number(match.line || 0) || '—'),
@@ -878,7 +954,7 @@
       if (Array.isArray(payload.headers) && payload.headers.length) state.headers = payload.headers;
       const logicalStart = payload.rows?.length ? state.page * state.pageSize + 1 : 0;
       const logicalEnd = logicalStart ? logicalStart + payload.rows.length - 1 : 0;
-      root.replaceChildren(renderTable({
+      swapContent(root, renderTable({
         headers: state.headers,
         rows: payload.rows || [],
         rowNumbers: payload.rowNumbers || [],
@@ -1048,6 +1124,7 @@
     tabBar.setAttribute('role', 'tablist');
     tabBar.setAttribute('aria-label', 'Workbook sheets');
 
+    const sheetTabs = [];
     descriptors.forEach((sheet, index) => {
       const button = document.createElement('button');
       button.type = 'button';
@@ -1061,19 +1138,11 @@
       text.textContent = sheet.name;
       button.append(icon, text);
       button.addEventListener('click', () => activate(index));
-      button.addEventListener('keydown', event => {
-        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-        event.preventDefault();
-        let next = index;
-        if (event.key === 'ArrowLeft') next = (index - 1 + descriptors.length) % descriptors.length;
-        if (event.key === 'ArrowRight') next = (index + 1) % descriptors.length;
-        if (event.key === 'Home') next = 0;
-        if (event.key === 'End') next = descriptors.length - 1;
-        activate(next);
-      });
+      sheetTabs.push(button);
       tabBar.appendChild(button);
     });
 
+    BB.ui?.enhanceTabs?.(sheetTabs, [], activate);
     const selectLabel = document.createElement('label');
     selectLabel.className = 'spreadsheet-sheet-select';
     const selectText = document.createElement('span');
@@ -1157,7 +1226,7 @@
         const loading = document.createElement('div');
         loading.className = 'preview-loading data-loading';
         loading.innerHTML = '<i class="mdi mdi-loading mdi-spin"></i><span>Reading workbook rows...</span>';
-        root.replaceChildren(loading);
+        swapContent(root, loading);
       } else {
         root.classList.add('is-loading-query');
         root.setAttribute('aria-busy', 'true');
@@ -1205,7 +1274,7 @@
           void draw(0).catch(error => showTableError(root, error));
         };
 
-        root.replaceChildren(renderTable({
+        swapContent(root, renderTable({
           headers,
           rows,
           rowNumbers,
@@ -1346,12 +1415,12 @@
       Number(field.children || 0) || ''
     ]);
     const notes = [
-      'The constrained offline viewer reads only the Parquet footer and schema by exact byte ranges. Row data is not decoded in this build, so no hidden full-object transfer occurs.'
+      'Schema only: this viewer reads the Parquet footer, not the rows, so the file is never downloaded in full.'
     ];
     if (payload.schemaTruncated) notes.push('The schema reached the configured field limit.');
     if (payload.rowGroupsTruncated) notes.push('The row-group summary reached the configured limit.');
     if (Number(payload.storageBytes || 0) > 0) {
-      notes.push(`${Number(payload.storageBytes).toLocaleString()} storage bytes were transferred.`);
+      notes.push(`Read ${Number(payload.storageBytes).toLocaleString()} bytes of the file.`);
     }
     return createQueryableTable({
       headers: ['Field path', 'Physical type', 'Logical type', 'Repetition', 'Children'],
@@ -1392,12 +1461,12 @@
     box.append(icon, copy);
     if (root?.dataset?.sourceUrl) {
       const link = document.createElement('a');
-      link.className = 'button is-light data-preview-error-action';
+      link.className = 'btn btn-sm data-preview-error-action';
       link.href = root.dataset.sourceUrl;
       link.textContent = 'Download original';
       box.appendChild(link);
     }
-    root.replaceChildren(box);
+    swapContent(root, box);
   }
 
   BB.tabular = {

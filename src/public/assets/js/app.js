@@ -1,5 +1,4 @@
 const config = {
-  primaryColor: '#167df0',
   pageSize: 50,
   allowDownloadAll: true,
   keyExcludePatterns: [/^index\.html$/],
@@ -13,9 +12,12 @@ window.BB = window.BB || {};
 BB.cfg = config;
 
 document.title = 'Object Storage Browser';
-document.documentElement.style.setProperty('--primary-color', config.primaryColor);
 
 (function main() {
+  // BB.runtime.groupDigits and formatRelativeTime avoid Intl on purpose (see runtime.js).
+  const { groupDigits, formatRelativeTime } = BB.runtime;
+  const byteParts = new Map();
+
   function normalizePrefix(value) {
     const clean = String(value || '').replace(/^\/+/, '').replace(/\/+$/, '');
     return clean ? clean + '/' : '';
@@ -338,6 +340,8 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
   }
 
   const app = Vue.createApp({
+    // Compiled ahead of time from src/frontend/app.template.html (see tools/build-template.mjs).
+    render: BB.renderApp,
     data() {
       return {
         config,
@@ -348,6 +352,7 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
         pathPrefix: '',
         searchPrefix: '',
         pathContentTableData: [],
+        loadError: '',
         previousContinuationTokens: [],
         continuationToken: '',
         nextContinuationToken: '',
@@ -374,7 +379,6 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
     },
 
     computed: {
-      cssVars() { return { '--primary-color': this.config.primaryColor }; },
       currentInstance() { return this.instances.find(instance => instance.id === this.instanceId) || null; },
       storageHosts() {
         const hosts = [];
@@ -433,6 +437,11 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
       hasPreviousPage() { return this.localPage > 0 || this.previousContinuationTokens.length > 0; },
       hasNextPage() { return this.localPage + 1 < this.localPageCount || !!this.nextContinuationToken; },
       hasPagination() { return this.hasPreviousPage || this.hasNextPage; },
+      // Names where the user is, for screen readers and the browser's heading outline (the visual crumb trail is a nav).
+      pageHeading() {
+        const folder = String(this.pathPrefix || '').replace(/\/+$/, '').split('/').pop();
+        return folder ? `Objects in ${folder}` : `Objects in ${this.currentInstance?.name || 'storage root'}`;
+      },
       breadcrumbs() {
         const parts = String(this.pathPrefix || '').replace(/\/+$/, '').split('/').filter(Boolean);
         let prefix = '';
@@ -471,6 +480,7 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
         this.$nextTick(() => this.refreshVisibleVersionCounts());
       },
       pathPrefix() {
+        this.updateDocumentTitle();
         this.closeBreadcrumbOverflow();
         this.breadcrumbVisibleStart = Math.max(0, this.breadcrumbs.length - 1);
         this.$nextTick(() => this.scheduleBreadcrumbLayout());
@@ -494,7 +504,7 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
       },
 
       capabilityLabel(state) {
-        return BB.capabilities?.stateLabel ? BB.capabilities.stateLabel(state) : (state?.allowed === false ? 'Denied' : 'On use');
+        return BB.capabilities?.stateLabel ? BB.capabilities.stateLabel(state) : (state?.allowed === false ? 'Denied' : 'Checked on use');
       },
 
       capabilityClass(state) {
@@ -517,10 +527,17 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
         }
         this.expandCurrentHost();
         this.storageSwitcherOpen = true;
+        this.$nextTick(() => {
+          const popover = this.$refs.storageSwitcherPopover;
+          const target = popover?.querySelector('.storage-bucket-row[aria-current="true"]') || popover?.querySelector('button');
+          target?.focus();
+        });
       },
 
-      closeStorageSwitcher() {
+      closeStorageSwitcher({ restoreFocus = false } = {}) {
+        const wasOpen = this.storageSwitcherOpen;
         this.storageSwitcherOpen = false;
+        if (wasOpen && restoreFocus) this.$refs.storageSwitcherTrigger?.focus();
       },
 
       expandCurrentHost() {
@@ -539,13 +556,48 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
         this.expandedHosts = { ...this.expandedHosts, [id]: !this.isHostExpanded(id) };
       },
 
-      toggleBreadcrumbOverflow() {
+      // detail === 0 means the click came from the keyboard: move focus into the menu like a native menu button.
+      toggleBreadcrumbOverflow(event) {
         if (this.breadcrumbOverflowOpen) {
           this.closeBreadcrumbOverflow();
           return;
         }
+        this.openBreadcrumbOverflow({ focusFirst: !!event && event.detail === 0 });
+      },
+
+      openBreadcrumbOverflowFromKeyboard() {
+        if (!this.breadcrumbOverflowOpen) this.openBreadcrumbOverflow({ focusFirst: true });
+        else this.focusBreadcrumbMenuItem(0);
+      },
+
+      openBreadcrumbOverflow({ focusFirst = false } = {}) {
         this.breadcrumbOverflowOpen = true;
-        this.$nextTick(() => this.positionBreadcrumbOverflow());
+        this.$nextTick(() => {
+          this.positionBreadcrumbOverflow();
+          if (focusFirst) this.focusBreadcrumbMenuItem(0);
+        });
+      },
+
+      focusBreadcrumbMenuItem(index) {
+        const items = Array.from(this.$refs.breadcrumbOverflowPopover?.querySelectorAll('[role="menuitem"]') || []);
+        if (!items.length) return;
+        items[(index + items.length) % items.length].focus();
+      },
+
+      onBreadcrumbMenuKeydown(event) {
+        const items = Array.from(this.$refs.breadcrumbOverflowPopover?.querySelectorAll('[role="menuitem"]') || []);
+        const current = items.indexOf(document.activeElement);
+        switch (event.key) {
+          case 'ArrowDown': event.preventDefault(); this.focusBreadcrumbMenuItem(current + 1); break;
+          case 'ArrowUp': event.preventDefault(); this.focusBreadcrumbMenuItem(current < 0 ? -1 : current - 1); break;
+          case 'Home': event.preventDefault(); this.focusBreadcrumbMenuItem(0); break;
+          case 'End': event.preventDefault(); this.focusBreadcrumbMenuItem(-1); break;
+          case 'Tab':
+            // Leave from the trigger so the tab order continues where the menu was opened.
+            this.$refs.breadcrumbOverflowTrigger?.focus();
+            this.closeBreadcrumbOverflow();
+            break;
+        }
       },
 
       closeBreadcrumbOverflow() {
@@ -564,12 +616,12 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
         const popover = this.$refs.breadcrumbOverflowPopover;
         if (!trigger || !popover) return;
         const margin = 8;
-        const viewport = BB.viewport?.size() || { width: window.innerWidth, height: window.innerHeight };
-        const triggerRect = BB.viewport?.rect(trigger) || trigger.getBoundingClientRect();
+        const viewport = { width: window.innerWidth, height: window.innerHeight };
+        const triggerRect = trigger.getBoundingClientRect();
         const maxWidth = Math.max(220, Math.min(380, viewport.width - margin * 2));
         popover.style.width = `${maxWidth}px`;
         popover.style.maxWidth = `${viewport.width - margin * 2}px`;
-        const popoverRect = BB.viewport?.rect(popover) || popover.getBoundingClientRect();
+        const popoverRect = popover.getBoundingClientRect();
         const width = Math.min(maxWidth, Math.max(220, popoverRect.width || maxWidth));
         const height = Math.min(popoverRect.height || 320, Math.max(120, viewport.height - margin * 2));
         const left = Math.max(margin, Math.min(triggerRect.left, viewport.width - width - margin));
@@ -598,8 +650,10 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
 
       onBreadcrumbDocumentKeydown(event) {
         if (event.key !== 'Escape') return;
+        const overflowWasOpen = this.breadcrumbOverflowOpen;
         this.closeBreadcrumbOverflow();
-        this.closeStorageSwitcher();
+        this.closeStorageSwitcher({ restoreFocus: true });
+        if (overflowWasOpen) this.$refs.breadcrumbOverflowTrigger?.focus();
       },
 
       scheduleBreadcrumbLayout() {
@@ -619,7 +673,7 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
 
         const line = this.$refs.breadcrumbLine;
         if (!line) return;
-        const available = Math.floor((BB.viewport?.rect(line).width || line.clientWidth || 0));
+        const available = Math.floor(line.getBoundingClientRect().width || line.clientWidth || 0);
         if (available <= 0) return;
 
         const style = window.getComputedStyle(line);
@@ -710,7 +764,20 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
         this.config.operations = instance.operations || {};
         this.config.versioningSupported = instance.versioningSupported === true;
         BB.runtime?.writeState('object-browser-instance', instance.id);
-        document.title = `${instance.name} - Object Storage Browser`;
+        this.updateDocumentTitle();
+      },
+
+      // A fragment link would resolve against <base href> and reload the page, so focus the target directly.
+      focusMainContent() {
+        const target = document.getElementById('main-content');
+        if (target) target.focus();
+      },
+
+      // The tab title names the current folder so history and tab lists stay meaningful.
+      updateDocumentTitle() {
+        const instance = this.currentInstance;
+        const folder = String(this.pathPrefix || '').replace(/\/+$/, '').split('/').pop();
+        document.title = [folder, instance?.name, 'Object Storage Browser'].filter(Boolean).join(' - ');
       },
 
       async changeInstance() {
@@ -724,7 +791,7 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
 
       async selectInstance(id) {
         if (!id) return;
-        this.closeStorageSwitcher();
+        this.closeStorageSwitcher({ restoreFocus: true });
         if (id === this.instanceId) return;
         this.instanceId = id;
         await this.changeInstance();
@@ -738,7 +805,7 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
         const permissionRows = this.permissionStates.map(item => {
           const state = item.state || {};
           const stateName = this.capabilityName(state);
-          const result = stateName === 'allowed' ? 'Allowed' : (stateName === 'denied' ? 'Denied' : 'On use');
+          const result = stateName === 'allowed' ? 'Allowed' : (stateName === 'denied' ? 'Denied' : 'Checked on use');
           const verification = stateName === 'unknown'
             ? 'The provider will verify this permission when the operation is used.'
             : (state.verified ? (stateName === 'allowed' ? 'Verified by a real provider operation.' : 'Denied by the provider.') : 'Defined by the connection configuration.');
@@ -829,6 +896,7 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
       },
 
       goToPrefix(prefix) {
+        this.keepFocusAfterNavigation = true;
         this.closeBreadcrumbOverflow();
         const normalized = normalizePrefix(prefix);
         if (normalized === this.pathPrefix) {
@@ -857,10 +925,25 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
         this.refresh();
       },
 
+      // The pager button that was just used is disabled on the first/last page or while loading: hand focus
+      // to the other pager button, or to the main content, instead of letting it fall back to <body>.
+      settlePagingFocus(preferredLabel) {
+        this.$nextTick(() => {
+          const buttons = Array.from(document.querySelectorAll('.pagination-control button'));
+          const usable = element => !!element && !element.disabled && element.tabIndex >= 0 && element.offsetParent !== null;
+          const active = document.activeElement;
+          if (active && active !== document.body && active.isConnected && usable(active)) return;
+          const preferred = buttons.find(button => button.getAttribute('aria-label') === preferredLabel);
+          const target = usable(preferred) ? preferred : buttons.find(usable);
+          (target || document.getElementById('main-content'))?.focus();
+        });
+      },
+
       async nextPage() {
         if (this.localPage + 1 < this.localPageCount) {
           this.localPage += 1;
           this.$nextTick(() => this.refreshVisibleVersionCounts());
+          this.settlePagingFocus('Next page');
           return;
         }
         if (!this.nextContinuationToken) return;
@@ -869,12 +952,14 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
         this.continuationToken = this.nextContinuationToken;
         this.localPage = 0;
         await this.refresh();
+        this.settlePagingFocus('Next page');
       },
 
       async previousPage() {
         if (this.localPage > 0) {
           this.localPage -= 1;
           this.$nextTick(() => this.refreshVisibleVersionCounts());
+          this.settlePagingFocus('Previous page');
           return;
         }
         if (!this.previousContinuationTokens.length) return;
@@ -883,11 +968,13 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
         this.scanOffset = Number(previous?.offset || 0);
         await this.refresh();
         this.localPage = Math.max(0, this.localPageCount - 1);
+        this.settlePagingFocus('Previous page');
       },
 
       async refresh() {
         if (this.isRefreshing || !this.currentInstance) return;
         this.isRefreshing = true;
+        this.loadError = '';
         try {
           if (!this.canRead) {
             this.pathContentTableData = [];
@@ -930,10 +1017,22 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
           this.$nextTick(() => this.refreshVisibleVersionCounts());
         } catch (error) {
           this.pathContentTableData = [];
-          BB.ui.toast(String(error.message || error));
+          // The inline error state (role=alert) reports this; a toast would only repeat it.
+          this.loadError = String(error.message || error);
         } finally {
           this.isRefreshing = false;
+          this.restoreFocusAfterNavigation();
         }
+      },
+
+      // The control that triggered a navigation is replaced by the new listing; keep focus inside the page.
+      restoreFocusAfterNavigation() {
+        if (!this.keepFocusAfterNavigation) return;
+        this.keepFocusAfterNavigation = false;
+        this.$nextTick(() => {
+          const active = document.activeElement;
+          if (!active || active === document.body || !active.isConnected) this.focusMainContent();
+        });
       },
 
       async refreshVisibleVersionCounts() {
@@ -965,7 +1064,22 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
 
       openPreview(row) {
         if (!this.canRead) return;
-        window.location.href = BB.api.previewPageURL(row.key, { instance: this.instanceId });
+        window.location.href = this.objectHref(row);
+      },
+
+      // Rows are real links, so "open in a new tab" works; a plain click keeps the in-page navigation.
+      objectHref(row) { return BB.api.previewPageURL(row.key, { instance: this.instanceId }); },
+      folderHref(prefix) { return BB.api.browserPageURL(normalizePrefix(prefix), { instance: this.instanceId }); },
+      isPlainClick(event) { return event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey; },
+      onObjectLink(event, row) {
+        if (!this.isPlainClick(event)) return;
+        event.preventDefault();
+        this.openPreview(row);
+      },
+      onFolderLink(event, row) {
+        if (!this.isPlainClick(event)) return;
+        event.preventDefault();
+        this.goToPrefix(row.prefix);
       },
 
       onRowMetadata(row) { BB.actions.showMetadata(row.key, { size: row.size, mime: row.contentType, etag: row.etag, lastModified: row.dateModified?.toUTCString?.() || '' }); },
@@ -1187,11 +1301,18 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
 
       formatByteParts(size) {
         const value = Math.max(0, Number(size) || 0);
-        if (value < 1024) return { value: Math.round(value).toLocaleString('en-US'), unit: 'B' };
-        if (value < 1024 ** 2) return { value: Math.round(value / 1024).toLocaleString('en-US'), unit: 'KB' };
-        if (value < 1024 ** 3) return { value: (value / 1024 ** 2).toFixed(2), unit: 'MB' };
-        if (value < 1024 ** 4) return { value: (value / 1024 ** 3).toFixed(2), unit: 'GB' };
-        return { value: (value / 1024 ** 4).toFixed(2), unit: 'TB' };
+        const cached = byteParts.get(value);
+        if (cached) return cached;
+        let parts;
+        if (value < 1024) parts = { value: groupDigits(Math.round(value)), unit: 'B' };
+        else if (value < 1024 ** 2) parts = { value: groupDigits(Math.round(value / 1024)), unit: 'KB' };
+        else if (value < 1024 ** 3) parts = { value: (value / 1024 ** 2).toFixed(2), unit: 'MB' };
+        else if (value < 1024 ** 4) parts = { value: (value / 1024 ** 3).toFixed(2), unit: 'GB' };
+        else parts = { value: (value / 1024 ** 4).toFixed(2), unit: 'TB' };
+        // A listing shows each size several times per render; the cache is bounded so it never grows without limit.
+        if (byteParts.size > 2000) byteParts.clear();
+        byteParts.set(value, parts);
+        return parts;
       },
       formatBytes(size) {
         const parts = this.formatByteParts(size);
@@ -1211,10 +1332,9 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
           ['minute', 60],
           ['second', 1]
         ];
-        const formatter = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
         for (const [unit, divisor] of ranges) {
           if (Math.abs(seconds) >= divisor || unit === 'second') {
-            return formatter.format(Math.round(seconds / divisor), unit);
+            return formatRelativeTime(Math.round(seconds / divisor), unit);
           }
         }
         return 'now';
@@ -1243,6 +1363,10 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
       };
       this.onDocumentPointer = event => this.onBreadcrumbDocumentPointer(event);
       this.onDocumentKeydown = event => this.onBreadcrumbDocumentKeydown(event);
+      // Tabbing out of the storage switcher closes it, like clicking elsewhere does.
+      this.onDocumentFocusIn = event => {
+        if (this.storageSwitcherOpen && !this.$refs.storageSwitcher?.contains(event.target)) this.closeStorageSwitcher();
+      };
       this.onWindowScroll = () => {
         if (this.breadcrumbOverflowOpen) this.positionBreadcrumbOverflow();
       };
@@ -1256,6 +1380,7 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
       window.addEventListener('scroll', this.onWindowScroll, true);
       document.addEventListener('pointerdown', this.onDocumentPointer);
       document.addEventListener('keydown', this.onDocumentKeydown);
+      document.addEventListener('focusin', this.onDocumentFocusIn);
       window.addEventListener('dragenter', this.onWindowDragEnter);
       window.addEventListener('dragover', this.onWindowDragOver);
       window.addEventListener('dragleave', this.onWindowDragLeave);
@@ -1277,6 +1402,7 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
       window.removeEventListener('scroll', this.onWindowScroll, true);
       document.removeEventListener('pointerdown', this.onDocumentPointer);
       document.removeEventListener('keydown', this.onDocumentKeydown);
+      document.removeEventListener('focusin', this.onDocumentFocusIn);
       window.removeEventListener('dragenter', this.onWindowDragEnter);
       window.removeEventListener('dragover', this.onWindowDragOver);
       window.removeEventListener('dragleave', this.onWindowDragLeave);
@@ -1306,6 +1432,8 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
       image.addEventListener('load', finish, { once: true });
       image.addEventListener('error', finish, { once: true });
       image.decoding = 'async';
+      // CSS masks are fetched in CORS mode; matching it lets the preloaded response be reused.
+      image.crossOrigin = 'anonymous';
       image.src = url;
       if (image.complete) finish();
     })));
@@ -1315,7 +1443,6 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
     app.mount('#root');
   }
 
-  app.use(Buefy.default, { defaultIconPack: 'mdi' });
-  const iconWaitLimit = new Promise(resolve => window.setTimeout(resolve, 600));
+  const iconWaitLimit = new Promise(resolve => window.setTimeout(resolve, 150));
   Promise.race([preloadInitialShellIcons(), iconWaitLimit]).then(mountBrowser, mountBrowser);
 })();

@@ -56,6 +56,19 @@
     return false;
   }
 
+  // Counts read naturally: "1 object", "2 objects".
+  function countLabel(count, noun) {
+    const value = Number(count) || 0;
+    return `${value.toLocaleString()} ${noun}${value === 1 ? '' : 's'}`;
+  }
+
+  // One date format everywhere in dialogs: 2026-10-11 00:19:24 UTC.
+  function utcStamp(value) {
+    if (!value) return '';
+    const date = new Date(value);
+    return Number.isFinite(date.getTime()) ? `${BB.runtime.formatDateTimeUTC(date)} UTC` : String(value);
+  }
+
   function formatBytes(size) {
     const value = Number(size || 0);
     if (value < 1024) return `${value} B`;
@@ -135,10 +148,10 @@
   function jobProgressMessage(job, label) {
     const processed = Number(job.processed || 0).toLocaleString();
     if (job.status === 'queued') return `${label}: queued...`;
-    if (job.status === 'paused') return `${label}: paused after ${processed} object(s).`;
+    if (job.status === 'paused') return `${label}: paused after ${countLabel(processed, 'object')}.`;
     if (job.status === 'completed') return jobCompletionMessage(job, label);
     return Number(job.processed || 0) > 0
-      ? `${label}: ${processed} object(s) processed...`
+      ? `${label}: ${countLabel(processed, 'object')} processed...`
       : `${label}...`;
   }
 
@@ -147,9 +160,9 @@
     if (job.stats) {
       const count = Number(job.stats.count || processed).toLocaleString();
       const subject = String(label || 'Insights').replace(/^Computing\s+/i, '').trim() || 'insights';
-      return `${subject.charAt(0).toUpperCase()}${subject.slice(1)} ready: ${count} object(s), ${formatBytes(job.stats.totalBytes || 0)}.`;
+      return `${subject.charAt(0).toUpperCase()}${subject.slice(1)} ready: ${countLabel(count, 'object')}, ${formatBytes(job.stats.totalBytes || 0)}.`;
     }
-    return `${label} completed: ${processed.toLocaleString()} object(s) processed.`;
+    return `${label} completed: ${countLabel(processed.toLocaleString(), 'object')} processed.`;
   }
 
   async function waitForJob(job, label) {
@@ -172,7 +185,7 @@
             status: current.status === 'paused' ? 'paused' : 'loading',
             indeterminate: current.status !== 'paused',
             progress: current.status === 'paused' ? null : undefined,
-            detail: `${processed} object(s) checkpointed`,
+            detail: `${countLabel(processed, 'object')} checkpointed`,
             duration: 5000
           });
         }
@@ -183,7 +196,7 @@
           status: 'paused',
           progress: null,
           indeterminate: false,
-          detail: `${Number(completed.processed || 0).toLocaleString()} object(s) checkpointed`,
+          detail: `${countLabel(Number(completed.processed || 0).toLocaleString(), 'object')} checkpointed`,
           duration: 5000
         });
         return completed;
@@ -193,7 +206,7 @@
         status: 'success',
         progress: 1,
         indeterminate: false,
-        detail: `${Number(completed.processed || completed.stats?.count || 0).toLocaleString()} object(s) processed`,
+        detail: `${countLabel(Number(completed.processed || completed.stats?.count || 0).toLocaleString(), 'object')} processed`,
         duration: 4500
       });
       return completed;
@@ -337,7 +350,7 @@
         status: status.title,
         integrity: entry
       };
-      const html = `<section class="bb-details-section bb-details-tool-result-section"><div class="bb-details-section-title"><i class="mdi mdi-shield-key-outline"></i> Result</div><div class="bb-kv">${metadataRow('Provider comparison', status.comparison)}${metadataRow('SHA-256', entry.sha256, true)}${metadataRow('MD5', entry.md5, true)}${metadataRow('CRC32', entry.crc32, true)}${metadataRow('CRC32C', entry.crc32c, true)}${providerRows}${matchRows}${metadataRow('Checked', new Date(result.checkedAt).toLocaleString())}</div></section><div class="bb-details-tool-footer"><button type="button" class="bb-btn" data-details-integrity-copy><i class="mdi mdi-content-copy"></i><span>Copy results</span></button><button type="button" class="bb-btn" data-details-integrity-json><i class="mdi mdi-download"></i><span>Download JSON</span></button><button type="button" class="bb-btn" data-details-integrity-rerun><i class="mdi mdi-refresh"></i><span>Run again</span></button></div>`;
+      const html = `<section class="bb-details-section bb-details-tool-result-section"><div class="bb-details-section-title"><i class="mdi mdi-shield-key-outline"></i> Result</div><div class="bb-kv">${metadataRow('Provider comparison', status.comparison)}${metadataRow('SHA-256', entry.sha256, true)}${metadataRow('MD5', entry.md5, true)}${metadataRow('CRC32', entry.crc32, true)}${metadataRow('CRC32C', entry.crc32c, true)}${providerRows}${matchRows}${metadataRow('Checked', new Date(result.checkedAt).toLocaleString())}</div></section><div class="bb-details-tool-footer"><button type="button" class="btn btn-sm" data-details-integrity-copy><i class="mdi mdi-content-copy"></i><span>Copy results</span></button><button type="button" class="btn btn-sm" data-details-integrity-json><i class="mdi mdi-download"></i><span>Download JSON</span></button><button type="button" class="btn btn-sm" data-details-integrity-rerun><i class="mdi mdi-refresh"></i><span>Run again</span></button></div>`;
       if (!detailsToolComplete(card, statusHost, resultHost, status.state, status.title, status.message, html)) return;
       resultHost.querySelector('[data-details-integrity-copy]')?.addEventListener('click', event => { void copyDetailsResult(result, event.currentTarget); });
       resultHost.querySelector('[data-details-integrity-json]')?.addEventListener('click', () => downloadJSON(result, 'integrity-verification.json'));
@@ -375,7 +388,7 @@
       const technical = headers || probes
         ? `<details class="bb-details-technical"><summary class="has-bb-chevron"><i class="mdi mdi-file-code-outline"></i><span>Technical details</span></summary><div class="bb-details-technical-body">${headers ? `<section class="bb-details-technical-section"><div class="bb-details-section-title">Provider headers</div><div class="bb-kv">${headers}</div></section>` : ''}${probes}</div></details>`
         : '';
-      const html = `${summary}${structureSection}${technical}<div class="bb-details-tool-footer"><button type="button" class="bb-btn" data-details-inspection-copy><i class="mdi mdi-content-copy"></i><span>Copy results</span></button><button type="button" class="bb-btn" data-details-inspection-json><i class="mdi mdi-download"></i><span>Download JSON</span></button><button type="button" class="bb-btn" data-details-inspection-rerun><i class="mdi mdi-refresh"></i><span>Inspect again</span></button></div>`;
+      const html = `${summary}${structureSection}${technical}<div class="bb-details-tool-footer"><button type="button" class="btn btn-sm" data-details-inspection-copy><i class="mdi mdi-content-copy"></i><span>Copy results</span></button><button type="button" class="btn btn-sm" data-details-inspection-json><i class="mdi mdi-download"></i><span>Download JSON</span></button><button type="button" class="btn btn-sm" data-details-inspection-rerun><i class="mdi mdi-refresh"></i><span>Inspect again</span></button></div>`;
       if (!detailsToolComplete(card, statusHost, resultHost, state, title, message, html)) return;
       resultHost.querySelector('[data-details-inspection-copy]')?.addEventListener('click', event => { void copyDetailsResult(result, event.currentTarget); });
       resultHost.querySelector('[data-details-inspection-json]')?.addEventListener('click', () => downloadJSON(result, 'technical-inspection.json'));
@@ -435,7 +448,7 @@
       const storageRows = [
         metadataRow('Size', formatBytes(result.size)),
         metadataRow('MIME type', result.mime || '-'),
-        metadataRow('Modified', headerValue(headers, 'last-modified')),
+        metadataRow('Modified', utcStamp(headerValue(headers, 'last-modified'))),
         metadataRow('ETag', headerValue(headers, 'etag'), true),
         metadataRow('Version', headerValue(headers, 'x-amz-version-id', 'x-goog-generation') || selectedVersion, true)
       ].filter(Boolean).join('');
@@ -496,17 +509,17 @@
         ? `<section class="bb-details-section"><div class="bb-details-section-title"><i class="mdi mdi-file-search-outline"></i> File metadata</div><div class="bb-kv">${fileRows}</div></section>`
         : '';
       const countSection = countAction
-        ? `<section class="bb-details-section bb-details-count-section"><div class="bb-details-section-title"><i class="mdi mdi-${escapeHTML(countAction.icon)}"></i> Document dimensions</div><div class="bb-details-count-result" data-document-count-result><span>Not calculated. This operation reads the complete document.</span></div><button type="button" class="bb-btn bb-details-count-button" data-document-count>${escapeHTML(countAction.label)}</button></section>`
+        ? `<section class="bb-details-section bb-details-count-section"><div class="bb-details-section-title"><i class="mdi mdi-${escapeHTML(countAction.icon)}"></i> Document dimensions</div><div class="bb-details-count-result" data-document-count-result><span>Not calculated. This operation reads the complete document.</span></div><button type="button" class="btn bb-details-count-button" data-document-count>${escapeHTML(countAction.label)}</button></section>`
         : '';
       const overviewSections = `${storageSection}${customSection}${fileSection}${countSection}`;
       const advancedPanel = `<section class="bb-details-advanced">
         <article class="bb-details-tool-card is-idle" data-details-tool-card="integrity" aria-busy="false">
-          <div class="bb-details-tool-card-head"><div class="bb-details-tool-heading"><span class="bb-details-tool-icon"><i class="mdi mdi-shield-key-outline"></i></span><div><strong>Verify integrity</strong><span>Calculate checksums for the complete object and compare them with values exposed by the provider.</span></div></div><button type="button" class="bb-btn bb-details-tool-run" data-details-integrity><i class="mdi mdi-play"></i><span>Run check</span></button></div>
+          <div class="bb-details-tool-card-head"><div class="bb-details-tool-heading"><span class="bb-details-tool-icon"><i class="mdi mdi-shield-key-outline"></i></span><div><strong>Verify integrity</strong><span>Calculate checksums for the complete object and compare them with values exposed by the provider.</span></div></div><button type="button" class="btn bb-details-tool-run" data-details-integrity><i class="mdi mdi-play"></i><span>Run check</span></button></div>
           <div class="bb-details-tool-status is-idle" data-details-integrity-status hidden></div>
           <div class="bb-details-tool-result" data-details-integrity-result hidden></div>
         </article>
         <article class="bb-details-tool-card is-idle" data-details-tool-card="inspection" aria-busy="false">
-          <div class="bb-details-tool-card-head"><div class="bb-details-tool-heading"><span class="bb-details-tool-icon"><i class="mdi mdi-file-search-outline"></i></span><div><strong>Inspect file</strong><span>Read bounded byte ranges to identify the format, structure, provider headers and technical probes.</span></div></div><button type="button" class="bb-btn bb-details-tool-run" data-details-inspect><i class="mdi mdi-play"></i><span>Inspect</span></button></div>
+          <div class="bb-details-tool-card-head"><div class="bb-details-tool-heading"><span class="bb-details-tool-icon"><i class="mdi mdi-file-search-outline"></i></span><div><strong>Inspect file</strong><span>Read bounded byte ranges to identify the format, structure, provider headers and technical probes.</span></div></div><button type="button" class="btn bb-details-tool-run" data-details-inspect><i class="mdi mdi-play"></i><span>Inspect</span></button></div>
           <div class="bb-details-tool-status is-idle" data-details-inspection-status hidden></div>
           <div class="bb-details-tool-result" data-details-inspection-result hidden></div>
         </article>
@@ -540,7 +553,7 @@
 
       await ui().alert({
         html: `<div class="bb-details bb-details--file">
-          <div class="bb-details-head"><i class="mdi mdi-${escapeHTML(icon)}"></i><div class="bb-details-titles"><div class="bb-details-name">${escapeHTML(name)}</div><div class="bb-details-prefix">${escapeHTML(key)}</div></div>${versionSelector}</div>
+          <div class="bb-details-head"><i class="mdi mdi-${escapeHTML(icon)}"></i><div class="bb-details-titles"><div class="bb-details-name">${escapeHTML(name)}</div><div class="bb-details-prefix">${escapeHTML(key === name ? 'Storage root' : key)}</div></div>${versionSelector}</div>
           <div class="bb-details-body">
             <div class="spreadsheet-tabs bb-details-tabs" role="tablist" aria-label="File details">
               <button type="button" class="spreadsheet-tab is-active" role="tab" aria-selected="true" data-details-tab="overview"><i class="mdi mdi-information-outline"></i><span>Overview</span></button>
@@ -566,6 +579,7 @@
             panels.forEach(panel => { panel.hidden = panel.dataset.detailsPanel !== next; });
           };
           tabs.forEach(tab => tab.addEventListener('click', () => activateDetailsTab(tab.dataset.detailsTab)));
+          ui().enhanceTabs?.(tabs, tabs.map(tab => overlay.querySelector(`[data-details-panel="${tab.dataset.detailsTab}"]`)), index => activateDetailsTab(tabs[index].dataset.detailsTab));
 
           const integrityCard = overlay.querySelector('[data-details-tool-card="integrity"]');
           const integrityButton = overlay.querySelector('[data-details-integrity]');
@@ -658,24 +672,10 @@
       .sort((left, right) => right.bytes - left.bytes || right.count - left.count || left.name.localeCompare(right.name));
   }
 
-  const statsTypePalette = Object.freeze({
-    archive: '#9333ea',
-    audio: '#7c3aed',
-    calendar: '#0284c7',
-    certificate: '#d97706',
-    code: '#2563eb',
-    contact: '#0d9488',
-    database: '#0f766e',
-    document: '#4f46e5',
-    email: '#ea580c',
-    image: '#db2777',
-    markdown: '#0891b2',
-    pdf: '#dc2626',
-    spreadsheet: '#16a34a',
-    text: '#64748b',
-    video: '#be123c',
-    other: '#3ecf8e'
-  });
+  const statsTypePalette = Object.freeze(Object.fromEntries(
+    ['archive', 'audio', 'calendar', 'certificate', 'code', 'contact', 'database', 'document', 'email', 'image', 'markdown', 'pdf', 'spreadsheet', 'text', 'video', 'other']
+      .map(type => [type, `var(--chart-${type})`])
+  ));
 
   function statsTypeColor(type) {
     const normalized = String(type || 'other').trim().toLowerCase();
@@ -683,7 +683,7 @@
     let hash = 0;
     for (let index = 0; index < normalized.length; index++) hash = ((hash << 5) - hash + normalized.charCodeAt(index)) | 0;
     const hue = (210 + Math.abs(hash) * 47) % 360;
-    return `hsl(${hue} 62% 52%)`;
+    return `hsl(${hue} 55% 34%)`;
   }
 
   function distributionEntries(entries, field, maximum = 7) {
@@ -709,12 +709,12 @@
     if (!(total > 0)) return '';
     const segments = displayed.map(entry => {
       const percent = Number(entry[field] || 0) * 100 / total;
-      const detail = field === 'bytes' ? formatBytes(entry.bytes) : `${entry.count.toLocaleString()} object(s)`;
+      const detail = field === 'bytes' ? formatBytes(entry.bytes) : `${countLabel(entry.count.toLocaleString(), 'object')}`;
       return `<span class="folder-distribution-segment" style="--segment-width:${percent}%;--segment-color:${statsTypeColor(entry.name)}" title="${escapeHTML(`${entry.name}: ${percent.toFixed(1)}% · ${detail}`)}"></span>`;
     }).join('');
     const legend = displayed.map(entry => {
       const percent = Number(entry[field] || 0) * 100 / total;
-      const detail = field === 'bytes' ? formatBytes(entry.bytes) : `${entry.count.toLocaleString()} object(s)`;
+      const detail = field === 'bytes' ? formatBytes(entry.bytes) : `${countLabel(entry.count.toLocaleString(), 'object')}`;
       return `<div class="folder-distribution-legend-item"><span class="folder-distribution-swatch" style="--segment-color:${statsTypeColor(entry.name)}"></span><span class="folder-distribution-label">${escapeHTML(entry.name)}</span><span class="folder-distribution-value">${percent.toFixed(1)}% · ${escapeHTML(detail)}</span></div>`;
     }).join('');
     return `<section class="folder-distribution"><div class="folder-distribution-title">${escapeHTML(title)}</div><div class="folder-distribution-bar" role="img" aria-label="${escapeHTML(title)}">${segments}</div><div class="folder-distribution-legend">${legend}</div></section>`;
@@ -944,9 +944,8 @@
     const labelName = node.name || (kind === 'folder' ? 'Folder' : 'Unnamed');
     const label = `<span class="folder-treemap-label"><span class="folder-treemap-name">${escapeHTML(labelName)}</span><span class="folder-treemap-details"><span class="folder-treemap-size">${escapeHTML(sizeLabel)}</span><span class="folder-treemap-meta">${escapeHTML(countLabel)}</span></span></span>`;
     const branchClass = isBranch ? ' is-branch has-header' : ' is-terminal';
-    const role = kind === 'other' ? 'img' : 'button';
     const headerValue = header > 0 ? `${header.toFixed(2)}px` : '100%';
-    output.push(`<div class="folder-treemap-node is-${kind}${branchClass}" tabindex="0" role="${role}" aria-label="${escapeHTML(title.replace(/\n/g, ', '))}" data-kind="${kind}" data-name="${escapeHTML(node.name || '')}" data-depth="${depth}" data-header-height="${header}" data-path="${escapeHTML(node.path || '')}" data-size="${Math.max(0, Number(node.bytes || 0))}" data-count="${Math.max(0, Number(node.count || 0))}" data-mime="${escapeHTML(node.mime || '')}" data-etag="${escapeHTML(node.etag || '')}" data-modified="${escapeHTML(node.lastModified || '')}" style="left:${drawX.toFixed(2)}px;top:${drawY.toFixed(2)}px;width:${drawWidth.toFixed(2)}px;height:${drawHeight.toFixed(2)}px;z-index:${depth};--treemap-color:${color};--treemap-header:${headerValue}">${label}</div>`);
+    output.push(`<button type="button" class="folder-treemap-node is-${kind}${branchClass}" tabindex="-1"${kind === 'other' ? ' aria-disabled="true"' : ''} data-full-label="${escapeHTML(title.replace(/\n/g, ', '))}" data-kind="${kind}" data-name="${escapeHTML(node.name || '')}" data-depth="${depth}" data-header-height="${header}" data-path="${escapeHTML(node.path || '')}" data-size="${Math.max(0, Number(node.bytes || 0))}" data-count="${Math.max(0, Number(node.count || 0))}" data-mime="${escapeHTML(node.mime || '')}" data-etag="${escapeHTML(node.etag || '')}" data-modified="${escapeHTML(node.lastModified || '')}" style="left:${drawX.toFixed(2)}px;top:${drawY.toFixed(2)}px;width:${drawWidth.toFixed(2)}px;height:${drawHeight.toFixed(2)}px;z-index:${depth};--treemap-color:${color};--treemap-header:${headerValue}">${label}</button>`);
     if (isLeaf || output.length >= treemapMaximumRectangles) return;
 
     const inset = Math.min(treemapBranchInsetPixels, drawWidth / 4, drawHeight / 4);
@@ -963,7 +962,7 @@
       const label = node.querySelector('.folder-treemap-label');
       if (!label) return;
       const meta = label.querySelector('.folder-treemap-meta');
-      const rect = BB.viewport?.rect(node) || node.getBoundingClientRect();
+      const rect = node.getBoundingClientRect();
       const headerHeight = Math.max(0, Number(node.dataset.headerHeight || 0));
       const labelHeight = node.classList.contains('is-branch') && headerHeight > 0 ? headerHeight : rect.height;
       const isOther = node.dataset.kind === 'other';
@@ -1016,7 +1015,7 @@
 
   function renderTreemap(map, nodes) {
     if (!map) return;
-    const bounds = BB.viewport?.rect(map) || map.getBoundingClientRect();
+    const bounds = map.getBoundingClientRect();
     const width = Math.max(0, Math.floor(bounds.width));
     const height = Math.max(0, Math.floor(bounds.height));
     if (!(width > 0) || !(height > 0)) return;
@@ -1034,6 +1033,36 @@
     map.classList.remove('is-layout-pending');
     map.setAttribute('aria-busy', 'false');
     fitTreemapLabels(map);
+    nameTreemapTiles(map);
+  }
+
+  // A tile whose label is visible is named by that text, so the accessible name always contains the visible
+  // words (WCAG 2.5.3). A tile too small to print a label gets the full description instead. Only one tile is a
+  // tab stop; Arrow keys move between tiles (see treemapKeydown).
+  function nameTreemapTiles(map) {
+    const tiles = Array.from(map.querySelectorAll('.folder-treemap-node'));
+    tiles.forEach((tile, index) => {
+      const label = tile.querySelector('.folder-treemap-label');
+      if (label && !label.classList.contains('is-hidden')) tile.removeAttribute('aria-label');
+      else tile.setAttribute('aria-label', tile.dataset.fullLabel || '');
+      tile.tabIndex = index === 0 ? 0 : -1;
+    });
+  }
+
+  function treemapKeydown(event) {
+    const keys = ['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'Home', 'End'];
+    if (!keys.includes(event.key)) return;
+    const tile = event.target.closest('.folder-treemap-node');
+    if (!tile) return;
+    const tiles = Array.from(event.currentTarget.querySelectorAll('.folder-treemap-node'));
+    const index = tiles.indexOf(tile);
+    let next = index;
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') next = Math.min(tiles.length - 1, index + 1);
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') next = Math.max(0, index - 1);
+    if (event.key === 'Home') next = 0;
+    if (event.key === 'End') next = tiles.length - 1;
+    event.preventDefault();
+    if (next !== index) tiles[next].focus();
   }
 
   function navigateFromStats(metadata) {
@@ -1090,7 +1119,7 @@
               <div class="folder-details-footer">Computed in ${Number(stats.tookMs || 0).toLocaleString()} ms</div>
             </section>
             <section class="folder-insights-panel" data-insights-panel="treemap" hidden>
-              <div class="folder-treemap is-layout-pending" role="img" aria-label="${scopeTitle} size treemap" aria-busy="true"></div>
+              <div class="folder-treemap is-layout-pending" role="group" aria-label="${scopeTitle} size treemap" aria-busy="true"></div>
               <div class="folder-treemap-tooltip" data-treemap-tooltip role="status" hidden><strong></strong><span></span></div>
             </section>
           </div>
@@ -1133,14 +1162,14 @@
           if (metaHost) metaHost.textContent = `${formatBytes(Number(node.dataset.size || 0))} · ${treemapObjectCount(node.dataset.count || 0)}`;
           treemapTooltip.hidden = false;
 
-          const panelRect = BB.viewport?.rect(treemapPanel) || treemapPanel.getBoundingClientRect();
-          const nodeRect = BB.viewport?.rect(node) || node.getBoundingClientRect();
-          const tooltipRect = BB.viewport?.rect(treemapTooltip) || treemapTooltip.getBoundingClientRect();
+          const panelRect = treemapPanel.getBoundingClientRect();
+          const nodeRect = node.getBoundingClientRect();
+          const tooltipRect = treemapTooltip.getBoundingClientRect();
           const pointerX = Number.isFinite(clientX)
-            ? (BB.viewport?.toLayoutPixels(clientX) ?? clientX)
+            ? clientX
             : null;
           const pointerY = Number.isFinite(clientY)
-            ? (BB.viewport?.toLayoutPixels(clientY) ?? clientY)
+            ? clientY
             : null;
           const anchorX = pointerX ?? nodeRect.left + Math.min(nodeRect.width, 24);
           const anchorY = pointerY ?? nodeRect.top + Math.min(nodeRect.height, 24);
@@ -1182,14 +1211,20 @@
           if (next === 'treemap') scheduleTreemapRender();
         };
         tabs.forEach(tab => tab.addEventListener('click', () => activate(tab.dataset.insightsTab)));
+        ui().enhanceTabs?.(tabs, tabs.map(tab => root.querySelector(`[data-insights-panel="${tab.dataset.insightsTab}"]`)), index => activate(tabs[index].dataset.insightsTab));
         activate(requestedTab);
         map?.addEventListener('pointermove', event => {
           const node = event.target.closest('.folder-treemap-node');
           updateTreemapHover(node, event.clientX, event.clientY);
         });
         map?.addEventListener('pointerleave', clearTreemapHover);
+        map?.addEventListener('keydown', treemapKeydown);
         map?.addEventListener('focusin', event => {
           const node = event.target.closest('.folder-treemap-node');
+          if (node) {
+            map.querySelectorAll('.folder-treemap-node[tabindex="0"]').forEach(tile => { tile.tabIndex = -1; });
+            node.tabIndex = 0;
+          }
           updateTreemapHover(node);
         });
         map?.addEventListener('focusout', event => {
@@ -1323,7 +1358,7 @@
 
   async function deleteObject(key) {
     if (!(await requirePermissions(['delete']))) return false;
-    const confirmed = await ui().confirm({ title: 'Delete file', message: `Permanently delete "${key}"?` });
+    const confirmed = await ui().confirm({ title: 'Delete file', message: `Permanently delete "${key}"?`, confirmLabel: 'Delete', danger: true });
     if (!confirmed) return false;
     const notification = ui().toast(`Deleting ${key.split('/').pop() || key}...`, {
       persistent: true,
@@ -1394,7 +1429,7 @@
   async function deletePrefix(prefix) {
     if (!(await requirePermissions(['delete']))) return false;
     const source = ensurePrefix(prefix);
-    const confirmed = await ui().confirm({ title: 'Delete folder', message: `Permanently delete "${source}" and all of its contents?` });
+    const confirmed = await ui().confirm({ title: 'Delete folder', message: `Permanently delete "${source}" and all of its contents?`, confirmLabel: 'Delete', danger: true });
     if (!confirmed) return false;
     try {
       const created = await BB.api.deletePrefix(source);
@@ -1431,12 +1466,12 @@
       } catch (error) {
         if (error?.name === 'AbortError') return false;
         BB.downloads.fallbackDownload(key, safeFilename, options.version || '', options.instance || BB.api.getInstance());
-        ui().toast(`Resumable download was unavailable: ${String(error?.message || error)}. Browser download started instead.`, { type: 'warning', duration: 6500 });
+        ui().toast(`Resumable download was unavailable: ${String(error?.message || error)}. Browser download started instead.`, { status: 'warning', duration: 6500 });
       }
     } else {
       const downloadURL = BB.api.openURLForKey(key, options.instance || BB.api.getInstance(), options.version || '');
       triggerBrowserDownload(downloadURL, safeFilename);
-      ui().toast('Download started in the browser.', { type: 'info', duration: 4000 });
+      ui().toast('Download started in the browser.', { status: 'info', duration: 4000 });
     }
     return true;
   }
@@ -1465,7 +1500,7 @@
   }
 
   function versionDateLabel(version) {
-    return version?.lastModified ? new Date(version.lastModified).toLocaleString() : '';
+    return version?.lastModified ? utcStamp(version.lastModified) : '';
   }
 
   async function fetchExactVersionRange(key, version, start, end, size, etag, instance, signal) {
@@ -1624,15 +1659,15 @@
           <td class="is-numeric">${version.deleteMarker ? '-' : escapeHTML(formatBytes(version.size || 0))}</td>
           <td>${escapeHTML(versionDateLabel(version))}</td>
           <td class="bb-version-actions">
-            ${version.deleteMarker ? '' : `<button class="bb-btn" data-version-download="${index}">Download</button>`}
-            ${canWriteVersion && !version.isCurrent && !version.deleteMarker ? `<button class="bb-btn bb-btn-primary" data-version-restore="${index}">Restore</button>` : ''}
-            ${canDeleteVersion ? `<button class="bb-btn danger" data-version-delete="${index}">${deleteLabel}</button>` : ''}
+            ${version.deleteMarker ? '' : `<button class="btn btn-sm" data-version-download="${index}">Download</button>`}
+            ${canWriteVersion && !version.isCurrent && !version.deleteMarker ? `<button class="btn btn-sm btn-primary" data-version-restore="${index}">Restore</button>` : ''}
+            ${canDeleteVersion ? `<button class="btn btn-sm danger" data-version-delete="${index}">${deleteLabel}</button>` : ''}
           </td>
         </tr>`;
       };
       const initialRows = versions.map(renderRow).join('');
       await ui().alert({
-        html: `<div class="bb-details bb-version-browser"><div class="bb-details-head"><i class="mdi mdi-source-commit"></i><div class="bb-details-titles"><div class="bb-details-name">Object versions</div><div class="bb-details-prefix">${escapeHTML(key)}</div></div></div><div class="bb-details-body"><div class="bb-version-toolbar"><button type="button" class="bb-btn bb-btn-primary" data-version-compare-selected disabled><i class="mdi mdi-swap-vertical"></i><span>Compare selected</span></button><span data-version-selection>Choose two versions</span></div><div class="data-table-scroll bb-version-table"><table class="data-table"><thead><tr><th aria-label="Selection"></th><th>State</th><th>Version</th><th>Size</th><th>Modified</th><th>Actions</th></tr></thead><tbody data-version-body>${initialRows}</tbody></table></div><div class="bb-version-pagination"><button type="button" class="bb-btn" data-version-more${pageToken ? '' : ' hidden'}>Load more</button><span data-version-count>${versions.length.toLocaleString()} version record(s)</span></div></div></div>`,
+        html: `<div class="bb-details bb-version-browser"><div class="bb-details-head"><i class="mdi mdi-source-commit"></i><div class="bb-details-titles"><div class="bb-details-name">Object versions</div><div class="bb-details-prefix">${escapeHTML(key)}</div></div></div><div class="bb-details-body"><div class="bb-version-toolbar"><button type="button" class="btn btn-sm btn-primary" data-version-compare-selected disabled><i class="mdi mdi-swap-vertical"></i><span>Compare selected</span></button><span data-version-selection>Choose two versions</span></div><div class="data-table-scroll bb-version-table"><table class="data-table"><thead><tr><th><span class="sr-only">Selection</span></th><th>State</th><th>Version</th><th>Size</th><th>Modified</th><th>Actions</th></tr></thead><tbody data-version-body>${initialRows}</tbody></table></div><div class="bb-version-pagination"><button type="button" class="btn btn-sm" data-version-more${pageToken ? '' : ' hidden'}>Load more</button><span data-version-count>${countLabel(versions.length, 'version record')}</span></div></div></div>`,
         onOpen: ({ overlay }) => {
           const body = overlay.querySelector('[data-version-body]');
           const moreButton = overlay.querySelector('[data-version-more]');
@@ -1653,7 +1688,7 @@
           };
           const updateFooter = () => {
             moreButton.hidden = !pageToken;
-            count.textContent = `${versions.length.toLocaleString()} version record(s)`;
+            count.textContent = `${countLabel(versions.length, 'version record')}`;
             refreshSelection();
           };
           const appendPage = async () => {
@@ -1714,9 +1749,9 @@
               }
               if (target.hasAttribute('data-version-restore')) {
                 if (!(await requirePermissions(['write']))) return;
-                if (!(await ui().confirm({ title: 'Restore version', message: `Create a new current version of "${key}" from ${version.version}?` }))) return;
+                if (!(await ui().confirm({ title: 'Restore version', message: `Create a new current version of "${key}" from ${version.version}?`, confirmLabel: 'Restore' }))) return;
                 await BB.api.restoreVersion(key, version.version, instance);
-                ui().toast('Version restored.', { type: 'success', duration: 4000 });
+                ui().toast('Version restored.', { status: 'success', duration: 4000 });
                 await reload();
                 return;
               }
@@ -1725,9 +1760,9 @@
                 const message = version.deleteMarker
                   ? `Permanently remove delete marker ${version.version} from "${key}"?${version.isCurrent ? ' The previous object version may become current again.' : ''}`
                   : `Permanently delete exact version ${version.version} of "${key}"?${version.isCurrent ? ' A previous version or delete marker may become current.' : ''}`;
-                if (!(await ui().confirm({ title: version.deleteMarker ? 'Remove delete marker' : 'Delete version', message }))) return;
+                if (!(await ui().confirm({ title: version.deleteMarker ? 'Remove delete marker' : 'Delete version', message, confirmLabel: version.deleteMarker ? 'Remove' : 'Delete', danger: true }))) return;
                 await BB.api.deleteVersion(key, version.version, instance);
-                ui().toast(version.deleteMarker ? 'Delete marker removed.' : 'Version deleted.', { type: 'success', duration: 4000 });
+                ui().toast(version.deleteMarker ? 'Delete marker removed.' : 'Version deleted.', { status: 'success', duration: 4000 });
                 await reload();
               }
             } catch (error) {
