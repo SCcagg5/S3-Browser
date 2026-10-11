@@ -7,7 +7,6 @@
  */
 (function () {
   const BB = (window.BB = window.BB || {});
-  let domSequence = 0; // unique, token-safe ids for aria-labelledby references
 
   const $ = (sel, root = document) => root.querySelector(sel);
   const el = (tag, cls, html) => {
@@ -30,6 +29,9 @@
       if (scrollLockDepth > 1) return;
 
       const scrollbarWidth = Math.max(0, Number(window.innerWidth || 0) - Number(root.clientWidth || 0));
+      const layoutScrollbarWidth = BB.viewport?.toLayoutPixels
+        ? BB.viewport.toLayoutPixels(scrollbarWidth)
+        : scrollbarWidth;
       const computedBodyPaddingRight = Number.parseFloat(window.getComputedStyle(body).paddingRight) || 0;
 
       scrollLockState = {
@@ -52,8 +54,8 @@
       body.style.overscrollBehavior = 'none';
       root.style.scrollbarGutter = 'auto';
       body.style.scrollbarGutter = 'auto';
-      if (scrollbarWidth > 0) {
-        body.style.paddingRight = `${computedBodyPaddingRight + scrollbarWidth}px`;
+      if (layoutScrollbarWidth > 0) {
+        body.style.paddingRight = `${computedBodyPaddingRight + layoutScrollbarWidth}px`;
       }
       return;
     }
@@ -79,26 +81,17 @@
     }
   }
 
-  let modalSequence = 0;
-
   function buildModal({ title = '', message = '', html = '', kind = 'alert', defaultValue = '', confirmLabel = 'OK', cancelLabel = 'Cancel' }) {
     const overlay = el('div', 'bb-overlay', '');
     const modal = el('div', 'bb-modal', '');
-    modal.setAttribute('role', kind === 'alert' ? 'dialog' : 'alertdialog');
-    modal.setAttribute('aria-modal', 'true');
-    modal.tabIndex = -1;
 
-    const btnClose = el('button', 'btn btn-sm btn-ghost bb-modal-x', '<i class="mdi mdi-close"></i>');
+    const btnClose = el('button', 'bb-btn bb-btn-ghost bb-modal-x', '<i class="mdi mdi-close"></i>');
     btnClose.setAttribute('aria-label', 'Close');
     var header = void 0;
     if (title != '' || html == '') {
       header = el('div', 'bb-modal-header', '');
       const hTitle = el('div', 'bb-modal-title', '');
       hTitle.textContent = title || '';
-      hTitle.id = `bb-modal-title-${++modalSequence}`;
-      hTitle.setAttribute('role', 'heading');
-      hTitle.setAttribute('aria-level', '2');
-      modal.setAttribute('aria-labelledby', hTitle.id);
       header.append(hTitle, btnClose);
     }
 
@@ -114,20 +107,11 @@
       input.placeholder = defaultValue || '';
       input.autocomplete = 'off';
       input.spellcheck = false;
-      input.setAttribute('aria-label', message || title || 'Value');
+      input.setAttribute('aria-label', 'Input');
       body.append(msg, input);
    } else if (html) {
       const wrap = el('div', 'bb-modal-html', '');
       wrap.innerHTML = String(html || '');
-      const heading = wrap.querySelector('.bb-details-name');
-      if (heading) {
-        heading.id = `bb-modal-title-${++modalSequence}`;
-        heading.setAttribute('role', 'heading');
-        heading.setAttribute('aria-level', '2');
-        modal.setAttribute('aria-labelledby', heading.id);
-      } else {
-        modal.setAttribute('aria-label', 'Dialog');
-      }
       if (title == '' && html != '') {
         wrap.prepend(btnClose);
       }
@@ -145,9 +129,9 @@
     }
 
     const footer = el('div', 'bb-modal-actions', '');
-    const btnCancel = el('button', 'btn btn-sm', '');
+    const btnCancel = el('button', 'bb-btn', '');
     btnCancel.textContent = cancelLabel || 'Cancel';
-    const btnOk = el('button', 'btn btn-sm btn-primary', '');
+    const btnOk = el('button', 'bb-btn bb-btn-primary', '');
     btnOk.textContent = confirmLabel || 'OK';
     if (kind != 'alert') {
       footer.append(btnCancel, btnOk);
@@ -160,44 +144,10 @@
     return { overlay, modal, header, body, footer, btnCancel, btnOk, btnClose };
   }
 
-  function focusableIn(root) {
-    // Tab order, not just focusability: a roving-tabindex tab with tabindex="-1" is never the last Tab stop.
-    return Array.from(root.querySelectorAll('a[href], button, input, select, textarea, summary, [tabindex]'))
-      .filter((node) => !node.disabled && node.tabIndex >= 0 && node.offsetParent !== null);
-  }
-
-  // Keep Tab inside the modal, as aria-modal promises assistive technology.
-  function trapTab(event, overlay) {
-    if (event.key !== 'Tab') return;
-    const nodes = focusableIn(overlay);
-    if (!nodes.length) {
-      event.preventDefault();
-      return;
-    }
-    const first = nodes[0];
-    const last = nodes[nodes.length - 1];
-    if (event.shiftKey && (document.activeElement === first || !overlay.contains(document.activeElement))) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
-  }
-
   function attachAndShow(overlay) {
-    // A dialog opened from a menu item returns focus to the control that owns the menu, not to the hidden item.
-    let opener = document.activeElement;
-    const ownerMenu = opener && opener.closest ? opener.closest('.bb-menu') : null;
-    if (ownerMenu) opener = ownerMenu.querySelector('.bb-menu-trigger, .bb-kebab') || opener;
-    overlay._bbReturnFocus = opener;
-    overlay.addEventListener('keydown', (e) => trapTab(e, overlay));
     document.body.appendChild(overlay);
     lockScroll(true);
     requestAnimationFrame(() => overlay.classList.add('is-open'));
-    // Alerts have no input or default button: focus the dialog itself so Escape reaches it.
-    const modal = overlay.querySelector('.bb-modal');
-    if (modal) modal.focus({ preventScroll: true });
   }
 
   function cleanup(overlay) {
@@ -207,11 +157,6 @@
     setTimeout(() => {
       if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
       lockScroll(false);
-      const back = overlay._bbReturnFocus;
-      const usable = back && back.isConnected && back.offsetParent !== null && typeof back.focus === 'function';
-      // If the opener is gone (row deleted, list refreshed), fall back to the main content so focus never drops to <body>.
-      const target = usable ? back : document.getElementById('main-content') || document.querySelector('main');
-      if (target && typeof target.focus === 'function') target.focus({ preventScroll: true });
     }, 120);
   }
 
@@ -229,12 +174,10 @@
         try { onOpen({ overlay, modal: overlay.querySelector('.bb-modal') }); }
         catch (error) { console.error('modal onOpen failed', error); }
       }
-      // A dialog built around tabs starts on its selected tab: a focused control, not the bare dialog box.
-      overlay.querySelector('[role="tab"][aria-selected="true"], [role="tab"]')?.focus({ preventScroll: true });
     });
   }
 
-  async function confirm({ title = '', message = '', html = '', confirmLabel = 'OK', cancelLabel = 'Cancel', danger = false }) {
+  async function confirm({ title = '', message = '', html = '', confirmLabel = 'OK', cancelLabel = 'Cancel' }) {
     return new Promise((resolve) => {
       const { overlay, btnOk, btnCancel, btnClose } = buildModal({
         title,
@@ -244,7 +187,6 @@
         confirmLabel,
         cancelLabel
       });
-      if (danger) btnOk.classList.replace('btn-primary', 'btn-danger');
 
       function yes() { cleanup(overlay); resolve(true); }
       function no()  { cleanup(overlay); resolve(false); }
@@ -274,7 +216,7 @@
       overlay.addEventListener('click', (e) => { if (e.target === overlay) cancel(); });
       overlay.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') cancel();
-        if (e.key === 'Enter' && e.target === input) ok();
+        if (e.key === 'Enter') ok();
       });
 
       attachAndShow(overlay);
@@ -284,10 +226,9 @@
   }
 
   function toast(message = '', {
-    duration = 5000,
+    duration = 3000,
     persistent = false,
-    type = '',
-    status = type,
+    status = '',
     progress,
     indeterminate = false,
     detail = '',
@@ -297,14 +238,13 @@
     if (!host) {
       host = el('div', 'bb-toast-host', '');
       host.id = 'bb-toast-host';
+      host.setAttribute('aria-live', 'polite');
+      host.setAttribute('aria-relevant', 'additions text');
       document.body.appendChild(host);
     }
 
     const t = el('div', 'bb-toast', '');
     t.setAttribute('role', 'status');
-    const closeButton = el('button', 'bb-toast-close', '<i class="mdi mdi-close" aria-hidden="true"></i>');
-    closeButton.type = 'button';
-    closeButton.setAttribute('aria-label', 'Dismiss notification');
     const icon = el('i', 'mdi bb-toast-icon', '');
     const content = el('div', 'bb-toast-content', '');
     const copy = el('div', 'bb-toast-message', '');
@@ -313,11 +253,9 @@
     const progressBar = el('div', 'bb-toast-progress-bar', '');
     const actionRow = el('div', 'bb-toast-actions', '');
     progressTrack.setAttribute('role', 'progressbar');
-    copy.id = `bb-toast-message-${++domSequence}`;
-    progressTrack.setAttribute('aria-labelledby', copy.id);
     progressTrack.appendChild(progressBar);
     content.append(copy, detailNode, progressTrack, actionRow);
-    t.append(icon, content, closeButton);
+    t.append(icon, content);
     host.appendChild(t);
 
     let currentStatus = '';
@@ -337,44 +275,15 @@
       window.setTimeout(() => t.remove(), 200);
     }
 
-    // Timing is adjustable: hovering or focusing a toast pauses its dismissal, and it can be closed at any time.
-    let deadline = 0;
-    let remaining = 0;
-    let engaged = false;
-
     function scheduleRemoval(nextDuration) {
       window.clearTimeout(removalTimer);
-      remaining = Math.max(4000, Number(nextDuration) || 0);
-      if (engaged) return;
-      deadline = Date.now() + remaining;
-      removalTimer = window.setTimeout(hide, remaining);
+      removalTimer = window.setTimeout(hide, Math.max(1000, Number(nextDuration) || 0));
     }
-
-    function engage() {
-      if (engaged || removed || currentPersistent) return;
-      engaged = true;
-      window.clearTimeout(removalTimer);
-      remaining = Math.max(2000, deadline - Date.now());
-    }
-
-    function release() {
-      if (!engaged || t.matches(':hover, :focus-within')) return;
-      engaged = false;
-      if (!removed && !currentPersistent) scheduleRemoval(remaining);
-    }
-
-    t.addEventListener('pointerenter', engage);
-    t.addEventListener('pointerleave', release);
-    t.addEventListener('focusin', engage);
-    t.addEventListener('focusout', () => window.setTimeout(release, 0));
-    closeButton.addEventListener('click', () => { window.clearTimeout(removalTimer); hide(); });
 
     function setStatus(nextStatus) {
-      currentStatus = ['loading', 'success', 'error', 'paused', 'warning', 'info'].includes(nextStatus) ? nextStatus : '';
-      t.classList.remove('is-loading', 'is-success', 'is-error', 'is-paused', 'is-warning', 'is-info');
-      t.setAttribute('role', currentStatus === 'error' ? 'alert' : 'status');
+      currentStatus = ['loading', 'success', 'error', 'paused'].includes(nextStatus) ? nextStatus : '';
+      t.classList.remove('is-loading', 'is-success', 'is-error', 'is-paused');
       icon.className = 'mdi bb-toast-icon';
-      icon.setAttribute('aria-hidden', 'true');
       icon.hidden = false;
 
       if (currentStatus === 'loading') {
@@ -389,12 +298,6 @@
       } else if (currentStatus === 'paused') {
         t.classList.add('is-paused');
         icon.classList.add('mdi-pause-circle-outline');
-      } else if (currentStatus === 'warning') {
-        t.classList.add('is-warning');
-        icon.classList.add('mdi-alert-outline');
-      } else if (currentStatus === 'info') {
-        t.classList.add('is-info');
-        icon.classList.add('mdi-information-outline');
       } else {
         icon.hidden = true;
       }
@@ -422,7 +325,7 @@
 
       if (!visible) {
         progressTrack.removeAttribute('aria-valuenow');
-        progressBar.style.removeProperty('--progress');
+        progressBar.style.width = '';
         return;
       }
       progressTrack.setAttribute('aria-valuemin', '0');
@@ -430,10 +333,10 @@
       if (hasNumericProgress) {
         const bounded = Math.max(0, Math.min(1, numeric));
         progressTrack.setAttribute('aria-valuenow', String(Math.round(bounded * 100)));
-        progressBar.style.setProperty('--progress', String(bounded));
+        progressBar.style.width = `${bounded * 100}%`;
       } else {
         progressTrack.removeAttribute('aria-valuenow');
-        progressBar.style.removeProperty('--progress');
+        progressBar.style.width = '';
       }
     }
 
@@ -555,6 +458,8 @@
     if (!host) {
       host = el('div', 'bb-toast-host', '');
       host.id = 'bb-toast-host';
+      host.setAttribute('aria-live', 'polite');
+      host.setAttribute('aria-relevant', 'additions text');
       document.body.appendChild(host);
     }
 
@@ -564,18 +469,17 @@
       comparison: { title: 'Version comparison', icon: 'swap-vertical' }
     };
     const label = labels[normalizedKind] || { title: 'Transfers', icon: 'swap-vertical' };
-    const panel = el('div', `bb-transfer-panel is-${normalizedKind}`, '');
-    panel.setAttribute('role', 'group');
+    const panel = el('section', `bb-transfer-panel is-${normalizedKind}`, '');
+    panel.setAttribute('role', 'status');
     panel.setAttribute('aria-label', label.title);
 
-    const header = el('div', 'bb-transfer-header', '');
+    const header = el('header', 'bb-transfer-header', '');
     const heading = el('div', 'bb-transfer-heading', '');
     const headingIcon = el('i', `mdi mdi-${label.icon}`, '');
     const headingCopy = el('div', 'bb-transfer-heading-copy', '');
     const headingTitle = el('strong', '', '');
     headingTitle.textContent = label.title;
     const headingSummary = el('span', 'bb-transfer-summary', '');
-    headingSummary.setAttribute('role', 'status');
     headingSummary.textContent = 'Preparing...';
     headingCopy.append(headingTitle, headingSummary);
     heading.append(headingIcon, headingCopy);
@@ -736,34 +640,6 @@
       actionIcon.className = `mdi mdi-${icon || 'circle-outline'}`;
     }
 
-    function transferStatusRank(item) {
-      const value = String(item?.state?.status || 'queued');
-      const recentlyTransferred = Date.now() - Number(item?.state?.lastActivityAt || 0) < 5000;
-      if (value === 'running' && recentlyTransferred) return 0;
-      if (value === 'running') return 1;
-      if (value === 'preparing') return 2;
-      if (value === 'queued') return 3;
-      if (value === 'paused') return 4;
-      if (value === 'error') return 5;
-      if (value === 'completed') return 6;
-      if (value === 'canceled') return 7;
-      return 5;
-    }
-
-    function reorderItems() {
-      Array.from(items.values())
-        .sort((left, right) => {
-          const statusDifference = transferStatusRank(left) - transferStatusRank(right);
-          if (statusDifference) return statusDifference;
-          if (left.state.status === 'running' && right.state.status === 'running') {
-            const activityDifference = Number(right.state.lastActivityAt || 0) - Number(left.state.lastActivityAt || 0);
-            if (activityDifference) return activityDifference;
-          }
-          return left.order - right.order;
-        })
-        .forEach(item => list.appendChild(item.nodes.row));
-    }
-
     function renderItem(item) {
       const { state, nodes, handlers } = item;
       const status = state.status || 'queued';
@@ -780,10 +656,10 @@
       nodes.progress.classList.toggle('is-indeterminate', progress === null && !!state.indeterminate);
       if (progress !== null) {
         nodes.progress.setAttribute('aria-valuenow', String(Math.round(progress * 100)));
-        nodes.progressBar.style.setProperty('--progress', String(progress));
+        nodes.progressBar.style.width = `${progress * 100}%`;
       } else {
         nodes.progress.removeAttribute('aria-valuenow');
-        nodes.progressBar.style.removeProperty('--progress');
+        nodes.progressBar.style.width = '';
       }
 
       const canPause = ['queued', 'preparing', 'running'].includes(status) && typeof handlers.pause === 'function';
@@ -804,7 +680,6 @@
         : canDismiss
           ? { visible: true, icon: 'close', label: `Dismiss ${state.name || 'transfer'}`, onClick: () => removeItem(item.id) }
           : { visible: false });
-      reorderItems();
       updateHeader();
       schedulePanelRemoval();
     }
@@ -846,8 +721,6 @@
       const progress = el('div', 'bb-transfer-item-progress', '');
       const progressBar = el('div', 'bb-transfer-item-progress-bar', '');
       progress.setAttribute('role', 'progressbar');
-      name.id = `bb-transfer-name-${++domSequence}`;
-      progress.setAttribute('aria-labelledby', name.id);
       progress.setAttribute('aria-valuemin', '0');
       progress.setAttribute('aria-valuemax', '100');
       progress.appendChild(progressBar);
@@ -857,15 +730,12 @@
 
       const item = {
         id,
-        order: ++sequence,
         state: {
           name: options.name || 'Transfer',
           status: options.status || 'queued',
           progress: options.progress,
           indeterminate: !!options.indeterminate,
-          detail: options.detail || '',
-          lastActivityAt: options.status === 'running' ? Date.now() : 0,
-          lastProgress: boundedProgress(options.progress)
+          detail: options.detail || ''
         },
         handlers: {
           pause: options.onPause,
@@ -883,19 +753,8 @@
         update(next = {}) {
           if (!items.has(id)) return controller;
           if (Object.prototype.hasOwnProperty.call(next, 'name')) item.state.name = String(next.name || 'Transfer');
-          if (Object.prototype.hasOwnProperty.call(next, 'status')) {
-            const previousStatus = item.state.status;
-            item.state.status = String(next.status || 'queued');
-            if (item.state.status === 'running' && previousStatus !== 'running') item.state.lastActivityAt = Date.now();
-          }
-          if (Object.prototype.hasOwnProperty.call(next, 'progress')) {
-            const nextProgress = boundedProgress(next.progress);
-            if (nextProgress !== null && (item.state.lastProgress === null || nextProgress > item.state.lastProgress + 0.000001)) {
-              item.state.lastActivityAt = Date.now();
-            }
-            item.state.lastProgress = nextProgress;
-            item.state.progress = next.progress;
-          }
+          if (Object.prototype.hasOwnProperty.call(next, 'status')) item.state.status = String(next.status || 'queued');
+          if (Object.prototype.hasOwnProperty.call(next, 'progress')) item.state.progress = next.progress;
           if (Object.prototype.hasOwnProperty.call(next, 'indeterminate')) item.state.indeterminate = !!next.indeterminate;
           if (Object.prototype.hasOwnProperty.call(next, 'detail')) item.state.detail = String(next.detail || '');
           if (Object.prototype.hasOwnProperty.call(next, 'onPause')) item.handlers.pause = next.onPause;
@@ -978,102 +837,5 @@
     return controller;
   }
 
-  // Roving-tabindex tabs: links each tab to its panel and adds Arrow/Home/End navigation. `select` activates a tab;
-  // when it re-renders the tab strip the replacement is found again through replaceContent's focus restoration.
-  let tabSequence = 0;
-  function enhanceTabs(tabs, panels, select) {
-    const base = `bb-tabs-${++tabSequence}`;
-    tabs.forEach((tab, index) => {
-      tab.id = tab.id || `${base}-tab-${index}`;
-      const panel = panels[index];
-      if (panel) {
-        panel.id = panel.id || `${base}-panel-${index}`;
-        panel.setAttribute('role', 'tabpanel');
-        panel.setAttribute('aria-labelledby', tab.id);
-        tab.setAttribute('aria-controls', panel.id);
-      }
-      tab.addEventListener('keydown', event => {
-        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-        event.preventDefault();
-        let next = index;
-        if (event.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length;
-        if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
-        if (event.key === 'Home') next = 0;
-        if (event.key === 'End') next = tabs.length - 1;
-        select(next);
-        if (tabs[next].isConnected) tabs[next].focus();
-      });
-    });
-  }
-
-  // replaceChildren for a region that re-renders itself (grid sort, paging, filter toggle, sheet change). Focus
-  // moves to the equivalent control in the new content, so a keyboard user never lands on <body>. A focused tab
-  // follows the selection (roving tabindex). When the new content has no equivalent yet (a loading view), the
-  // intent is kept for the next replacement.
-  const FOCUSABLE = 'a[href], button, input, select, textarea, summary, [tabindex]:not([tabindex="-1"])';
-  const focusKey = element => [
-    element.tagName,
-    element.getAttribute('role') || '',
-    element.getAttribute('aria-label') || '',
-    element.getAttribute('title') || '',
-    element.name || '',
-    (element.textContent || '').trim().slice(0, 40),
-    typeof element.className === 'string' ? element.className.split(/\s+/).filter(name => name && !name.startsWith('is-')).join(' ') : ''
-  ].join('|');
-  const focusableControls = root => Array.from(root.querySelectorAll(FOCUSABLE)).filter(element => !element.disabled && element.offsetParent !== null);
-
-  function replaceContent(root, ...nodes) {
-    const active = document.activeElement;
-    let intent = null;
-    if (active && active !== document.body && root.contains(active)) {
-      const all = focusableControls(root);
-      const key = focusKey(active);
-      intent = {
-        key,
-        ordinal: all.filter(element => focusKey(element) === key).indexOf(active),
-        index: all.indexOf(active),
-        isTab: active.getAttribute('role') === 'tab',
-        at: Date.now()
-      };
-    } else if (root._bbFocusIntent && Date.now() - root._bbFocusIntent.at < 10000 && (!active || active === document.body)) {
-      intent = root._bbFocusIntent;
-    }
-    root.replaceChildren(...nodes);
-    root._bbFocusIntent = null;
-    if (!intent) return;
-    const all = focusableControls(root);
-    let target = null;
-    if (intent.isTab) target = all.find(element => element.getAttribute('role') === 'tab' && element.getAttribute('aria-selected') === 'true') || null;
-    if (!target) {
-      const matches = all.filter(element => focusKey(element) === intent.key);
-      target = matches[intent.ordinal] || matches[0] || null;
-    }
-    if (!target && all.length && nodes.some(node => node && node.querySelector && node.querySelector(FOCUSABLE))) {
-      target = all[Math.max(0, Math.min(intent.index, all.length - 1))];
-    }
-    if (target) target.focus({ preventScroll: true });
-    else root._bbFocusIntent = intent;
-  }
-
-  // A control that is disabled while its action runs (Refresh, "Count lines", pager buttons, "Run check") loses focus
-  // to <body> in browsers. Remember it and hand focus back when it is enabled again, unless the user moved on.
-  (function keepFocusAcrossDisabled() {
-    if (typeof MutationObserver !== 'function') return;
-    let held = null;
-    new MutationObserver(records => {
-      for (const record of records) {
-        const element = record.target;
-        if (element.disabled) {
-          if (document.activeElement === element) held = element;
-        } else if (held === element) {
-          held = null;
-          const active = document.activeElement;
-          if (element.isConnected && (!active || active === document.body)) element.focus({ preventScroll: true });
-        }
-      }
-    }).observe(document.documentElement, { attributes: true, attributeFilter: ['disabled'], subtree: true });
-    document.addEventListener('focusin', event => { if (event.target !== held) held = null; });
-  })();
-
-  BB.ui = { alert, confirm, prompt, toast, transferGroup, enhanceTabs, replaceContent };
+  BB.ui = { alert, confirm, prompt, toast, transferGroup };
 })();

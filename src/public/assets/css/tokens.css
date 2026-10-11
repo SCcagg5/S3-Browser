@@ -1,236 +1,90 @@
-/*
- * Design tokens. Every colour, size, radius, shadow, layer and duration used by
- * the interface is declared here; the other stylesheets only consume them.
- * The dark theme follows the operating system through prefers-color-scheme.
- */
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
 
-  /* Typography. 12px is the floor for any rendered text. */
+  /* Typography */
   --font-ui: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial, sans-serif;
-  --font-mono: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Monaco, "Courier New", monospace;
+  --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Monaco, "Courier New", monospace;
   --font-size-xs: .75rem;
   --font-size-sm: .8125rem;
   --font-size-md: .875rem;
   --font-size-lg: 1rem;
-  --font-size-xl: 1.125rem;
-  --font-size-2xl: 1.25rem;
-  --font-size-3xl: 1.5rem;
   --line-height-compact: 1.25;
   --line-height-body: 1.5;
 
-  /* Surfaces */
+  /* Semantic colors */
+  --color-primary: #167df0;
+  --color-primary-hover: #0f6ed8;
+  --color-primary-soft: #eef6ff;
   --color-bg-page: #f5f7fa;
   --color-bg-panel: #ffffff;
   --color-bg-subtle: #f8fafc;
   --color-bg-hover: #f1f5f9;
-  --color-bg-inset: #f2f4f7;
-  --color-border: #e4e7ec;
-  --color-border-strong: #d0d5dd;
-  /* Boundary of form fields: 3:1 against every surface they sit on (WCAG 1.4.11). */
-  --color-control-border: #7c879a;
-
-  /* Text */
+  --color-border: #dfe4ea;
+  --color-border-strong: #c7d0db;
+  --color-text: #172033;
   --color-text-strong: #101828;
-  --color-text: #344054;
-  --color-text-secondary: #475467;
   --color-text-muted: #667085;
-  --color-on-solid: #ffffff;
-
-  /* Accent. The foreground variant is used for links, icons and focus rings;
-     the solid variant is the fill behind --color-on-solid text. */
-  --color-primary: #0c68d0;
-  --color-primary-solid: #0c68d0;
-  --color-primary-hover: #0a58b0;
-  --color-primary-soft: #eef6ff;
-  --color-primary-border: #bfdbfe;
-
-  /* Status */
+  --color-text-subtle: #98a2b3;
   --color-danger: #b42318;
-  --color-danger-solid: #b42318;
-  --color-danger-hover: #912018;
-  --color-danger-soft: #fef3f2;
-  --color-danger-border: #fecdca;
-  --color-warning: #b54708;
-  --color-warning-soft: #fffaeb;
-  --color-warning-border: #fedf89;
+  --color-danger-soft: #fff1f0;
+  --color-warning: #9a6700;
+  --color-warning-soft: #fff8c5;
   --color-success: #067647;
   --color-success-soft: #ecfdf3;
-  --color-success-border: #abefc6;
-
-  /* Inverse surfaces (media overlays and the PDF canvas) keep a dark ground in both themes. */
-  --color-inverse-bg: #1d2939;
-  --color-inverse-text: #f2f4f7;
-  --color-viewer-bg: #525659;
-  --color-media-bg: #000000;
-  --color-other-tile: #f3b944;
-  --color-other-tile-text: #5f370e;
-  --color-other-tile-line: #92400e;
-  --color-tile-label-shadow: rgb(0 0 0 / .72);
-  --color-other-tile-label-shadow: rgb(255 255 255 / .55);
-  --color-scrim: rgb(16 24 40 / .5);
-  --color-selection: #cfe7ff;
-
-  /* Syntax and data colours */
-  --syntax-blue: #0550ae;
-  --syntax-green: #0a7f47;
-  --syntax-purple: #6941c6;
-  --syntax-orange: #b54708;
-  --syntax-red: #c62828;
-  --syntax-gray: #5f6b7c;
-  --syntax-bg: #f8fafc;
-
-  /* Data colours for charts and treemap tiles; each keeps 4.5:1 contrast with white labels. */
-  --chart-archive: #7e22ce;
-  --chart-audio: #6d28d9;
-  --chart-calendar: #0369a1;
-  --chart-certificate: #b45309;
-  --chart-code: #1d4ed8;
-  --chart-contact: #0f766e;
-  --chart-database: #115e59;
-  --chart-document: #4338ca;
-  --chart-email: #c2410c;
-  --chart-image: #be185d;
-  --chart-markdown: #0e7490;
-  --chart-pdf: #b91c1c;
-  --chart-spreadsheet: #15803d;
-  --chart-text: #475569;
-  --chart-video: #9f1239;
-  --chart-other: #4d7c0f;
-
-  /* Elevation */
-  --shadow-ink: 16 24 40;
-  --shadow-sm: 0 1px 3px rgb(var(--shadow-ink) / .12);
-  --shadow-md: 0 4px 14px rgb(var(--shadow-ink) / .1);
-  --shadow-popover: 0 6px 14px rgb(var(--shadow-ink) / .16);
-  --shadow-modal: 0 24px 64px rgb(var(--shadow-ink) / .24);
+  --color-unknown: #475467;
+  --color-unknown-soft: #f2f4f7;
+  --focus-ring: 0 0 0 3px rgba(22, 125, 240, .2);
 
   /* Geometry */
-  /* 4px grid with half steps (1h = 6px, 2h = 10px, 3h = 14px). Spacing never uses a literal. */
-  --space-0: .125rem;
   --space-1: .25rem;
-  --space-1h: .375rem;
   --space-2: .5rem;
-  --space-2h: .625rem;
   --space-3: .75rem;
-  --space-3h: .875rem;
   --space-4: 1rem;
   --space-5: 1.25rem;
   --space-6: 1.5rem;
-  --space-7: 1.75rem;
   --space-8: 2rem;
-  --space-10: 2.5rem;
-  --space-12: 3rem;
   --radius-sm: 6px;
-  --radius-md: 8px;
+  --radius-md: 9px;
   --radius-lg: 12px;
-  --radius-pill: 999px;
-  --control-height-sm: 2rem;
-  --control-height-md: 2.375rem;
-  --target-size: 2rem;
-  --grid-row-height: 2.5rem;
-  --icon-smmd: 1.5rem;
-  --icon-xl: 2.75rem;
-  --container-max: 1280px;
-  --preview-max: 1680px;
-  --preview-pad: clamp(.625rem, 1vw, 1rem);
-  --browser-header-row-height: 3.625rem;
+  --control-height-sm: 32px;
+  --control-height-md: 38px;
+  --grid-row-height: 36px;
+  --shadow-popover: 0 12px 30px rgba(16, 24, 40, .14);
+  --shadow-sm: 0 1px 3px rgba(16, 24, 40, .12);
 
-  /* Layers. Local stacking inside one component uses 1-9; anything that overlays other
-     components takes a --z-* token. */
-  --z-sticky: 20;
-  --z-dropdown: 1000;
-  --z-overlay: 1040;
-  --z-modal: 1050;
-  --z-toast: 1200;
-  --z-top: 3000;
+  /* Render the complete application at the same visual density as Chrome at
+     80%, including object previews. JavaScript positioning helpers read the
+     active value so fixed popovers remain anchored to their triggers. */
+  --browser-ui-scale: .8;
+  --browser-ui-scale-active: 1;
 
-  /* Motion */
-  --duration-fast: .12s;
-  --duration-base: .18s;
-  --ease-out: cubic-bezier(.16, 1, .3, 1);
+  /* Shared aliases used by the existing interface layers. */
+  --primary-color: var(--color-primary);
+  --page-bg: var(--color-bg-page);
+  --panel-bg: var(--color-bg-panel);
+  --border-color: var(--color-border);
+  --muted-color: var(--color-text-muted);
+  --text-color: var(--color-text);
+  --danger-color: var(--color-danger);
+  --warning-color: var(--color-warning);
+  --bb-primary: var(--color-primary);
+  --bb-border: var(--color-border);
+  --bb-text: var(--color-text);
+  --bb-muted: var(--color-text-muted);
+  --bb-bg: var(--color-bg-panel);
 }
 
-@media (pointer: coarse) {
+
+/* Chrome zoom changes both visual scale and the effective CSS layout width.
+   Applying the same scale to every application page reproduces that density at
+   100% browser zoom. Coordinate-sensitive controls use BB.viewport to convert
+   visual viewport values back into this scaled layout coordinate space. */
+@media screen and (min-width: 768px) {
   :root {
-    --target-size: 2.75rem;
-    --grid-row-height: 2.75rem;
-    --control-height-sm: 2.75rem;
-    --control-height-md: 2.75rem;
+    --browser-ui-scale-active: var(--browser-ui-scale);
   }
-}
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --color-bg-page: #0c111d;
-    --color-bg-panel: #131a27;
-    --color-bg-subtle: #161e2c;
-    --color-bg-hover: #1b2536;
-    --color-bg-inset: #202b3d;
-    --color-border: #263244;
-    --color-border-strong: #364458;
-    --color-control-border: #6b7a90;
-
-    --color-text-strong: #f5f7fa;
-    --color-text: #d5dae3;
-    --color-text-secondary: #b4bcc9;
-    --color-text-muted: #98a2b3;
-
-    --color-primary: #6cb2ff;
-    --color-primary-solid: #1a6fd1;
-    --color-primary-hover: #1862bd;
-    --color-primary-soft: #14233b;
-    --color-primary-border: #1f3a63;
-
-    --color-danger: #fb7d72;
-    --color-danger-solid: #c0332b;
-    --color-danger-hover: #a52820;
-    --color-danger-soft: #3a1816;
-    --color-danger-border: #6b2a25;
-    --color-warning: #f5a65b;
-    --color-warning-soft: #33230f;
-    --color-warning-border: #6b4a1c;
-    --color-success: #4cd08d;
-    --color-success-soft: #0f2b20;
-    --color-success-border: #1c5a3d;
-
-    --color-inverse-bg: #2a3649;
-    --color-scrim: rgb(0 0 0 / .62);
-    --color-selection: #1f3a63;
-
-    --syntax-blue: #79c0ff;
-    --syntax-green: #7ee787;
-    --syntax-purple: #d2a8ff;
-    --syntax-orange: #ffa657;
-    --syntax-red: #ff7b72;
-    --syntax-gray: #8b949e;
-    --syntax-bg: #161e2c;
-
-    --shadow-ink: 0 0 0;
-    --shadow-sm: 0 1px 3px rgb(var(--shadow-ink) / .5);
-    --shadow-md: 0 4px 14px rgb(var(--shadow-ink) / .45);
-    --shadow-popover: 0 6px 14px rgb(var(--shadow-ink) / .55);
-    --shadow-modal: 0 24px 64px rgb(var(--shadow-ink) / .65);
-  }
-}
-
-/* Increased contrast: stronger separators and secondary text in both themes. */
-@media (prefers-contrast: more) {
-  :root {
-    --color-border: #98a2b3;
-    --color-border-strong: #667085;
-    --color-control-border: #475467;
-    --color-text-muted: #475467;
-    --color-text-secondary: #344054;
-  }
-}
-
-@media (prefers-contrast: more) and (prefers-color-scheme: dark) {
-  :root {
-    --color-border: #6b7a90;
-    --color-border-strong: #98a2b3;
-    --color-control-border: #98a2b3;
-    --color-text-muted: #d0d5dd;
-    --color-text-secondary: #e4e7ec;
+  body {
+    zoom: var(--browser-ui-scale-active);
   }
 }

@@ -31,7 +31,13 @@ type capabilityState struct {
 	Verified bool   `json:"verified"`
 	Source   string `json:"source"`
 	Reason   string `json:"reason,omitempty"`
+	// expires is set on a denial observed from one real provider call: the denial may only concern that object,
+	// so it is a short-lived hint for the UI and is never enforced by requirePermission.
+	expires time.Time
 }
+
+// observedDenialTTL is how long a provider denial learned from a single operation stays reported.
+const observedDenialTTL = time.Minute
 
 func normalizedCapabilityState(state capabilityState) capabilityState {
 	if state.State == "" {
@@ -330,6 +336,10 @@ func initialCapabilities(cfg bucketConfig, forceReadOnlyValues ...bool) capabili
 
 func (s *storageInstance) refreshCapabilities(ctx context.Context) capabilities {
 	discovered, err := s.discoverCapabilities(ctx)
+	if ctx.Err() != nil {
+		// A cancelled or timed-out probe proves nothing; keep what is known.
+		return s.capabilities()
+	}
 	merged := mergeCapabilitiesWithPolicy(s.cfg, s.forceReadOnly, discovered, err)
 	s.mu.Lock()
 	s.caps = merged
@@ -383,12 +393,27 @@ func mergeCapabilities(cfg bucketConfig, discovered discoveredCapabilities, disc
 
 func (s *storageInstance) capabilities() capabilities {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.caps
+	caps := s.caps
+	s.mu.RUnlock()
+	now := timeNowUTC()
+	for _, name := range []string{permissionRead, permissionWrite, permissionDelete} {
+		if state := caps.state(name); !state.expires.IsZero() && !now.Before(state.expires) {
+			caps.set(name, unknownCapability("provider", "an earlier provider denial expired; the action will be verified when used"))
+		}
+	}
+	return caps
 }
 
 func (s *storageInstance) allowed(permission string) bool {
 	return s.capabilities().state(permission).Allowed
+}
+
+// permitted reports whether a request may reach the backend. A denial learned from a single provider call
+// (source "provider") is only informational: it is per request, so it must never block the operation that could
+// disprove it. Configuration, runtime policy and explicit probes remain hard gates.
+func (s *storageInstance) permitted(permission string) bool {
+	state := s.capabilities().state(permission)
+	return state.Allowed || state.Source == "provider"
 }
 
 func (s *storageInstance) fullKey(relative string) string {

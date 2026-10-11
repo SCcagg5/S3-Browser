@@ -187,7 +187,7 @@ func (a *application) routes() http.Handler {
 		}
 		mux.ServeHTTP(w, r)
 	})
-	internal := requestLogMiddleware(a.config.Runtime.LogMode, requestBudgetMiddleware(a.config.Runtime, sameOriginMutationMiddleware(router)))
+	internal := requestLogMiddleware(a.config.Runtime.LogMode, requestBudgetMiddleware(a.config.Runtime, sameOriginMutationMiddleware(gzipJSONMiddleware(router))))
 	return securityHeadersMiddleware(internal)
 }
 
@@ -380,12 +380,7 @@ func (a *application) handleList(w http.ResponseWriter, r *http.Request) {
 			ContentType:  object.ContentType,
 		})
 	}
-	sort.SliceStable(items, func(i, j int) bool {
-		if items[i].Type != items[j].Type {
-			return items[i].Type == "prefix"
-		}
-		return strings.ToLower(items[i].Name) < strings.ToLower(items[j].Name)
-	})
+	sortListItems(items)
 	response := listResponseJSON{
 		Instance:              instance.cfg.ID,
 		Prefix:                prefix,
@@ -401,6 +396,28 @@ func (a *application) handleList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, response)
+}
+
+// sortListItems orders folders before objects, then by case-insensitive name. The lower-cased names are computed
+// once per item instead of on every comparison.
+func sortListItems(items []listItemJSON) {
+	type sortable struct {
+		item  listItemJSON
+		lower string
+	}
+	rows := make([]sortable, len(items))
+	for index, item := range items {
+		rows[index] = sortable{item: item, lower: strings.ToLower(item.Name)}
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].item.Type != rows[j].item.Type {
+			return rows[i].item.Type == "prefix"
+		}
+		return rows[i].lower < rows[j].lower
+	})
+	for index := range rows {
+		items[index] = rows[index].item
+	}
 }
 
 type aggregate struct {
@@ -773,7 +790,7 @@ func (a *application) handleOpenOriginal(w http.ResponseWriter, r *http.Request)
 	applyOpenOriginalHeaders(w.Header(), key, filename)
 	applyObjectSafetyHeaders(w.Header())
 	w.WriteHeader(response.StatusCode)
-	_, _ = io.Copy(w, response.Body)
+	_, _ = copyStream(w, response.Body)
 }
 
 func applyOpenOriginalHeaders(headers http.Header, key, filename string) {
@@ -881,7 +898,7 @@ func (a *application) handleObjectGateway(w http.ResponseWriter, r *http.Request
 		}
 		applyObjectSafetyHeaders(w.Header())
 		w.WriteHeader(response.StatusCode)
-		_, _ = io.Copy(w, response.Body)
+		_, _ = copyStream(w, response.Body)
 	case http.MethodHead:
 		if err := requirePermission(instance, permissionRead); err != nil {
 			writeGatewayError(w, err)
@@ -1093,7 +1110,7 @@ func (a *application) writePreviewRangeResponse(
 	applyPreviewObjectHeaders(w.Header(), key)
 	applyObjectSafetyHeaders(w.Header())
 	w.WriteHeader(http.StatusPartialContent)
-	_, _ = io.CopyN(w, response.Body, length)
+	_, _ = copyStream(w, io.LimitReader(response.Body, length))
 	return true
 }
 
@@ -1205,7 +1222,7 @@ func (a *application) instanceFromRequest(r *http.Request, bodyInstance string) 
 }
 
 func requirePermission(instance *storageInstance, permission string) error {
-	if instance.allowed(permission) {
+	if instance.permitted(permission) {
 		return nil
 	}
 	return apiError{
@@ -1540,6 +1557,10 @@ func (a *application) handleStorageFrontend(w http.ResponseWriter, r *http.Reque
 		methodNotAllowed(w, http.MethodGet, http.MethodHead)
 		return
 	}
+	if frontendDepth(r.URL.Path) > maxFrontendDepth {
+		http.NotFound(w, r)
+		return
+	}
 	relative := strings.TrimPrefix(r.URL.Path, "/-/")
 	if relative == "" {
 		a.notFoundPage(w, r)
@@ -1594,15 +1615,29 @@ func (a *application) handleStorageFrontend(w http.ResponseWriter, r *http.Reque
 	return
 }
 
-func frontendBaseHref(requestPath string) string {
+// maxFrontendDepth is the deepest request path (in segments) that gets a frontend page. The base href grows with the
+// depth and is part of the prepared-response cache key, so an unbounded depth would let a client mint large entries.
+const maxFrontendDepth = 32
+
+// frontendDepth counts the directory levels a browser climbs to leave requestPath, empty segments included.
+func frontendDepth(requestPath string) int {
 	clean := strings.Trim(strings.TrimSpace(requestPath), "/")
 	if clean == "" {
-		return "./"
+		return 0
 	}
 	depth := len(strings.Split(clean, "/"))
 	if !strings.HasSuffix(requestPath, "/") {
 		depth--
 	}
+	if depth < 0 {
+		return 0
+	}
+	return depth
+}
+
+// frontendBaseHref never returns more than maxFrontendDepth levels; callers refuse deeper paths before serving pages.
+func frontendBaseHref(requestPath string) string {
+	depth := min(frontendDepth(requestPath), maxFrontendDepth)
 	if depth < 1 {
 		return "./"
 	}
@@ -1634,22 +1669,32 @@ func notFoundPage(w http.ResponseWriter, r *http.Request, root fs.FS) {
 
 func serveEmbeddedFrontend(w http.ResponseWriter, r *http.Request, root fs.FS, requested, baseHref string) {
 	name := strings.TrimPrefix(requested, "/")
-	data, err := fs.ReadFile(root, name)
+	version := frontendVersion(root)
+	entry, err := preparedStatic(version, name, baseHref, func() ([]byte, error) {
+		data, err := fs.ReadFile(root, name)
+		if err != nil {
+			return nil, err
+		}
+		if bytes.Contains(data, []byte(frontendBasePlaceholder)) {
+			data = bytes.ReplaceAll(data, []byte(frontendBasePlaceholder), []byte(baseHref))
+		}
+		return versionHTML(data, version), nil
+	})
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
-	if bytes.Contains(data, []byte(frontendBasePlaceholder)) {
-		data = bytes.ReplaceAll(data, []byte(frontendBasePlaceholder), []byte(baseHref))
-	}
-	data = versionHTML(data, frontendVersion(root))
-	serveFrontendData(w, r, path.Base(requested), "text/html; charset=utf-8", "no-cache", data)
+	serveFrontendEntry(w, r, path.Base(requested), "text/html; charset=utf-8", "no-cache", entry)
 }
 
 func secureStaticHandler(root fs.FS) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			methodNotAllowed(w, http.MethodGet, http.MethodHead)
+			return
+		}
+		if frontendDepth(r.URL.Path) > maxFrontendDepth {
+			http.NotFound(w, r)
 			return
 		}
 		requested := path.Clean("/" + r.URL.Path)
@@ -1679,19 +1724,25 @@ func serveEmbeddedFile(w http.ResponseWriter, r *http.Request, root fs.FS, reque
 		notFoundPage(w, r, root)
 		return
 	}
-	data, err := fs.ReadFile(root, name)
-	if err != nil {
-		http.Error(w, "read embedded file", http.StatusInternalServerError)
-		return
-	}
 	extension := strings.ToLower(path.Ext(requested))
 	contentType := mime.TypeByExtension(extension)
 	if extension == ".mjs" {
 		contentType = "text/javascript; charset=utf-8"
 	}
 	version := frontendVersion(root)
-	if extension == ".css" {
-		data = versionCSS(data, version)
+	entry, err := preparedStatic(version, name, "", func() ([]byte, error) {
+		data, err := fs.ReadFile(root, name)
+		if err != nil {
+			return nil, err
+		}
+		if extension == ".css" {
+			data = versionCSS(data, version)
+		}
+		return data, nil
+	})
+	if err != nil {
+		http.Error(w, "read embedded file", http.StatusInternalServerError)
+		return
 	}
 	// Vendored libraries live under a versioned path, so their bytes never change for a given URL. First-party
 	// files are cacheable for a year when the request carries the fingerprint of this build (the pages add it to
@@ -1700,7 +1751,7 @@ func serveEmbeddedFile(w http.ResponseWriter, r *http.Request, root fs.FS, reque
 	if strings.HasPrefix(requested, "/assets/vendor/") || r.URL.Query().Get("v") == version {
 		cacheControl = "public, max-age=31536000, immutable"
 	}
-	serveFrontendData(w, r, info.Name(), contentType, cacheControl, data)
+	serveFrontendEntry(w, r, info.Name(), contentType, cacheControl, entry)
 }
 
 func securityHeadersMiddleware(next http.Handler) http.Handler {
@@ -1767,8 +1818,12 @@ func requestLogMiddleware(mode string, next http.Handler) http.Handler {
 				loggedPath = "/api/uploads/<id>"
 			case strings.HasPrefix(loggedPath, "/api/sqlite/sessions/"):
 				loggedPath = "/api/sqlite/sessions/<id>"
+			case strings.HasPrefix(loggedPath, "/-/"):
+				// Frontend routes carry the decoded object key or prefix in the path.
+				loggedPath = "/-/<path>"
 			}
 		}
-		log.Printf("%s %s %d %dB %s", r.Method, loggedPath, status, recorder.bytes, time.Since(start).Round(time.Millisecond))
+		// %q keeps a decoded %0A or other control byte in the path from forging log lines.
+		log.Printf("%s %q %d %dB %s", r.Method, loggedPath, status, recorder.bytes, time.Since(start).Round(time.Millisecond))
 	})
 }

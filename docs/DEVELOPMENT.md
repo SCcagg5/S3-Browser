@@ -3,7 +3,6 @@
 ## Requirements
 
 - Go 1.22 or newer;
-- Node.js 22 or newer for frontend contract tests;
 - Docker only for the optional Garage and scratch-image tests.
 
 ## Build
@@ -24,30 +23,11 @@ go vet ./...
 CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /tmp/s3-browser-check .
 ```
 
-## Frontend validation
+## Frontend
 
-From the repository root:
-
-```sh
-for file in src/public/assets/js/*.js src/public/assets/js/common/*.js test/*.js; do
-  node --check "$file"
-done
-
-for file in test/*.js; do
-  node "$file"
-done
-```
-
-The advanced object-tool contract covers:
-
-- startup-gated version controls;
-- visible-row version counts;
-- Preview and Details version selectors;
-- browser-only same-key version comparison;
-- strict range download behavior;
-- memory-only transfer checkpoints;
-- per-object integrity and inspection;
-- selective ZIP-compatible entry access and extraction.
+The frontend under `src/public` is plain HTML, CSS and JavaScript embedded into the binary. It has no build step and no
+JavaScript toolchain: edit the files, rebuild the binary (or the test image) and reload. The object browser page
+(`public/index.html`, `assets/js/app.js`) renders its DOM directly; there is no framework.
 
 ## Filesystem-write check
 

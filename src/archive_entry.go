@@ -84,6 +84,9 @@ func (a *application) handleArchiveEntry(w http.ResponseWriter, r *http.Request)
 		methodNotAllowed(w, http.MethodGet, http.MethodHead)
 		return
 	}
+	// Same sandbox as the raw object routes: member bytes are bucket-author
+	// controlled and must never run with the application origin.
+	applyObjectSafetyHeaders(w.Header())
 	instance, err := a.instanceFromRequest(r, "")
 	if err != nil {
 		writeAPIError(w, err)
@@ -105,7 +108,7 @@ func (a *application) handleArchiveEntry(w http.ResponseWriter, r *http.Request)
 		ETag:         strings.TrimSpace(r.URL.Query().Get("etag")),
 		LastModified: strings.TrimSpace(r.URL.Query().Get("lastModified")),
 	}
-	reader, err := openArchiveReader(r.Context(), instance, key, version, listed)
+	reader, err := openArchiveReader(r.Context(), instance, key, version, listed, a.config.Runtime.MaxArchiveEntries)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -134,10 +137,19 @@ func (a *application) handleArchiveEntry(w http.ResponseWriter, r *http.Request)
 	if r.URL.Query().Get("inline") == "1" && browserInlineContent(filename, contentType) {
 		disposition = "inline"
 	}
+	if archiveEntryActiveContent(filename, contentType) {
+		// Archive members are authored by whoever can write the bucket and are
+		// served from the application origin. Never hand a browser an active
+		// document or a script type. The only exception is an SVG loaded as an
+		// image sub-resource, which cannot run script.
+		if !(isSVGContent(filename, contentType) && r.Header.Get("Sec-Fetch-Dest") == "image") {
+			contentType = "application/octet-stream"
+			disposition = "attachment"
+		}
+	}
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", file.UncompressedSize64))
 	w.Header().Set("Cache-Control", "private, no-store")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
 	if value := mime.FormatMediaType(disposition, map[string]string{"filename": filename}); value != "" {
 		w.Header().Set("Content-Disposition", value)
 	}
@@ -152,12 +164,33 @@ func (a *application) handleArchiveEntry(w http.ResponseWriter, r *http.Request)
 	}
 	defer body.Close()
 	w.WriteHeader(http.StatusOK)
-	written, copyErr := io.CopyBuffer(w, io.LimitReader(body, int64(file.UncompressedSize64)+1), make([]byte, 128<<10))
+	written, copyErr := copyStream(w, io.LimitReader(body, int64(file.UncompressedSize64)+1))
 	if copyErr != nil || written != int64(file.UncompressedSize64) {
 		// The response headers are already committed. Terminating the response is
 		// safer than appending a misleading error body to a truncated member.
 		return
 	}
+}
+
+// archiveEntryActiveContent reports members that a browser could execute as a
+// document or script on the application origin.
+func archiveEntryActiveContent(filename, contentType string) bool {
+	switch strings.ToLower(path.Ext(filename)) {
+	case ".html", ".htm", ".xhtml", ".xht", ".shtml", ".svg", ".svgz", ".xml", ".xsl", ".xslt", ".js", ".mjs", ".cjs", ".wasm", ".hta":
+		return true
+	}
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		mediaType = strings.TrimSpace(strings.SplitN(contentType, ";", 2)[0])
+	}
+	mediaType = strings.ToLower(mediaType)
+	return mediaType == "text/html" || mediaType == "image/svg+xml" || mediaType == "text/xml" || mediaType == "application/xml" ||
+		mediaType == "application/wasm" || mediaType == "text/xsl" || strings.HasSuffix(mediaType, "+xml") ||
+		strings.Contains(mediaType, "javascript") || strings.Contains(mediaType, "ecmascript")
+}
+
+func isSVGContent(filename, contentType string) bool {
+	return strings.EqualFold(path.Ext(filename), ".svg") || strings.HasPrefix(strings.ToLower(strings.TrimSpace(contentType)), "image/svg+xml")
 }
 
 func (a *application) handleArchiveExtract(w http.ResponseWriter, r *http.Request) {
@@ -188,6 +221,10 @@ func (a *application) handleArchiveExtract(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if err := requirePermission(target, permissionWrite); err != nil {
+		writeAPIError(w, err)
+		return
+	}
+	if err := requirePermission(target, permissionRead); err != nil {
 		writeAPIError(w, err)
 		return
 	}
@@ -279,7 +316,7 @@ func normalizeArchiveEntrySelection(entries []string, maximum int) ([]string, er
 	return result, nil
 }
 
-func openArchiveReader(ctx context.Context, instance *storageInstance, key, version string, listed mediaSourceMetadata) (*zip.Reader, error) {
+func openArchiveReader(ctx context.Context, instance *storageInstance, key, version string, listed mediaSourceMetadata, maxEntries int) (*zip.Reader, error) {
 	extension := strings.ToLower(strings.TrimPrefix(path.Ext(key), "."))
 	if !isZipArchiveExtension(extension) {
 		return nil, apiError{Status: http.StatusUnsupportedMediaType, Code: "unsupported_archive", Message: "selective extraction is available only for indexed ZIP-compatible archives"}
@@ -291,6 +328,14 @@ func openArchiveReader(ctx context.Context, instance *storageInstance, key, vers
 	reader, err := openRemoteZIPReader(source, extension)
 	if err != nil {
 		return nil, apiError{Status: http.StatusUnprocessableEntity, Code: "invalid_zip", Message: "the object does not contain a readable ZIP central directory"}
+	}
+	// Same cap as the archive preview so selection cost stays bounded by the
+	// configured entry limit rather than by an attacker-sized central directory.
+	if maxEntries <= 0 {
+		maxEntries = defaultMaxArchiveEntries
+	}
+	if len(reader.File) > maxEntries {
+		return nil, apiError{Status: http.StatusRequestEntityTooLarge, Code: "archive_too_many_entries", Message: fmt.Sprintf("the archive contains more than the configured limit of %d entries", maxEntries)}
 	}
 	return reader, nil
 }
@@ -357,16 +402,42 @@ func runArchiveExtraction(ctx context.Context, manager *jobManager, job *jobStat
 	if err := requirePermission(target, permissionWrite); err != nil {
 		return err
 	}
-	reader, err := openArchiveReader(ctx, source, job.Source, job.Version, mediaSourceMetadata{})
+	// Create-only extraction reports whether a destination already exists, which
+	// would reveal keys on a target whose read permission is denied.
+	if err := requirePermission(target, permissionRead); err != nil {
+		return err
+	}
+	// The ZIP is read lazily while the destination upload holds a storage slot.
+	// Those nested source reads must not wait for another slot, otherwise
+	// concurrent extraction jobs hold-and-wait on each other forever.
+	reader, err := openArchiveReader(withGateExempt(ctx), source, job.Source, job.Version, mediaSourceMetadata{}, manager.app.config.Runtime.MaxArchiveEntries)
 	if err != nil {
 		return err
+	}
+	// One O(N) index instead of a linear scan per selected name.
+	index := make(map[string][]*zip.File, len(reader.File))
+	for position, file := range reader.File {
+		if position%1024 == 0 {
+			if err := manager.interrupted(ctx, job.ID); err != nil {
+				return err
+			}
+		}
+		index[file.Name] = append(index[file.Name], file)
 	}
 	selected := make([]*zip.File, 0, len(job.Entries))
 	destinations := make(map[string]struct{}, len(job.Entries))
 	for _, name := range job.Entries {
-		file, err := exactArchiveEntry(reader, name)
-		if err != nil {
+		if err := manager.interrupted(ctx, job.ID); err != nil {
 			return err
+		}
+		var file *zip.File
+		switch matches := index[name]; len(matches) {
+		case 0:
+			return apiError{Status: http.StatusNotFound, Code: "archive_entry_not_found", Message: "archive entry was not found"}
+		case 1:
+			file = matches[0]
+		default:
+			return apiError{Status: http.StatusConflict, Code: "ambiguous_archive_entry", Message: "the archive contains multiple entries with the selected name"}
 		}
 		if err := validateSelectableArchiveEntry(file, manager.app.config.Runtime.MaxBackgroundStorageBytes); err != nil {
 			return err
@@ -454,7 +525,7 @@ func runArchiveEntryIntegrity(ctx context.Context, manager *jobManager, job *job
 	if err := requirePermission(instance, permissionRead); err != nil {
 		return err
 	}
-	reader, err := openArchiveReader(ctx, instance, request.Key, request.Version, mediaSourceMetadata{})
+	reader, err := openArchiveReader(ctx, instance, request.Key, request.Version, mediaSourceMetadata{}, manager.app.config.Runtime.MaxArchiveEntries)
 	if err != nil {
 		return err
 	}

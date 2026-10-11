@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -185,3 +186,73 @@ func TestHardArchiveFormatsDoNotUseAutomaticArchivePreview(t *testing.T) {
 }
 
 func stringInt64(value int64) string { return strconv.FormatInt(value, 10) }
+
+func TestUnfoldStructuredLinesIsLinearAndCapped(t *testing.T) {
+	if got := unfoldStructuredLines("A:1\r\n 2\r\n\t3\r\n\r\nB:x\r\n"); len(got) != 2 || got[0] != "A:123" || got[1] != "B:x" {
+		t.Fatalf("unfolded = %q", got)
+	}
+	// 50k one-byte continuations: re-copying the accumulated line per row would
+	// allocate over 1 GiB.
+	input := "A:" + strings.Repeat("\n x", 50000)
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	lines := unfoldStructuredLines(input)
+	runtime.ReadMemStats(&after)
+	if len(lines) != 1 || len(lines[0]) != 50002 {
+		t.Fatalf("lines = %d, first length = %d", len(lines), len(lines[0]))
+	}
+	if allocated := after.TotalAlloc - before.TotalAlloc; allocated > 64<<20 {
+		t.Fatalf("unfold allocated %d bytes", allocated)
+	}
+	huge := unfoldStructuredLines("A:" + strings.Repeat("\n "+strings.Repeat("x", 1<<20), 5))
+	if len(huge) != 1 || len(huge[0]) > maxUnfoldedLineBytes {
+		t.Fatalf("unfolded line length = %d, want <= %d", len(huge[0]), maxUnfoldedLineBytes)
+	}
+}
+
+func TestParseVCardPreviewCapsAndDedupesValues(t *testing.T) {
+	var builder strings.Builder
+	builder.WriteString("BEGIN:VCARD\nFN:Ada\nEMAIL:dup@example.test\nEMAIL:dup@example.test\n")
+	for index := 0; index < 20000; index++ {
+		builder.WriteString("EMAIL:user" + strconv.Itoa(index) + "@example.test\n")
+	}
+	builder.WriteString("TEL:+1\nEND:VCARD\n")
+	contacts := parseVCardPreview([]byte(builder.String()))
+	if len(contacts) != 1 || len(contacts[0].Emails) != maxContactValuesPerField || contacts[0].Emails[0] != "dup@example.test" || contacts[0].Emails[1] != "user0@example.test" {
+		t.Fatalf("contacts = %+v", contacts)
+	}
+	if len(contacts[0].Phones) != 1 {
+		t.Fatalf("phones = %v", contacts[0].Phones)
+	}
+}
+
+func nestedMultipartMessage(depth int, leaf string) []byte {
+	var builder strings.Builder
+	builder.WriteString("From: a@example.test\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=b0\r\n\r\n")
+	for level := 0; level < depth; level++ {
+		builder.WriteString("--b" + strconv.Itoa(level) + "\r\nContent-Type: multipart/mixed; boundary=b" + strconv.Itoa(level+1) + "\r\n\r\n")
+	}
+	builder.WriteString("--b" + strconv.Itoa(depth) + "\r\nContent-Type: text/plain\r\n\r\n" + leaf + "\r\n--b" + strconv.Itoa(depth) + "--\r\n")
+	for level := depth - 1; level >= 0; level-- {
+		builder.WriteString("--b" + strconv.Itoa(level) + "--\r\n")
+	}
+	return []byte(builder.String())
+}
+
+func TestParseEmailPreviewBoundsMultipartDepthAndParts(t *testing.T) {
+	if preview := parseEmailPreview(nestedMultipartMessage(3, "shallow")); preview.BodyText != "shallow" {
+		t.Fatalf("body = %q", preview.BodyText)
+	}
+	if preview := parseEmailPreview(nestedMultipartMessage(maxMIMEPreviewDepth+12, "too deep")); preview.BodyText != "" {
+		t.Fatalf("deeply nested body = %q, want it skipped", preview.BodyText)
+	}
+	var builder strings.Builder
+	builder.WriteString("From: a@example.test\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=b\r\n\r\n")
+	for index := 0; index < maxMIMEPreviewParts+500; index++ {
+		builder.WriteString("--b\r\nContent-Type: text/plain; name=f.txt\r\n\r\nx\r\n")
+	}
+	builder.WriteString("--b--\r\n")
+	if preview := parseEmailPreview([]byte(builder.String())); len(preview.Attachments) != maxMIMEPreviewParts {
+		t.Fatalf("attachments = %d, want %d", len(preview.Attachments), maxMIMEPreviewParts)
+	}
+}

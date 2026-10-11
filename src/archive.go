@@ -2,6 +2,7 @@ package main
 
 import (
 	"archive/zip"
+	"context"
 	"fmt"
 	"io"
 	"mime"
@@ -57,8 +58,13 @@ func (a *application) handleArchive(w http.ResponseWriter, r *http.Request) {
 	w.Header().Add("Trailer", archiveBytesTrailer)
 	w.WriteHeader(http.StatusOK)
 
-	writer := zip.NewWriter(w)
+	// A client that stops reading must not pin a storage slot for the rest of the archive.
+	dst, clearDeadline := withIdleWriteDeadline(w)
+	defer clearDeadline()
+	writer := zip.NewWriter(dst)
 	buffer := make([]byte, 128<<10)
+	var prefetch *archivePrefetch
+	defer func() { prefetch.discard() }()
 	seen := make(map[string]int)
 	entries := 0
 	var writtenBytes int64
@@ -67,7 +73,7 @@ func (a *application) handleArchive(w http.ResponseWriter, r *http.Request) {
 	current := page
 
 	for {
-		for _, object := range current.Objects {
+		for position, object := range current.Objects {
 			if err := r.Context().Err(); err != nil {
 				archiveErr = err
 				break
@@ -86,7 +92,17 @@ func (a *application) handleArchive(w http.ResponseWriter, r *http.Request) {
 				archiveErr = apiError{Status: http.StatusRequestEntityTooLarge, Code: "archive_entry_limit", Message: fmt.Sprintf("the archive exceeds the configured limit of %d entries", a.config.Runtime.MaxArchiveEntries)}
 				break
 			}
-			if err := writeArchiveObject(r, writer, buffer, instance, object, name, &writtenBytes); err != nil {
+			var ready *archiveFetch
+			if prefetch != nil {
+				ready = prefetch.take(object.Key)
+				prefetch = nil
+			}
+			var next *archivePrefetch
+			if position+1 < len(current.Objects) {
+				next = newArchivePrefetch(r.Context(), instance, prefix, object, current.Objects[position+1])
+				prefetch = next
+			}
+			if err := writeArchiveObject(r, writer, buffer, instance, object, name, &writtenBytes, ready, next); err != nil {
 				archiveErr = err
 				break
 			}
@@ -124,7 +140,83 @@ func (a *application) handleArchive(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(archiveBytesTrailer, strconv.FormatInt(writtenBytes, 10))
 }
 
-func writeArchiveObject(r *http.Request, writer *zip.Writer, buffer []byte, instance *storageInstance, object objectInfo, name string, writtenBytes *int64) error {
+// archivePrefetchMaxBytes is the largest member (current or next) for which the next member's request is started early.
+// Starting it holds a second storage slot until it is consumed, which is only acceptable while members stream quickly.
+const archivePrefetchMaxBytes = 4 << 20
+
+// archiveFetch is the answer of a storage read started ahead of time.
+type archiveFetch struct {
+	response objectResponse
+	err      error
+}
+
+// archivePrefetch starts the storage request for the next archive member while the current one is still being sent, so
+// archives of many small objects are not paced by one provider round trip per member. It never waits for a slot: when
+// none is free the member is simply fetched in line as before.
+type archivePrefetch struct {
+	key    string
+	result chan archiveFetch
+	used   bool
+	start  func()
+}
+
+func newArchivePrefetch(ctx context.Context, instance *storageInstance, prefix string, current, next objectInfo) *archivePrefetch {
+	relative, ok := instance.relativeKey(next.Key)
+	if !ok || !strings.HasPrefix(relative, prefix) || strings.HasSuffix(relative, "/") {
+		return nil
+	}
+	if _, ok := safeArchiveEntryName(strings.TrimPrefix(relative, prefix)); !ok {
+		return nil
+	}
+	if current.Size < 0 || current.Size > archivePrefetchMaxBytes || next.Size <= 0 || next.Size > archivePrefetchMaxBytes {
+		return nil
+	}
+	prefetch := &archivePrefetch{key: next.Key, result: make(chan archiveFetch, 1)}
+	prefetch.start = func() {
+		go func() {
+			response, err := instance.Get(withNoGateWait(ctx), next.Key, nil)
+			prefetch.result <- archiveFetch{response: response, err: err}
+		}()
+	}
+	return prefetch
+}
+
+// take returns the prefetched answer for key, or nil when the member must be fetched in line (no prefetch, another key,
+// or no slot was available).
+func (p *archivePrefetch) take(key string) *archiveFetch {
+	if p == nil || !p.used {
+		return nil
+	}
+	if p.key != key {
+		p.discard()
+		return nil
+	}
+	fetched := <-p.result
+	p.used = false
+	p.key = ""
+	if fetched.err != nil {
+		if fetched.response.Body != nil {
+			_ = fetched.response.Body.Close()
+		}
+		return nil
+	}
+	return &fetched
+}
+
+// discard releases a prefetched body that was never consumed (the archive ended or failed first).
+func (p *archivePrefetch) discard() {
+	if p == nil || !p.used {
+		return
+	}
+	p.used = false
+	go func() {
+		if fetched := <-p.result; fetched.err == nil && fetched.response.Body != nil {
+			_ = fetched.response.Body.Close()
+		}
+	}()
+}
+
+func writeArchiveObject(r *http.Request, writer *zip.Writer, buffer []byte, instance *storageInstance, object objectInfo, name string, writtenBytes *int64, ready *archiveFetch, next *archivePrefetch) error {
 	header := &zip.FileHeader{Name: name, Method: zip.Store}
 	header.SetMode(0o600)
 	if strings.HasSuffix(name, "/") {
@@ -141,8 +233,10 @@ func writeArchiveObject(r *http.Request, writer *zip.Writer, buffer []byte, inst
 	if err != nil {
 		return fmt.Errorf("create archive entry: %w", err)
 	}
-	response, err := instance.Get(r.Context(), object.Key, nil)
-	if err != nil {
+	var response objectResponse
+	if ready != nil {
+		response = ready.response
+	} else if response, err = instance.Get(r.Context(), object.Key, nil); err != nil {
 		return err
 	}
 	if response.Body == nil {
@@ -151,6 +245,11 @@ func writeArchiveObject(r *http.Request, writer *zip.Writer, buffer []byte, inst
 	defer response.Body.Close()
 	if !isSuccessfulObjectReadStatus(response.StatusCode) {
 		return &upstreamError{StatusCode: response.StatusCode, Code: "ArchiveObjectReadFailed"}
+	}
+	if next != nil {
+		// The current member's slot is already held, so the request for the next one overlaps with this transfer.
+		next.used = true
+		next.start()
 	}
 	count, err := io.CopyBuffer(entry, response.Body, buffer)
 	*writtenBytes += count

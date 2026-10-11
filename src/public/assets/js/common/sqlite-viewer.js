@@ -3,14 +3,8 @@
   'use strict';
 
   const BB = (window.BB = window.BB || {});
-  // Re-render a viewer region without dropping keyboard focus (see BB.ui.replaceContent).
-  function swapContent(root, ...nodes) {
-    if (BB.ui && BB.ui.replaceContent) BB.ui.replaceContent(root, ...nodes);
-    else root.replaceChildren(...nodes);
-  }
   if (!BB.api || !BB.tabular) throw new Error('BB.api and BB.tabular are required before BB.sqliteViewer');
   const PAGE_SIZES = [100, 250, 500, 1000];
-  const activeRoots = new Set();
 
   function icon(name) {
     const node = document.createElement('i');
@@ -56,7 +50,6 @@
     selectLabel.append(selectText, select);
     controls.append(tabs, selectLabel);
 
-    BB.ui?.enhanceTabs?.(buttons, [], activate);
     const bounded = Math.max(0, Math.min(tables.length - 1, Number(activeIndex) || 0));
     buttons.forEach((button, index) => {
       const active = index === bounded;
@@ -101,16 +94,10 @@
   function errorView(error) {
     const box = document.createElement('div');
     box.className = 'preview-error';
-    box.setAttribute('role', 'alert');
-    box.innerHTML = '<i class="mdi mdi-alert-circle-outline" aria-hidden="true"></i><strong>SQLite query failed</strong>';
+    box.innerHTML = '<i class="mdi mdi-alert-circle-outline"></i><strong>SQLite query failed</strong>';
     const detail = document.createElement('p');
     detail.textContent = String(error?.message || error);
-    const retry = document.createElement('button');
-    retry.type = 'button';
-    retry.className = 'btn btn-sm';
-    retry.innerHTML = '<i class="mdi mdi-refresh" aria-hidden="true"></i><span>Try again</span>';
-    retry.addEventListener('click', () => window.location.reload());
-    box.append(detail, retry);
+    box.appendChild(detail);
     return box;
   }
 
@@ -124,17 +111,6 @@
     let requestSerial = 0;
     let redrawTimer = 0;
     let session = null;
-    // Installed before the first await (see cleanupAll, called on pagehide): leaving the page aborts any request in
-    // flight and releases the session once its id is known. A session the server created for a request that was
-    // aborted before the response arrived cannot be named by the client; the server's idle timeout removes it.
-    root.cleanup = () => {
-      window.clearTimeout(redrawTimer);
-      requestController?.abort();
-      abortController.abort();
-      activeRoots.delete(root);
-      if (session?.id) BB.api.deleteSQLiteSession(session.id, { keepalive: true }).catch(() => {});
-    };
-    activeRoots.add(root);
     const state = {
       table: 0,
       page: 0,
@@ -148,7 +124,8 @@
     try {
       session = await BB.api.createSQLiteSession({ key, size, version, instance, signal: abortController.signal });
     } catch (error) {
-      swapContent(root, errorView(error));
+      root.replaceChildren(errorView(error));
+      root.cleanup = () => abortController.abort();
       return root;
     }
 
@@ -157,7 +134,11 @@
       const empty = document.createElement('div');
       empty.className = 'preview-error';
       empty.innerHTML = '<i class="mdi mdi-database-off-outline"></i><strong>No user tables or views</strong><p>The database does not expose any non-system tables.</p>';
-      swapContent(root, empty);
+      root.replaceChildren(empty);
+      root.cleanup = () => {
+        abortController.abort();
+        if (session?.id) BB.api.deleteSQLiteSession(session.id, { keepalive: true }).catch(() => {});
+      };
       return root;
     }
 
@@ -201,7 +182,7 @@
       requestController = new AbortController();
       const serial = ++requestSerial;
       const active = tables[Math.max(0, Math.min(tables.length - 1, state.table))];
-      if (!root.querySelector('.bb-data-grid')) swapContent(root, loadingView(`Reading ${active.name}...`));
+      if (!root.querySelector('.bb-data-grid')) root.replaceChildren(loadingView(`Reading ${active.name}...`));
       else {
         root.classList.add('is-loading-query');
         root.setAttribute('aria-busy', 'true');
@@ -291,7 +272,7 @@
             }
           }
         });
-        swapContent(root, table);
+        root.replaceChildren(table);
         root.classList.remove('is-loading-query');
         root.removeAttribute('aria-busy');
         const scroller = root.querySelector('.data-table-scroll');
@@ -300,18 +281,21 @@
         restoreFocus(focusColumn);
       } catch (error) {
         if (error?.name === 'AbortError') return;
-        swapContent(root, errorView(error));
+        root.replaceChildren(errorView(error));
         root.classList.remove('is-loading-query');
         root.removeAttribute('aria-busy');
       }
     }
 
     await draw(0);
+    root.cleanup = () => {
+      window.clearTimeout(redrawTimer);
+      requestController?.abort();
+      abortController.abort();
+      if (session?.id) BB.api.deleteSQLiteSession(session.id, { keepalive: true }).catch(() => {});
+    };
     return root;
   }
 
-  BB.sqliteViewer = {
-    render: renderSQLite,
-    cleanupAll() { for (const root of Array.from(activeRoots)) root.cleanup?.(); }
-  };
+  BB.sqliteViewer = { render: renderSQLite };
 })();

@@ -27,6 +27,13 @@ const (
 	maxSpreadsheetSortRows    = 150_000
 	maxSharedStrings          = 2_000_000
 	maxSharedStringBytes      = 128 << 20
+	maxSpreadsheetSheetBytes  = 256 << 20
+	maxSpreadsheetCellBytes   = 32 << 10
+	// Shared-string cells alias one table entry, so the response and the
+	// search/filter work grow with references, not with the table size.
+	maxSpreadsheetReferencedBytes = int64(1 << 30)
+	maxSpreadsheetPageBytes       = 32 << 20
+	spreadsheetContextCheckEvery  = 1024
 )
 
 type spreadsheetSheetInfo struct {
@@ -54,6 +61,7 @@ type spreadsheetResponseJSON struct {
 	PageSize         int                    `json:"pageSize"`
 	TruncatedRows    bool                   `json:"truncatedRows,omitempty"`
 	TruncatedColumns bool                   `json:"truncatedColumns,omitempty"`
+	TruncatedCells   bool                   `json:"truncatedCells,omitempty"`
 	MacrosIgnored    bool                   `json:"macrosIgnored,omitempty"`
 }
 
@@ -103,6 +111,24 @@ type spreadsheetStyles struct {
 type spreadsheetRecord struct {
 	rowNumber int
 	cells     map[int]string
+}
+
+// spreadsheetReadState carries the per-request work budget of one worksheet
+// parse: request cancellation, bytes expanded from shared strings and whether
+// any cell was cut to the per-cell limit.
+type spreadsheetReadState struct {
+	ctx             context.Context
+	ticks           int
+	referencedBytes int64
+	truncatedCells  bool
+}
+
+func (s *spreadsheetReadState) tick() error {
+	s.ticks++
+	if s.ticks%spreadsheetContextCheckEvery == 0 {
+		return s.ctx.Err()
+	}
+	return nil
 }
 
 type spreadsheetQuery struct {
@@ -178,7 +204,7 @@ func (a *application) handleSpreadsheet(w http.ResponseWriter, r *http.Request) 
 		writeAPIError(w, err)
 		return
 	}
-	response, err := readSpreadsheetSheet(files[sheets[sheetIndex].Target], sheets, sheetIndex, sharedStrings, styles, query)
+	response, err := readSpreadsheetSheet(r.Context(), files[sheets[sheetIndex].Target], sheets, sheetIndex, sharedStrings, styles, query)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -556,7 +582,7 @@ func isDateNumberFormat(id int, code string) bool {
 	return strings.ContainsAny(letters, "yd") || (strings.Contains(letters, "m") && strings.ContainsAny(letters, "hs"))
 }
 
-func readSpreadsheetSheet(file *zip.File, sheets []spreadsheetSheetInfo, sheetIndex int, sharedStrings []string, styles spreadsheetStyles, query spreadsheetQuery) (spreadsheetResponseJSON, error) {
+func readSpreadsheetSheet(ctx context.Context, file *zip.File, sheets []spreadsheetSheetInfo, sheetIndex int, sharedStrings []string, styles spreadsheetStyles, query spreadsheetQuery) (spreadsheetResponseJSON, error) {
 	if file == nil {
 		return spreadsheetResponseJSON{}, apiError{Status: http.StatusUnprocessableEntity, Code: "missing_sheet", Message: "the selected worksheet is missing from the workbook"}
 	}
@@ -565,11 +591,15 @@ func readSpreadsheetSheet(file *zip.File, sheets []spreadsheetSheetInfo, sheetIn
 		return spreadsheetResponseJSON{}, err
 	}
 	defer reader.Close()
-	decoder := xml.NewDecoder(reader)
+	// The sheet entry is the only part read without a decompressed-size cap
+	// elsewhere; a tiny ZIP entry can inflate to gigabytes of XML.
+	decoder := xml.NewDecoder(&hardLimitReader{reader: reader, limit: maxSpreadsheetSheetBytes + 1})
+	state := &spreadsheetReadState{ctx: ctx}
 	activeColumns := make(map[int]bool)
 	pageRecords := make([]spreadsheetRecord, 0, query.pageSize)
 	sortRecords := make([]spreadsheetRecord, 0)
 	sourceRows := 0
+	parsedRows := 0
 	matchedRows := 0
 	truncatedRows := false
 	truncatedColumns := false
@@ -581,15 +611,25 @@ func readSpreadsheetSheet(file *zip.File, sheets []spreadsheetSheetInfo, sheetIn
 			break
 		}
 		if err != nil {
-			return spreadsheetResponseJSON{}, apiError{Status: http.StatusUnprocessableEntity, Code: "invalid_sheet", Message: "unable to parse the selected worksheet"}
+			return spreadsheetResponseJSON{}, spreadsheetParseError(err, ctx)
 		}
 		start, ok := token.(xml.StartElement)
 		if !ok || start.Name.Local != "row" {
 			continue
 		}
-		record, visible, beyondLimit, err := readSpreadsheetRow(decoder, start, sharedStrings, styles)
-		if err != nil {
+		// Rows without a visible cell are never counted as source rows, so they
+		// need their own budget or a sheet of empty rows is parsed unbounded.
+		parsedRows++
+		if parsedRows > maxSpreadsheetRows {
+			truncatedRows = true
+			break
+		}
+		if err := state.tick(); err != nil {
 			return spreadsheetResponseJSON{}, err
+		}
+		record, visible, beyondLimit, err := readSpreadsheetRow(decoder, start, sharedStrings, styles, state)
+		if err != nil {
+			return spreadsheetResponseJSON{}, spreadsheetParseError(err, ctx)
 		}
 		if beyondLimit {
 			truncatedColumns = true
@@ -649,10 +689,17 @@ func readSpreadsheetSheet(file *zip.File, sheets []spreadsheetSheetInfo, sheetIn
 	}
 
 	rows := make([]spreadsheetRowJSON, 0, len(pageRecords))
+	pageBytes := 0
 	for _, record := range pageRecords {
 		cells := make([]string, len(columns))
 		for index, column := range columns {
 			cells[index] = record.cells[column]
+			// Four bytes approximate the quotes, comma and escapes per cell, so
+			// a page of empty cells is bounded as well.
+			pageBytes += len(cells[index]) + 4
+		}
+		if pageBytes > maxSpreadsheetPageBytes {
+			return spreadsheetResponseJSON{}, apiError{Status: http.StatusRequestEntityTooLarge, Code: "spreadsheet_page_too_large", Message: fmt.Sprintf("this page of the worksheet exceeds %d MiB; request a smaller page size", maxSpreadsheetPageBytes>>20)}
 		}
 		rows = append(rows, spreadsheetRowJSON{Number: record.rowNumber, Cells: cells})
 	}
@@ -671,10 +718,27 @@ func readSpreadsheetSheet(file *zip.File, sheets []spreadsheetSheetInfo, sheetIn
 		PageSize:         query.pageSize,
 		TruncatedRows:    truncatedRows,
 		TruncatedColumns: truncatedColumns,
+		TruncatedCells:   state.truncatedCells,
 	}, nil
 }
 
-func readSpreadsheetRow(decoder *xml.Decoder, start xml.StartElement, sharedStrings []string, styles spreadsheetStyles) (spreadsheetRecord, bool, bool, error) {
+// spreadsheetParseError maps a worksheet read failure to the API error shown to
+// the client, keeping cancellation and the budget errors distinguishable from
+// malformed XML.
+func spreadsheetParseError(err error, ctx context.Context) error {
+	var apiErr apiError
+	switch {
+	case errors.As(err, &apiErr):
+		return err
+	case ctx.Err() != nil:
+		return ctx.Err()
+	case errors.Is(err, errWordXMLLimit):
+		return apiError{Status: http.StatusRequestEntityTooLarge, Code: "sheet_too_large", Message: fmt.Sprintf("the worksheet XML exceeds %d MiB once decompressed", maxSpreadsheetSheetBytes>>20)}
+	}
+	return apiError{Status: http.StatusUnprocessableEntity, Code: "invalid_sheet", Message: "unable to parse the selected worksheet"}
+}
+
+func readSpreadsheetRow(decoder *xml.Decoder, start xml.StartElement, sharedStrings []string, styles spreadsheetStyles, state *spreadsheetReadState) (spreadsheetRecord, bool, bool, error) {
 	rowNumber := 0
 	for _, attribute := range start.Attr {
 		if attribute.Name.Local == "r" {
@@ -695,7 +759,10 @@ func readSpreadsheetRow(decoder *xml.Decoder, start xml.StartElement, sharedStri
 		case xml.StartElement:
 			depth++
 			if typed.Name.Local == "c" {
-				column, value, err := readSpreadsheetCell(decoder, typed, nextColumn, sharedStrings, styles)
+				if err := state.tick(); err != nil {
+					return spreadsheetRecord{}, false, false, err
+				}
+				column, value, err := readSpreadsheetCell(decoder, typed, nextColumn, sharedStrings, styles, state)
 				if err != nil {
 					return spreadsheetRecord{}, false, false, err
 				}
@@ -722,7 +789,16 @@ func readSpreadsheetRow(decoder *xml.Decoder, start xml.StartElement, sharedStri
 	return spreadsheetRecord{rowNumber: rowNumber, cells: cells}, visible, beyondLimit, nil
 }
 
-func readSpreadsheetCell(decoder *xml.Decoder, start xml.StartElement, fallbackColumn int, sharedStrings []string, styles spreadsheetStyles) (int, string, error) {
+func readSpreadsheetCell(decoder *xml.Decoder, start xml.StartElement, fallbackColumn int, sharedStrings []string, styles spreadsheetStyles, state *spreadsheetReadState) (int, string, error) {
+	column, value, err := readSpreadsheetCellValue(decoder, start, fallbackColumn, sharedStrings, styles, state)
+	if err == nil && len(value) > maxSpreadsheetCellBytes {
+		value = truncateUTF8Bytes(value, maxSpreadsheetCellBytes)
+		state.truncatedCells = true
+	}
+	return column, value, err
+}
+
+func readSpreadsheetCellValue(decoder *xml.Decoder, start xml.StartElement, fallbackColumn int, sharedStrings []string, styles spreadsheetStyles, state *spreadsheetReadState) (int, string, error) {
 	column := fallbackColumn
 	cellType := ""
 	styleIndex := -1
@@ -772,6 +848,12 @@ func readSpreadsheetCell(decoder *xml.Decoder, start xml.StartElement, fallbackC
 	case "s":
 		index, err := strconv.Atoi(raw)
 		if err == nil && index >= 0 && index < len(sharedStrings) {
+			// Charge every reference, not each distinct entry: many cells can
+			// alias one large string.
+			state.referencedBytes += int64(minInt(len(sharedStrings[index]), maxSpreadsheetCellBytes))
+			if state.referencedBytes > maxSpreadsheetReferencedBytes {
+				return column, "", apiError{Status: http.StatusRequestEntityTooLarge, Code: "sheet_expansion_too_large", Message: "the worksheet references too much shared string data to preview"}
+			}
 			return column, sharedStrings[index], nil
 		}
 		return column, "", nil

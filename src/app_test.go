@@ -8,10 +8,10 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -395,16 +395,11 @@ func TestEmbeddedFrontendKeepsFlatOriginalStyleTable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The object browser's markup lives in a template that is compiled ahead of time (tools/build-template.mjs).
-	template, err := os.ReadFile("frontend/app.template.html")
-	if err != nil {
-		t.Fatal(err)
-	}
-	html := string(data) + string(template)
+	html := string(data)
 	for _, required := range []string{
 		"assets/css/icons.css",
-		"class=\"storage-switcher\"",
-		"mdi mdi-folder\"",
+		"storage-switcher",
+		"assets/js/app.js",
 	} {
 		if !strings.Contains(html, required) {
 			t.Fatalf("embedded index is missing %q", required)
@@ -814,7 +809,7 @@ func TestApplicationCSPAllowsOnlySameOriginEmbeddedPDFs(t *testing.T) {
 	}
 }
 
-// The browser page ships a precompiled template, so scripts never need eval-style evaluation.
+// The browser page is plain JavaScript, so scripts never need eval-style evaluation.
 func TestApplicationCSPForbidsScriptEvaluation(t *testing.T) {
 	t.Parallel()
 	app, _, _ := testApplication(t)
@@ -1100,5 +1095,185 @@ func TestFriendlyStorageFrontendRoutes(t *testing.T) {
 				t.Fatalf("GET %s Content-Type = %q", test.path, recorder.Header().Get("Content-Type"))
 			}
 		})
+	}
+}
+
+func TestObjectReadEndpointsRefuseWriteOnlyInstance(t *testing.T) {
+	t.Parallel()
+	app, _, _ := testApplication(t)
+	backend := newMemoryBackend(map[string]string{"a.txt": "secret"})
+	cfg := bucketConfig{
+		ID: "wo", Name: "wo", AuthID: "test-auth", Provider: "s3", Bucket: "wo-bucket", Region: "test",
+		PermissionsDefined: true, Permissions: []string{permissionWrite},
+	}
+	app.instances["wo"] = &storageInstance{cfg: cfg, backend: backend, caps: initialCapabilities(cfg)}
+	app.order = append(app.order, "wo")
+
+	for _, endpoint := range []string{
+		"/api/list", "/api/stats", "/api/archive", "/api/spreadsheet", "/api/delimited", "/api/document-count",
+		"/api/document/word", "/api/parquet", "/api/json/raw", "/api/json/beautify", "/api/json/summary",
+		"/api/json/tree", "/api/search", "/api/media-info", "/api/structured-preview", "/api/archive-preview",
+		"/api/archive-entry", "/api/inspect", "/api/image-preview", "/s3", "/open/",
+	} {
+		recorder := httptest.NewRecorder()
+		target := endpoint + "?instance=wo&key=a.txt&q=secret&entry=x&prefix=&size=6"
+		app.routes().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, target, nil))
+		if recorder.Code != http.StatusForbidden {
+			t.Errorf("%s status = %d, want 403: %s", endpoint, recorder.Code, recorder.Body.String())
+		}
+	}
+	if backend.getCount != 0 || backend.headCount != 0 || backend.listCalls != 0 {
+		t.Fatalf("write-only instance reached the backend: gets=%d heads=%d lists=%d", backend.getCount, backend.headCount, backend.listCalls)
+	}
+}
+
+// forbiddenKeyBackend answers 403 for one key, like a prefix-scoped IAM policy.
+type forbiddenKeyBackend struct {
+	*memoryBackend
+	forbidden string
+}
+
+func (b *forbiddenKeyBackend) Get(ctx context.Context, key string, headers http.Header) (objectResponse, error) {
+	if key == b.forbidden {
+		return objectResponse{}, &upstreamError{StatusCode: http.StatusForbidden, Code: "AccessDenied"}
+	}
+	return b.memoryBackend.Get(ctx, key, headers)
+}
+
+func TestObjectDenialDoesNotBlockOtherRequests(t *testing.T) {
+	app, _, _ := testApplication(t)
+	instance := app.instances["rw"]
+	instance.backend = &forbiddenKeyBackend{memoryBackend: newMemoryBackend(map[string]string{"tenant/ok.txt": "ok"}), forbidden: "tenant/secret.txt"}
+	get := func(key string) int {
+		recorder := httptest.NewRecorder()
+		app.routes().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/s3?instance=rw&key="+key, nil))
+		return recorder.Code
+	}
+	if code := get("secret.txt"); code != http.StatusForbidden {
+		t.Fatalf("forbidden key status = %d, want 403", code)
+	}
+	if state := instance.capabilities().Read; state.State != capabilityDenied || state.Source != "provider" {
+		t.Fatalf("observed denial is not reported: %#v", state)
+	}
+	if code := get("ok.txt"); code != http.StatusOK {
+		t.Fatalf("one object's 403 blocked a different key: status %d", code)
+	}
+	if state := instance.capabilities().Read; state.State != capabilityAllowed {
+		t.Fatalf("a later success did not replace the observed denial: %#v", state)
+	}
+
+	// The reported denial is a short-lived hint, not a lasting verdict.
+	instance.observePermission(permissionWrite, &upstreamError{StatusCode: http.StatusForbidden})
+	if instance.capabilities().Write.State != capabilityDenied {
+		t.Fatal("write denial was not reported")
+	}
+	originalNow := timeNowUTC
+	defer func() { timeNowUTC = originalNow }()
+	timeNowUTC = func() time.Time { return originalNow().Add(observedDenialTTL + time.Second) }
+	if state := instance.capabilities().Write; state.State != capabilityUnknown || !state.Allowed {
+		t.Fatalf("observed denial did not expire: %#v", state)
+	}
+
+	// Configuration ceilings stay hard gates.
+	if err := requirePermission(app.instances["readonly"], permissionWrite); err == nil {
+		t.Fatal("configuration denial must still be enforced")
+	}
+}
+
+func TestPermissionRefreshKeepsStateOnProbeErrors(t *testing.T) {
+	t.Parallel()
+	status := http.StatusInternalServerError
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(status)
+	}))
+	defer server.Close()
+	backend := newAnonymousS3BackendForTest(t, server.URL, "bucket")
+	cfg := bucketConfig{ID: "s3", Provider: "s3", Bucket: "bucket"}
+	instance := &storageInstance{cfg: cfg, backend: backend, caps: initialCapabilities(cfg)}
+
+	// A 5xx probe does not prove the credentials are denied.
+	if read := instance.refreshCapabilities(context.Background()).Read; read.Verified || !read.Allowed {
+		t.Fatalf("5xx probe produced a verified denial: %#v", read)
+	}
+	// A cancelled probe leaves the shared state untouched.
+	status = http.StatusForbidden
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if read := instance.refreshCapabilities(ctx).Read; read.Verified || !read.Allowed {
+		t.Fatalf("cancelled probe changed the capabilities: %#v", read)
+	}
+	// An explicit 403 on the bucket-level probe is still a verified denial.
+	if read := instance.refreshCapabilities(context.Background()).Read; !read.Verified || read.Allowed || read.Source != "s3-list-probe" {
+		t.Fatalf("403 probe was not recorded as a verified denial: %#v", read)
+	}
+}
+
+func TestFrontendDepthIsCapped(t *testing.T) {
+	// Not parallel: the prepared-response cache is process-wide.
+	staticMu.Lock()
+	savedCache, savedBytes := staticCache, staticCacheBytes
+	staticCache, staticCacheBytes = map[string]*staticEntry{}, 0
+	staticMu.Unlock()
+	defer func() {
+		staticMu.Lock()
+		staticCache, staticCacheBytes = savedCache, savedBytes
+		staticMu.Unlock()
+	}()
+
+	deep := "/-/host/bucket/" + strings.Repeat("/", 5000) + "x"
+	if got := strings.Count(frontendBaseHref(deep), "../"); got != maxFrontendDepth {
+		t.Fatalf("base href depth = %d, want clamp to %d", got, maxFrontendDepth)
+	}
+	app, _, _ := testApplication(t)
+	for _, target := range []string{deep, deep + "/", "/" + strings.Repeat("a/", maxFrontendDepth+1) + "index.html"} {
+		recorder := httptest.NewRecorder()
+		app.routes().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, target, nil))
+		if recorder.Code != http.StatusNotFound {
+			t.Fatalf("path of %d bytes: status %d, want 404", len(target), recorder.Code)
+		}
+	}
+	staticMu.RLock()
+	entries := len(staticCache)
+	staticMu.RUnlock()
+	if entries != 0 {
+		t.Fatalf("refused paths left %d cached entries", entries)
+	}
+
+	// The byte budget stops caching; the response is still produced.
+	block := make([]byte, staticCacheByteLimit/4)
+	for i := 0; i < 8; i++ {
+		if _, err := preparedStatic("v", "big.html", strconv.Itoa(i), func() ([]byte, error) { return block, nil }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	staticMu.RLock()
+	size := staticCacheBytes
+	staticMu.RUnlock()
+	if size > staticCacheByteLimit {
+		t.Fatalf("static cache holds %d accounted bytes, over the %d budget", size, staticCacheByteLimit)
+	}
+}
+
+func TestRequestLogHidesObjectPathsAndEscapesControlBytes(t *testing.T) {
+	// Not parallel: the standard logger is process-wide.
+	var output bytes.Buffer
+	originalWriter := log.Writer()
+	log.SetOutput(&output)
+	defer log.SetOutput(originalWriter)
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
+	request := func(target string) {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.URL.Path = target
+		requestLogMiddleware(logModeAnonymous, next).ServeHTTP(httptest.NewRecorder(), req)
+	}
+	request("/-/host/bucket/customers/secret-report.pdf")
+	request("/healthz\nGET /forged 200")
+	request("/healthz\n\x1b[31mforged")
+	logged := output.String()
+	if strings.Contains(logged, "secret-report") || !strings.Contains(logged, `"/-/<path>"`) {
+		t.Fatalf("object key path was logged in anonymous mode: %q", logged)
+	}
+	if strings.Count(logged, "\n") != 3 || strings.ContainsRune(logged, 0x1b) {
+		t.Fatalf("control characters reached the log: %q", logged)
 	}
 }

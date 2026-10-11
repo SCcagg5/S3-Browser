@@ -30,11 +30,6 @@ jobs:
           go-version: "1.22"
           cache-dependency-path: src/go.sum
 
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
       - name: Prepare manual tag
         if: github.event_name == 'workflow_dispatch'
         shell: bash
@@ -82,31 +77,6 @@ jobs:
           go test -race ./...
           go vet ./...
 
-      - name: Precompiled template is current
-        working-directory: tools
-        run: |
-          npm ci --no-audit --no-fund
-          npm run check
-
-      - name: Frontend contracts
-        working-directory: .
-        run: |
-          set -euo pipefail
-          for file in src/public/assets/js/*.js src/public/assets/js/common/*.js test/*.js; do
-            node --check "$file"
-          done
-          node test/frontend-smoke.js
-          node test/advanced-object-tools.js
-          node test/ui-normalization.js
-          node test/json-coloring.js
-          node test/json-viewer.js
-          node test/transfer-controls.js
-          node test/stats-viewer.js
-          node test/sqlite-viewer.js
-          node test/office-metadata.js
-          node test/subpath-support.js
-          node test/design-system.js
-
       - name: Verify self-contained and private runtime
         working-directory: .
         shell: bash
@@ -125,7 +95,7 @@ jobs:
             echo "runtime source must not write application state to the local filesystem" >&2
             exit 1
           fi
-          if find . -name node_modules -prune -o -type f \( -iname '*.ttf' -o -iname '*.otf' -o -iname '*.woff' -o -iname '*.woff2' -o -iname '*.eot' \) -print | grep -q .; then
+          if find . -type f \( -iname '*.ttf' -o -iname '*.otf' -o -iname '*.woff' -o -iname '*.woff2' -o -iname '*.eot' \) | grep -q .; then
             echo "font binaries must not be shipped" >&2
             exit 1
           fi

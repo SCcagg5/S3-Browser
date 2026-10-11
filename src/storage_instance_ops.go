@@ -13,6 +13,10 @@ func (s *storageInstance) acquire(ctx context.Context) (func(), error) {
 	if s == nil {
 		return nil, errors.New("storage instance is nil")
 	}
+	if gateExempt(ctx) {
+		// The caller already holds a slot for this operation.
+		return func() {}, nil
+	}
 	var global chan struct{}
 	if s.concurrency != nil {
 		global = s.concurrency.global
@@ -49,6 +53,8 @@ func (s *storageInstance) observePermission(permission string, err error) {
 			return
 		}
 		next = deniedCapability("provider", "the storage provider denied a real operation during this process", true)
+		// One object's 403 is not an instance-wide verdict: report it briefly, never enforce it (see permitted).
+		next.expires = timeNowUTC().Add(observedDenialTTL)
 	}
 
 	s.mu.Lock()

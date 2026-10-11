@@ -3,23 +3,24 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="color-scheme" content="light dark" />
+  <meta name="color-scheme" content="light" />
   <meta name="robots" content="noindex" />
   <base href="{{APP_BASE}}" />
   <link rel="icon" type="image/svg+xml" href="favicon.svg?v=2" />
   <title>Page not found - Object Storage Browser</title>
   <link rel="stylesheet" href="assets/css/icons.css" />
+  <link rel="stylesheet" href="assets/vendor/buefy/1.0.1/buefy.min.css" />
   <link rel="stylesheet" href="assets/css/tokens.css" />
   <link rel="stylesheet" href="assets/css/base.css" />
-  <link rel="stylesheet" href="assets/css/ui.css" />
-  <link rel="stylesheet" href="assets/css/a11y.css" />
+  <link rel="stylesheet" href="assets/css/style.css" />
 </head>
 <body>
-  <main class="not-found" id="main-content">
-    <i class="mdi mdi-file-question-outline" aria-hidden="true"></i>
-    <h1>Page not found</h1>
-    <p>This address does not match any storage or object. It may have been renamed, or the link may be incomplete.</p>
-    <a class="btn btn-primary" href="./">Back to the object browser</a>
+  <main class="container main-content">
+    <div class="empty-state card is-warning">
+      <i class="mdi mdi-file-question-outline"></i>
+      <h2>Page not found</h2>
+      <p>This address does not match any storage or object. <a href="./">Back to the object browser</a></p>
+    </div>
   </main>
 </body>
 </html>

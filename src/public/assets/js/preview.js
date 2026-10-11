@@ -51,9 +51,9 @@
       const content = byId('viewer');
       if (!shell || !bar || !content) return;
 
-      const headerHeight = Math.ceil(bar.getBoundingClientRect().height);
+      const headerHeight = Math.ceil((BB.viewport?.rect(bar) || bar.getBoundingClientRect()).height);
       shell.style.setProperty('--preview-header-height', `${headerHeight}px`);
-      const contentHeight = Math.max(content.scrollHeight, content.getBoundingClientRect().height);
+      const contentHeight = Math.max(content.scrollHeight, (BB.viewport?.rect(content) || content.getBoundingClientRect()).height);
       shell.classList.toggle('is-content-tall', contentHeight > shell.clientHeight + 1);
     });
   }
@@ -77,66 +77,6 @@
     shell.dataset.previewType = String(type || 'unknown');
   }
 
-  // Viewer modules load on demand, so opening a README does not download the SQLite, spreadsheet or archive code.
-  const viewerScripts = new Map();
-  const VIEWER_MODULES = {
-    highlight: ['assets/vendor/highlightjs/11/highlight.min.js'],
-    markdown: ['assets/vendor/marked/12.0.2/marked.min.js', 'assets/vendor/highlightjs/11/highlight.min.js'],
-    json: ['assets/vendor/highlightjs/11/highlight.min.js', 'assets/js/common/json-viewer.js'],
-    tabular: ['assets/js/common/tabular.js'],
-    sqlite: ['assets/js/common/tabular.js', 'assets/js/common/sqlite-viewer.js'],
-    structured: ['assets/vendor/highlightjs/11/highlight.min.js', 'assets/js/common/structured-viewers.js']
-  };
-
-  function loadViewerScript(src) {
-    if (!viewerScripts.has(src)) {
-      viewerScripts.set(src, new Promise((resolve, reject) => {
-        const script = document.createElement('script');
-        const url = new URL(src, document.baseURI);
-        // The page carries the fingerprint of this build; using it makes the module cacheable and never stale.
-        const version = document.querySelector('meta[name="bb-asset-version"]')?.content;
-        if (version && !version.includes('{{')) url.searchParams.set('v', version);
-        script.src = url.href;
-        script.onload = resolve;
-        script.onerror = () => {
-          viewerScripts.delete(src);
-          reject(new Error(`Unable to load the ${src.split('/').pop()} viewer module.`));
-        };
-        document.head.appendChild(script);
-      }));
-    }
-    return viewerScripts.get(src);
-  }
-
-  function viewerModulesFor(type, archiveEntry) {
-    switch (type) {
-      case 'video': case 'archive': return ['structured'];
-      case 'json': return [archiveEntry ? 'highlight' : 'json'];
-      case 'markdown': return ['markdown'];
-      case 'contact': case 'calendar': case 'email': case 'certificate': return [archiveEntry ? 'highlight' : 'structured'];
-      case 'tabular': case 'spreadsheet': case 'parquet': return ['tabular'];
-      case 'sqlite': return ['sqlite'];
-      case 'image': case 'raw-image': case 'image-convert': case 'audio': case 'pdf': case 'word':
-      case 'word-unavailable': case 'sheet-unavailable': case 'slide-unavailable': case 'diagram-unavailable': return [];
-      default: return ['highlight'];
-    }
-  }
-
-  async function loadViewerModules(type, archiveEntry) {
-    const sources = new Set(viewerModulesFor(type, archiveEntry).flatMap(name => VIEWER_MODULES[name]));
-    // Scripts run in the listed order: sqlite-viewer.js requires tabular.js to be present when it loads.
-    for (const src of sources) await loadViewerScript(src);
-  }
-
-  // Loading and failure states are announced through one live region, never by moving focus.
-  function announce(message, { urgent = false } = {}) {
-    const region = byId('previewStatus');
-    if (!region) return;
-    region.setAttribute('role', urgent ? 'alert' : 'status');
-    region.textContent = '';
-    window.setTimeout(() => { region.textContent = message; }, 30);
-  }
-
   function cleanupPreviewResources() {
     activeDocumentSearch = null;
     activeDocumentSearchLabel = '';
@@ -146,7 +86,6 @@
       try { cleanup(); } catch (_) {}
     }
     activeMediaCleanups.clear();
-    BB.sqliteViewer?.cleanupAll?.();
   }
 
   function installViewerLayoutObserver() {
@@ -495,6 +434,7 @@
     url = rangeURL;
     const wrapper = document.createElement('section');
     wrapper.className = 'pdf-preview pdf-custom-preview';
+    wrapper.tabIndex = 0;
     wrapper.setAttribute('aria-label', 'PDF preview');
 
     const toolbar = document.createElement('div');
@@ -592,9 +532,6 @@
 
     const stage = document.createElement('div');
     stage.className = 'pdf-custom-stage pdf-page-stage';
-    stage.tabIndex = 0;
-    stage.setAttribute('role', 'region');
-    stage.setAttribute('aria-label', 'Document pages');
     const canvasWrap = document.createElement('div');
     canvasWrap.className = 'pdf-canvas-wrap';
     const loader = document.createElement('div');
@@ -1119,25 +1056,11 @@
     container.replaceChildren();
     const icon = document.createElement('i');
     icon.className = 'mdi mdi-alert-circle-outline';
-    icon.setAttribute('aria-hidden', 'true');
     const title = document.createElement('strong');
     title.textContent = 'Preview unavailable';
     const message = document.createElement('p');
     message.textContent = String(error?.message || error || 'Unknown error');
-    const actions = document.createElement('div');
-    actions.className = 'preview-error-actions';
-    const retry = document.createElement('button');
-    retry.type = 'button';
-    retry.className = 'btn btn-primary';
-    retry.innerHTML = '<i class="mdi mdi-refresh" aria-hidden="true"></i><span>Try again</span>';
-    retry.addEventListener('click', () => window.location.reload());
-    const back = document.createElement('a');
-    back.className = 'btn';
-    back.href = byId('backBtn')?.href || './';
-    back.textContent = 'Back to the browser';
-    actions.append(retry, back);
-    container.append(icon, title, message, actions);
-    announce(`Preview unavailable. ${message.textContent}`, { urgent: true });
+    container.append(icon, title, message);
     scheduleViewerLayout();
   }
 
@@ -1313,7 +1236,6 @@
     const loading = document.createElement('span');
     loading.textContent = 'Loading preview...';
     container.append(spinner, loading);
-    announce('Loading preview');
     scheduleViewerLayout();
 
     try {
@@ -1333,7 +1255,6 @@
         ? BB.api.archiveEntryURL(key, archiveEntry, { inline: true, instance: config.instanceId, version })
         : BB.api.openURLForKey(key, config.instanceId, version);
       const type = BB.detect.resolveType(displayKey, metadata.mime);
-      await loadViewerModules(type, archiveEntry);
       let node;
       let className = 'preview-content';
 
@@ -1450,7 +1371,6 @@
         await BB.render.renderMermaid(node);
       }
       scheduleViewerLayout();
-      announce('Preview ready');
     } catch (error) {
       renderError(error);
     }
@@ -1534,14 +1454,6 @@
     event.preventDefault();
     void openDocumentSearch();
   });
-  // A fragment link would resolve against <base href> and reload the page, so focus the target directly.
-  byId('skipLink')?.addEventListener('click', event => {
-    event.preventDefault();
-    document.getElementById('main-content')?.focus();
-  });
-  // Release server-side resources (SQLite sessions) when the page is left, and rebuild after a back/forward cache restore.
-  window.addEventListener('pagehide', () => cleanupPreviewResources());
-  window.addEventListener('pageshow', event => { if (event.persisted) window.location.reload(); });
   installViewerLayoutObserver();
   initialize();
 })();

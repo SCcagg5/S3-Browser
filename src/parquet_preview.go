@@ -86,6 +86,10 @@ func (a *application) handleParquetPreview(w http.ResponseWriter, r *http.Reques
 		writeAPIError(w, err)
 		return
 	}
+	if err := requirePermission(instance, permissionRead); err != nil {
+		writeAPIError(w, err)
+		return
+	}
 	key := strings.TrimLeft(r.URL.Query().Get("key"), "/")
 	if key == "" {
 		writeAPIError(w, apiError{Status: http.StatusBadRequest, Code: "missing_key", Message: "key is required"})
@@ -206,9 +210,13 @@ func parseParquetMetadataDetail(data []byte) (parquetMetadataDetail, error) {
 				return detail, err
 			}
 			detail.GroupCount = size
+			// Every element takes at least one byte, so a larger count is corrupt.
+			if size > len(reader.data)-reader.pos {
+				return detail, io.ErrUnexpectedEOF
+			}
 			for index := 0; index < size; index++ {
 				if elementType != compactStruct {
-					if err := reader.skip(elementType); err != nil {
+					if err := reader.skipValue(elementType, true); err != nil {
 						return detail, err
 					}
 					continue
@@ -368,8 +376,11 @@ func (r *thriftCompactReader) readParquetRowGroup(index int) (parquetRowGroupInf
 				return group, err
 			}
 			group.Columns = size
+			if size > len(r.data)-r.pos {
+				return group, io.ErrUnexpectedEOF
+			}
 			for item := 0; item < size; item++ {
-				if err := r.skip(elementType); err != nil {
+				if err := r.skipValue(elementType, true); err != nil {
 					return group, err
 				}
 			}

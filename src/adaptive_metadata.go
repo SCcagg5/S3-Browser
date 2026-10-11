@@ -395,60 +395,70 @@ func inspectRadianceHDRMetadata(source *objectRangeSource) (adaptiveMediaMetadat
 	return result, nil
 }
 
+// maxFITSHeaderBytes caps the header scan; real headers span a few blocks.
+const maxFITSHeaderBytes = int64(1 << 20)
+
 func inspectFITSMetadata(source *objectRangeSource) (adaptiveMediaMetadata, error) {
 	result := adaptiveMediaMetadata{mediaMetadata: newMediaMetadata()}
-	limit := metadataStructureLimit(source)
+	limit := minInt64(metadataStructureLimit(source), maxFITSHeaderBytes)
 	// FITS headers are a sequence of 2880-byte blocks containing 80-byte cards.
-	// Stop as soon as the END card is found; image data is never read.
-	for target := int64(2880); target <= limit; target = minInt64(limit, target+2880) {
-		data, err := source.ReadPrefix(metadataRangeLength(source, 0, target))
+	// Read each new chunk once (doubling in size), parse only the new cards, and
+	// stop as soon as the END card is found; image data is never read.
+	const block = int64(2880)
+	var width, height int
+	for offset, chunk := int64(0), block; offset < limit; chunk *= 2 {
+		length := minInt64(chunk, limit-offset)
+		data, err := source.ReadRange(offset, metadataRangeLength(source, offset, length))
 		if err != nil && err != io.EOF {
 			return result, err
 		}
-		width, height, complete, valid := parseFITSDimensions(data)
-		if !valid {
+		if offset == 0 {
+			if len(data) < 80 {
+				return result, nil
+			}
+			if !bytes.HasPrefix(data, []byte("SIMPLE  =")) && !bytes.HasPrefix(data, []byte("XTENSION=")) {
+				return result, nil
+			}
+		}
+		if parseFITSCards(data, &width, &height) {
+			if width > 0 && height > 0 {
+				result.Width, result.Height = width, height
+			}
 			return result, nil
 		}
-		if complete {
-			result.Width, result.Height = width, height
-			return result, nil
-		}
-		if int64(len(data)) < target || target == limit {
+		if int64(len(data)) < length {
 			break
 		}
+		offset += length
 	}
 	return result, nil
 }
 
-func parseFITSDimensions(data []byte) (width, height int, complete, valid bool) {
-	if len(data) < 80 {
-		return 0, 0, false, true
-	}
-	if !strings.HasPrefix(string(data[:80]), "SIMPLE  =") && !strings.HasPrefix(string(data[:80]), "XTENSION=") {
-		return 0, 0, true, false
-	}
+// parseFITSCards scans whole 80-byte cards, recording NAXIS1/NAXIS2, and
+// reports whether the END card was seen.
+func parseFITSCards(data []byte, width, height *int) bool {
 	for offset := 0; offset+80 <= len(data); offset += 80 {
-		card := string(data[offset : offset+80])
-		keyword := strings.TrimSpace(card[:8])
+		card := data[offset : offset+80]
+		keyword := strings.TrimSpace(string(card[:8]))
 		if keyword == "END" {
-			return width, height, true, width > 0 && height > 0
+			return true
 		}
-		if len(card) < 10 || card[8] != '=' {
+		if card[8] != '=' {
 			continue
 		}
-		value := strings.TrimSpace(strings.SplitN(card[10:], "/", 2)[0])
+		value := strings.TrimSpace(strings.SplitN(string(card[10:]), "/", 2)[0])
 		parsed, err := strconv.Atoi(value)
 		if err != nil || parsed <= 0 {
 			continue
 		}
 		switch keyword {
 		case "NAXIS1":
-			width = parsed
+			*width = parsed
 		case "NAXIS2":
-			height = parsed
+			*height = parsed
 		}
 	}
-	return width, height, false, true
+	return false
 }
 
 func parseRadianceHDRDimensions(data []byte) (width, height int, complete, valid bool) {

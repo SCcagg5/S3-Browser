@@ -28,7 +28,6 @@
     const tabs = document.createElement('div');
     tabs.className = 'spreadsheet-tabs structured-preview-tabs';
     tabs.setAttribute('role', 'tablist');
-    tabs.setAttribute('aria-label', 'Preview sections');
     const host = document.createElement('div');
     host.className = 'structured-preview-host';
     const buttons = [];
@@ -61,17 +60,28 @@
       button.appendChild(label);
       const panel = document.createElement('div');
       panel.className = `structured-preview-panel ${definition.className || ''}`.trim();
+      panel.setAttribute('role', 'tabpanel');
       panel.hidden = index !== 0;
       const content = typeof definition.render === 'function' ? definition.render() : definition.node;
       if (content) panel.appendChild(content);
       button.addEventListener('click', () => activate(index));
+      button.addEventListener('keydown', event => {
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+        event.preventDefault();
+        let next = index;
+        if (event.key === 'ArrowLeft') next = (index - 1 + buttons.length) % buttons.length;
+        if (event.key === 'ArrowRight') next = (index + 1) % buttons.length;
+        if (event.key === 'Home') next = 0;
+        if (event.key === 'End') next = buttons.length - 1;
+        activate(next);
+        buttons[next]?.focus();
+      });
       buttons.push(button);
       panels.push(panel);
       tabs.appendChild(button);
       host.appendChild(panel);
     });
 
-    BB.ui?.enhanceTabs?.(buttons, panels, activate);
     wrapper.append(tabs, host);
     return wrapper;
   }
@@ -153,11 +163,11 @@
         body.appendChild(subtitle);
       }
       [
-        labeledList('Email', contact.emails, 'email-outline'),
-        labeledList('Phone', contact.phones, 'phone-outline'),
-        labeledList('Address', contact.addresses, 'map-marker-outline'),
-        labeledList('Website', contact.urls, 'web'),
-        labeledList('Notes', contact.notes, 'note-text-outline')
+        labeledList('Email', contact.emails, 'information-outline'),
+        labeledList('Phone', contact.phones, 'information-outline'),
+        labeledList('Address', contact.addresses, 'information-outline'),
+        labeledList('Website', contact.urls, 'information-outline'),
+        labeledList('Notes', contact.notes, 'information-outline')
       ].filter(Boolean).forEach(node => body.appendChild(node));
       card.append(avatar, body);
       section.appendChild(card);
@@ -172,16 +182,6 @@
       ...(calendar?.freeBusy || []),
       ...(calendar?.journals || [])
     ];
-  }
-
-  // iCalendar writes instants as 20241003T090000Z and dates as 20241003: show them the way the rest of the app does.
-  function calendarTime(value) {
-    const raw = text(value).trim();
-    const stamp = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})?(Z?)$/.exec(raw);
-    if (stamp) return `${stamp[1]}-${stamp[2]}-${stamp[3]} ${stamp[4]}:${stamp[5]}${stamp[6] ? `:${stamp[6]}` : ''}${stamp[7] ? ' UTC' : ''}`;
-    const day = /^(\d{4})(\d{2})(\d{2})$/.exec(raw);
-    if (day) return `${day[1]}-${day[2]}-${day[3]}`;
-    return raw;
   }
 
   function calendarPreview(payload) {
@@ -210,14 +210,14 @@
       card.className = 'calendar-preview-card';
       const date = document.createElement('div');
       date.className = 'calendar-preview-date';
-      date.textContent = calendarTime(record.start || record.due) || text(record.type || index + 1);
+      date.textContent = text(record.start || record.due || record.type || index + 1);
       const body = document.createElement('div');
       body.className = 'calendar-preview-body';
-      const title = document.createElement('h2');
+      const title = document.createElement('h3');
       title.textContent = text(record.summary || record.type || `Item ${index + 1}`);
       const meta = document.createElement('p');
       meta.className = 'calendar-preview-meta';
-      meta.textContent = [record.type, record.end ? `Ends ${calendarTime(record.end)}` : '', record.location, record.status].filter(Boolean).join(' · ');
+      meta.textContent = [record.type, record.end ? `Ends ${record.end}` : '', record.location, record.status].filter(Boolean).join(' · ');
       body.append(title, meta);
       if (record.description) {
         const description = document.createElement('p');
@@ -245,10 +245,6 @@
       bodyHeading.textContent = 'Message';
       const body = document.createElement('pre');
       body.className = 'email-preview-body';
-      // The body scrolls on its own when the message is long: keyboard users must be able to focus it.
-      body.tabIndex = 0;
-      body.setAttribute('role', 'region');
-      body.setAttribute('aria-label', 'Message body');
       body.textContent = email.bodyText;
       root.append(bodyHeading, body);
     }
@@ -337,14 +333,6 @@
   }
 
 
-  // A checkbox sits inside a label so the whole padded area is the touch target.
-  function checkTarget(input) {
-    const label = document.createElement('label');
-    label.className = 'check-target';
-    label.appendChild(input);
-    return label;
-  }
-
   function archiveEntries(payload) {
     const root = document.createElement('div');
     root.className = 'archive-entries-preview';
@@ -352,7 +340,7 @@
     toolbar.className = 'data-preview-toolbar archive-preview-toolbar';
     const search = document.createElement('input');
     search.type = 'search';
-    search.className = 'input archive-entry-search';
+    search.className = 'archive-entry-search';
     search.placeholder = 'Filter entries';
     search.setAttribute('aria-label', 'Filter archive entries');
     const summary = document.createElement('span');
@@ -361,11 +349,11 @@
     selectionSummary.className = 'archive-selection-summary';
     const extractButton = document.createElement('button');
     extractButton.type = 'button';
-    extractButton.className = 'btn btn-sm archive-extract-selected';
+    extractButton.className = 'bb-btn archive-extract-selected';
     extractButton.textContent = 'Extract selected';
     const clearButton = document.createElement('button');
     clearButton.type = 'button';
-    clearButton.className = 'btn btn-sm archive-clear-selection';
+    clearButton.className = 'bb-btn archive-clear-selection';
     clearButton.textContent = 'Clear';
     const pageSizeLabel = document.createElement('label');
     pageSizeLabel.className = 'data-page-size archive-page-size';
@@ -392,11 +380,18 @@
     const table = document.createElement('table');
     table.className = 'data-table archive-entry-table';
     const colgroup = document.createElement('colgroup');
-    // Column widths live in preview.css (.archive-col-*) so phones can drop the technical columns.
-    ['archive-col-select', 'archive-col-name', 'archive-col-compressed', 'archive-col-size',
-      'archive-col-method', 'archive-col-modified', 'archive-col-actions'].forEach(className => {
+    [
+      ['archive-col-select', '4%'],
+      ['archive-col-name', '34%'],
+      ['archive-col-compressed', '12%'],
+      ['archive-col-size', '12%'],
+      ['archive-col-method', '10%'],
+      ['archive-col-modified', '20%'],
+      ['archive-col-actions', '8%']
+    ].forEach(([className, width]) => {
       const column = document.createElement('col');
       column.className = className;
+      column.style.width = width;
       colgroup.appendChild(column);
     });
     const head = document.createElement('thead');
@@ -406,7 +401,7 @@
     const selectVisible = document.createElement('input');
     selectVisible.type = 'checkbox';
     selectVisible.setAttribute('aria-label', 'Select visible archive entries');
-    selectHead.appendChild(checkTarget(selectVisible));
+    selectHead.appendChild(selectVisible);
     [
       ['archive-cell-name', 'Name'],
       ['archive-cell-compressed is-numeric', 'Compressed'], ['archive-cell-size is-numeric', 'Size'],
@@ -415,14 +410,8 @@
     ].forEach(([className, label]) => {
       const cell = document.createElement('th');
       cell.className = className;
-      if (className === 'archive-cell-actions') {
-        const hidden = document.createElement('span');
-        hidden.className = 'sr-only';
-        hidden.textContent = 'Actions';
-        cell.appendChild(hidden);
-      } else {
-        cell.textContent = label;
-      }
+      cell.textContent = label;
+      if (className === 'archive-cell-actions') cell.setAttribute('aria-label', 'Actions');
       headRow.appendChild(cell);
     });
     headRow.prepend(selectHead);
@@ -435,13 +424,13 @@
     pagination.className = 'data-preview-pagination archive-pagination';
     const previous = document.createElement('button');
     previous.type = 'button';
-    previous.className = 'btn btn-icon btn-sm';
+    previous.className = 'icon-btn';
     previous.innerHTML = '<i class="mdi mdi-chevron-left"></i>';
     previous.setAttribute('aria-label', 'Previous page');
     const pageLabel = document.createElement('span');
     const next = document.createElement('button');
     next.type = 'button';
-    next.className = 'btn btn-icon btn-sm';
+    next.className = 'icon-btn';
     next.innerHTML = '<i class="mdi mdi-chevron-right"></i>';
     next.setAttribute('aria-label', 'Next page');
     pagination.append(previous, pageLabel, next);
@@ -527,7 +516,7 @@
           else selected.delete(entry.name);
           updateSelection();
         });
-        select.appendChild(checkTarget(checkbox));
+        select.appendChild(checkbox);
         const name = document.createElement('td');
         name.className = 'archive-cell-name';
         const nameContent = document.createElement('div');
@@ -535,11 +524,7 @@
         const icon = document.createElement('i');
         icon.className = 'mdi mdi-file-outline';
         const value = document.createElement('span');
-        // Offer a line break after each path separator so a long name wraps between folders, not mid-word.
-        String(entry.name ?? '').split('/').forEach((part, index, parts) => {
-          value.append(document.createTextNode(index < parts.length - 1 ? `${part}/` : part));
-          if (index < parts.length - 1) value.append(document.createElement('wbr'));
-        });
+        value.textContent = entry.name;
         nameContent.append(icon, value);
         name.appendChild(nameContent);
         const compressed = document.createElement('td');
@@ -572,11 +557,9 @@
           popover.className = 'bb-menu-popover';
           const list = document.createElement('div');
           list.className = 'bb-menu-list';
-          list.setAttribute('role', 'menu');
 
           const preview = document.createElement('a');
           preview.className = 'bb-menu-item';
-          preview.setAttribute('role', 'menuitem');
           preview.innerHTML = '<i class="mdi mdi-eye-outline" aria-hidden="true"></i><span>Open</span>';
           preview.href = BB.api.previewPageURL(payload.key, {
             instance: payload.instance,
@@ -586,17 +569,15 @@
 
           const download = document.createElement('a');
           download.className = 'bb-menu-item';
-          download.setAttribute('role', 'menuitem');
           download.innerHTML = '<i class="mdi mdi-download" aria-hidden="true"></i><span>Download</span>';
           download.href = BB.api.archiveEntryURL(payload.key, entry.name, { inline: false, instance: payload.instance, version: payload.version || '' });
-          download.download = String(entry.name ?? '').split('/').pop() || 'archive-entry';
+          download.download = entry.name.split('/').pop() || 'archive-entry';
           list.append(preview, download);
 
           if (canWrite) {
             const extract = document.createElement('button');
             extract.type = 'button';
             extract.className = 'bb-menu-item';
-            extract.setAttribute('role', 'menuitem');
             extract.innerHTML = '<i class="mdi mdi-archive-arrow-down-outline" aria-hidden="true"></i><span>Extract</span>';
             extract.addEventListener('click', () => extractEntries([entry.name]));
             list.appendChild(extract);

@@ -197,8 +197,56 @@ func newStorageConcurrency(limit int) *storageConcurrency {
 	return &storageConcurrency{global: make(chan struct{}, limit)}
 }
 
+// gateWaitTimeout bounds how long a request queues for a storage slot. Slots
+// can be pinned by slow clients (released after streamIdleTimeout), so waiting
+// forever would let them starve every other user; callers receive a retryable 503
+// instead. It is long enough that a listing issued during a big transfer just queues. Background jobs opt out
+// through withUnboundedGateWait because they are expected to queue.
+var gateWaitTimeout = 30 * time.Second
+
+type gateContextKey int
+
+const (
+	gateExemptContextKey gateContextKey = iota
+	gateUnboundedContextKey
+	gateNoWaitContextKey
+)
+
+// withGateExempt marks reads performed on behalf of an operation that already
+// holds a slot (the lazy ZIP source behind an extraction upload). Taking a
+// second slot while holding the first would deadlock concurrent operations.
+func withGateExempt(ctx context.Context) context.Context {
+	return context.WithValue(ctx, gateExemptContextKey, true)
+}
+
+func withUnboundedGateWait(ctx context.Context) context.Context {
+	return context.WithValue(ctx, gateUnboundedContextKey, true)
+}
+
+// withNoGateWait makes a storage request fail immediately with storage_busy instead of queueing for a slot. It is for
+// opportunistic work (prefetching the next archive member) that must never compete with, or wait behind, real requests.
+func withNoGateWait(ctx context.Context) context.Context {
+	return context.WithValue(ctx, gateNoWaitContextKey, true)
+}
+
+func gateExempt(ctx context.Context) bool {
+	exempt, _ := ctx.Value(gateExemptContextKey).(bool)
+	return exempt
+}
+
+func errStorageBusy() error {
+	return apiError{Status: http.StatusServiceUnavailable, Code: "storage_busy", Message: "the storage backend is busy; retry shortly"}
+}
+
 func acquireGate(ctx context.Context, gates ...chan struct{}) (func(), error) {
+	var timeout <-chan time.Time
+	unbounded, _ := ctx.Value(gateUnboundedContextKey).(bool)
 	acquired := make([]chan struct{}, 0, len(gates))
+	giveBack := func() {
+		for index := len(acquired) - 1; index >= 0; index-- {
+			<-acquired[index]
+		}
+	}
 	for _, gate := range gates {
 		if gate == nil {
 			continue
@@ -206,19 +254,30 @@ func acquireGate(ctx context.Context, gates ...chan struct{}) (func(), error) {
 		select {
 		case gate <- struct{}{}:
 			acquired = append(acquired, gate)
+			continue
+		default:
+		}
+		if noWait, _ := ctx.Value(gateNoWaitContextKey).(bool); noWait {
+			giveBack()
+			return nil, errStorageBusy()
+		}
+		if timeout == nil && !unbounded && gateWaitTimeout > 0 {
+			// Started lazily so the uncontended path allocates no timer.
+			timer := time.NewTimer(gateWaitTimeout)
+			defer timer.Stop()
+			timeout = timer.C
+		}
+		select {
+		case gate <- struct{}{}:
+			acquired = append(acquired, gate)
 		case <-ctx.Done():
-			for index := len(acquired) - 1; index >= 0; index-- {
-				<-acquired[index]
-			}
+			giveBack()
 			return nil, ctx.Err()
+		case <-timeout:
+			giveBack()
+			return nil, errStorageBusy()
 		}
 	}
 	var once sync.Once
-	return func() {
-		once.Do(func() {
-			for index := len(acquired) - 1; index >= 0; index-- {
-				<-acquired[index]
-			}
-		})
-	}, nil
+	return func() { once.Do(giveBack) }, nil
 }

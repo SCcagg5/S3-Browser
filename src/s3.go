@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -550,6 +552,12 @@ func (s *s3Backend) Copy(ctx context.Context, sourceKey, destinationKey string) 
 	return nil
 }
 
+// isAuthorizationDenial reports whether err is the provider explicitly refusing the credentials (HTTP 401/403).
+func isAuthorizationDenial(err error) bool {
+	var upstream *upstreamError
+	return errors.As(err, &upstream) && (upstream.StatusCode == http.StatusUnauthorized || upstream.StatusCode == http.StatusForbidden)
+}
+
 func (s *s3Backend) DiscoverCapabilities(ctx context.Context) (discoveredCapabilities, error) {
 	states := map[string]capabilityState{
 		permissionWrite: {
@@ -567,6 +575,11 @@ func (s *s3Backend) DiscoverCapabilities(ctx context.Context) (discoveredCapabil
 	}
 	page, err := s.List(ctx, listOptions{Prefix: s.cfg.RootPrefix, MaxResults: 1})
 	if err != nil {
+		// Only an explicit authorisation failure is a verified denial. A cancelled probe, a timeout or a 5xx says
+		// nothing about the credentials, so the error is returned and the permission stays tentable.
+		if !isAuthorizationDenial(err) {
+			return discoveredCapabilities{}, err
+		}
 		states[permissionRead] = capabilityState{
 			Allowed:  false,
 			Verified: true,
@@ -586,6 +599,9 @@ func (s *s3Backend) DiscoverCapabilities(ctx context.Context) (discoveredCapabil
 		return discoveredCapabilities{States: states, Permissions: permissions}, nil
 	}
 	if _, err := s.Head(ctx, page.Objects[0].Key); err != nil {
+		if !isAuthorizationDenial(err) {
+			return discoveredCapabilities{}, err
+		}
 		states[permissionRead] = capabilityState{
 			Allowed:  false,
 			Verified: true,
@@ -697,10 +713,7 @@ func signS3Request(req *http.Request, creds s3Credentials, region string, now ti
 		sha256Hex([]byte(canonicalRequest)),
 	}, "\n")
 
-	dateKey := hmacSHA256([]byte("AWS4"+creds.SecretAccessKey), dateStamp)
-	regionKey := hmacSHA256(dateKey, region)
-	serviceKey := hmacSHA256(regionKey, "s3")
-	signingKey := hmacSHA256(serviceKey, "aws4_request")
+	signingKey := s3SigningKey(creds.SecretAccessKey, dateStamp, region)
 	signature := hex.EncodeToString(hmacSHA256(signingKey, stringToSign))
 
 	req.Header.Set("Authorization", fmt.Sprintf(
@@ -793,6 +806,33 @@ func awsURIEncode(value string, encodeSlash bool) string {
 func sha256Hex(value []byte) string {
 	sum := sha256.Sum256(value)
 	return hex.EncodeToString(sum[:])
+}
+
+// s3SigningKey derives the SigV4 signing key. It only changes with the secret, the UTC day and the region, so derivations
+// are kept (a handful: one per configured credential and day) instead of running four HMACs for every request.
+func s3SigningKey(secret, dateStamp, region string) []byte {
+	id := s3SigningKeyID{secret: secret, date: dateStamp, region: region}
+	s3SigningKeys.Lock()
+	defer s3SigningKeys.Unlock()
+	if key, ok := s3SigningKeys.keys[id]; ok {
+		return key
+	}
+	dateKey := hmacSHA256([]byte("AWS4"+secret), dateStamp)
+	regionKey := hmacSHA256(dateKey, region)
+	serviceKey := hmacSHA256(regionKey, "s3")
+	key := hmacSHA256(serviceKey, "aws4_request")
+	if len(s3SigningKeys.keys) >= 16 || s3SigningKeys.keys == nil {
+		s3SigningKeys.keys = make(map[s3SigningKeyID][]byte)
+	}
+	s3SigningKeys.keys[id] = key
+	return key
+}
+
+type s3SigningKeyID struct{ secret, date, region string }
+
+var s3SigningKeys struct {
+	sync.Mutex
+	keys map[s3SigningKeyID][]byte
 }
 
 func hmacSHA256(key []byte, value string) []byte {

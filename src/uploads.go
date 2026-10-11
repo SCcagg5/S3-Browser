@@ -33,6 +33,15 @@ const (
 	maxInMemoryUploadSessions = 4
 )
 
+// An upload session that makes no progress for this long is abandoned: its
+// provider session is aborted and its slot is released. The client-held resume
+// token can still re-register it later.
+var (
+	uploadIdleTTL        = 30 * time.Minute
+	uploadReapInterval   = time.Minute
+	uploadReapAbortLimit = 30 * time.Second
+)
+
 type s3MultipartAPI interface {
 	InitiateMultipart(context.Context, string, string) (string, error)
 	UploadPart(context.Context, string, string, int, io.Reader, int64) (string, error)
@@ -72,6 +81,9 @@ type uploadSession struct {
 	CompletedAt      *time.Time        `json:"completed_at,omitempty"`
 	Verified         bool              `json:"verified,omitempty"`
 	ResumeToken      string            `json:"-"`
+	// lastActivity moves only on creation and real progress, so status polls
+	// cannot keep an abandoned session alive.
+	lastActivity time.Time
 }
 
 type publicUpload struct {
@@ -122,13 +134,82 @@ type uploadManager struct {
 	uploads map[string]*uploadSession
 	lockMu  sync.Mutex
 	uplocks map[string]*sync.Mutex
+	ctx     context.Context
+	stop    context.CancelFunc
+	wg      sync.WaitGroup
 }
 
 func newUploadManager(app *application) (*uploadManager, error) {
 	if app == nil {
 		return nil, fmt.Errorf("application is nil")
 	}
-	return &uploadManager{app: app, uploads: make(map[string]*uploadSession), uplocks: make(map[string]*sync.Mutex)}, nil
+	// The reaper stops with the job manager when the application closes.
+	parent := context.Background()
+	if app.jobs != nil {
+		parent = app.jobs.ctx
+	}
+	ctx, cancel := context.WithCancel(parent)
+	manager := &uploadManager{app: app, uploads: make(map[string]*uploadSession), uplocks: make(map[string]*sync.Mutex), ctx: ctx, stop: cancel}
+	manager.wg.Add(1)
+	go manager.reaper()
+	return manager, nil
+}
+
+func (m *uploadManager) close() {
+	if m == nil {
+		return
+	}
+	m.stop()
+	m.wg.Wait()
+}
+
+func (m *uploadManager) reaper() {
+	defer m.wg.Done()
+	ticker := time.NewTicker(uploadReapInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-m.ctx.Done():
+			return
+		case now := <-ticker.C:
+			m.reapIdle(now.UTC())
+		}
+	}
+}
+
+// reapIdle aborts and forgets sessions with no progress for uploadIdleTTL.
+// Sessions currently handling a request hold their upload lock and are skipped,
+// so a slow but live chunk transfer is never reaped.
+func (m *uploadManager) reapIdle(now time.Time) int {
+	m.mu.RLock()
+	var idle []string
+	for id, upload := range m.uploads {
+		if now.Sub(upload.lastActivity) > uploadIdleTTL {
+			idle = append(idle, id)
+		}
+	}
+	m.mu.RUnlock()
+	reaped := 0
+	for _, id := range idle {
+		lock := m.uploadLock(id)
+		if !lock.TryLock() {
+			continue
+		}
+		upload, ok := m.get(id)
+		if ok && now.Sub(upload.lastActivity) > uploadIdleTTL {
+			if upload.Status == uploadStatusUploading {
+				if instance := m.app.instances[upload.Instance]; instance != nil {
+					abortContext, cancel := context.WithTimeout(m.ctx, uploadReapAbortLimit)
+					_ = m.abortProvider(abortContext, instance, upload)
+					cancel()
+				}
+			}
+			m.remove(id)
+			reaped++
+		}
+		lock.Unlock()
+	}
+	return reaped
 }
 
 func (m *uploadManager) uploadLock(id string) *sync.Mutex {
@@ -172,9 +253,15 @@ func (m *uploadManager) put(upload uploadSession) error {
 	}
 	copyUpload := cloneUploadSession(upload)
 	m.mu.Lock()
-	if _, exists := m.uploads[upload.ID]; !exists && len(m.uploads) >= maxInMemoryUploadSessions {
+	existing, exists := m.uploads[upload.ID]
+	if !exists && len(m.uploads) >= maxInMemoryUploadSessions {
 		m.mu.Unlock()
 		return uploadCapacityError()
+	}
+	if exists && existing.UploadedBytes == copyUpload.UploadedBytes && existing.Status == copyUpload.Status {
+		copyUpload.lastActivity = existing.lastActivity
+	} else {
+		copyUpload.lastActivity = time.Now().UTC()
 	}
 	m.uploads[upload.ID] = &copyUpload
 	m.mu.Unlock()
@@ -577,6 +664,12 @@ func (m *uploadManager) synchronizeS3Parts(ctx context.Context, instance *storag
 }
 
 func (m *uploadManager) verifyCompletedObject(ctx context.Context, instance *storageInstance, upload *uploadSession) error {
+	if requirePermission(instance, permissionRead) != nil {
+		// Verification reads the object back. On a read-denied instance it would
+		// reveal whether and how large a key is, so leave the session unverified.
+		upload.Verified = false
+		return nil
+	}
 	response, err := instance.Head(ctx, instance.fullKey(upload.Key))
 	if err != nil {
 		upload.Error = "the upload completed but the final object could not be verified"
@@ -642,7 +735,14 @@ func (m *uploadManager) status(ctx context.Context, id string) (uploadSession, e
 			err := m.synchronizeS3Parts(ctx, instance, &upload)
 			if err != nil {
 				// The provider may remove the multipart session immediately after completion. Verify the final object before marking the session complete.
-				if isStorageNotFound(err) {
+				if isStorageNotFound(err) && requirePermission(instance, permissionRead) != nil {
+					// A vanished multipart session is only proof of completion when the
+					// object can be checked. Without read access, answer identically
+					// whether or not the key exists.
+					upload.Error = "the upload session is no longer available"
+					upload.UpdatedAt = time.Now().UTC()
+					_ = m.put(upload)
+				} else if isStorageNotFound(err) {
 					now := time.Now().UTC()
 					upload.Status = uploadStatusCompleted
 					upload.UploadedBytes = upload.TotalSize

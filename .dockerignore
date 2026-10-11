@@ -12,6 +12,3 @@ service-account*.json
 # Repository metadata and workstation files are not needed in image builds.
 .git/
 .DS_Store
-
-# Developer tooling that is never part of an image.
-**/node_modules/

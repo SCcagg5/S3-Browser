@@ -27,20 +27,3 @@ http://localhost:8080/
 To expose the application under `/s3-browser/`, configure the reverse proxy to remove that prefix before forwarding. The frontend resolves all URLs relative to the public document path and requires no HCL path setting.
 
 The fixed credentials in `config.hcl` belong only to the isolated Garage service. Do not reuse them outside this test environment.
-
-## Browser behaviour tests
-
-`test/e2e/` drives a real Chrome against a running stack. The `test/*.js` files pin source text and tokens; these
-cover what only a browser shows: keyboard focus after menus, dialogs, paging and re-renders, focus rings that a
-scroller clips, vertical swipes on touch screens, 200% text, forced colours, reduced motion and axe-core in both
-themes.
-
-```sh
-docker compose up --build -d        # this stack
-cd e2e && npm install               # playwright-core and axe-core, dev only
-CHROME_PATH=/usr/bin/google-chrome BB_E2E_URL=http://127.0.0.1:8080 npm test
-```
-
-The run uploads its fixtures under `e2e-fixtures/` in `garage-main` and deletes them afterwards. `BB_E2E_FILTER`
-runs only the checks whose name contains the given text. These tests are not part of the application and are not
-run by the CI workflows.

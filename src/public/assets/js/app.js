@@ -1,4 +1,5 @@
 const config = {
+  primaryColor: '#167df0',
   pageSize: 50,
   allowDownloadAll: true,
   keyExcludePatterns: [/^index\.html$/],
@@ -12,12 +13,9 @@ window.BB = window.BB || {};
 BB.cfg = config;
 
 document.title = 'Object Storage Browser';
+document.documentElement.style.setProperty('--primary-color', config.primaryColor);
 
 (function main() {
-  // BB.runtime.groupDigits and formatRelativeTime avoid Intl on purpose (see runtime.js).
-  const { groupDigits, formatRelativeTime } = BB.runtime;
-  const byteParts = new Map();
-
   function normalizePrefix(value) {
     const clean = String(value || '').replace(/^\/+/, '').replace(/\/+$/, '');
     return clean ? clean + '/' : '';
@@ -339,1079 +337,1538 @@ document.title = 'Object Storage Browser';
     return uploadManager;
   }
 
-  const app = Vue.createApp({
-    // Compiled ahead of time from src/frontend/app.template.html (see tools/build-template.mjs).
-    render: BB.renderApp,
-    data() {
-      return {
-        config,
-        instances: [],
-        build: {},
-        defaultInstanceId: '',
-        instanceId: '',
-        pathPrefix: '',
-        searchPrefix: '',
-        pathContentTableData: [],
-        loadError: '',
-        previousContinuationTokens: [],
-        continuationToken: '',
-        nextContinuationToken: '',
-        scanOffset: 0,
-        localPage: 0,
-        scanComplete: false,
-        navigationSortAvailable: false,
-        navigationSortField: '',
-        navigationSortDirection: '',
-        modifiedTimeMode: 'relative',
-        isRefreshing: false,
-        isInitializing: true,
-        pageSize: config.pageSize,
-        breadcrumbVisibleStart: 0,
-        breadcrumbLayoutFrame: 0,
-        breadcrumbOverflowOpen: false,
-        breadcrumbPopoverStyle: {},
-        storageSwitcherOpen: false,
-        expandedHosts: {},
-        isDragActive: false,
-        dragDepth: 0,
-        versionCountRequest: 0
-      };
-    },
 
-    computed: {
-      currentInstance() { return this.instances.find(instance => instance.id === this.instanceId) || null; },
-      storageHosts() {
-        const hosts = [];
-        const byID = new Map();
-        for (const instance of this.instances) {
-          const id = String(instance.host || instance.id || '');
-          let host = byID.get(id);
-          if (!host) {
-            host = { id, provider: String(instance.provider || ''), instances: [] };
-            byID.set(id, host);
-            hosts.push(host);
-          }
-          host.instances.push(instance);
-        }
-        return hosts;
-      },
-      capabilities() { return this.currentInstance?.capabilities || {}; },
-      versioningSupported() { return this.currentInstance?.versioningSupported === true; },
-      operations() { return this.currentInstance?.operations || {}; },
-      canRead() { return this.can('list'); },
-      canWrite() { return this.can('upload'); },
-      canDelete() { return this.can('delete'); },
-      canCopy() { return this.can('copy'); },
-      canRename() { return this.can('rename'); },
-      canDownloadAll() {
-        return this.canRead && this.config.allowDownloadAll && this.pathContentTableData.length > 0;
-      },
-      orderedPathContentTableData() {
-        const rows = Array.from(this.pathContentTableData || []);
-        if (!this.navigationSortAvailable || !this.navigationSortField || !this.navigationSortDirection) return rows;
-        const field = this.navigationSortField;
-        const direction = this.navigationSortDirection === 'desc' ? -1 : 1;
-        const nameOf = row => String(row?.name || '').toLocaleLowerCase();
-        rows.sort((left, right) => {
-          let comparison = 0;
-          if (field === 'size') {
-            comparison = Number(left?.type === 'content' ? left.size : 0) - Number(right?.type === 'content' ? right.size : 0);
-          } else if (field === 'dateModified') {
-            comparison = Number(left?.dateModified instanceof Date ? left.dateModified.getTime() : 0) - Number(right?.dateModified instanceof Date ? right.dateModified.getTime() : 0);
-          } else {
-            comparison = nameOf(left).localeCompare(nameOf(right));
-          }
-          if (comparison === 0) comparison = nameOf(left).localeCompare(nameOf(right));
-          return comparison * direction;
-        });
-        return rows;
-      },
-      localPageCount() { return Math.max(1, Math.ceil(this.orderedPathContentTableData.length / this.pageSize)); },
-      visiblePathContentTableData() {
-        const start = this.localPage * this.pageSize;
-        return this.orderedPathContentTableData.slice(start, start + this.pageSize);
-      },
-      rangeStart() { return this.visiblePathContentTableData.length ? this.scanOffset + this.localPage * this.pageSize + 1 : 0; },
-      rangeEnd() { return this.scanOffset + this.localPage * this.pageSize + this.visiblePathContentTableData.length; },
-      hasRows() { return this.pathContentTableData.length > 0; },
-      hasPreviousPage() { return this.localPage > 0 || this.previousContinuationTokens.length > 0; },
-      hasNextPage() { return this.localPage + 1 < this.localPageCount || !!this.nextContinuationToken; },
-      hasPagination() { return this.hasPreviousPage || this.hasNextPage; },
-      // Names where the user is, for screen readers and the browser's heading outline (the visual crumb trail is a nav).
-      pageHeading() {
-        const folder = String(this.pathPrefix || '').replace(/\/+$/, '').split('/').pop();
-        return folder ? `Objects in ${folder}` : `Objects in ${this.currentInstance?.name || 'storage root'}`;
-      },
-      breadcrumbs() {
-        const parts = String(this.pathPrefix || '').replace(/\/+$/, '').split('/').filter(Boolean);
-        let prefix = '';
-        return parts.map(name => {
-          prefix += name + '/';
-          return { name, prefix };
-        });
-      },
-      visibleBreadcrumbs() {
-        if (!this.breadcrumbs.length) return [];
-        const start = Math.max(0, Math.min(this.breadcrumbVisibleStart, this.breadcrumbs.length - 1));
-        return this.breadcrumbs.slice(start);
-      },
-      hiddenBreadcrumbs() {
-        if (!this.breadcrumbs.length) return [];
-        const start = Math.max(0, Math.min(this.breadcrumbVisibleStart, this.breadcrumbs.length - 1));
-        return this.breadcrumbs.slice(0, start);
-      },
-      permissionStates() {
-        return this.permissionStatesFor(this.currentInstance);
-      },
-      permissionSummaryTitle() {
-        return this.permissionStates
-          .map(item => `${item.label}: ${this.capabilityLabel(item.state)}`)
-          .join(' · ');
-      },
-      currentInsightsLabel() {
-        return this.pathPrefix ? 'Folder insights' : 'Storage insights';
-      }
-    },
-
-    watch: {
-      pageSize() {
-        this.config.pageSize = Number(this.pageSize) || 50;
-        this.localPage = 0;
-        this.$nextTick(() => this.refreshVisibleVersionCounts());
-      },
-      pathPrefix() {
-        this.updateDocumentTitle();
-        this.closeBreadcrumbOverflow();
-        this.breadcrumbVisibleStart = Math.max(0, this.breadcrumbs.length - 1);
-        this.$nextTick(() => this.scheduleBreadcrumbLayout());
-      },
-      instanceId() {
-        this.closeBreadcrumbOverflow();
-        this.expandCurrentHost();
-        this.$nextTick(() => this.scheduleBreadcrumbLayout());
-      }
-    },
-
-    methods: {
-      can(operation, instance = this.currentInstance) {
-        if (BB.capabilities?.actionable) return BB.capabilities.actionable(instance, operation);
-        const state = instance?.operations?.[operation];
-        return state ? state.allowed !== false : true;
-      },
-
-      capabilityName(state) {
-        return BB.capabilities?.normalizeState ? BB.capabilities.normalizeState(state) : (state?.allowed === false ? 'denied' : 'unknown');
-      },
-
-      capabilityLabel(state) {
-        return BB.capabilities?.stateLabel ? BB.capabilities.stateLabel(state) : (state?.allowed === false ? 'Denied' : 'Checked on use');
-      },
-
-      capabilityClass(state) {
-        return BB.capabilities?.stateClass ? BB.capabilities.stateClass(state) : (state?.allowed === false ? 'is-denied' : 'is-unknown');
-      },
-
-      permissionStatesFor(instance) {
-        const capabilities = instance?.capabilities || {};
-        return [
-          { key: 'read', label: 'Read', icon: 'eye-outline', state: capabilities.read || {} },
-          { key: 'write', label: 'Write', icon: 'pencil-outline', state: capabilities.write || {} },
-          { key: 'delete', label: 'Delete', icon: 'delete-outline', state: capabilities.delete || {} }
-        ];
-      },
-
-      toggleStorageSwitcher() {
-        if (this.storageSwitcherOpen) {
-          this.closeStorageSwitcher();
-          return;
-        }
-        this.expandCurrentHost();
-        this.storageSwitcherOpen = true;
-        this.$nextTick(() => {
-          const popover = this.$refs.storageSwitcherPopover;
-          const target = popover?.querySelector('.storage-bucket-row[aria-current="true"]') || popover?.querySelector('button');
-          target?.focus();
-        });
-      },
-
-      closeStorageSwitcher({ restoreFocus = false } = {}) {
-        const wasOpen = this.storageSwitcherOpen;
-        this.storageSwitcherOpen = false;
-        if (wasOpen && restoreFocus) this.$refs.storageSwitcherTrigger?.focus();
-      },
-
-      expandCurrentHost() {
-        const host = String(this.currentInstance?.host || '');
-        if (!host || this.expandedHosts[host] === true) return;
-        this.expandedHosts = { ...this.expandedHosts, [host]: true };
-      },
-
-      isHostExpanded(host) {
-        return this.expandedHosts[String(host || '')] === true;
-      },
-
-      toggleHost(host) {
-        const id = String(host || '');
-        if (!id) return;
-        this.expandedHosts = { ...this.expandedHosts, [id]: !this.isHostExpanded(id) };
-      },
-
-      // detail === 0 means the click came from the keyboard: move focus into the menu like a native menu button.
-      toggleBreadcrumbOverflow(event) {
-        if (this.breadcrumbOverflowOpen) {
-          this.closeBreadcrumbOverflow();
-          return;
-        }
-        this.openBreadcrumbOverflow({ focusFirst: !!event && event.detail === 0 });
-      },
-
-      openBreadcrumbOverflowFromKeyboard() {
-        if (!this.breadcrumbOverflowOpen) this.openBreadcrumbOverflow({ focusFirst: true });
-        else this.focusBreadcrumbMenuItem(0);
-      },
-
-      openBreadcrumbOverflow({ focusFirst = false } = {}) {
-        this.breadcrumbOverflowOpen = true;
-        this.$nextTick(() => {
-          this.positionBreadcrumbOverflow();
-          if (focusFirst) this.focusBreadcrumbMenuItem(0);
-        });
-      },
-
-      focusBreadcrumbMenuItem(index) {
-        const items = Array.from(this.$refs.breadcrumbOverflowPopover?.querySelectorAll('[role="menuitem"]') || []);
-        if (!items.length) return;
-        items[(index + items.length) % items.length].focus();
-      },
-
-      onBreadcrumbMenuKeydown(event) {
-        const items = Array.from(this.$refs.breadcrumbOverflowPopover?.querySelectorAll('[role="menuitem"]') || []);
-        const current = items.indexOf(document.activeElement);
-        switch (event.key) {
-          case 'ArrowDown': event.preventDefault(); this.focusBreadcrumbMenuItem(current + 1); break;
-          case 'ArrowUp': event.preventDefault(); this.focusBreadcrumbMenuItem(current < 0 ? -1 : current - 1); break;
-          case 'Home': event.preventDefault(); this.focusBreadcrumbMenuItem(0); break;
-          case 'End': event.preventDefault(); this.focusBreadcrumbMenuItem(-1); break;
-          case 'Tab':
-            // Leave from the trigger so the tab order continues where the menu was opened.
-            this.$refs.breadcrumbOverflowTrigger?.focus();
-            this.closeBreadcrumbOverflow();
-            break;
-        }
-      },
-
-      closeBreadcrumbOverflow() {
-        this.breadcrumbOverflowOpen = false;
-        this.breadcrumbPopoverStyle = {};
-      },
-
-      openHiddenBreadcrumb(prefix) {
-        this.closeBreadcrumbOverflow();
-        this.goToPrefix(prefix);
-      },
-
-      positionBreadcrumbOverflow() {
-        if (!this.breadcrumbOverflowOpen) return;
-        const trigger = this.$refs.breadcrumbOverflowTrigger;
-        const popover = this.$refs.breadcrumbOverflowPopover;
-        if (!trigger || !popover) return;
-        const margin = 8;
-        const viewport = { width: window.innerWidth, height: window.innerHeight };
-        const triggerRect = trigger.getBoundingClientRect();
-        const maxWidth = Math.max(220, Math.min(380, viewport.width - margin * 2));
-        popover.style.width = `${maxWidth}px`;
-        popover.style.maxWidth = `${viewport.width - margin * 2}px`;
-        const popoverRect = popover.getBoundingClientRect();
-        const width = Math.min(maxWidth, Math.max(220, popoverRect.width || maxWidth));
-        const height = Math.min(popoverRect.height || 320, Math.max(120, viewport.height - margin * 2));
-        const left = Math.max(margin, Math.min(triggerRect.left, viewport.width - width - margin));
-        const below = triggerRect.bottom + 6;
-        const above = triggerRect.top - height - 6;
-        const top = below + height <= viewport.height - margin ? below : Math.max(margin, above);
-        this.breadcrumbPopoverStyle = {
-          position: 'fixed',
-          left: `${Math.round(left)}px`,
-          top: `${Math.round(top)}px`,
-          width: `${Math.round(width)}px`,
-          maxHeight: `${Math.max(120, Math.round(viewport.height - top - margin))}px`
-        };
-      },
-
-      onBreadcrumbDocumentPointer(event) {
-        if (this.storageSwitcherOpen && !this.$refs.storageSwitcher?.contains(event.target)) {
-          this.closeStorageSwitcher();
-        }
-        if (this.breadcrumbOverflowOpen) {
-          const trigger = this.$refs.breadcrumbOverflowTrigger;
-          const popover = this.$refs.breadcrumbOverflowPopover;
-          if (!trigger?.contains(event.target) && !popover?.contains(event.target)) this.closeBreadcrumbOverflow();
-        }
-      },
-
-      onBreadcrumbDocumentKeydown(event) {
-        if (event.key !== 'Escape') return;
-        const overflowWasOpen = this.breadcrumbOverflowOpen;
-        this.closeBreadcrumbOverflow();
-        this.closeStorageSwitcher({ restoreFocus: true });
-        if (overflowWasOpen) this.$refs.breadcrumbOverflowTrigger?.focus();
-      },
-
-      scheduleBreadcrumbLayout() {
-        window.cancelAnimationFrame(this.breadcrumbLayoutFrame || 0);
-        this.breadcrumbLayoutFrame = window.requestAnimationFrame(() => {
-          this.breadcrumbLayoutFrame = 0;
-          this.measureBreadcrumbs();
-        });
-      },
-
-      measureBreadcrumbs() {
-        const crumbs = this.breadcrumbs;
-        if (!crumbs.length) {
-          this.breadcrumbVisibleStart = 0;
-          return;
-        }
-
-        const line = this.$refs.breadcrumbLine;
-        if (!line) return;
-        const available = Math.floor(line.getBoundingClientRect().width || line.clientWidth || 0);
-        if (available <= 0) return;
-
-        const style = window.getComputedStyle(line);
-        const canvas = this._breadcrumbMeasureCanvas || (this._breadcrumbMeasureCanvas = document.createElement('canvas'));
-        const context = canvas.getContext('2d');
-        if (!context) return;
-        context.font = style.font || `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
-
-        const gap = Number.parseFloat(style.columnGap || style.gap || '3') || 3;
-        const separatorWidth = Math.ceil(context.measureText('/').width);
-        const widths = crumbs.map(crumb => Math.ceil(context.measureText(crumb.name).width + 2));
-        const currentIndex = crumbs.length - 1;
-
-        const requiredWidth = start => {
-          const visibleCount = currentIndex - start + 1;
-          const separatorCount = start > 0 ? visibleCount + 1 : visibleCount;
-          const overflowCount = start > 0 ? 1 : 0;
-          const elementCount = visibleCount + separatorCount + overflowCount;
-          const overflowWidth = start > 0
-            ? Math.max(36, Math.ceil(context.measureText(`…${start}`).width + 10))
-            : 0;
-          const crumbWidth = widths.slice(start).reduce((total, width) => total + width, 0);
-          return crumbWidth
-            + separatorCount * separatorWidth
-            + overflowWidth
-            + Math.max(0, elementCount - 1) * gap;
-        };
-
-        // The current folder has absolute priority. Parents are added from the
-        // nearest parent outwards only when the current name still fits in full.
-        let start = currentIndex;
-        while (start > 0 && requiredWidth(start - 1) <= available) start--;
-        if (this.breadcrumbVisibleStart !== start) this.breadcrumbVisibleStart = start;
-      },
-
-      async initialize() {
-        this.isInitializing = true;
-        try {
-          const response = await BB.api.instances();
-          this.instances = (response.instances || []).map(instance => ({
-            ...instance,
-            host: String(instance.host || instance.id || '')
-          }));
-          this.build = response.build || {};
-          this.config.runtime = BB.runtime?.configure(response.runtime || {}) || (response.runtime || {});
-          this.defaultInstanceId = response.default || this.instances[0]?.id || '';
-          const route = BB.runtime?.storageRoute?.();
-          const routeInstance = route?.view === 'browser'
-            ? this.instances.find(instance => instance.host === route.host && instance.id === route.bucket)?.id || ''
-            : '';
-          const queryInstance = new URLSearchParams(location.search).get('instance');
-          const storedInstance = BB.runtime?.readState('object-browser-instance') || '';
-          const candidate = [routeInstance, queryInstance, storedInstance, this.defaultInstanceId]
-            .find(id => id && this.instances.some(instance => instance.id === id));
-          this.instanceId = candidate || this.instances[0]?.id || '';
-          if (!this.instanceId) throw new Error('No storage instance is configured.');
-          this.applyCurrentInstance();
-          this.pathPrefix = routeInstance === this.instanceId
-            ? normalizePrefix(route.path)
-            : parseLegacyHash();
-          this.searchPrefix = '';
-          this.replaceBrowserLocation(this.pathPrefix);
-          await this.refresh();
-        } catch (error) {
-          BB.ui.toast(String(error.message || error));
-        } finally {
-          this.isInitializing = false;
-        }
-      },
-
-      browserLocation(prefix = '') {
-        const url = new URL(BB.api.browserPageURL(prefix, { instance: this.instanceId }));
-        return url.pathname + url.search + url.hash;
-      },
-
-      replaceBrowserLocation(prefix = '', { push = false } = {}) {
-        const target = this.browserLocation(prefix);
-        const current = location.pathname + location.search + location.hash;
-        if (target === current) return;
-        history[push ? 'pushState' : 'replaceState'](null, '', target);
-      },
-
-      applyCurrentInstance() {
-        const instance = this.currentInstance;
-        if (!instance) return;
-        BB.api.setInstance(instance);
-        this.config.capabilities = instance.capabilities || {};
-        this.config.operations = instance.operations || {};
-        this.config.versioningSupported = instance.versioningSupported === true;
-        BB.runtime?.writeState('object-browser-instance', instance.id);
-        this.updateDocumentTitle();
-      },
-
-      // A fragment link would resolve against <base href> and reload the page, so focus the target directly.
-      focusMainContent() {
-        const target = document.getElementById('main-content');
-        if (target) target.focus();
-      },
-
-      // The tab title names the current folder so history and tab lists stay meaningful.
-      updateDocumentTitle() {
-        const instance = this.currentInstance;
-        const folder = String(this.pathPrefix || '').replace(/\/+$/, '').split('/').pop();
-        document.title = [folder, instance?.name, 'Object Storage Browser'].filter(Boolean).join(' - ');
-      },
-
-      async changeInstance() {
-        this.applyCurrentInstance();
-        this.pathPrefix = '';
-        this.searchPrefix = '';
-        this.resetPagination();
-        this.replaceBrowserLocation('', { push: true });
-        await this.refresh();
-      },
-
-      async selectInstance(id) {
-        if (!id) return;
-        this.closeStorageSwitcher({ restoreFocus: true });
-        if (id === this.instanceId) return;
-        this.instanceId = id;
-        await this.changeInstance();
-      },
-
-      async showPermissionDetails() {
-        const instance = this.currentInstance;
-        if (!instance) return;
-        const reportedPermissions = Array.from(instance.capabilities?.permissions || []).map(String);
-        const providerPermissions = reportedPermissions.length ? reportedPermissions.join(', ') : 'Not reported';
-        const permissionRows = this.permissionStates.map(item => {
-          const state = item.state || {};
-          const stateName = this.capabilityName(state);
-          const result = stateName === 'allowed' ? 'Allowed' : (stateName === 'denied' ? 'Denied' : 'Checked on use');
-          const verification = stateName === 'unknown'
-            ? 'The provider will verify this permission when the operation is used.'
-            : (state.verified ? (stateName === 'allowed' ? 'Verified by a real provider operation.' : 'Denied by the provider.') : 'Defined by the connection configuration.');
-          const explanation = String(state.reason || verification);
-          return `<div class="bb-permission-summary-row" title="${escapeHTML(explanation)}">
-            <span class="bb-permission-summary-icon is-${escapeHTML(stateName)}"><i class="mdi mdi-${escapeHTML(item.icon)}"></i></span>
-            <span class="bb-permission-summary-copy"><strong>${escapeHTML(item.label)}</strong></span>
-            <span class="bb-permission-result is-${escapeHTML(stateName)}">${escapeHTML(result)}</span>
-          </div>`;
-        }).join('');
-        const discoveryError = instance.capabilities?.error
-          ? `<div class="bb-permission-provider is-error"><strong>Discovery</strong><span title="${escapeHTML(instance.capabilities.error)}">Unavailable</span></div>`
-          : '';
-        await BB.ui.alert({
-          html: `<div class="bb-details bb-permission-details">
-            <div class="bb-details-head">
-              <i class="mdi mdi-shield-key-outline"></i>
-              <div class="bb-details-titles">
-                <div class="bb-details-name">Storage permissions</div>
-                <div class="bb-details-prefix">${escapeHTML(instance.name)} · ${escapeHTML(instance.bucket)}</div>
-              </div>
-            </div>
-            <div class="bb-details-body">
-              <div class="bb-permission-summary">${permissionRows}</div>
-              <div class="bb-permission-provider"><strong>Provider permissions</strong><span class="mono" title="${escapeHTML(providerPermissions)}">${escapeHTML(providerPermissions)}</span></div>
-              ${discoveryError}
-            </div>
-          </div>`
-        });
-      },
-
-      resetPagination() {
-        this.previousContinuationTokens = [];
-        this.continuationToken = '';
-        this.nextContinuationToken = '';
-        this.scanOffset = 0;
-        this.localPage = 0;
-        this.scanComplete = false;
-        this.navigationSortAvailable = false;
-        this.navigationSortField = '';
-        this.navigationSortDirection = '';
-      },
-
-      navigationSortIcon(field) {
-        if (!this.navigationSortAvailable) return '';
-        if (this.navigationSortField !== field) return 'unfold-more-horizontal';
-        return this.navigationSortDirection === 'desc' ? 'arrow-down' : 'arrow-up';
-      },
-
-      navigationSortAria(field) {
-        if (!this.navigationSortAvailable || this.navigationSortField !== field) return 'none';
-        return this.navigationSortDirection === 'desc' ? 'descending' : 'ascending';
-      },
-
-      toggleNavigationSort(field) {
-        if (!this.navigationSortAvailable) return;
-        const initialDirection = field === 'name' ? 'asc' : 'desc';
-        const reverseDirection = initialDirection === 'desc' ? 'asc' : 'desc';
-        if (this.navigationSortField !== field) {
-          this.navigationSortField = field;
-          this.navigationSortDirection = initialDirection;
-        } else if (this.navigationSortDirection === initialDirection) {
-          this.navigationSortDirection = reverseDirection;
-        } else {
-          this.navigationSortField = '';
-          this.navigationSortDirection = '';
-        }
-        this.localPage = 0;
-        this.$nextTick(() => this.refreshVisibleVersionCounts());
-      },
-
-      updatePathFromLocation() {
-        const route = BB.runtime?.storageRoute?.();
-        if (!route || route.view !== 'browser') return;
-        const instance = this.instances.find(item => item.host === route.host && item.id === route.bucket);
-        if (!instance) return;
-        const next = normalizePrefix(route.path);
-        const instanceChanged = instance.id !== this.instanceId;
-        if (!instanceChanged && next === this.pathPrefix) return;
-        if (instanceChanged) {
-          this.instanceId = instance.id;
-          this.applyCurrentInstance();
-        }
-        this.pathPrefix = next;
-        this.searchPrefix = '';
-        this.resetPagination();
-        if (!this.isInitializing) this.refresh();
-      },
-
-      goToPrefix(prefix) {
-        this.keepFocusAfterNavigation = true;
-        this.closeBreadcrumbOverflow();
-        const normalized = normalizePrefix(prefix);
-        if (normalized === this.pathPrefix) {
-          this.resetPagination();
-          this.refresh();
-          return;
-        }
-        this.pathPrefix = normalized;
-        this.searchPrefix = '';
-        this.resetPagination();
-        this.replaceBrowserLocation(normalized, { push: true });
-        this.refresh();
-      },
-
-      searchByPrefix() {
-        const value = String(this.searchPrefix || '').trim();
-        if (!value) {
-          this.refresh();
-          return;
-        }
-        this.goToPrefix(normalizePrefix(this.pathPrefix + value));
-      },
-
-      manualRefresh() {
-        this.resetPagination();
-        this.refresh();
-      },
-
-      // The pager button that was just used is disabled on the first/last page or while loading: hand focus
-      // to the other pager button, or to the main content, instead of letting it fall back to <body>.
-      settlePagingFocus(preferredLabel) {
-        this.$nextTick(() => {
-          const buttons = Array.from(document.querySelectorAll('.pagination-control button'));
-          const usable = element => !!element && !element.disabled && element.tabIndex >= 0 && element.offsetParent !== null;
-          const active = document.activeElement;
-          if (active && active !== document.body && active.isConnected && usable(active)) return;
-          const preferred = buttons.find(button => button.getAttribute('aria-label') === preferredLabel);
-          const target = usable(preferred) ? preferred : buttons.find(usable);
-          (target || document.getElementById('main-content'))?.focus();
-        });
-      },
-
-      async nextPage() {
-        if (this.localPage + 1 < this.localPageCount) {
-          this.localPage += 1;
-          this.$nextTick(() => this.refreshVisibleVersionCounts());
-          this.settlePagingFocus('Next page');
-          return;
-        }
-        if (!this.nextContinuationToken) return;
-        this.previousContinuationTokens.push({ token: this.continuationToken || '', offset: this.scanOffset });
-        this.scanOffset += this.pathContentTableData.length;
-        this.continuationToken = this.nextContinuationToken;
-        this.localPage = 0;
-        await this.refresh();
-        this.settlePagingFocus('Next page');
-      },
-
-      async previousPage() {
-        if (this.localPage > 0) {
-          this.localPage -= 1;
-          this.$nextTick(() => this.refreshVisibleVersionCounts());
-          this.settlePagingFocus('Previous page');
-          return;
-        }
-        if (!this.previousContinuationTokens.length) return;
-        const previous = this.previousContinuationTokens.pop();
-        this.continuationToken = previous?.token || '';
-        this.scanOffset = Number(previous?.offset || 0);
-        await this.refresh();
-        this.localPage = Math.max(0, this.localPageCount - 1);
-        this.settlePagingFocus('Previous page');
-      },
-
-      async refresh() {
-        if (this.isRefreshing || !this.currentInstance) return;
-        this.isRefreshing = true;
-        this.loadError = '';
-        try {
-          if (!this.canRead) {
-            this.pathContentTableData = [];
-            this.nextContinuationToken = '';
-            return;
-          }
-          const data = await BB.api.list({
-            prefix: this.pathPrefix,
-            delimiter: '/',
-            continuationToken: this.continuationToken
-          });
-          this.nextContinuationToken = data.nextContinuationToken || '';
-          this.scanComplete = data.scanComplete === true;
-          this.navigationSortAvailable = data.sortAvailable === true;
-          if (!this.navigationSortAvailable) {
-            this.navigationSortField = '';
-            this.navigationSortDirection = '';
-          }
-          const rows = (data.items || []).map(item => {
-            if (item.type === 'prefix') {
-              return { type: 'prefix', name: item.name, prefix: item.prefix, size: 0, dateModified: null };
-            }
-            return {
-              type: 'content',
-              name: item.name || String(item.key || '').split('/').pop(),
-              key: item.key,
-              size: Number(item.size || 0),
-              dateModified: item.lastModified ? new Date(item.lastModified) : null,
-              contentType: item.contentType || '',
-              etag: item.etag || '',
-              url: BB.api.urlForKey(item.key),
-              versionCount: null
-            };
-          }).filter(row => {
-            const key = row.type === 'prefix' ? row.prefix : row.key;
-            return !this.config.keyExcludePatterns.some(pattern => pattern.test(String(key || '')));
-          });
-          this.pathContentTableData = rows;
-          this.localPage = Math.max(0, Math.min(this.localPage, Math.max(0, Math.ceil(rows.length / this.pageSize) - 1)));
-          this.$nextTick(() => this.refreshVisibleVersionCounts());
-        } catch (error) {
-          this.pathContentTableData = [];
-          // The inline error state (role=alert) reports this; a toast would only repeat it.
-          this.loadError = String(error.message || error);
-        } finally {
-          this.isRefreshing = false;
-          this.restoreFocusAfterNavigation();
-        }
-      },
-
-      // The control that triggered a navigation is replaced by the new listing; keep focus inside the page.
-      restoreFocusAfterNavigation() {
-        if (!this.keepFocusAfterNavigation) return;
-        this.keepFocusAfterNavigation = false;
-        this.$nextTick(() => {
-          const active = document.activeElement;
-          if (!active || active === document.body || !active.isConnected) this.focusMainContent();
-        });
-      },
-
-      async refreshVisibleVersionCounts() {
-        const requestID = ++this.versionCountRequest;
-        if (!this.versioningSupported || !this.canRead) {
-          for (const row of this.pathContentTableData) if (row.type === 'content') row.versionCount = null;
-          return;
-        }
-        const instanceID = this.instanceId;
-        const keys = this.visiblePathContentTableData.filter(row => row.type === 'content' && row.key).map(row => row.key);
-        if (!keys.length) return;
-        try {
-          const response = await BB.api.versionCounts(keys, instanceID);
-          if (requestID !== this.versionCountRequest || instanceID !== this.instanceId) return;
-          const counts = response?.counts || {};
-          for (const row of this.pathContentTableData) {
-            if (row.type !== 'content' || !Object.prototype.hasOwnProperty.call(counts, row.key)) continue;
-            row.versionCount = Number(counts[row.key]?.count || 0);
-          }
-        } catch (error) {
-          if (Number(error?.status || 0) === 501) return;
-          console.warn('Unable to load object version counts', error);
-        }
-      },
-
-      fileRowIcon(row) {
-        return BB.detect.iconForType(BB.detect.resolveType(row.name || '', row.contentType || ''));
-      },
-
-      openPreview(row) {
-        if (!this.canRead) return;
-        window.location.href = this.objectHref(row);
-      },
-
-      // Rows are real links, so "open in a new tab" works; a plain click keeps the in-page navigation.
-      objectHref(row) { return BB.api.previewPageURL(row.key, { instance: this.instanceId }); },
-      folderHref(prefix) { return BB.api.browserPageURL(normalizePrefix(prefix), { instance: this.instanceId }); },
-      isPlainClick(event) { return event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey; },
-      onObjectLink(event, row) {
-        if (!this.isPlainClick(event)) return;
-        event.preventDefault();
-        this.openPreview(row);
-      },
-      onFolderLink(event, row) {
-        if (!this.isPlainClick(event)) return;
-        event.preventDefault();
-        this.goToPrefix(row.prefix);
-      },
-
-      onRowMetadata(row) { BB.actions.showMetadata(row.key, { size: row.size, mime: row.contentType, etag: row.etag, lastModified: row.dateModified?.toUTCString?.() || '' }); },
-      onRowDownload(row) { BB.actions.downloadObject(row.key, row.name); },
-      onRowVersions(row) { BB.actions.showVersions(row.key); },
-      async onRowCopy(row) { if (await BB.actions.copyObject(row.key)) await this.refresh(); },
-      async onRowRename(row) { if (await BB.actions.renameObject(row.key)) await this.refresh(); },
-      async onRowDelete(row) { if (await BB.actions.deleteObject(row.key)) await this.refresh(); },
-      onPrefixInsights(row) { BB.actions.showPrefixInsights(row.prefix); },
-      async onPrefixCopy(row) { if (await BB.actions.copyPrefix(row.prefix)) await this.refresh(); },
-      async onPrefixRename(row) { if (await BB.actions.renamePrefix(row.prefix)) await this.refresh(); },
-      async onPrefixDelete(row) { if (await BB.actions.deletePrefix(row.prefix)) await this.refresh(); },
-      onCurrentInsights() { BB.actions.showPrefixInsights(this.pathPrefix); },
-
-      onRowContextMenu(event) {
-        const row = event.target?.closest?.('.browser-card tbody tr');
-        if (!row) return;
-        const menu = row.querySelector('.bb-menu');
-        if (!menu || !BB.menu?.openAt) return;
-        event.preventDefault();
-        event.stopPropagation();
-        BB.menu.openAt(menu, event.clientX, event.clientY);
-      },
-
-      onDragEnter(event) {
-        if (!dataTransferHasFiles(event.dataTransfer)) return;
-        event.preventDefault();
-        if (!this.canWrite) return;
-        this.dragDepth++;
-        this.isDragActive = true;
-      },
-
-      onDragOver(event) {
-        if (!dataTransferHasFiles(event.dataTransfer)) return;
-        event.preventDefault();
-        if (event.dataTransfer) event.dataTransfer.dropEffect = this.canWrite ? 'copy' : 'none';
-        if (!this.canWrite) return;
-        this.isDragActive = true;
-      },
-
-      onDragLeave(event) {
-        if (!this.isDragActive) return;
-        event.preventDefault();
-        this.dragDepth = Math.max(0, this.dragDepth - 1);
-        const leftWindow = !event.relatedTarget || event.clientX <= 0 || event.clientY <= 0 ||
-          event.clientX >= window.innerWidth || event.clientY >= window.innerHeight;
-        if (this.dragDepth === 0 || leftWindow) {
-          this.dragDepth = 0;
-          this.isDragActive = false;
-        }
-      },
-
-      async onDrop(event) {
-        if (!dataTransferHasFiles(event.dataTransfer)) return;
-        event.preventDefault();
-        this.dragDepth = 0;
-        this.isDragActive = false;
-        if (!this.canWrite) {
-          BB.ui.toast('Upload is not available for this storage instance.', { status: 'error', duration: 4500 });
-          return;
-        }
-        try {
-          const entries = await droppedUploadEntries(event.dataTransfer);
-          if (!entries.length) {
-            BB.ui.toast('No files were found in the dropped selection.', { status: 'error', duration: 4500 });
-            return;
-          }
-          const containsFolder = entries.some(entry => String(entry.relative || '').includes('/'));
-          if (containsFolder && !await this.confirmFolderUpload(entries)) return;
-          await this.uploadResolvedFiles(entries);
-        } catch (error) {
-          BB.ui.toast(`Unable to read dropped files: ${String(error.message || error)}`, { status: 'error', duration: 6500 });
-        }
-      },
-
-      triggerUpload() {
-        if (!this.canWrite) return;
-        const input = this.$refs.fileInput;
-        input.value = '';
-        input.click();
-      },
-
-      triggerUploadDir() {
-        if (!this.canWrite) return;
-        const input = this.$refs.dirInput;
-        input.value = '';
-        input.click();
-      },
-
-      async showUploadSelectionError(title, message) {
-        await BB.ui.alert({
-          title,
-          html: `<div class="bb-upload-selection-error">
-            <i class="mdi mdi-alert-circle-outline"></i>
-            <div><strong>${escapeHTML(title)}</strong><p>${escapeHTML(message)}</p></div>
-          </div>`
-        });
-      },
-
-      async onFileInput(event) {
-        const files = Array.from(event.target.files || []);
-        event.target.value = '';
-        if (!files.length) return;
-        if (files.some(file => cleanDroppedPath(file.webkitRelativePath || '').includes('/'))) {
-          await this.showUploadSelectionError('Files expected', 'Use “Upload folder” when the selected items include a directory hierarchy.');
-          return;
-        }
-        await this.uploadFiles(files, file => file.name);
-      },
-
-      async onDirInput(event) {
-        const files = Array.from(event.target.files || []);
-        event.target.value = '';
-        if (!files.length) return;
-        const hasDirectoryPath = files.some(file => cleanDroppedPath(file.webkitRelativePath || '').includes('/'));
-        if (!hasDirectoryPath) {
-          await this.showUploadSelectionError('Folder expected', 'Use “Upload files” for individual files, or select a folder containing the files to upload.');
-          return;
-        }
-        const entries = files.map(file => ({
-          file,
-          relative: cleanDroppedPath(file.webkitRelativePath || file.name)
-        }));
-        if (await this.confirmFolderUpload(entries)) await this.uploadResolvedFiles(entries);
-      },
-
-      async confirmFolderUpload(entries, selectedName = '') {
-        const files = Array.from(entries || []).filter(entry => entry?.file && entry.relative);
-        if (!files.length) return false;
-        const totalSize = files.reduce((sum, entry) => sum + Math.max(0, Number(entry.file.size || 0)), 0);
-        const roots = Array.from(new Set(files.map(entry => String(entry.relative).split('/')[0]).filter(Boolean)));
-        const folderName = selectedName || (roots.length === 1 ? roots[0] : `${roots.length} top-level folders`);
-        const destination = `/${this.pathPrefix || ''}`;
-        const samples = files.slice(0, 4).map(entry => `<li class="mono">${escapeHTML(entry.relative)}</li>`).join('');
-        const remaining = Math.max(0, files.length - 4);
-        return BB.ui.confirm({
-          title: 'Upload folder',
-          confirmLabel: `Upload ${files.length.toLocaleString()} file${files.length === 1 ? '' : 's'}`,
-          cancelLabel: 'Cancel',
-          html: `<div class="bb-upload-confirmation">
-            <div class="bb-upload-confirmation-icon"><i class="mdi mdi-folder-upload-outline"></i></div>
-            <div class="bb-upload-confirmation-copy">
-              <strong>${escapeHTML(folderName)}</strong>
-              <span>${files.length.toLocaleString()} file${files.length === 1 ? '' : 's'} · ${escapeHTML(this.formatBytes(totalSize))}</span>
-            </div>
-            <div class="bb-upload-confirmation-destination">
-              <small>Destination</small>
-              <code>${escapeHTML(destination)}</code>
-            </div>
-            <ul class="bb-upload-confirmation-files">${samples}${remaining ? `<li>+ ${remaining.toLocaleString()} more file${remaining === 1 ? '' : 's'}</li>` : ''}</ul>
-          </div>`
-        });
-      },
-
-      async uploadFiles(files, keyResolver) {
-        const resolved = Array.from(files || []).map(file => ({
-          file,
-          relative: cleanDroppedPath(keyResolver(file))
-        }));
-        return this.uploadResolvedFiles(resolved);
-      },
-
-      async uploadResolvedFiles(uploadEntries) {
-        if (!this.canWrite || !uploadEntries.length) return;
-        const instanceId = this.instanceId;
-        const basePrefix = this.pathPrefix;
-        const entries = uploadEntries
-          .filter(entry => entry?.file && cleanDroppedPath(entry.relative || entry.file.name))
-          .map(entry => {
-            const relative = cleanDroppedPath(entry.relative || entry.file.name);
-            return {
-              file: entry.file,
-              relative,
-              key: `${basePrefix}${relative}`.replace(/^\/+/, ''),
-              instanceId,
-              basePrefix
-            };
-          });
-        if (!entries.length) return;
-        getUploadManager(this).add(entries);
-      },
-
-      async downloadAllFiles() {
-        if (!this.canDownloadAll) return false;
-        const basePrefix = this.pathPrefix;
-        const archiveName = `${basePrefix.split('/').filter(Boolean).pop() || this.currentInstance.name || 'archive'}.zip`;
-        return this.downloadArchive({
-          archiveName,
-          basePrefix,
-          instanceId: this.instanceId
-        });
-      },
-
-      async onPrefixDownload(row) {
-        if (!this.canRead || !row?.prefix) return false;
-        const prefix = normalizePrefix(row.prefix);
-        const folderName = prefix.split('/').filter(Boolean).pop() || 'folder';
-        return this.downloadArchive({
-          archiveName: `${folderName}.zip`,
-          basePrefix: prefix,
-          instanceId: this.instanceId
-        });
-      },
-
-      async downloadArchive({ archiveName, basePrefix = '', instanceId = '' }) {
-        if (!this.canRead) return false;
-        const url = BB.api.archiveURL({
-          prefix: basePrefix,
-          name: archiveName,
-          instance: instanceId
-        });
-        BB.actions.triggerBrowserDownload(url, archiveName);
-        BB.ui.toast('Archive download started in the browser.', {
-          type: 'info',
-          duration: 5000
-        });
-        return true;
-      },
-
-      formatByteParts(size) {
-        const value = Math.max(0, Number(size) || 0);
-        const cached = byteParts.get(value);
-        if (cached) return cached;
-        let parts;
-        if (value < 1024) parts = { value: groupDigits(Math.round(value)), unit: 'B' };
-        else if (value < 1024 ** 2) parts = { value: groupDigits(Math.round(value / 1024)), unit: 'KB' };
-        else if (value < 1024 ** 3) parts = { value: (value / 1024 ** 2).toFixed(2), unit: 'MB' };
-        else if (value < 1024 ** 4) parts = { value: (value / 1024 ** 3).toFixed(2), unit: 'GB' };
-        else parts = { value: (value / 1024 ** 4).toFixed(2), unit: 'TB' };
-        // A listing shows each size several times per render; the cache is bounded so it never grows without limit.
-        if (byteParts.size > 2000) byteParts.clear();
-        byteParts.set(value, parts);
-        return parts;
-      },
-      formatBytes(size) {
-        const parts = this.formatByteParts(size);
-        return `${parts.value} ${parts.unit}`;
-      },
-      formatDateTime_relative(date) {
-        if (!date) return '—';
-        const timestamp = new Date(date).getTime();
-        if (!Number.isFinite(timestamp)) return '—';
-        const seconds = Math.round((timestamp - Date.now()) / 1000);
-        const ranges = [
-          ['year', 365 * 24 * 60 * 60],
-          ['month', 30 * 24 * 60 * 60],
-          ['week', 7 * 24 * 60 * 60],
-          ['day', 24 * 60 * 60],
-          ['hour', 60 * 60],
-          ['minute', 60],
-          ['second', 1]
-        ];
-        for (const [unit, divisor] of ranges) {
-          if (Math.abs(seconds) >= divisor || unit === 'second') {
-            return formatRelativeTime(Math.round(seconds / divisor), unit);
-          }
-        }
-        return 'now';
-      },
-      formatDateTime_utc(date) {
-        return BB.runtime.formatDateTimeUTC(date);
-      },
-      formatDateTime_absolute(date) {
-        return BB.runtime.formatDateTimeUTC(date);
-      },
-      formatDateTime_display(date) {
-        return this.modifiedTimeMode === 'absolute'
-          ? this.formatDateTime_absolute(date)
-          : this.formatDateTime_relative(date);
-      },
-      toggleModifiedTimeMode() {
-        this.modifiedTimeMode = this.modifiedTimeMode === 'relative' ? 'absolute' : 'relative';
-      }
-    },
-
-    mounted() {
-      this.onPopState = () => this.updatePathFromLocation();
-      this.onResize = () => {
-        this.scheduleBreadcrumbLayout();
-        if (this.breadcrumbOverflowOpen) this.$nextTick(() => this.positionBreadcrumbOverflow());
-      };
-      this.onDocumentPointer = event => this.onBreadcrumbDocumentPointer(event);
-      this.onDocumentKeydown = event => this.onBreadcrumbDocumentKeydown(event);
-      // Tabbing out of the storage switcher closes it, like clicking elsewhere does.
-      this.onDocumentFocusIn = event => {
-        if (this.storageSwitcherOpen && !this.$refs.storageSwitcher?.contains(event.target)) this.closeStorageSwitcher();
-      };
-      this.onWindowScroll = () => {
-        if (this.breadcrumbOverflowOpen) this.positionBreadcrumbOverflow();
-      };
-      this.onWindowDragEnter = event => this.onDragEnter(event);
-      this.onWindowDragOver = event => this.onDragOver(event);
-      this.onWindowDragLeave = event => this.onDragLeave(event);
-      this.onWindowDrop = event => this.onDrop(event);
-      this.onContextMenu = event => this.onRowContextMenu(event);
-      window.addEventListener('popstate', this.onPopState);
-      window.addEventListener('resize', this.onResize);
-      window.addEventListener('scroll', this.onWindowScroll, true);
-      document.addEventListener('pointerdown', this.onDocumentPointer);
-      document.addEventListener('keydown', this.onDocumentKeydown);
-      document.addEventListener('focusin', this.onDocumentFocusIn);
-      window.addEventListener('dragenter', this.onWindowDragEnter);
-      window.addEventListener('dragover', this.onWindowDragOver);
-      window.addEventListener('dragleave', this.onWindowDragLeave);
-      window.addEventListener('drop', this.onWindowDrop);
-      document.addEventListener('contextmenu', this.onContextMenu);
-      this.$nextTick(() => {
-        if ('ResizeObserver' in window && this.$refs.breadcrumbRegion) {
-          this.breadcrumbResizeObserver = new ResizeObserver(() => this.scheduleBreadcrumbLayout());
-          this.breadcrumbResizeObserver.observe(this.$refs.breadcrumbRegion);
-        }
-        this.scheduleBreadcrumbLayout();
-      });
-      this.initialize();
-    },
-
-    beforeUnmount() {
-      window.removeEventListener('popstate', this.onPopState);
-      window.removeEventListener('resize', this.onResize);
-      window.removeEventListener('scroll', this.onWindowScroll, true);
-      document.removeEventListener('pointerdown', this.onDocumentPointer);
-      document.removeEventListener('keydown', this.onDocumentKeydown);
-      document.removeEventListener('focusin', this.onDocumentFocusIn);
-      window.removeEventListener('dragenter', this.onWindowDragEnter);
-      window.removeEventListener('dragover', this.onWindowDragOver);
-      window.removeEventListener('dragleave', this.onWindowDragLeave);
-      window.removeEventListener('drop', this.onWindowDrop);
-      document.removeEventListener('contextmenu', this.onContextMenu);
-      this.breadcrumbResizeObserver?.disconnect();
-      window.cancelAnimationFrame(this.breadcrumbLayoutFrame || 0);
+  // ---------------------------------------------------------------------------
+  // DOM helpers
+  // ---------------------------------------------------------------------------
+
+  function append(node, children) {
+    for (const child of children.flat(Infinity)) {
+      if (child == null || child === false) continue;
+      node.append(child.nodeType ? child : document.createTextNode(String(child)));
     }
-  });
+    return node;
+  }
+
+  function h(tag, attrs, ...children) {
+    const node = document.createElement(tag);
+    for (const [key, value] of Object.entries(attrs || {})) {
+      if (value == null || value === false) continue;
+      if (key === 'class') node.className = Array.isArray(value) ? value.filter(Boolean).join(' ') : String(value);
+      else if (key === 'style' && typeof value === 'object') Object.assign(node.style, value);
+      else if (key.startsWith('on')) node.addEventListener(key.slice(2), value);
+      else node.setAttribute(key, value === true ? '' : String(value));
+    }
+    return append(node, children);
+  }
+
+  function icon(name, extra = '') {
+    return h('i', { class: ['mdi', `mdi-${name}`, extra] });
+  }
+
+  function button({ tone = '', icon: left = '', iconRight = '', label = '', classes = [], ...attrs }) {
+    const iconBox = name => h('span', { class: 'icon is-small' }, icon(name));
+    return h('button', { class: ['button', ...classes, tone], type: 'button', ...attrs },
+      left && iconBox(left),
+      label && h('span', {}, ` ${label} `),
+      iconRight && iconBox(iconRight));
+  }
+
+  function setClass(node, name, on) {
+    node.classList.toggle(name, Boolean(on));
+  }
+
+  // Dropdown behaviour: the trigger toggles the menu, an item, a click outside or Escape closes it.
+  function initDropdown(root) {
+    const trigger = root.querySelector('.dropdown-trigger');
+    const menu = root.querySelector('.dropdown-menu');
+    const items = () => Array.from(menu.querySelectorAll('.dropdown-item:not(.is-disabled)'));
+    function isOpen() { return root.classList.contains('is-active'); }
+    function close({ restoreFocus = false } = {}) {
+      if (!isOpen()) return;
+      root.classList.remove('is-active');
+      menu.style.display = 'none';
+      menu.setAttribute('aria-hidden', 'true');
+      if (restoreFocus) (trigger.querySelector('button') || trigger).focus();
+    }
+    function open() {
+      document.dispatchEvent(new CustomEvent('bb:dropdown-open', { detail: root }));
+      root.classList.add('is-active');
+      menu.style.display = '';
+      menu.setAttribute('aria-hidden', 'false');
+    }
+    trigger.addEventListener('click', event => {
+      event.stopPropagation();
+      if (isOpen()) close(); else open();
+    });
+    trigger.addEventListener('keydown', event => {
+      if (event.key === 'ArrowDown' && !isOpen()) {
+        event.preventDefault();
+        open();
+        items()[0]?.focus();
+      }
+    });
+    menu.addEventListener('click', () => close());
+    menu.addEventListener('keydown', event => {
+      const list = items();
+      const index = list.indexOf(document.activeElement);
+      if (event.key === 'ArrowDown') { event.preventDefault(); list[Math.min(list.length - 1, index + 1)]?.focus(); }
+      else if (event.key === 'ArrowUp') { event.preventDefault(); list[Math.max(0, index - 1)]?.focus(); }
+      else if (event.key === 'Enter' || event.key === ' ') {
+        if (document.activeElement?.classList.contains('dropdown-item')) {
+          event.preventDefault();
+          document.activeElement.click();
+        }
+      } else if (event.key === 'Escape') {
+        event.stopPropagation();
+        close({ restoreFocus: true });
+      }
+    });
+    document.addEventListener('click', event => { if (!root.contains(event.target)) close(); });
+    document.addEventListener('bb:dropdown-open', event => { if (event.detail !== root) close(); });
+    document.addEventListener('keydown', event => { if (event.key === 'Escape') close(); });
+  }
+
+  function byId(id) {
+    return document.getElementById(id);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Browser state and controller
+  // ---------------------------------------------------------------------------
+
+  const state = {
+    instances: [],
+    build: {},
+    defaultInstanceId: '',
+    instanceId: '',
+    pathPrefix: '',
+    searchPrefix: '',
+    rows: [],
+    previousContinuationTokens: [],
+    continuationToken: '',
+    nextContinuationToken: '',
+    scanOffset: 0,
+    localPage: 0,
+    scanComplete: false,
+    navigationSortAvailable: false,
+    navigationSortField: '',
+    navigationSortDirection: '',
+    modifiedTimeMode: 'relative',
+    isRefreshing: false,
+    isInitializing: true,
+    pageSize: config.pageSize,
+    breadcrumbVisibleStart: 0,
+    breadcrumbLayoutFrame: 0,
+    breadcrumbOverflowOpen: false,
+    storageSwitcherOpen: false,
+    expandedHosts: {},
+    isDragActive: false,
+    dragDepth: 0,
+    versionCountRequest: 0
+  };
+
+  const browser = {
+    get instanceId() { return state.instanceId; },
+    get pathPrefix() { return state.pathPrefix; },
+    refresh: () => refresh()
+  };
+
+  const ui = {};
+
+  function currentInstance() {
+    return state.instances.find(instance => instance.id === state.instanceId) || null;
+  }
+
+  function storageHosts() {
+    const hosts = [];
+    const byID = new Map();
+    for (const instance of state.instances) {
+      const id = String(instance.host || instance.id || '');
+      let host = byID.get(id);
+      if (!host) {
+        host = { id, provider: String(instance.provider || ''), instances: [] };
+        byID.set(id, host);
+        hosts.push(host);
+      }
+      host.instances.push(instance);
+    }
+    return hosts;
+  }
+
+  function can(operation, instance = currentInstance()) {
+    if (BB.capabilities?.actionable) return BB.capabilities.actionable(instance, operation);
+    const operationState = instance?.operations?.[operation];
+    return operationState ? operationState.allowed !== false : true;
+  }
+
+  const canRead = () => can('list');
+  const canWrite = () => can('upload');
+  const canDelete = () => can('delete');
+  const canCopy = () => can('copy');
+  const canRename = () => can('rename');
+  const versioningSupported = () => currentInstance()?.versioningSupported === true;
+  const canDownloadAll = () => canRead() && config.allowDownloadAll && state.rows.length > 0;
+
+  function orderedRows() {
+    const rows = Array.from(state.rows || []);
+    if (!state.navigationSortAvailable || !state.navigationSortField || !state.navigationSortDirection) return rows;
+    const field = state.navigationSortField;
+    const direction = state.navigationSortDirection === 'desc' ? -1 : 1;
+    const nameOf = row => String(row?.name || '').toLocaleLowerCase();
+    rows.sort((left, right) => {
+      let comparison = 0;
+      if (field === 'size') {
+        comparison = Number(left?.type === 'content' ? left.size : 0) - Number(right?.type === 'content' ? right.size : 0);
+      } else if (field === 'dateModified') {
+        comparison = Number(left?.dateModified instanceof Date ? left.dateModified.getTime() : 0) - Number(right?.dateModified instanceof Date ? right.dateModified.getTime() : 0);
+      } else {
+        comparison = nameOf(left).localeCompare(nameOf(right));
+      }
+      if (comparison === 0) comparison = nameOf(left).localeCompare(nameOf(right));
+      return comparison * direction;
+    });
+    return rows;
+  }
+
+  const localPageCount = () => Math.max(1, Math.ceil(orderedRows().length / state.pageSize));
+
+  function visibleRows() {
+    const start = state.localPage * state.pageSize;
+    return orderedRows().slice(start, start + state.pageSize);
+  }
+
+  const rangeStart = () => (visibleRows().length ? state.scanOffset + state.localPage * state.pageSize + 1 : 0);
+  const rangeEnd = () => state.scanOffset + state.localPage * state.pageSize + visibleRows().length;
+  const hasRows = () => state.rows.length > 0;
+  const hasPreviousPage = () => state.localPage > 0 || state.previousContinuationTokens.length > 0;
+  const hasNextPage = () => state.localPage + 1 < localPageCount() || !!state.nextContinuationToken;
+  const hasPagination = () => hasPreviousPage() || hasNextPage();
+
+  function breadcrumbs() {
+    const parts = String(state.pathPrefix || '').replace(/\/+$/, '').split('/').filter(Boolean);
+    let prefix = '';
+    return parts.map(name => {
+      prefix += name + '/';
+      return { name, prefix };
+    });
+  }
+
+  function breadcrumbStart() {
+    const crumbs = breadcrumbs();
+    return crumbs.length ? Math.max(0, Math.min(state.breadcrumbVisibleStart, crumbs.length - 1)) : 0;
+  }
+
+  const visibleBreadcrumbs = () => breadcrumbs().slice(breadcrumbStart());
+  const hiddenBreadcrumbs = () => breadcrumbs().slice(0, breadcrumbStart());
+
+  function capabilityName(capability) {
+    return BB.capabilities?.normalizeState ? BB.capabilities.normalizeState(capability) : (capability?.allowed === false ? 'denied' : 'unknown');
+  }
+
+  function capabilityLabel(capability) {
+    return BB.capabilities?.stateLabel ? BB.capabilities.stateLabel(capability) : (capability?.allowed === false ? 'Denied' : 'On use');
+  }
+
+  function capabilityClass(capability) {
+    return BB.capabilities?.stateClass ? BB.capabilities.stateClass(capability) : (capability?.allowed === false ? 'is-denied' : 'is-unknown');
+  }
+
+  function permissionStatesFor(instance) {
+    const capabilities = instance?.capabilities || {};
+    return [
+      { key: 'read', label: 'Read', icon: 'eye-outline', state: capabilities.read || {} },
+      { key: 'write', label: 'Write', icon: 'pencil-outline', state: capabilities.write || {} },
+      { key: 'delete', label: 'Delete', icon: 'delete-outline', state: capabilities.delete || {} }
+    ];
+  }
+
+  function permissionSummaryTitle() {
+    return permissionStatesFor(currentInstance())
+      .map(item => `${item.label}: ${capabilityLabel(item.state)}`)
+      .join(' · ');
+  }
+
+  // ---------------------------------------------------------------------------
+  // Formatting
+  // ---------------------------------------------------------------------------
+
+  function formatByteParts(size) {
+    const value = Math.max(0, Number(size) || 0);
+    if (value < 1024) return { value: Math.round(value).toLocaleString('en-US'), unit: 'B' };
+    if (value < 1024 ** 2) return { value: Math.round(value / 1024).toLocaleString('en-US'), unit: 'KB' };
+    if (value < 1024 ** 3) return { value: (value / 1024 ** 2).toFixed(2), unit: 'MB' };
+    if (value < 1024 ** 4) return { value: (value / 1024 ** 3).toFixed(2), unit: 'GB' };
+    return { value: (value / 1024 ** 4).toFixed(2), unit: 'TB' };
+  }
+
+  function formatBytes(size) {
+    const parts = formatByteParts(size);
+    return `${parts.value} ${parts.unit}`;
+  }
+
+  function formatDateTimeRelative(date) {
+    if (!date) return '—';
+    const timestamp = new Date(date).getTime();
+    if (!Number.isFinite(timestamp)) return '—';
+    const seconds = Math.round((timestamp - Date.now()) / 1000);
+    const ranges = [
+      ['year', 365 * 24 * 60 * 60],
+      ['month', 30 * 24 * 60 * 60],
+      ['week', 7 * 24 * 60 * 60],
+      ['day', 24 * 60 * 60],
+      ['hour', 60 * 60],
+      ['minute', 60],
+      ['second', 1]
+    ];
+    const formatter = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
+    for (const [unit, divisor] of ranges) {
+      if (Math.abs(seconds) >= divisor || unit === 'second') {
+        return formatter.format(Math.round(seconds / divisor), unit);
+      }
+    }
+    return 'now';
+  }
+
+  const formatDateTimeAbsolute = date => BB.runtime.formatDateTimeUTC(date);
+
+  function formatDateTimeDisplay(date) {
+    return state.modifiedTimeMode === 'absolute' ? formatDateTimeAbsolute(date) : formatDateTimeRelative(date);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Header: build info, breadcrumbs, storage switcher
+  // ---------------------------------------------------------------------------
+
+  function renderBuild() {
+    const build = state.build || {};
+    const node = ui.buildVersion;
+    node.hidden = !(build && build.display);
+    if (node.hidden) return;
+    const commit = build.commit && build.commit !== 'unknown' ? ` · source ${build.commit}` : '';
+    node.title = `Release ${build.version || 'dev'}${commit}${build.date ? ` · built ${build.date}` : ''}`;
+    node.querySelector('span').textContent = build.display;
+  }
+
+  function renderBreadcrumbs() {
+    const crumbs = breadcrumbs();
+    const hidden = hiddenBreadcrumbs();
+    const visible = visibleBreadcrumbs();
+    const signature = JSON.stringify([crumbs.map(crumb => crumb.prefix), hidden.length, state.breadcrumbOverflowOpen]);
+
+    const root = ui.rootLink;
+    setClass(root, 'breadcrumb-current', !crumbs.length);
+    if (crumbs.length) root.removeAttribute('aria-current'); else root.setAttribute('aria-current', 'page');
+    root.setAttribute('aria-disabled', crumbs.length ? 'false' : 'true');
+    root.tabIndex = crumbs.length ? 0 : -1;
+
+    if (ui.breadcrumbSignature === signature) return;
+    ui.breadcrumbSignature = signature;
+
+    const line = ui.breadcrumbLine;
+    line.replaceChildren();
+    line.append(h('span', { class: 'breadcrumb-separator' }, '/'));
+
+    ui.breadcrumbOverflowTrigger = null;
+    if (hidden.length) {
+      const trigger = h('button', {
+        type: 'button',
+        class: 'breadcrumb-overflow-trigger',
+        title: `Show ${hidden.length} hidden parent folder${hidden.length === 1 ? '' : 's'}`,
+        'aria-label': 'Show hidden parent folders',
+        'aria-haspopup': 'menu',
+        'aria-expanded': state.breadcrumbOverflowOpen ? 'true' : 'false',
+        onclick: event => { event.stopPropagation(); toggleBreadcrumbOverflow(); }
+      },
+      h('span', { class: 'breadcrumb-overflow-ellipsis', 'aria-hidden': 'true' }, '…'),
+      h('span', { class: 'breadcrumb-overflow-count' }, hidden.length));
+      ui.breadcrumbOverflowTrigger = trigger;
+      line.append(h('span', { class: 'breadcrumb-overflow' }, trigger));
+    }
+
+    if (hidden.length && visible.length) line.append(h('span', { class: 'breadcrumb-separator' }, '/'));
+
+    visible.forEach((crumb, index) => {
+      if (hidden.length + index < crumbs.length - 1) {
+        line.append(h('button', {
+          type: 'button',
+          class: 'breadcrumb-link',
+          title: crumb.prefix,
+          onclick: () => goToPrefix(crumb.prefix)
+        }, crumb.name));
+      } else {
+        line.append(h('span', { class: 'breadcrumb-current', 'aria-current': 'page', title: crumb.prefix }, crumb.name));
+      }
+      if (index < visible.length - 1) line.append(h('span', { class: 'breadcrumb-separator' }, '/'));
+    });
+
+    renderBreadcrumbOverflowPopover();
+  }
+
+  function renderBreadcrumbOverflowPopover() {
+    ui.breadcrumbOverflowPopover?.remove();
+    ui.breadcrumbOverflowPopover = null;
+    const hidden = hiddenBreadcrumbs();
+    if (!state.breadcrumbOverflowOpen || !hidden.length) return;
+    const popover = h('div', {
+      class: 'breadcrumb-overflow-popover',
+      role: 'menu',
+      'aria-label': 'Hidden parent folders',
+      onclick: event => event.stopPropagation()
+    }, hidden.map((crumb, index) => h('button', {
+      type: 'button',
+      class: 'breadcrumb-overflow-item',
+      title: crumb.prefix,
+      role: 'menuitem',
+      onclick: () => openHiddenBreadcrumb(crumb.prefix)
+    },
+    h('span', { class: 'breadcrumb-overflow-copy', style: { paddingLeft: `${Math.min(index, 6) * 0.65}rem` } },
+      h('span', { class: 'breadcrumb-overflow-branch', 'aria-hidden': 'true' }, icon('subdirectory-arrow-right')),
+      h('span', { class: 'breadcrumb-overflow-node' },
+        h('small', {}, index === 0 ? 'Inside storage root' : `Inside ${hidden[index - 1].name}`),
+        h('strong', {}, crumb.name))))));
+    document.body.append(popover);
+    ui.breadcrumbOverflowPopover = popover;
+    positionBreadcrumbOverflow();
+  }
+
+  function toggleBreadcrumbOverflow() {
+    if (state.breadcrumbOverflowOpen) closeBreadcrumbOverflow();
+    else {
+      state.breadcrumbOverflowOpen = true;
+      renderBreadcrumbs();
+    }
+  }
+
+  function closeBreadcrumbOverflow() {
+    if (!state.breadcrumbOverflowOpen) return;
+    state.breadcrumbOverflowOpen = false;
+    renderBreadcrumbs();
+  }
+
+  function openHiddenBreadcrumb(prefix) {
+    closeBreadcrumbOverflow();
+    goToPrefix(prefix);
+  }
+
+  function positionBreadcrumbOverflow() {
+    const trigger = ui.breadcrumbOverflowTrigger;
+    const popover = ui.breadcrumbOverflowPopover;
+    if (!state.breadcrumbOverflowOpen || !trigger || !popover) return;
+    const margin = 8;
+    const viewport = BB.viewport?.size() || { width: window.innerWidth, height: window.innerHeight };
+    const triggerRect = BB.viewport?.rect(trigger) || trigger.getBoundingClientRect();
+    const maxWidth = Math.max(220, Math.min(380, viewport.width - margin * 2));
+    popover.style.width = `${maxWidth}px`;
+    popover.style.maxWidth = `${viewport.width - margin * 2}px`;
+    const popoverRect = BB.viewport?.rect(popover) || popover.getBoundingClientRect();
+    const width = Math.min(maxWidth, Math.max(220, popoverRect.width || maxWidth));
+    const height = Math.min(popoverRect.height || 320, Math.max(120, viewport.height - margin * 2));
+    const left = Math.max(margin, Math.min(triggerRect.left, viewport.width - width - margin));
+    const below = triggerRect.bottom + 6;
+    const above = triggerRect.top - height - 6;
+    const top = below + height <= viewport.height - margin ? below : Math.max(margin, above);
+    Object.assign(popover.style, {
+      position: 'fixed',
+      left: `${Math.round(left)}px`,
+      top: `${Math.round(top)}px`,
+      width: `${Math.round(width)}px`,
+      maxHeight: `${Math.max(120, Math.round(viewport.height - top - margin))}px`
+    });
+  }
+
+  function scheduleBreadcrumbLayout() {
+    window.cancelAnimationFrame(state.breadcrumbLayoutFrame || 0);
+    state.breadcrumbLayoutFrame = window.requestAnimationFrame(() => {
+      state.breadcrumbLayoutFrame = 0;
+      measureBreadcrumbs();
+    });
+  }
+
+  function measureBreadcrumbs() {
+    const crumbs = breadcrumbs();
+    if (!crumbs.length) {
+      state.breadcrumbVisibleStart = 0;
+      return;
+    }
+
+    const line = ui.breadcrumbLine;
+    if (!line) return;
+    const available = Math.floor((BB.viewport?.rect(line).width || line.clientWidth || 0));
+    if (available <= 0) return;
+
+    const style = window.getComputedStyle(line);
+    const canvas = ui.measureCanvas || (ui.measureCanvas = document.createElement('canvas'));
+    const context = canvas.getContext('2d');
+    if (!context) return;
+    context.font = style.font || `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+
+    const gap = Number.parseFloat(style.columnGap || style.gap || '3') || 3;
+    const separatorWidth = Math.ceil(context.measureText('/').width);
+    const widths = crumbs.map(crumb => Math.ceil(context.measureText(crumb.name).width + 2));
+    const currentIndex = crumbs.length - 1;
+
+    const requiredWidth = start => {
+      const visibleCount = currentIndex - start + 1;
+      const separatorCount = start > 0 ? visibleCount + 1 : visibleCount;
+      const overflowCount = start > 0 ? 1 : 0;
+      const elementCount = visibleCount + separatorCount + overflowCount;
+      const overflowWidth = start > 0
+        ? Math.max(36, Math.ceil(context.measureText(`…${start}`).width + 10))
+        : 0;
+      const crumbWidth = widths.slice(start).reduce((total, width) => total + width, 0);
+      return crumbWidth
+        + separatorCount * separatorWidth
+        + overflowWidth
+        + Math.max(0, elementCount - 1) * gap;
+    };
+
+    // The current folder has absolute priority. Parents are added from the
+    // nearest parent outwards only when the current name still fits in full.
+    let start = currentIndex;
+    while (start > 0 && requiredWidth(start - 1) <= available) start--;
+    if (state.breadcrumbVisibleStart !== start) {
+      state.breadcrumbVisibleStart = start;
+      renderBreadcrumbs();
+    }
+  }
+
+  function permissionDot(item) {
+    return h('span', {
+      class: ['storage-permission-dot', capabilityClass(item.state)],
+      title: `${item.label}: ${capabilityLabel(item.state)}`
+    }, icon(item.icon));
+  }
+
+  function storageSubtitle(instance, { rootPrefix = false, provider = false } = {}) {
+    return [
+      instance.bucket,
+      instance.name !== instance.bucket ? h('span', {}, ` · ${instance.name}`) : null,
+      rootPrefix && instance.rootPrefix ? h('span', {}, ` · /${instance.rootPrefix}`) : null,
+      provider ? ` · ${String(instance.provider || '').toUpperCase()}` : null
+    ];
+  }
+
+  function permissionChips(instance) {
+    return h('span', {
+      class: 'storage-switcher-permissions is-interactive',
+      role: 'button',
+      tabindex: '0',
+      'aria-label': 'Open storage permission details',
+      title: `${permissionSummaryTitle()}. Open details.`,
+      onclick: event => { event.stopPropagation(); showPermissionDetails(); },
+      onkeydown: event => {
+        if (!['Enter', ' '].includes(event.key)) return;
+        event.stopPropagation();
+        event.preventDefault();
+        showPermissionDetails();
+      }
+    }, permissionStatesFor(instance).map(permissionDot));
+  }
+
+  function switcherCopy(instance) {
+    return h('span', { class: 'storage-switcher-copy' },
+      h('span', { class: 'storage-switcher-title-row' },
+        h('strong', {}, `${instance.host} / ${instance.id}`),
+        permissionChips(instance)),
+      h('small', {}, storageSubtitle(instance, { provider: true })));
+  }
+
+  function renderSwitcher() {
+    const instance = currentInstance();
+    const multiple = state.instances.length > 1;
+    const signature = JSON.stringify([
+      instance ? [instance.id, instance.host, instance.name, instance.bucket, instance.provider] : null,
+      multiple ? state.instances.map(item => [item.id, item.host, item.name, item.bucket, item.rootPrefix, permissionStatesFor(item).map(entry => capabilityName(entry.state))]) : null,
+      permissionStatesFor(instance).map(entry => capabilityName(entry.state))
+    ]);
+
+    if (ui.switcherSignature !== signature) {
+      ui.switcherSignature = signature;
+      ui.switcher = null;
+      ui.switcherTrigger = null;
+      ui.switcherPopover = null;
+      const tools = ui.headerTools;
+      tools.replaceChildren();
+
+      if (instance && multiple) {
+        const trigger = h('button', {
+          type: 'button',
+          class: 'storage-switcher-trigger has-bb-chevron',
+          'aria-haspopup': 'menu',
+          'aria-expanded': 'false',
+          title: `${instance.host} / ${instance.id}. ${permissionSummaryTitle()}`,
+          onclick: event => { event.stopPropagation(); toggleStorageSwitcher(); }
+        }, icon('database-outline', 'storage-switcher-icon'), switcherCopy(instance));
+
+        const popover = h('div', {
+          class: 'storage-tree-popover',
+          role: 'menu',
+          'aria-label': 'Storage hosts and buckets',
+          style: { display: 'none' },
+          onclick: event => event.stopPropagation()
+        }, storageHosts().map(host => h('section', {
+          class: ['storage-host-group', host.id === instance.host && 'is-current-host'],
+          'data-host': host.id
+        },
+        h('button', {
+          type: 'button',
+          class: 'storage-host-row',
+          'aria-expanded': 'false',
+          onclick: event => { event.stopPropagation(); toggleHost(host.id); }
+        },
+        h('span', { class: 'storage-host-chevron', 'aria-hidden': 'true' }, icon('chevron-right')),
+        h('span', { class: 'storage-host-icon' }, icon('database-outline')),
+        h('span', { class: 'storage-host-copy' },
+          h('strong', {}, host.id),
+          h('small', {}, `${host.provider.toUpperCase()} · ${host.instances.length} bucket${host.instances.length === 1 ? '' : 's'}`))),
+        h('div', { class: 'storage-bucket-list', role: 'group', 'aria-label': `${host.id} buckets`, style: { display: 'none' } },
+          host.instances.map(entry => h('button', {
+            type: 'button',
+            class: ['storage-bucket-row', entry.id === state.instanceId && 'is-current-storage'],
+            role: 'menuitemradio',
+            'aria-checked': entry.id === state.instanceId ? 'true' : 'false',
+            onclick: () => selectInstance(entry.id)
+          },
+          h('span', { class: 'storage-option-icon' }, icon('folder')),
+          h('span', { class: 'storage-option-copy' },
+            h('span', { class: 'storage-option-title-row' },
+              h('strong', {}, entry.id),
+              h('span', { class: 'storage-option-permissions', 'aria-label': `${entry.name} permissions` },
+                permissionStatesFor(entry).map(permissionDot))),
+            h('small', {}, storageSubtitle(entry, { rootPrefix: true }))),
+          h('span', { class: 'storage-option-check', 'aria-hidden': 'true' },
+            entry.id === state.instanceId ? icon('check') : null)))))));
+
+        const switcher = h('div', { class: 'storage-switcher storage-tree-switcher' }, trigger, popover);
+        tools.append(switcher);
+        ui.switcher = switcher;
+        ui.switcherTrigger = trigger;
+        ui.switcherPopover = popover;
+      } else if (instance) {
+        tools.append(h('div', { class: 'storage-switcher is-static-switcher' },
+          h('div', { class: 'storage-switcher-trigger is-static', title: permissionSummaryTitle() },
+            icon('database-outline', 'storage-switcher-icon'), switcherCopy(instance))));
+      } else {
+        tools.append(h('div', { class: 'storage-switcher is-static-switcher is-loading-switcher', 'aria-hidden': 'true' },
+          h('div', { class: 'storage-switcher-trigger is-static is-loading' },
+            h('span', { class: 'storage-switcher-loading-icon' }),
+            h('span', { class: 'storage-switcher-copy' },
+              h('span', { class: 'storage-switcher-loading-line is-title' }),
+              h('span', { class: 'storage-switcher-loading-line is-subtitle' })))));
+      }
+    }
+    syncSwitcher();
+  }
+
+  function syncSwitcher() {
+    if (!ui.switcher) return;
+    setClass(ui.switcher, 'is-open', state.storageSwitcherOpen);
+    ui.switcherTrigger.setAttribute('aria-expanded', state.storageSwitcherOpen ? 'true' : 'false');
+    ui.switcherPopover.style.display = state.storageSwitcherOpen ? '' : 'none';
+    for (const group of ui.switcherPopover.querySelectorAll('.storage-host-group')) {
+      const expanded = isHostExpanded(group.dataset.host);
+      group.querySelector('.storage-host-row').setAttribute('aria-expanded', expanded ? 'true' : 'false');
+      setClass(group.querySelector('.storage-host-chevron'), 'is-expanded', expanded);
+      group.querySelector('.storage-bucket-list').style.display = expanded ? '' : 'none';
+    }
+  }
+
+  function toggleStorageSwitcher() {
+    if (state.storageSwitcherOpen) {
+      closeStorageSwitcher();
+      return;
+    }
+    expandCurrentHost();
+    state.storageSwitcherOpen = true;
+    syncSwitcher();
+  }
+
+  function closeStorageSwitcher() {
+    if (!state.storageSwitcherOpen) return;
+    state.storageSwitcherOpen = false;
+    syncSwitcher();
+  }
+
+  function expandCurrentHost() {
+    const host = String(currentInstance()?.host || '');
+    if (!host || state.expandedHosts[host] === true) return;
+    state.expandedHosts = { ...state.expandedHosts, [host]: true };
+    syncSwitcher();
+  }
+
+  function isHostExpanded(host) {
+    return state.expandedHosts[String(host || '')] === true;
+  }
+
+  function toggleHost(host) {
+    const id = String(host || '');
+    if (!id) return;
+    state.expandedHosts = { ...state.expandedHosts, [id]: !isHostExpanded(id) };
+    syncSwitcher();
+  }
+
+  function onDocumentPointer(event) {
+    if (state.storageSwitcherOpen && !ui.switcher?.contains(event.target)) closeStorageSwitcher();
+    if (state.breadcrumbOverflowOpen) {
+      const inside = ui.breadcrumbOverflowTrigger?.contains(event.target) || ui.breadcrumbOverflowPopover?.contains(event.target);
+      if (!inside) closeBreadcrumbOverflow();
+    }
+  }
+
+  function onDocumentKeydown(event) {
+    if (event.key !== 'Escape') return;
+    closeBreadcrumbOverflow();
+    closeStorageSwitcher();
+  }
+
+  async function showPermissionDetails() {
+    const instance = currentInstance();
+    if (!instance) return;
+    const reportedPermissions = Array.from(instance.capabilities?.permissions || []).map(String);
+    const providerPermissions = reportedPermissions.length ? reportedPermissions.join(', ') : 'Not reported';
+    const permissionRows = permissionStatesFor(instance).map(item => {
+      const itemState = item.state || {};
+      const stateName = capabilityName(itemState);
+      const result = stateName === 'allowed' ? 'Allowed' : (stateName === 'denied' ? 'Denied' : 'On use');
+      const verification = stateName === 'unknown'
+        ? 'The provider will verify this permission when the operation is used.'
+        : (itemState.verified ? (stateName === 'allowed' ? 'Verified by a real provider operation.' : 'Denied by the provider.') : 'Defined by the connection configuration.');
+      const explanation = String(itemState.reason || verification);
+      return `<div class="bb-permission-summary-row" title="${escapeHTML(explanation)}">
+        <span class="bb-permission-summary-icon is-${escapeHTML(stateName)}"><i class="mdi mdi-${escapeHTML(item.icon)}"></i></span>
+        <span class="bb-permission-summary-copy"><strong>${escapeHTML(item.label)}</strong></span>
+        <span class="bb-permission-result is-${escapeHTML(stateName)}">${escapeHTML(result)}</span>
+      </div>`;
+    }).join('');
+    const discoveryError = instance.capabilities?.error
+      ? `<div class="bb-permission-provider is-error"><strong>Discovery</strong><span title="${escapeHTML(instance.capabilities.error)}">Unavailable</span></div>`
+      : '';
+    await BB.ui.alert({
+      html: `<div class="bb-details bb-permission-details">
+        <div class="bb-details-head">
+          <i class="mdi mdi-shield-key-outline"></i>
+          <div class="bb-details-titles">
+            <div class="bb-details-name">Storage permissions</div>
+            <div class="bb-details-prefix">${escapeHTML(instance.name)} · ${escapeHTML(instance.bucket)}</div>
+          </div>
+        </div>
+        <div class="bb-details-body">
+          <div class="bb-permission-summary">${permissionRows}</div>
+          <div class="bb-permission-provider"><strong>Provider permissions</strong><span class="mono" title="${escapeHTML(providerPermissions)}">${escapeHTML(providerPermissions)}</span></div>
+          ${discoveryError}
+        </div>
+      </div>`
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Toolbar and upload overlay
+  // ---------------------------------------------------------------------------
+
+  function renderToolbar() {
+    const read = canRead();
+    ui.searchInput.disabled = !read;
+    ui.openButton.disabled = !read;
+    ui.refreshButton.disabled = !read || state.isRefreshing;
+    setClass(ui.downloadAllItem, 'is-disabled', !canDownloadAll());
+    setClass(ui.insightsItem, 'is-disabled', !read);
+    ui.insightsItem.querySelector('span').textContent = state.pathPrefix ? 'Folder insights' : 'Storage insights';
+    if (canWrite()) {
+      if (!ui.newMenu.isConnected) ui.toolbarRight.append(ui.newMenu);
+    } else {
+      ui.newMenu.remove();
+    }
+  }
+
+  function renderDropOverlay() {
+    ui.dropOverlay.style.display = state.isDragActive ? '' : 'none';
+    ui.dropTarget.textContent = `/${state.pathPrefix}`;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Main card: states, pagination and the object table
+  // ---------------------------------------------------------------------------
+
+  function emptyState(kind, iconName, title, text) {
+    return h('div', { class: ['empty-state', 'card', kind] },
+      icon(iconName),
+      title && h('h2', {}, title),
+      h('p', {}, text));
+  }
+
+  function renderMain() {
+    let mode = 'browser';
+    if (state.isInitializing) mode = 'initializing';
+    else if (!currentInstance()) mode = 'none';
+    else if (!canRead()) mode = 'unreadable';
+
+    if (mode !== ui.mainMode) {
+      ui.mainMode = mode;
+      ui.table = null;
+      ui.card = null;
+      if (mode === 'initializing') {
+        ui.main.replaceChildren(emptyState('', 'loading mdi-spin', '', 'Loading storage instances...'));
+      } else if (mode === 'none') {
+        ui.main.replaceChildren(emptyState('is-error', 'cloud-alert-outline', 'No storage instance is available', 'Check the server HCL configuration.'));
+      } else if (mode === 'unreadable') {
+        ui.main.replaceChildren(emptyState('is-warning', 'shield-lock-outline', 'Read access is not available', 'This storage instance cannot list or read objects. Other actions remain hidden or disabled.'));
+      } else {
+        buildBrowserCard();
+      }
+    }
+    if (mode === 'browser') renderBrowserCard();
+  }
+
+  function sortButton(field, label, { numeric = false } = {}) {
+    const iconBox = h('span', { class: 'navigation-sort-icon', 'aria-hidden': 'true' });
+    const node = h('button', {
+      type: 'button',
+      class: ['navigation-sort-button', numeric && 'is-numeric'],
+      onclick: () => toggleNavigationSort(field)
+    }, h('span', {}, label), iconBox);
+    return { field, label, node, iconBox };
+  }
+
+  function updateSortButton(entry) {
+    const available = state.navigationSortAvailable;
+    setClass(entry.node, 'is-sortable', available);
+    setClass(entry.node, 'is-active', state.navigationSortField === entry.field);
+    entry.node.disabled = !available;
+    entry.node.setAttribute('aria-label', available ? `Sort by ${entry.label.toLowerCase()}` : entry.label);
+    setClass(entry.iconBox, 'is-placeholder', !available);
+    const name = navigationSortIcon(entry.field);
+    entry.iconBox.replaceChildren(...(name ? [icon(name)] : []));
+  }
+
+  function buildBrowserCard() {
+    const head = {
+      select: h('select', { onchange: event => {
+        state.pageSize = Number(event.target.value) || 50;
+        config.pageSize = state.pageSize;
+        state.localPage = 0;
+        update();
+        refreshVisibleVersionCounts();
+      } }, [50, 100, 500].map(size => h('option', { value: size }, size))),
+      range: h('span', {}),
+      previous: button({
+        tone: 'is-light', icon: 'chevron-left', classes: ['icon-btn-disc'], title: 'Previous page', onclick: () => previousPage()
+      }),
+      next: button({
+        tone: 'is-light', iconRight: 'chevron-right', classes: ['icon-btn-disc'], title: 'Next page', onclick: () => nextPage()
+      })
+    };
+    head.node = h('div', { class: 'card-content browser-card-head' },
+      h('div', { class: 'page-size-control' },
+        h('div', { class: 'control' }, h('span', { class: 'select is-small' }, head.select)),
+        h('span', {}, 'per page')),
+      h('div', { class: 'pagination-control' }, head.previous, head.range, head.next));
+
+    const sorts = {
+      name: sortButton('name', 'Name'),
+      size: sortButton('size', 'Size', { numeric: true }),
+      dateModified: sortButton('dateModified', 'Last modified', { numeric: true })
+    };
+    const timeToggle = h('button', { type: 'button', class: 'modified-time-toggle', onclick: event => { event.stopPropagation(); toggleModifiedTimeMode(); } },
+      h('i', { class: 'mdi mdi-clock-outline', 'aria-hidden': 'true' }));
+    const headerCell = (cls, content, style) => h('th', { class: cls, draggable: 'false', style },
+      h('div', { class: 'th-wrap is-relative', style }, h('span', {}, content)));
+    const tbody = h('tbody');
+    const overlay = h('div', { class: 'loading-overlay is-active' },
+      h('div', { class: 'loading-background' }),
+      h('div', { class: 'loading-icon' }));
+    const tableElement = h('table', { class: 'table is-hoverable' },
+      h('thead', {}, h('tr', {},
+        headerCell('name-column-header', sorts.name.node),
+        headerCell('size-column-header', sorts.size.node),
+        headerCell('modified-column-header', h('div', { class: 'modified-header-controls' }, timeToggle, sorts.dateModified.node)),
+        h('th', { class: 'is-right', draggable: 'false', style: { width: '46px' } },
+          h('div', { class: 'th-wrap is-relative', style: { width: '46px' } },
+            h('span', { class: 'icon is-small sort-icon is-invisible' }, icon('arrow-up')))))),
+      tbody);
+    const wrapper = h('div', { class: 'table-wrapper has-mobile-cards' }, tableElement);
+    // Buefy's mobile-card helper. It is hidden, but `.table-wrapper:not(:last-child)` in the stylesheet relies on it.
+    const touchCell = h('div', { class: 'touch-dragged-cell has-mobile-cards', style: { display: 'none' } });
+    const tableWrap = h('div', { class: 'table-wrap' }, h('div', { class: 'b-table' }, wrapper, touchCell));
+    const emptyFolder = h('div', { class: 'table-empty browser-empty-folder' },
+      icon('folder-open-outline'),
+      h('span', {}, 'This folder is empty.'));
+    const content = h('div', { class: 'card-content table-card-content' });
+    const card = h('div', { class: 'card browser-card' }, content);
+
+    ui.table = { head, sorts, timeToggle, tbody, wrapper, overlay, tableWrap, emptyFolder, content, card };
+    ui.main.replaceChildren(card);
+  }
+
+  function renderBrowserCard() {
+    const t = ui.table;
+    const rows = hasRows();
+
+    // Page-size and pagination controls are only present when there is something to page.
+    if (rows && !t.head.node.isConnected) t.card.insertBefore(t.head.node, t.content);
+    if (!rows) t.head.node.remove();
+    if (rows) {
+      t.head.select.value = String(state.pageSize);
+      t.head.select.disabled = state.isRefreshing;
+      t.head.range.textContent = `Items ${rangeStart()}–${rangeEnd()}`;
+      const paged = hasPagination();
+      for (const [control, enabled] of [[t.head.previous, hasPreviousPage()], [t.head.next, hasNextPage()]]) {
+        setClass(control, 'is-pagination-placeholder', !paged);
+        control.setAttribute('aria-hidden', paged ? 'false' : 'true');
+        control.tabIndex = paged ? 0 : -1;
+        control.disabled = !enabled || state.isRefreshing;
+      }
+    }
+
+    const showTable = rows || state.isRefreshing;
+    const desired = showTable ? t.tableWrap : t.emptyFolder;
+    if (t.content.firstChild !== desired) t.content.replaceChildren(desired);
+    if (!showTable) return;
+
+    for (const entry of Object.values(t.sorts)) updateSortButton(entry);
+    const absolute = state.modifiedTimeMode === 'absolute';
+    setClass(t.timeToggle, 'is-absolute', absolute);
+    const toggleLabel = absolute ? 'Show relative times' : 'Show exact UTC dates';
+    t.timeToggle.title = toggleLabel;
+    t.timeToggle.setAttribute('aria-label', toggleLabel);
+
+    renderRows();
+    if (state.isRefreshing) t.wrapper.append(t.overlay); else t.overlay.remove();
+  }
+
+  function navigationSortIcon(field) {
+    if (!state.navigationSortAvailable) return '';
+    if (state.navigationSortField !== field) return 'unfold-more-horizontal';
+    return state.navigationSortDirection === 'desc' ? 'arrow-down' : 'arrow-up';
+  }
+
+  function menuItem(label, iconName, onclick, { danger = false } = {}) {
+    return h('div', { class: ['bb-menu-item', danger && 'danger'], onclick }, icon(iconName), ` ${label}`);
+  }
+
+  function rowMenu(row) {
+    const items = row.type === 'content'
+      ? [
+        canRead() && menuItem('Details', 'information-outline', () => onRowMetadata(row)),
+        canRead() && menuItem('Download', 'download', () => onRowDownload(row)),
+        canRead() && versioningSupported() && menuItem('Versions', 'source-commit', () => onRowVersions(row)),
+        canCopy() && menuItem('Copy', 'content-copy', () => onRowCopy(row)),
+        canRename() && menuItem('Rename', 'rename-outline', () => onRowRename(row)),
+        canDelete() && menuItem('Delete', 'delete-outline', () => onRowDelete(row), { danger: true })
+      ]
+      : [
+        canRead() && menuItem('Insights', 'chart-box-outline', () => onPrefixInsights(row)),
+        canRead() && menuItem('Download as ZIP', 'folder-download-outline', () => onPrefixDownload(row)),
+        canCopy() && menuItem('Copy', 'content-copy', () => onPrefixCopy(row)),
+        canRename() && menuItem('Rename', 'rename-outline', () => onPrefixRename(row)),
+        canDelete() && menuItem('Delete', 'delete-outline', () => onPrefixDelete(row), { danger: true })
+      ];
+    return h('div', { class: 'row-menu-wrap' },
+      h('div', { class: 'bb-menu', ...(row.type === 'content' ? { 'data-key': row.key } : { 'data-prefix': row.prefix }) },
+        h('button', { type: 'button', class: 'bb-kebab', 'aria-haspopup': 'menu', 'aria-expanded': 'false', title: 'Options' }, icon('dots-vertical')),
+        h('div', { class: 'bb-menu-popover' }, h('div', { class: 'bb-menu-list' }, items))));
+  }
+
+  function versionCountBadge(row) {
+    if (!versioningSupported() || !Number.isInteger(row.versionCount)) return null;
+    return h('span', {
+      class: 'object-version-count',
+      title: `${row.versionCount} version${row.versionCount === 1 ? '' : 's'}`
+    }, row.versionCount);
+  }
+
+  function buildRow(row) {
+    const isContent = row.type === 'content';
+    const nameCell = h('div', { class: 'object-name-cell' },
+      h('span', { class: 'icon name-column-icon is-smmd' }, icon(isContent ? fileRowIcon(row) : 'folder', 'mdi-24px')),
+      h('button', {
+        type: 'button',
+        class: 'object-link',
+        title: row.name,
+        onclick: () => (isContent ? openPreview(row) : goToPrefix(row.prefix))
+      }, row.name),
+      isContent && versionCountBadge(row));
+
+    let sizeCell;
+    if (isContent) {
+      const parts = formatByteParts(row.size);
+      sizeCell = h('span', { class: 'object-size', title: formatBytes(row.size) },
+        h('span', { class: 'object-size-value' }, parts.value),
+        h('span', { class: 'object-size-unit' }, parts.unit));
+    } else {
+      sizeCell = h('span', { class: 'object-size object-size-empty', 'aria-hidden': 'true' },
+        h('span', { class: 'object-size-value' }, '-'),
+        h('span', { class: 'object-size-unit' }));
+    }
+
+    const modifiedCell = row.dateModified
+      ? h('span', { class: 'object-modified', title: BB.runtime.formatDateTimeUTC(row.dateModified) }, ` ${formatDateTimeDisplay(row.dateModified)} `)
+      : h('span', { class: 'object-modified object-modified-empty' }, '-');
+
+    const tr = h('tr', { draggable: 'false' },
+      h('td', { class: 'name-column', 'data-label': 'Name' }, nameCell),
+      h('td', { class: 'size-column', 'data-label': 'Size' }, sizeCell),
+      h('td', { class: 'modified-column', 'data-label': 'Last modified' }, modifiedCell),
+      h('td', { class: 'is-right', 'data-label': '' }, rowMenu(row)));
+    row.element = tr;
+    return tr;
+  }
+
+  function renderRows() {
+    const tbody = ui.table.tbody;
+    const rows = visibleRows();
+    if (!rows.length) {
+      tbody.replaceChildren(h('tr', { class: 'is-empty' },
+        h('td', { colspan: '4' }, h('div', { class: 'table-empty' }, icon('folder-open-outline'), h('span', {}, 'This folder is empty.')))));
+      return;
+    }
+    tbody.replaceChildren(...rows.map(buildRow));
+  }
+
+  function updateVersionCountBadges() {
+    for (const row of visibleRows()) {
+      const cell = row.element?.querySelector('.object-name-cell');
+      if (!cell) continue;
+      cell.querySelector('.object-version-count')?.remove();
+      const badge = row.type === 'content' ? versionCountBadge(row) : null;
+      if (badge) cell.append(badge);
+    }
+  }
+
+  function update() {
+    renderBuild();
+    renderBreadcrumbs();
+    renderSwitcher();
+    renderToolbar();
+    renderDropOverlay();
+    renderMain();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Navigation and data loading
+  // ---------------------------------------------------------------------------
+
+  function setPathPrefix(prefix) {
+    state.pathPrefix = prefix;
+    state.breadcrumbOverflowOpen = false;
+    state.breadcrumbVisibleStart = Math.max(0, breadcrumbs().length - 1);
+    update();
+    scheduleBreadcrumbLayout();
+  }
+
+  function setInstanceId(id) {
+    state.instanceId = id;
+    state.breadcrumbOverflowOpen = false;
+    expandCurrentHost();
+    update();
+    scheduleBreadcrumbLayout();
+  }
+
+  function setSearchPrefix(value) {
+    state.searchPrefix = value;
+    ui.searchInput.value = value;
+  }
+
+  async function initialize() {
+    state.isInitializing = true;
+    try {
+      const response = await BB.api.instances();
+      state.instances = (response.instances || []).map(instance => ({
+        ...instance,
+        host: String(instance.host || instance.id || '')
+      }));
+      state.build = response.build || {};
+      config.runtime = BB.runtime?.configure(response.runtime || {}) || (response.runtime || {});
+      state.defaultInstanceId = response.default || state.instances[0]?.id || '';
+      const route = BB.runtime?.storageRoute?.();
+      const routeInstance = route?.view === 'browser'
+        ? state.instances.find(instance => instance.host === route.host && instance.id === route.bucket)?.id || ''
+        : '';
+      const queryInstance = new URLSearchParams(location.search).get('instance');
+      const storedInstance = BB.runtime?.readState('object-browser-instance') || '';
+      const candidate = [routeInstance, queryInstance, storedInstance, state.defaultInstanceId]
+        .find(id => id && state.instances.some(instance => instance.id === id));
+      state.instanceId = candidate || state.instances[0]?.id || '';
+      if (!state.instanceId) throw new Error('No storage instance is configured.');
+      applyCurrentInstance();
+      state.pathPrefix = routeInstance === state.instanceId
+        ? normalizePrefix(route.path)
+        : parseLegacyHash();
+      setSearchPrefix('');
+      replaceBrowserLocation(state.pathPrefix);
+      setInstanceId(state.instanceId);
+      setPathPrefix(state.pathPrefix);
+      await refresh();
+    } catch (error) {
+      BB.ui.toast(String(error.message || error));
+    } finally {
+      state.isInitializing = false;
+      update();
+    }
+  }
+
+  function browserLocation(prefix = '') {
+    const url = new URL(BB.api.browserPageURL(prefix, { instance: state.instanceId }));
+    return url.pathname + url.search + url.hash;
+  }
+
+  function replaceBrowserLocation(prefix = '', { push = false } = {}) {
+    const target = browserLocation(prefix);
+    const current = location.pathname + location.search + location.hash;
+    if (target === current) return;
+    history[push ? 'pushState' : 'replaceState'](null, '', target);
+  }
+
+  function applyCurrentInstance() {
+    const instance = currentInstance();
+    if (!instance) return;
+    BB.api.setInstance(instance);
+    config.capabilities = instance.capabilities || {};
+    config.operations = instance.operations || {};
+    config.versioningSupported = instance.versioningSupported === true;
+    BB.runtime?.writeState('object-browser-instance', instance.id);
+    document.title = `${instance.name} - Object Storage Browser`;
+  }
+
+  async function changeInstance() {
+    applyCurrentInstance();
+    setPathPrefix('');
+    setSearchPrefix('');
+    resetPagination();
+    replaceBrowserLocation('', { push: true });
+    await refresh();
+  }
+
+  async function selectInstance(id) {
+    if (!id) return;
+    closeStorageSwitcher();
+    if (id === state.instanceId) return;
+    setInstanceId(id);
+    await changeInstance();
+  }
+
+  function resetPagination() {
+    state.previousContinuationTokens = [];
+    state.continuationToken = '';
+    state.nextContinuationToken = '';
+    state.scanOffset = 0;
+    state.localPage = 0;
+    state.scanComplete = false;
+    state.navigationSortAvailable = false;
+    state.navigationSortField = '';
+    state.navigationSortDirection = '';
+  }
+
+  function toggleNavigationSort(field) {
+    if (!state.navigationSortAvailable) return;
+    const initialDirection = field === 'name' ? 'asc' : 'desc';
+    const reverseDirection = initialDirection === 'desc' ? 'asc' : 'desc';
+    if (state.navigationSortField !== field) {
+      state.navigationSortField = field;
+      state.navigationSortDirection = initialDirection;
+    } else if (state.navigationSortDirection === initialDirection) {
+      state.navigationSortDirection = reverseDirection;
+    } else {
+      state.navigationSortField = '';
+      state.navigationSortDirection = '';
+    }
+    state.localPage = 0;
+    update();
+    refreshVisibleVersionCounts();
+  }
+
+  function updatePathFromLocation() {
+    const route = BB.runtime?.storageRoute?.();
+    if (!route || route.view !== 'browser') return;
+    const instance = state.instances.find(item => item.host === route.host && item.id === route.bucket);
+    if (!instance) return;
+    const next = normalizePrefix(route.path);
+    const instanceChanged = instance.id !== state.instanceId;
+    if (!instanceChanged && next === state.pathPrefix) return;
+    if (instanceChanged) {
+      setInstanceId(instance.id);
+      applyCurrentInstance();
+    }
+    setPathPrefix(next);
+    setSearchPrefix('');
+    resetPagination();
+    if (!state.isInitializing) refresh();
+  }
+
+  function goToPrefix(prefix) {
+    closeBreadcrumbOverflow();
+    const normalized = normalizePrefix(prefix);
+    if (normalized === state.pathPrefix) {
+      resetPagination();
+      refresh();
+      return;
+    }
+    setPathPrefix(normalized);
+    setSearchPrefix('');
+    resetPagination();
+    replaceBrowserLocation(normalized, { push: true });
+    refresh();
+  }
+
+  function searchByPrefix() {
+    const value = String(state.searchPrefix || '').trim();
+    if (!value) {
+      refresh();
+      return;
+    }
+    goToPrefix(normalizePrefix(state.pathPrefix + value));
+  }
+
+  function manualRefresh() {
+    resetPagination();
+    refresh();
+  }
+
+  async function nextPage() {
+    if (state.localPage + 1 < localPageCount()) {
+      state.localPage += 1;
+      update();
+      refreshVisibleVersionCounts();
+      return;
+    }
+    if (!state.nextContinuationToken) return;
+    state.previousContinuationTokens.push({ token: state.continuationToken || '', offset: state.scanOffset });
+    state.scanOffset += state.rows.length;
+    state.continuationToken = state.nextContinuationToken;
+    state.localPage = 0;
+    await refresh();
+  }
+
+  async function previousPage() {
+    if (state.localPage > 0) {
+      state.localPage -= 1;
+      update();
+      refreshVisibleVersionCounts();
+      return;
+    }
+    if (!state.previousContinuationTokens.length) return;
+    const previous = state.previousContinuationTokens.pop();
+    state.continuationToken = previous?.token || '';
+    state.scanOffset = Number(previous?.offset || 0);
+    await refresh();
+    state.localPage = Math.max(0, localPageCount() - 1);
+    update();
+  }
+
+  async function refresh() {
+    if (state.isRefreshing || !currentInstance()) return;
+    state.isRefreshing = true;
+    update();
+    try {
+      if (!canRead()) {
+        state.rows = [];
+        state.nextContinuationToken = '';
+        return;
+      }
+      const data = await BB.api.list({
+        prefix: state.pathPrefix,
+        delimiter: '/',
+        continuationToken: state.continuationToken
+      });
+      state.nextContinuationToken = data.nextContinuationToken || '';
+      state.scanComplete = data.scanComplete === true;
+      state.navigationSortAvailable = data.sortAvailable === true;
+      if (!state.navigationSortAvailable) {
+        state.navigationSortField = '';
+        state.navigationSortDirection = '';
+      }
+      const rows = (data.items || []).map(item => {
+        if (item.type === 'prefix') {
+          return { type: 'prefix', name: item.name, prefix: item.prefix, size: 0, dateModified: null };
+        }
+        return {
+          type: 'content',
+          name: item.name || String(item.key || '').split('/').pop(),
+          key: item.key,
+          size: Number(item.size || 0),
+          dateModified: item.lastModified ? new Date(item.lastModified) : null,
+          contentType: item.contentType || '',
+          etag: item.etag || '',
+          url: BB.api.urlForKey(item.key),
+          versionCount: null
+        };
+      }).filter(row => {
+        const key = row.type === 'prefix' ? row.prefix : row.key;
+        return !config.keyExcludePatterns.some(pattern => pattern.test(String(key || '')));
+      });
+      state.rows = rows;
+      state.localPage = Math.max(0, Math.min(state.localPage, Math.max(0, Math.ceil(rows.length / state.pageSize) - 1)));
+    } catch (error) {
+      state.rows = [];
+      BB.ui.toast(String(error.message || error));
+    } finally {
+      state.isRefreshing = false;
+      update();
+    }
+    refreshVisibleVersionCounts();
+  }
+
+  async function refreshVisibleVersionCounts() {
+    const requestID = ++state.versionCountRequest;
+    if (!versioningSupported() || !canRead()) {
+      for (const row of state.rows) if (row.type === 'content') row.versionCount = null;
+      updateVersionCountBadges();
+      return;
+    }
+    const instanceID = state.instanceId;
+    const keys = visibleRows().filter(row => row.type === 'content' && row.key).map(row => row.key);
+    if (!keys.length) return;
+    try {
+      const response = await BB.api.versionCounts(keys, instanceID);
+      if (requestID !== state.versionCountRequest || instanceID !== state.instanceId) return;
+      const counts = response?.counts || {};
+      for (const row of state.rows) {
+        if (row.type !== 'content' || !Object.prototype.hasOwnProperty.call(counts, row.key)) continue;
+        row.versionCount = Number(counts[row.key]?.count || 0);
+      }
+      updateVersionCountBadges();
+    } catch (error) {
+      if (Number(error?.status || 0) === 501) return;
+      console.warn('Unable to load object version counts', error);
+    }
+  }
+
+  function fileRowIcon(row) {
+    return BB.detect.iconForType(BB.detect.resolveType(row.name || '', row.contentType || ''));
+  }
+
+  function openPreview(row) {
+    if (!canRead()) return;
+    window.location.href = BB.api.previewPageURL(row.key, { instance: state.instanceId });
+  }
+
+  function toggleModifiedTimeMode() {
+    state.modifiedTimeMode = state.modifiedTimeMode === 'relative' ? 'absolute' : 'relative';
+    update();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Row and folder actions
+  // ---------------------------------------------------------------------------
+
+  function onRowMetadata(row) { BB.actions.showMetadata(row.key, { size: row.size, mime: row.contentType, etag: row.etag, lastModified: row.dateModified?.toUTCString?.() || '' }); }
+  function onRowDownload(row) { BB.actions.downloadObject(row.key, row.name); }
+  function onRowVersions(row) { BB.actions.showVersions(row.key); }
+  async function onRowCopy(row) { if (await BB.actions.copyObject(row.key)) await refresh(); }
+  async function onRowRename(row) { if (await BB.actions.renameObject(row.key)) await refresh(); }
+  async function onRowDelete(row) { if (await BB.actions.deleteObject(row.key)) await refresh(); }
+  function onPrefixInsights(row) { BB.actions.showPrefixInsights(row.prefix); }
+  async function onPrefixCopy(row) { if (await BB.actions.copyPrefix(row.prefix)) await refresh(); }
+  async function onPrefixRename(row) { if (await BB.actions.renamePrefix(row.prefix)) await refresh(); }
+  async function onPrefixDelete(row) { if (await BB.actions.deletePrefix(row.prefix)) await refresh(); }
+  function onCurrentInsights() { BB.actions.showPrefixInsights(state.pathPrefix); }
+
+  function onRowContextMenu(event) {
+    const row = event.target?.closest?.('.browser-card tbody tr');
+    if (!row) return;
+    const menu = row.querySelector('.bb-menu');
+    if (!menu || !BB.menu?.openAt) return;
+    event.preventDefault();
+    event.stopPropagation();
+    BB.menu.openAt(menu, event.clientX, event.clientY);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Upload and drag-and-drop
+  // ---------------------------------------------------------------------------
+
+  function onDragEnter(event) {
+    if (!dataTransferHasFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    if (!canWrite()) return;
+    state.dragDepth++;
+    state.isDragActive = true;
+    renderDropOverlay();
+  }
+
+  function onDragOver(event) {
+    if (!dataTransferHasFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = canWrite() ? 'copy' : 'none';
+    if (!canWrite()) return;
+    state.isDragActive = true;
+    renderDropOverlay();
+  }
+
+  function onDragLeave(event) {
+    if (!state.isDragActive) return;
+    event.preventDefault();
+    state.dragDepth = Math.max(0, state.dragDepth - 1);
+    const leftWindow = !event.relatedTarget || event.clientX <= 0 || event.clientY <= 0 ||
+      event.clientX >= window.innerWidth || event.clientY >= window.innerHeight;
+    if (state.dragDepth === 0 || leftWindow) {
+      state.dragDepth = 0;
+      state.isDragActive = false;
+      renderDropOverlay();
+    }
+  }
+
+  async function onDrop(event) {
+    if (!dataTransferHasFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    state.dragDepth = 0;
+    state.isDragActive = false;
+    renderDropOverlay();
+    if (!canWrite()) {
+      BB.ui.toast('Upload is not available for this storage instance.', { status: 'error', duration: 4500 });
+      return;
+    }
+    try {
+      const entries = await droppedUploadEntries(event.dataTransfer);
+      if (!entries.length) {
+        BB.ui.toast('No files were found in the dropped selection.', { status: 'error', duration: 4500 });
+        return;
+      }
+      const containsFolder = entries.some(entry => String(entry.relative || '').includes('/'));
+      if (containsFolder && !await confirmFolderUpload(entries)) return;
+      await uploadResolvedFiles(entries);
+    } catch (error) {
+      BB.ui.toast(`Unable to read dropped files: ${String(error.message || error)}`, { status: 'error', duration: 6500 });
+    }
+  }
+
+  function triggerUpload() {
+    if (!canWrite()) return;
+    ui.fileInput.value = '';
+    ui.fileInput.click();
+  }
+
+  function triggerUploadDir() {
+    if (!canWrite()) return;
+    ui.dirInput.value = '';
+    ui.dirInput.click();
+  }
+
+  async function showUploadSelectionError(title, message) {
+    await BB.ui.alert({
+      title,
+      html: `<div class="bb-upload-selection-error">
+        <i class="mdi mdi-alert-circle-outline"></i>
+        <div><strong>${escapeHTML(title)}</strong><p>${escapeHTML(message)}</p></div>
+      </div>`
+    });
+  }
+
+  async function onFileInput(event) {
+    const files = Array.from(event.target.files || []);
+    event.target.value = '';
+    if (!files.length) return;
+    if (files.some(file => cleanDroppedPath(file.webkitRelativePath || '').includes('/'))) {
+      await showUploadSelectionError('Files expected', 'Use “Upload folder” when the selected items include a directory hierarchy.');
+      return;
+    }
+    await uploadFiles(files, file => file.name);
+  }
+
+  async function onDirInput(event) {
+    const files = Array.from(event.target.files || []);
+    event.target.value = '';
+    if (!files.length) return;
+    const hasDirectoryPath = files.some(file => cleanDroppedPath(file.webkitRelativePath || '').includes('/'));
+    if (!hasDirectoryPath) {
+      await showUploadSelectionError('Folder expected', 'Use “Upload files” for individual files, or select a folder containing the files to upload.');
+      return;
+    }
+    const entries = files.map(file => ({
+      file,
+      relative: cleanDroppedPath(file.webkitRelativePath || file.name)
+    }));
+    if (await confirmFolderUpload(entries)) await uploadResolvedFiles(entries);
+  }
+
+  async function confirmFolderUpload(entries, selectedName = '') {
+    const files = Array.from(entries || []).filter(entry => entry?.file && entry.relative);
+    if (!files.length) return false;
+    const totalSize = files.reduce((sum, entry) => sum + Math.max(0, Number(entry.file.size || 0)), 0);
+    const roots = Array.from(new Set(files.map(entry => String(entry.relative).split('/')[0]).filter(Boolean)));
+    const folderName = selectedName || (roots.length === 1 ? roots[0] : `${roots.length} top-level folders`);
+    const destination = `/${state.pathPrefix || ''}`;
+    const samples = files.slice(0, 4).map(entry => `<li class="mono">${escapeHTML(entry.relative)}</li>`).join('');
+    const remaining = Math.max(0, files.length - 4);
+    return BB.ui.confirm({
+      title: 'Upload folder',
+      confirmLabel: `Upload ${files.length.toLocaleString()} file${files.length === 1 ? '' : 's'}`,
+      cancelLabel: 'Cancel',
+      html: `<div class="bb-upload-confirmation">
+        <div class="bb-upload-confirmation-icon"><i class="mdi mdi-folder-upload-outline"></i></div>
+        <div class="bb-upload-confirmation-copy">
+          <strong>${escapeHTML(folderName)}</strong>
+          <span>${files.length.toLocaleString()} file${files.length === 1 ? '' : 's'} · ${escapeHTML(formatBytes(totalSize))}</span>
+        </div>
+        <div class="bb-upload-confirmation-destination">
+          <small>Destination</small>
+          <code>${escapeHTML(destination)}</code>
+        </div>
+        <ul class="bb-upload-confirmation-files">${samples}${remaining ? `<li>+ ${remaining.toLocaleString()} more file${remaining === 1 ? '' : 's'}</li>` : ''}</ul>
+      </div>`
+    });
+  }
+
+  async function uploadFiles(files, keyResolver) {
+    const resolved = Array.from(files || []).map(file => ({
+      file,
+      relative: cleanDroppedPath(keyResolver(file))
+    }));
+    return uploadResolvedFiles(resolved);
+  }
+
+  async function uploadResolvedFiles(uploadEntries) {
+    if (!canWrite() || !uploadEntries.length) return;
+    const instanceId = state.instanceId;
+    const basePrefix = state.pathPrefix;
+    const entries = uploadEntries
+      .filter(entry => entry?.file && cleanDroppedPath(entry.relative || entry.file.name))
+      .map(entry => {
+        const relative = cleanDroppedPath(entry.relative || entry.file.name);
+        return {
+          file: entry.file,
+          relative,
+          key: `${basePrefix}${relative}`.replace(/^\/+/, ''),
+          instanceId,
+          basePrefix
+        };
+      });
+    if (!entries.length) return;
+    getUploadManager(browser).add(entries);
+  }
+
+  async function downloadAllFiles() {
+    if (!canDownloadAll()) return false;
+    const basePrefix = state.pathPrefix;
+    const archiveName = `${basePrefix.split('/').filter(Boolean).pop() || currentInstance().name || 'archive'}.zip`;
+    return downloadArchive({ archiveName, basePrefix, instanceId: state.instanceId });
+  }
+
+  async function onPrefixDownload(row) {
+    if (!canRead() || !row?.prefix) return false;
+    const prefix = normalizePrefix(row.prefix);
+    const folderName = prefix.split('/').filter(Boolean).pop() || 'folder';
+    return downloadArchive({ archiveName: `${folderName}.zip`, basePrefix: prefix, instanceId: state.instanceId });
+  }
+
+  async function downloadArchive({ archiveName, basePrefix = '', instanceId = '' }) {
+    if (!canRead()) return false;
+    const url = BB.api.archiveURL({
+      prefix: basePrefix,
+      name: archiveName,
+      instance: instanceId
+    });
+    BB.actions.triggerBrowserDownload(url, archiveName);
+    BB.ui.toast('Archive download started in the browser.', {
+      type: 'info',
+      duration: 5000
+    });
+    return true;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Start-up
+  // ---------------------------------------------------------------------------
 
   function preloadInitialShellIcons() {
     if (typeof window.Image !== 'function') return Promise.resolve();
@@ -1432,17 +1889,65 @@ document.title = 'Object Storage Browser';
       image.addEventListener('load', finish, { once: true });
       image.addEventListener('error', finish, { once: true });
       image.decoding = 'async';
-      // CSS masks are fetched in CORS mode; matching it lets the preloaded response be reused.
-      image.crossOrigin = 'anonymous';
       image.src = url;
       if (image.complete) finish();
     })));
   }
 
-  function mountBrowser() {
-    app.mount('#root');
+  function bindElements() {
+    for (const [name, id] of Object.entries({
+      root: 'root', app: 'app', main: 'main', buildVersion: 'buildVersion', rootLink: 'rootLink',
+      breadcrumbRegion: 'breadcrumbRegion', breadcrumbLine: 'breadcrumbLine', headerTools: 'headerTools',
+      searchInput: 'searchInput', openButton: 'openButton', refreshButton: 'refreshButton',
+      downloadAllItem: 'downloadAllItem', insightsItem: 'insightsItem', newMenu: 'newMenu',
+      uploadFilesItem: 'uploadFilesItem', uploadFolderItem: 'uploadFolderItem',
+      fileInput: 'fileInput', dirInput: 'dirInput', dropOverlay: 'dropOverlay', dropTarget: 'dropTarget'
+    })) ui[name] = byId(id);
+    ui.toolbarRight = ui.newMenu.parentElement;
   }
 
-  const iconWaitLimit = new Promise(resolve => window.setTimeout(resolve, 150));
-  Promise.race([preloadInitialShellIcons(), iconWaitLimit]).then(mountBrowser, mountBrowser);
+  function bindEvents() {
+    ui.app.style.setProperty('--primary-color', config.primaryColor);
+    ui.rootLink.addEventListener('click', () => { if (breadcrumbs().length) goToPrefix(''); });
+    ui.searchInput.addEventListener('input', () => { state.searchPrefix = ui.searchInput.value; });
+    ui.searchInput.addEventListener('keyup', event => { if (event.key === 'Enter') searchByPrefix(); });
+    ui.openButton.addEventListener('click', searchByPrefix);
+    ui.refreshButton.addEventListener('click', manualRefresh);
+    document.querySelectorAll('.toolbar .dropdown').forEach(initDropdown);
+    ui.downloadAllItem.addEventListener('click', () => { if (canDownloadAll()) downloadAllFiles(); });
+    ui.insightsItem.addEventListener('click', () => { if (canRead()) onCurrentInsights(); });
+    ui.uploadFilesItem.addEventListener('click', triggerUpload);
+    ui.uploadFolderItem.addEventListener('click', triggerUploadDir);
+    ui.fileInput.addEventListener('change', onFileInput);
+    ui.dirInput.addEventListener('change', onDirInput);
+
+    window.addEventListener('popstate', updatePathFromLocation);
+    window.addEventListener('resize', () => {
+      scheduleBreadcrumbLayout();
+      if (state.breadcrumbOverflowOpen) window.requestAnimationFrame(positionBreadcrumbOverflow);
+    });
+    window.addEventListener('scroll', () => { if (state.breadcrumbOverflowOpen) positionBreadcrumbOverflow(); }, true);
+    document.addEventListener('pointerdown', onDocumentPointer);
+    document.addEventListener('keydown', onDocumentKeydown);
+    window.addEventListener('dragenter', onDragEnter);
+    window.addEventListener('dragover', onDragOver);
+    window.addEventListener('dragleave', onDragLeave);
+    window.addEventListener('drop', onDrop);
+    document.addEventListener('contextmenu', onRowContextMenu);
+    if ('ResizeObserver' in window) {
+      new ResizeObserver(scheduleBreadcrumbLayout).observe(ui.breadcrumbRegion);
+    }
+  }
+
+  function start() {
+    bindElements();
+    bindEvents();
+    ui.root.hidden = false;
+    update();
+    scheduleBreadcrumbLayout();
+    initialize();
+  }
+
+  const iconWaitLimit = new Promise(resolve => window.setTimeout(resolve, 600));
+  Promise.race([preloadInitialShellIcons(), iconWaitLimit]).then(start, start);
 })();

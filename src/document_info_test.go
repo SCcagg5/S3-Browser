@@ -375,3 +375,64 @@ func TestStructuredMetadataSmallTextFormats(t *testing.T) {
 		})
 	}
 }
+
+func TestPDFPageCountMarkerScanIsBounded(t *testing.T) {
+	// Without any "obj" text an unbounded backward search scans everything
+	// before each marker, which takes seconds for this input.
+	data := bytes.Repeat([]byte("/Type/Pages"), 20000)
+	started := time.Now()
+	deterministicPDFPageCount(data)
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("page count scan took %s", elapsed)
+	}
+	legit := []byte("%PDF-1.7\n2 0 obj << /Type /Pages /Count 7 /Kids [3 0 R] >> endobj\n")
+	if got := deterministicPDFPageCount(legit); got != 7 {
+		t.Fatalf("page count = %d, want 7", got)
+	}
+}
+
+func TestParquetThriftSkipRejectsHostileMetadata(t *testing.T) {
+	cases := []struct {
+		name string
+		data []byte
+	}{
+		// Unknown field 7: map with 2^32-1 zero-width (bool) key/value entries.
+		{"map of booleans", []byte{0x7b, 0xff, 0xff, 0xff, 0xff, 0x0f, 0x11}},
+		// Unknown field 7: list of 2^31 boolean elements.
+		{"list of booleans", []byte{0x79, 0xf1, 0x80, 0x80, 0x80, 0x80, 0x08}},
+		// Unknown field 7: list claiming more struct elements than bytes remain.
+		{"list larger than data", []byte{0x79, 0xfc, 0xff, 0xff, 0xff, 0x07, 0x1c}},
+		// Row-group list of 2^31 stop-typed elements.
+		{"row groups of stop type", []byte{0x49, 0xf0, 0x80, 0x80, 0x80, 0x80, 0x08}},
+		{"deeply nested structs", append([]byte{0x7c}, bytes.Repeat([]byte{0x1c}, 100000)...)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			done := make(chan error, 1)
+			go func() {
+				_, err := parseParquetMetadataDetail(tc.data)
+				done <- err
+			}()
+			select {
+			case err := <-done:
+				if err == nil {
+					t.Fatal("hostile metadata was accepted")
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("parser did not return")
+			}
+		})
+	}
+	reader := &thriftCompactReader{data: bytes.Repeat([]byte{0x1c}, 200)}
+	if err := reader.skip(compactStruct); err == nil || !strings.Contains(err.Error(), "nested too deeply") {
+		t.Fatalf("nesting error = %v", err)
+	}
+	// A list<bool> stores one byte per element and a nested struct skips normally.
+	reader = &thriftCompactReader{data: []byte{0x31, 0x01, 0x02, 0x01, 0x15, 0x04, 0x00}}
+	if err := reader.skip(compactList); err != nil || reader.pos != 4 {
+		t.Fatalf("list skip err = %v pos = %d", err, reader.pos)
+	}
+	if err := reader.skip(compactStruct); err != nil || reader.pos != len(reader.data) {
+		t.Fatalf("struct skip err = %v pos = %d", err, reader.pos)
+	}
+}

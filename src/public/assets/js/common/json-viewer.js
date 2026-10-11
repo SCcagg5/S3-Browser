@@ -66,7 +66,6 @@
     pager.append(range, previous, next);
 
     const host = document.createElement('div');
-    host.tabIndex = -1;
     host.className = 'json-text-host';
     panel.append(host);
 
@@ -136,14 +135,6 @@
         host.textContent = String(error?.message || error);
         range.textContent = `${mode === 'raw' ? 'Raw' : 'Beautify'} preview failed`;
         previous.disabled = target <= 0;
-      } finally {
-        // The pager button just used may now be disabled (first/last page): keep focus on a live control.
-        requestAnimationFrame(() => {
-          const active = document.activeElement;
-          if (active && active !== document.body && !active.disabled) return;
-          if (!panel.contains(active) && active && active !== document.body) return;
-          (next.disabled ? (previous.disabled ? host : previous) : next).focus?.({ preventScroll: true });
-        });
       }
     }
 
@@ -179,11 +170,7 @@
     const toggle = document.createElement('button');
     toggle.type = 'button';
     toggle.className = 'json-tree-toggle';
-    const nodeLabel = options.rootLabel || node.label || '(root)';
-    toggle.setAttribute('aria-label', node.container ? `Expand ${nodeLabel}` : `${nodeLabel}: scalar value`);
-    if (node.container) toggle.setAttribute('aria-expanded', 'false');
-    // One tab stop for the whole tree; Arrow keys move between nodes (see createTreePanel).
-    toggle.tabIndex = -1;
+    toggle.setAttribute('aria-label', node.container ? 'Expand JSON node' : 'Scalar value');
     toggle.disabled = !node.container;
     const toggleIcon = document.createElement('i');
     toggleIcon.className = node.container ? 'mdi mdi-plus-box-outline' : 'mdi mdi-circle-small';
@@ -299,7 +286,6 @@
       children.hidden = !expanded;
       toggleIcon.className = expanded ? 'mdi mdi-minus-box-outline' : 'mdi mdi-plus-box-outline';
       toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-      toggle.setAttribute('aria-label', `${expanded ? 'Collapse' : 'Expand'} ${nodeLabel}`);
       if (expanded && !initialized) void appendPage();
     }
 
@@ -336,41 +322,12 @@
           rootLabel: '(root)',
           initialPayload: payload.node?.container ? payload : null
         }));
-        const first = panel.querySelector('.json-tree-toggle:not(:disabled)');
-        if (first) first.tabIndex = 0;
       } catch (error) {
         if (error?.name === 'AbortError') return;
         panel.className = 'json-panel json-tree-panel is-error';
         panel.textContent = String(error?.message || error);
       }
     }
-
-    // Tree keyboard model: one tab stop, Up/Down/Home/End move between the visible nodes, Right expands, Left
-    // collapses (or moves to the parent node).
-    const visibleToggles = () => Array.from(panel.querySelectorAll('.json-tree-toggle')).filter(button => !button.disabled && button.offsetParent !== null);
-    panel.addEventListener('focusin', event => {
-      const target = event.target.closest?.('.json-tree-toggle');
-      if (!target) return;
-      panel.querySelectorAll('.json-tree-toggle[tabindex="0"]').forEach(button => { if (button !== target) button.tabIndex = -1; });
-      target.tabIndex = 0;
-    });
-    panel.addEventListener('keydown', event => {
-      const target = event.target.closest?.('.json-tree-toggle');
-      if (!target) return;
-      const toggles = visibleToggles();
-      const index = toggles.indexOf(target);
-      const expanded = target.getAttribute('aria-expanded') === 'true';
-      let handled = true;
-      if (event.key === 'ArrowDown') toggles[Math.min(toggles.length - 1, index + 1)]?.focus();
-      else if (event.key === 'ArrowUp') toggles[Math.max(0, index - 1)]?.focus();
-      else if (event.key === 'Home') toggles[0]?.focus();
-      else if (event.key === 'End') toggles[toggles.length - 1]?.focus();
-      else if (event.key === 'ArrowRight' && !expanded) target.click();
-      else if (event.key === 'ArrowLeft' && expanded) target.click();
-      else if (event.key === 'ArrowLeft') target.closest('.json-tree-children')?.closest('.json-tree-node')?.querySelector(':scope > .json-tree-line > .json-tree-toggle')?.focus();
-      else handled = false;
-      if (handled) event.preventDefault();
-    });
 
     panel.load = initialize;
     return panel;
@@ -395,7 +352,6 @@
     const tabs = document.createElement('div');
     tabs.className = 'spreadsheet-tabs json-tabs';
     tabs.setAttribute('role', 'tablist');
-    tabs.setAttribute('aria-label', 'JSON view');
     const rawTab = createModeButton('raw', 'Raw', true);
     const beautifyTab = createModeButton('beautify', 'Beautify', false);
     const treeTab = createModeButton('tree', 'Tree', false);
@@ -429,16 +385,8 @@
     const loaded = new Set();
     let activeMode = 'raw';
 
-    let countHadFocus = false;
     const syncCountButton = () => {
-      const hide = activeMode === 'tree' || view.summaryState === 'ready';
-      // The button disappears once the totals are known: hand its focus to the pager (or the text) so it is not lost.
-      if (hide && !countButton.hidden && countHadFocus) {
-        countHadFocus = false;
-        const panel = panels[activeMode];
-        (panel?.pager?.querySelector('button:not(:disabled)') || panel?.querySelector('.json-text-host') || panel)?.focus?.({ preventScroll: true });
-      }
-      countButton.hidden = hide;
+      countButton.hidden = activeMode === 'tree' || view.summaryState === 'ready';
     };
 
     view.ensureSummary = () => {
@@ -481,9 +429,7 @@
       });
       return view.summaryPromise;
     };
-    // Remember whether the user activated the button from it: it is disabled while counting, which already moves
-    // focus away, and it disappears when the totals are known.
-    countButton.addEventListener('click', () => { countHadFocus = document.activeElement === countButton || countHadFocus; void view.ensureSummary(); });
+    countButton.addEventListener('click', () => void view.ensureSummary());
 
     function selectMode(mode) {
       const selected = panels[mode] ? mode : 'raw';
@@ -493,7 +439,6 @@
         const active = name === selected;
         button.classList.toggle('is-active', active);
         button.setAttribute('aria-selected', active ? 'true' : 'false');
-        button.tabIndex = active ? 0 : -1;
         panels[name].hidden = !active;
       }
       select.value = selected;
@@ -509,7 +454,6 @@
       button.addEventListener('click', () => selectMode(name));
     }
     select.addEventListener('change', () => selectMode(select.value));
-    BB.ui?.enhanceTabs?.([rawTab, beautifyTab, treeTab], [rawPanel, beautifyPanel, treePanel], index => selectMode(['raw', 'beautify', 'tree'][index]));
 
     root.append(controls, rawPanel, beautifyPanel, treePanel);
     selectMode('raw');

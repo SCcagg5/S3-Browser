@@ -3,49 +3,179 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="color-scheme" content="light dark" />
+  <meta name="color-scheme" content="light" />
   <meta name="bb-asset-version" content="{{ASSET_VERSION}}" />
-  <meta name="description" content="Browse, preview and manage objects in S3-compatible and Google Cloud Storage buckets." />
   <base href="{{APP_BASE}}" />
   <link rel="icon" type="image/svg+xml" href="favicon.svg?v=2" />
   <title>Object Storage Browser</title>
 
   <!-- Keep the first visible header frame stable on hard reloads. -->
-  <link rel="preload" as="image" type="image/svg+xml" crossorigin="anonymous" href="assets/icons/mdi/source-commit.svg" fetchpriority="high" data-bb-initial-icon />
-  <link rel="preload" as="image" type="image/svg+xml" crossorigin="anonymous" href="assets/icons/mdi/database-outline.svg" fetchpriority="high" data-bb-initial-icon />
-  <link rel="preload" as="image" type="image/svg+xml" crossorigin="anonymous" href="assets/icons/mdi/eye-outline.svg" fetchpriority="high" data-bb-initial-icon />
-  <link rel="preload" as="image" type="image/svg+xml" crossorigin="anonymous" href="assets/icons/mdi/pencil-outline.svg" fetchpriority="high" data-bb-initial-icon />
-  <link rel="preload" as="image" type="image/svg+xml" crossorigin="anonymous" href="assets/icons/mdi/delete-outline.svg" fetchpriority="high" data-bb-initial-icon />
-  <link rel="preload" as="image" type="image/svg+xml" crossorigin="anonymous" href="assets/icons/mdi/magnify.svg" fetchpriority="high" data-bb-initial-icon />
-  <link rel="preload" as="image" type="image/svg+xml" crossorigin="anonymous" href="assets/icons/mdi/refresh.svg" fetchpriority="high" data-bb-initial-icon />
-  <link rel="preload" as="image" type="image/svg+xml" crossorigin="anonymous" href="assets/icons/mdi/cogs.svg" fetchpriority="high" data-bb-initial-icon />
-  <link rel="preload" as="image" type="image/svg+xml" crossorigin="anonymous" href="assets/icons/mdi/plus.svg" fetchpriority="high" data-bb-initial-icon />
-  <link rel="preload" as="image" type="image/svg+xml" crossorigin="anonymous" href="assets/icons/mdi/chevron-down.svg" fetchpriority="high" data-bb-initial-icon />
+  <link rel="preload" as="image" type="image/svg+xml" href="assets/icons/mdi/source-commit.svg" fetchpriority="high" data-bb-initial-icon />
+  <link rel="preload" as="image" type="image/svg+xml" href="assets/icons/mdi/database-outline.svg" fetchpriority="high" data-bb-initial-icon />
+  <link rel="preload" as="image" type="image/svg+xml" href="assets/icons/mdi/eye-outline.svg" fetchpriority="high" data-bb-initial-icon />
+  <link rel="preload" as="image" type="image/svg+xml" href="assets/icons/mdi/pencil-outline.svg" fetchpriority="high" data-bb-initial-icon />
+  <link rel="preload" as="image" type="image/svg+xml" href="assets/icons/mdi/delete-outline.svg" fetchpriority="high" data-bb-initial-icon />
+  <link rel="preload" as="image" type="image/svg+xml" href="assets/icons/mdi/magnify.svg" fetchpriority="high" data-bb-initial-icon />
+  <link rel="preload" as="image" type="image/svg+xml" href="assets/icons/mdi/refresh.svg" fetchpriority="high" data-bb-initial-icon />
+  <link rel="preload" as="image" type="image/svg+xml" href="assets/icons/mdi/cogs.svg" fetchpriority="high" data-bb-initial-icon />
+  <link rel="preload" as="image" type="image/svg+xml" href="assets/icons/mdi/plus.svg" fetchpriority="high" data-bb-initial-icon />
+  <link rel="preload" as="image" type="image/svg+xml" href="assets/icons/mdi/chevron-down.svg" fetchpriority="high" data-bb-initial-icon />
 
   <link rel="stylesheet" href="assets/css/icons.css" />
+  <link rel="stylesheet" href="assets/vendor/github-markdown-css/5/github-markdown-light.min.css" />
+  <link rel="stylesheet" href="assets/vendor/highlightjs/11/styles/github.min.css" />
+  <link rel="stylesheet" href="assets/vendor/buefy/1.0.1/buefy.min.css" />
   <link rel="stylesheet" href="assets/css/tokens.css" />
   <link rel="stylesheet" href="assets/css/base.css" />
+  <link rel="stylesheet" href="assets/css/style.css" />
   <link rel="stylesheet" href="assets/css/ui.css" />
+  <link rel="stylesheet" href="assets/css/components.css" />
+  <link rel="stylesheet" href="assets/css/data-grid.css" />
+  <link rel="stylesheet" href="assets/css/viewers.css" />
+  <link rel="stylesheet" href="assets/css/interaction.css" />
   <link rel="stylesheet" href="assets/css/treemap.css" />
-  <link rel="stylesheet" href="assets/css/browser.css" />
-  <link rel="stylesheet" href="assets/css/a11y.css" />
 </head>
 <body>
-  <div id="root"></div>
-  <noscript><p class="not-found">The object browser needs JavaScript to run.</p></noscript>
+  <div id="root" hidden>
+    <div id="app">
 
-  <!-- The browser page ships Vue's runtime-only build: its template is compiled ahead of time into app.render.js
-       (see tools/build-template.mjs), so nothing is compiled or evaluated in the browser. -->
-  <script defer src="assets/vendor/vue/3.5.18/vue.runtime.global.prod.js"></script>
+      <header class="top">
+        <span id="buildVersion" class="build-version" hidden>
+          <i class="mdi mdi-source-commit"></i>
+          <span></span>
+        </span>
+        <div class="container">
+          <div class="head">
+            <div id="breadcrumbRegion" class="title breadcrumbs browser-breadcrumbs">
+              <button id="rootLink" type="button" class="root-link breadcrumb-current" aria-current="page" aria-disabled="true" tabindex="-1" title="Storage root">
+                <i class="mdi mdi-database-outline"></i>
+              </button>
+              <h1 id="breadcrumbLine" class="breadcrumb-line">
+                <span class="breadcrumb-separator">/</span>
+              </h1>
+            </div>
 
-  <script defer src="assets/js/common/detect.js"></script>
-  <script defer src="assets/js/common/runtime.js"></script>
-  <script defer src="assets/js/common/api.js"></script>
-  <script defer src="assets/js/common/ui.js"></script>
-  <script defer src="assets/js/common/download-manager.js"></script>
-  <script defer src="assets/js/common/actions.js"></script>
-  <script defer src="assets/js/common/menu.js"></script>
-  <script defer src="assets/js/app.render.js"></script>
-  <script defer src="assets/js/app.js"></script>
+            <div id="headerTools" class="header-tools">
+              <div class="storage-switcher is-static-switcher is-loading-switcher" aria-hidden="true">
+                <div class="storage-switcher-trigger is-static is-loading">
+                  <span class="storage-switcher-loading-icon"></span>
+                  <span class="storage-switcher-copy">
+                    <span class="storage-switcher-loading-line is-title"></span>
+                    <span class="storage-switcher-loading-line is-subtitle"></span>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <section class="toolbar">
+        <div class="container toolbar-row">
+          <div class="toolbar-left">
+            <div class="field">
+              <div class="field-body">
+                <div class="field has-addons">
+                  <div class="control is-expanded is-clearfix">
+                    <input id="searchInput" class="input" type="text" autocomplete="on" placeholder="Open a prefix in the current folder..." />
+                  </div>
+                  <p class="control">
+                    <button id="openButton" class="button is-primary" type="button">
+                      <span class="icon is-small"><i class="mdi mdi-magnify"></i></span>
+                      <span> Open </span>
+                    </button>
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="toolbar-spacer"></div>
+
+          <div class="toolbar-right">
+            <button id="refreshButton" class="button icon-btn-disc is-light" title="Refresh" type="button">
+              <span class="icon is-small"><i class="mdi mdi-refresh"></i></span>
+            </button>
+
+            <div class="dropdown dropdown-menu-animation is-bottom-left">
+              <div tabindex="0" class="dropdown-trigger" aria-haspopup="true">
+                <button class="button has-bb-chevron is-light" type="button">
+                  <span class="icon is-small"><i class="mdi mdi-cogs"></i></span>
+                  <span> Actions </span>
+                </button>
+              </div>
+              <div class="dropdown-menu" aria-hidden="true" style="display: none;">
+                <div class="dropdown-content" role="menu" aria-modal="true">
+                  <a id="downloadAllItem" class="dropdown-item" tabindex="0">
+                    <i class="mdi mdi-archive-arrow-down-outline"></i>
+                    <span>Download as ZIP</span>
+                  </a>
+                  <a id="insightsItem" class="dropdown-item" tabindex="0">
+                    <i class="mdi mdi-chart-box-outline"></i>
+                    <span>Storage insights</span>
+                  </a>
+                </div>
+              </div>
+            </div>
+
+            <div id="newMenu" class="dropdown dropdown-menu-animation is-bottom-left">
+              <div tabindex="0" class="dropdown-trigger" aria-haspopup="true">
+                <button class="button has-bb-chevron is-primary" type="button">
+                  <span class="icon is-small"><i class="mdi mdi-plus"></i></span>
+                  <span> New </span>
+                </button>
+              </div>
+              <div class="dropdown-menu" aria-hidden="true" style="display: none;">
+                <div class="dropdown-content" role="menu" aria-modal="true">
+                  <a id="uploadFilesItem" class="dropdown-item" tabindex="0">
+                    <i class="mdi mdi-file-upload-outline"></i>
+                    <span>Upload files</span>
+                  </a>
+                  <a id="uploadFolderItem" class="dropdown-item" tabindex="0">
+                    <i class="mdi mdi-folder-upload"></i>
+                    <span>Upload folder</span>
+                  </a>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <input id="fileInput" type="file" class="is-hidden-input" multiple />
+      <input id="dirInput" type="file" class="is-hidden-input" webkitdirectory multiple />
+
+      <div id="dropOverlay" class="upload-drop-overlay" role="status" aria-live="polite" style="display: none;">
+        <div class="upload-drop-card">
+          <i class="mdi mdi-cloud-upload-outline"></i>
+          <strong>Drop files or folders to upload</strong>
+          <span>
+            Uploading to
+            <span id="dropTarget" class="mono">/</span>
+          </span>
+        </div>
+      </div>
+
+      <main id="main" class="container main-content">
+        <div class="empty-state card">
+          <i class="mdi mdi-loading mdi-spin"></i>
+          <p>Loading storage instances...</p>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script src="assets/vendor/highlightjs/11/highlight.min.js"></script>
+  <script src="assets/vendor/marked/12.0.2/marked.min.js"></script>
+
+  <script src="assets/js/common/detect.js"></script>
+  <script src="assets/js/common/runtime.js"></script>
+  <script src="assets/js/common/api.js"></script>
+  <script src="assets/js/common/ui.js"></script>
+  <script src="assets/js/common/download-manager.js"></script>
+  <script src="assets/js/common/actions.js"></script>
+  <script src="assets/js/common/menu.js"></script>
+  <script src="assets/js/common/render.js"></script>
+  <script src="assets/js/app.js"></script>
 </body>
 </html>

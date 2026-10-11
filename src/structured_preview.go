@@ -366,11 +366,31 @@ func isMostlyText(data []byte) bool {
 	return printable*100/len(data) >= 90
 }
 
+// maxContactValuesPerField bounds distinct EMAIL/TEL/ADR/URL/NOTE values kept per
+// contact so a crafted card cannot inflate the preview or the dedupe work.
+const maxContactValuesPerField = 256
+
+// appendUniqueLimited is appendUniqueString with a map-backed membership check
+// and a cap on the slice length, keeping dedupe linear in the number of values.
+func appendUniqueLimited(values []string, seen map[string]struct{}, field, value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" || len(values) >= maxContactValuesPerField {
+		return values
+	}
+	key := field + "\x00" + value
+	if _, ok := seen[key]; ok {
+		return values
+	}
+	seen[key] = struct{}{}
+	return append(values, value)
+}
+
 func parseVCardPreview(data []byte) []contactPreviewRecord {
 	blocks := splitICalBlocks(unfoldStructuredLines(string(data)), "BEGIN:VCARD", "END:VCARD")
 	result := make([]contactPreviewRecord, 0, len(blocks))
 	for _, block := range blocks {
 		record := contactPreviewRecord{}
+		seen := make(map[string]struct{})
 		for _, line := range block {
 			name := structuredPropertyName(line)
 			value := decodeStructuredValue(structuredPropertyValue(line))
@@ -389,15 +409,15 @@ func parseVCardPreview(data []byte) []contactPreviewRecord {
 					record.Title = value
 				}
 			case "EMAIL":
-				record.Emails = appendUniqueString(record.Emails, value)
+				record.Emails = appendUniqueLimited(record.Emails, seen, "EMAIL", value)
 			case "TEL":
-				record.Phones = appendUniqueString(record.Phones, value)
+				record.Phones = appendUniqueLimited(record.Phones, seen, "TEL", value)
 			case "ADR":
-				record.Addresses = appendUniqueString(record.Addresses, normalizeStructuredAddress(value))
+				record.Addresses = appendUniqueLimited(record.Addresses, seen, "ADR", normalizeStructuredAddress(value))
 			case "URL":
-				record.URLs = appendUniqueString(record.URLs, value)
+				record.URLs = appendUniqueLimited(record.URLs, seen, "URL", value)
 			case "NOTE":
-				record.Notes = appendUniqueString(record.Notes, value)
+				record.Notes = appendUniqueLimited(record.Notes, seen, "NOTE", value)
 			}
 		}
 		if record.Name == "" {
@@ -504,7 +524,26 @@ func textprotoHeaderFromMail(header mail.Header) map[string][]string {
 	return out
 }
 
+const (
+	maxMIMEPreviewDepth = 8
+	maxMIMEPreviewParts = 4096
+)
+
 func walkMIMEPreview(header map[string][]string, body []byte, preview *emailPreviewData) {
+	walker := &mimeWalker{preview: preview}
+	walker.walk(header, bytes.NewReader(body), 0)
+}
+
+// mimeWalker visits MIME parts with a depth and part budget. Nested multipart
+// bodies are streamed from the parent part instead of being copied per level,
+// so work and memory stay linear in the message size.
+type mimeWalker struct {
+	preview *emailPreviewData
+	parts   int
+}
+
+func (w *mimeWalker) walk(header map[string][]string, reader io.Reader, depth int) {
+	preview := w.preview
 	contentType := firstHeaderValue(header, "Content-Type")
 	mediaType, params, err := mime.ParseMediaType(contentType)
 	if err != nil || mediaType == "" {
@@ -512,28 +551,37 @@ func walkMIMEPreview(header map[string][]string, body []byte, preview *emailPrev
 	}
 	if strings.HasPrefix(strings.ToLower(mediaType), "multipart/") {
 		boundary := params["boundary"]
-		if boundary == "" {
+		if boundary == "" || depth >= maxMIMEPreviewDepth {
 			return
 		}
-		reader := multipart.NewReader(bytes.NewReader(body), boundary)
-		for {
-			part, err := reader.NextPart()
-			if err == io.EOF {
-				break
+		if depth > 0 {
+			switch strings.ToLower(strings.TrimSpace(firstHeaderValue(header, "Content-Transfer-Encoding"))) {
+			case "base64", "quoted-printable":
+				raw, readErr := io.ReadAll(reader)
+				if readErr != nil {
+					return
+				}
+				reader = bytes.NewReader(decodeTransferEncoding(header, raw))
 			}
+		}
+		multipartReader := multipart.NewReader(reader, boundary)
+		for w.parts < maxMIMEPreviewParts {
+			part, err := multipartReader.NextPart()
 			if err != nil {
 				break
 			}
-			partBody, readErr := io.ReadAll(part)
-			if readErr == nil {
-				partHeader := make(map[string][]string, len(part.Header))
-				for key, values := range part.Header {
-					partHeader[key] = append([]string(nil), values...)
-				}
-				walkMIMEPreview(partHeader, decodeTransferEncoding(partHeader, partBody), preview)
+			w.parts++
+			partHeader := make(map[string][]string, len(part.Header))
+			for key, values := range part.Header {
+				partHeader[key] = append([]string(nil), values...)
 			}
+			w.walk(partHeader, part, depth+1)
 			_ = part.Close()
 		}
+		return
+	}
+	body, readErr := io.ReadAll(reader)
+	if readErr != nil {
 		return
 	}
 	body = decodeTransferEncoding(header, body)

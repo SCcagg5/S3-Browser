@@ -49,16 +49,7 @@
   }
 
   async function request(path, options) {
-    let response;
-    try {
-      response = await fetch(BB.runtime.resolvePath(path), { cache: 'no-store', ...(options || {}) });
-    } catch (networkError) {
-      // An aborted request is the caller's own doing; anything else is the network, not a mystery string.
-      if (networkError?.name === 'AbortError') throw networkError;
-      const unreachable = new Error('The server could not be reached. Check your connection and try again.');
-      unreachable.code = 'network';
-      throw unreachable;
-    }
+    const response = await fetch(BB.runtime.resolvePath(path), { cache: 'no-store', ...(options || {}) });
     if (response.ok) return response;
     let message = `HTTP ${response.status}`;
     let code = '';

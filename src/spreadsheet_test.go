@@ -3,7 +3,9 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -225,5 +227,92 @@ func TestSpreadsheetPreviewExplainsCorruptOfficeZIP(t *testing.T) {
 	}
 	if !strings.Contains(message, "central directory") {
 		t.Fatalf("message = %q", message)
+	}
+}
+
+func testSheetFile(t *testing.T, sheetXML string) *zip.File {
+	t.Helper()
+	var buffer bytes.Buffer
+	writer := zip.NewWriter(&buffer)
+	entry, err := writer.Create("xl/worksheets/sheet1.xml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := entry.Write([]byte(sheetXML)); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reader, err := zip.NewReader(bytes.NewReader(buffer.Bytes()), int64(buffer.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return reader.File[0]
+}
+
+func readTestSheet(ctx context.Context, t *testing.T, sheetXML string, shared []string, pageSize int) (spreadsheetResponseJSON, error) {
+	t.Helper()
+	sheets := []spreadsheetSheetInfo{{Name: "Sheet1"}}
+	styles := spreadsheetStyles{dateStyles: map[int]bool{}}
+	query := spreadsheetQuery{pageSize: pageSize, filters: map[int]string{}, sortColumn: -1}
+	return readSpreadsheetSheet(ctx, testSheetFile(t, sheetXML), sheets, 0, shared, styles, query)
+}
+
+func aliasedSheetXML(rows, columns int) string {
+	var builder strings.Builder
+	builder.WriteString(`<worksheet><sheetData>`)
+	for row := 1; row <= rows; row++ {
+		builder.WriteString(`<row r="` + strconv.Itoa(row) + `">`)
+		for column := 0; column < columns; column++ {
+			builder.WriteString(`<c t="s"><v>0</v></c>`)
+		}
+		builder.WriteString(`</row>`)
+	}
+	builder.WriteString(`</sheetData></worksheet>`)
+	return builder.String()
+}
+
+func TestSpreadsheetSheetCapsCellAndPageOutput(t *testing.T) {
+	shared := []string{strings.Repeat("a", 64<<10)}
+	response, err := readTestSheet(context.Background(), t, aliasedSheetXML(10, 2), shared, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !response.TruncatedCells || len(response.Rows[0].Cells[0]) != maxSpreadsheetCellBytes {
+		t.Fatalf("cell length = %d, truncated = %v", len(response.Rows[0].Cells[0]), response.TruncatedCells)
+	}
+	_, err = readTestSheet(context.Background(), t, aliasedSheetXML(1000, 2), shared, 1000)
+	var apiErr apiError
+	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusRequestEntityTooLarge || apiErr.Code != "spreadsheet_page_too_large" {
+		t.Fatalf("page error = %#v", err)
+	}
+}
+
+func TestSpreadsheetSheetChargesSharedStringReferences(t *testing.T) {
+	shared := []string{strings.Repeat("a", 64<<10)}
+	// 40,000 references to one string stay far below the distinct-entry cap but
+	// expand past the per-sheet reference budget.
+	_, err := readTestSheet(context.Background(), t, aliasedSheetXML(200, 200), shared, 1)
+	var apiErr apiError
+	if !errors.As(err, &apiErr) || apiErr.Code != "sheet_expansion_too_large" {
+		t.Fatalf("reference budget error = %#v", err)
+	}
+}
+
+func TestSpreadsheetSheetCountsEmptyRowsAndHonoursContext(t *testing.T) {
+	empty := `<worksheet><sheetData>` + strings.Repeat(`<row/>`, maxSpreadsheetRows+1) + `</sheetData></worksheet>`
+	response, err := readTestSheet(context.Background(), t, empty, nil, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !response.TruncatedRows || response.SourceRows != 0 {
+		t.Fatalf("empty rows: truncated = %v, source rows = %d", response.TruncatedRows, response.SourceRows)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	short := `<worksheet><sheetData>` + strings.Repeat(`<row/>`, 5*spreadsheetContextCheckEvery) + `</sheetData></worksheet>`
+	if _, err := readTestSheet(ctx, t, short, nil, 10); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled read error = %v", err)
 	}
 }

@@ -3,34 +3,36 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="color-scheme" content="light dark" />
+  <meta name="color-scheme" content="light" />
   <meta name="bb-asset-version" content="{{ASSET_VERSION}}" />
-  <meta name="description" content="Preview an object from S3-compatible or Google Cloud Storage without downloading it." />
   <base href="{{APP_BASE}}" />
   <link rel="icon" type="image/svg+xml" href="favicon.svg?v=2" />
   <title>Preview - Object Storage Browser</title>
 
   <link rel="stylesheet" href="assets/css/icons.css" />
+  <link rel="stylesheet" href="assets/vendor/github-markdown-css/5/github-markdown-light.min.css" />
+  <link rel="stylesheet" href="assets/vendor/highlightjs/11/styles/github.min.css" />
+  <link rel="stylesheet" href="assets/vendor/buefy/1.0.1/buefy.min.css" />
   <link rel="stylesheet" href="assets/css/tokens.css" />
   <link rel="stylesheet" href="assets/css/base.css" />
+  <link rel="stylesheet" href="assets/css/style.css" />
   <link rel="stylesheet" href="assets/css/ui.css" />
-  <link rel="stylesheet" href="assets/css/markdown.css" />
-  <link rel="stylesheet" href="assets/css/syntax.css" />
-  <link rel="stylesheet" href="assets/css/preview.css" />
-  <link rel="stylesheet" href="assets/css/a11y.css" />
+  <link rel="stylesheet" href="assets/css/components.css" />
+  <link rel="stylesheet" href="assets/css/data-grid.css" />
+  <link rel="stylesheet" href="assets/css/viewers.css" />
+  <link rel="stylesheet" href="assets/css/interaction.css" />
 </head>
 <body class="preview-page">
-  <a class="skip-link" id="skipLink" href="#main-content">Skip to the preview</a>
-
   <header class="bar">
+    <span class="build-version preview-build-version" id="previewBuild" hidden><i class="mdi mdi-source-commit"></i><span></span></span>
     <div class="wrap bb-menu-constrain">
       <div class="bar-left">
-        <a class="btn btn-icon preview-back" id="backBtn" title="Back to browser" aria-label="Back to browser" rel="noopener">
+        <a class="icon-btn preview-back" id="backBtn" title="Back to browser" rel="noopener">
           <i class="mdi mdi-arrow-left"></i>
         </a>
         <div class="preview-title-group">
           <div>
-            <h1 class="doc-name" id="docName"></h1>
+            <span class="doc-name" id="docName"></span>
             <span class="doc-size" id="docSize"></span>
           </div>
           <div class="preview-context">
@@ -41,26 +43,25 @@
       </div>
 
       <div class="bar-right">
-        <span class="build-version preview-build-version" id="previewBuild" hidden><i class="mdi mdi-source-commit" aria-hidden="true"></i><span></span></span>
         <label class="preview-version-control" id="previewVersionControl" hidden>
           <span>Version</span>
           <select id="previewVersionSelect" aria-label="Object version"></select>
         </label>
-        <a class="btn btn-icon" id="openRawBtn" title="Open original" aria-label="Open original in a new tab" target="_blank" rel="noopener">
+        <a class="icon-btn-disc" id="openRawBtn" title="Open original" target="_blank" rel="noopener">
           <i class="mdi mdi-open-in-new"></i>
         </a>
         <div class="bb-menu" id="previewMenu">
-          <button type="button" class="bb-kebab" id="previewKebabBtn" aria-haspopup="menu" aria-expanded="false" title="Object options" aria-label="Object options">
-            <i class="mdi mdi-dots-vertical" aria-hidden="true"></i>
+          <button type="button" class="bb-kebab" id="previewKebabBtn" aria-haspopup="menu" aria-expanded="false" title="Options">
+            <i class="mdi mdi-dots-vertical"></i>
           </button>
           <div class="bb-menu-popover">
-            <div class="bb-menu-list" role="menu">
-              <button type="button" role="menuitem" class="bb-menu-item" id="pv-download"><i aria-hidden="true" class="mdi mdi-download"></i> Download</button>
-              <button type="button" role="menuitem" class="bb-menu-item" id="pv-copy"><i aria-hidden="true" class="mdi mdi-content-copy"></i> Copy</button>
-              <button type="button" role="menuitem" class="bb-menu-item" id="pv-rename"><i aria-hidden="true" class="mdi mdi-rename-outline"></i> Rename</button>
-              <button type="button" role="menuitem" class="bb-menu-item" id="pv-details"><i aria-hidden="true" class="mdi mdi-information-outline"></i> Details</button>
-              <button type="button" role="menuitem" class="bb-menu-item" id="pv-versions"><i aria-hidden="true" class="mdi mdi-source-commit"></i> Versions</button>
-              <button type="button" role="menuitem" class="bb-menu-item danger" id="pv-delete"><i aria-hidden="true" class="mdi mdi-delete-outline"></i> Delete</button>
+            <div class="bb-menu-list">
+              <div class="bb-menu-item" id="pv-download"><i class="mdi mdi-download"></i> Download</div>
+              <div class="bb-menu-item" id="pv-copy"><i class="mdi mdi-content-copy"></i> Copy</div>
+              <div class="bb-menu-item" id="pv-rename"><i class="mdi mdi-rename-outline"></i> Rename</div>
+              <div class="bb-menu-item" id="pv-details"><i class="mdi mdi-information-outline"></i> Details</div>
+              <div class="bb-menu-item" id="pv-versions"><i class="mdi mdi-source-commit"></i> Versions</div>
+              <div class="bb-menu-item danger" id="pv-delete"><i class="mdi mdi-delete-outline"></i> Delete</div>
             </div>
           </div>
         </div>
@@ -68,26 +69,30 @@
     </div>
   </header>
 
-  <div id="previewStatus" class="sr-only" role="status" aria-live="polite"></div>
-
-  <main class="viewer" id="main-content" tabindex="-1">
+  <main class="viewer">
     <div class="bb-menu-constrain">
       <div id="viewer" class="markdown-body preview-loading">
-        <i class="mdi mdi-loading mdi-spin" aria-hidden="true"></i>
+        <i class="mdi mdi-loading mdi-spin"></i>
         <span>Loading preview...</span>
       </div>
     </div>
   </main>
 
+  <script src="assets/vendor/highlightjs/11/highlight.min.js"></script>
+  <script src="assets/vendor/marked/12.0.2/marked.min.js"></script>
 
-  <script defer src="assets/js/common/detect.js"></script>
-  <script defer src="assets/js/common/runtime.js"></script>
-  <script defer src="assets/js/common/api.js"></script>
-  <script defer src="assets/js/common/ui.js"></script>
-  <script defer src="assets/js/common/download-manager.js"></script>
-  <script defer src="assets/js/common/actions.js"></script>
-  <script defer src="assets/js/common/menu.js"></script>
-  <script defer src="assets/js/common/render.js"></script>
-  <script defer src="assets/js/preview.js"></script>
+  <script src="assets/js/common/detect.js"></script>
+  <script src="assets/js/common/runtime.js"></script>
+  <script src="assets/js/common/api.js"></script>
+  <script src="assets/js/common/ui.js"></script>
+  <script src="assets/js/common/download-manager.js"></script>
+  <script src="assets/js/common/actions.js"></script>
+  <script src="assets/js/common/menu.js"></script>
+  <script src="assets/js/common/render.js"></script>
+  <script src="assets/js/common/json-viewer.js"></script>
+  <script src="assets/js/common/tabular.js"></script>
+  <script src="assets/js/common/sqlite-viewer.js"></script>
+  <script src="assets/js/common/structured-viewers.js"></script>
+  <script src="assets/js/preview.js"></script>
 </body>
 </html>

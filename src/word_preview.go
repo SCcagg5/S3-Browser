@@ -115,6 +115,10 @@ func (a *application) handleWordPreview(w http.ResponseWriter, r *http.Request) 
 		writeAPIError(w, err)
 		return
 	}
+	if err := requirePermission(instance, permissionRead); err != nil {
+		writeAPIError(w, err)
+		return
+	}
 	key := strings.TrimLeft(r.URL.Query().Get("key"), "/")
 	if key == "" {
 		writeAPIError(w, apiError{Status: http.StatusBadRequest, Code: "missing_key", Message: "key is required"})

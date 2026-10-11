@@ -3,10 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 )
 
 const (
@@ -23,6 +26,13 @@ func requestBudgetMiddleware(policy runtimePolicy, next http.Handler) http.Handl
 		if !strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/s3" {
 			next.ServeHTTP(w, r)
 			return
+		}
+		if r.Method == http.MethodPut && r.Body != nil && r.Body != http.NoBody {
+			// Object and upload-chunk bodies are streamed straight to the provider
+			// while a storage slot is held, so a stalled client must not pin it.
+			body := newIdleDeadlineBody(w, r.Body)
+			defer body.release()
+			r.Body = body
 		}
 		budget := newResourceBudget(policy)
 		w.Header().Add("Trailer", resourceRequestsTrailer)
@@ -112,4 +122,114 @@ func resourceUsageHeaders(usage resourceUsage) http.Header {
 // the original request cancellation signal.
 func requestContextWithoutCancel(ctx context.Context) context.Context {
 	return context.WithoutCancel(ctx)
+}
+
+// streamIdleTimeout is how long a request body read or a response body write may
+// make no progress before the connection deadline fires. The deadline is rolled
+// forward on every chunk, so long transfers keep working while a stalled peer is
+// cut off and stops holding a storage concurrency slot.
+var streamIdleTimeout = 30 * time.Second
+
+// idleDeadlineBody rolls the connection read deadline forward while the client
+// keeps sending the request body. The deadline is cleared once the body ends so
+// it cannot fire while the handler keeps working after the last byte.
+type idleDeadlineBody struct {
+	io.ReadCloser
+	controller *http.ResponseController
+	idle       time.Duration
+	refreshed  time.Time
+	armed      bool
+	failed     bool
+}
+
+func newIdleDeadlineBody(w http.ResponseWriter, body io.ReadCloser) *idleDeadlineBody {
+	return &idleDeadlineBody{ReadCloser: body, controller: http.NewResponseController(w), idle: streamIdleTimeout}
+}
+
+func (b *idleDeadlineBody) Read(buffer []byte) (int, error) {
+	if b.idle > 0 {
+		// Refresh at most every quarter period; the deadline is then never more
+		// than one idle period past the last byte received.
+		if now := time.Now(); !b.armed || now.Sub(b.refreshed) >= b.idle/4 {
+			if b.controller.SetReadDeadline(now.Add(b.idle)) == nil {
+				b.armed = true
+			}
+			b.refreshed = now
+		}
+	}
+	count, err := b.ReadCloser.Read(buffer)
+	if err == io.EOF {
+		b.release()
+	} else if err != nil {
+		// Leave an expired deadline in place: the server drains an unread body
+		// before it answers, and that drain must fail fast instead of waiting
+		// for the stalled client again.
+		b.failed = true
+	}
+	return count, err
+}
+
+func (b *idleDeadlineBody) release() {
+	if b.armed && !b.failed {
+		_ = b.controller.SetReadDeadline(time.Time{})
+		b.armed = false
+	}
+}
+
+func (b *idleDeadlineBody) Close() error {
+	b.release()
+	return b.ReadCloser.Close()
+}
+
+// idleDeadlineWriter is the download counterpart: it rolls the write deadline
+// forward on each chunk so a client that stops reading releases its gate.
+type idleDeadlineWriter struct {
+	io.Writer
+	controller *http.ResponseController
+	idle       time.Duration
+	refreshed  time.Time
+}
+
+func (w *idleDeadlineWriter) Write(data []byte) (int, error) {
+	if now := time.Now(); now.Sub(w.refreshed) >= w.idle/4 {
+		_ = w.controller.SetWriteDeadline(now.Add(w.idle))
+		w.refreshed = now
+	}
+	return w.Writer.Write(data)
+}
+
+// streamBufferPool holds the copy buffers used to relay object bytes. A larger buffer than io.Copy's 32 KiB default
+// means fewer read and write calls per gigabyte, and pooling keeps concurrent downloads from allocating one each.
+var streamBufferPool = sync.Pool{New: func() any {
+	buffer := make([]byte, 256<<10)
+	return &buffer
+}}
+
+// withIdleWriteDeadline wraps a response writer so that every chunk rolls its write deadline forward. The returned
+// function clears the deadline; when the connection does not support deadlines the writer is returned unchanged.
+func withIdleWriteDeadline(w http.ResponseWriter) (io.Writer, func()) {
+	if streamIdleTimeout <= 0 {
+		return w, func() {}
+	}
+	controller := http.NewResponseController(w)
+	now := time.Now()
+	if controller.SetWriteDeadline(now.Add(streamIdleTimeout)) != nil {
+		return w, func() {}
+	}
+	return &idleDeadlineWriter{Writer: w, controller: controller, idle: streamIdleTimeout, refreshed: now},
+		func() { _ = controller.SetWriteDeadline(time.Time{}) }
+}
+
+// copyStream relays src to dst through a pooled buffer. When dst is a response
+// writer that supports deadlines, a rolling write deadline cuts off a client
+// that stops reading.
+func copyStream(dst io.Writer, src io.Reader) (int64, error) {
+	buffer := streamBufferPool.Get().(*[]byte)
+	defer streamBufferPool.Put(buffer)
+	if responseWriter, ok := dst.(http.ResponseWriter); ok {
+		var done func()
+		dst, done = withIdleWriteDeadline(responseWriter)
+		defer done()
+	}
+	return io.CopyBuffer(dst, src, *buffer)
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"sort"
 	"strings"
@@ -118,6 +119,14 @@ const (
 	maxActiveJobs  = 4
 	jobWorkerCount = 2
 	jobQueueSize   = 8
+)
+
+// A paused job still counts against maxActiveJobs, and only the holder of its
+// id can resume or cancel it. Abandoned paused jobs are canceled after this
+// idle period so they cannot pin the shared capacity forever.
+var (
+	pausedJobTTL    = 30 * time.Minute
+	jobReapInterval = time.Minute
 )
 
 var (
@@ -317,6 +326,8 @@ func newJobManager(app *application, historyLimit int) (*jobManager, error) {
 		manager.wg.Add(1)
 		go manager.worker()
 	}
+	manager.wg.Add(1)
+	go manager.reaper()
 	return manager, nil
 }
 
@@ -326,6 +337,46 @@ func (m *jobManager) close() {
 	}
 	m.cancel()
 	m.wg.Wait()
+}
+
+func (m *jobManager) reaper() {
+	defer m.wg.Done()
+	ticker := time.NewTicker(jobReapInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-m.ctx.Done():
+			return
+		case now := <-ticker.C:
+			m.reapExpiredPaused(now.UTC())
+		}
+	}
+}
+
+// reapExpiredPaused cancels jobs that have been paused longer than
+// pausedJobTTL so they become terminal and release their active-job slot.
+func (m *jobManager) reapExpiredPaused(now time.Time) int {
+	var expired []string
+	m.mu.Lock()
+	for id, job := range m.jobs {
+		if job == nil || job.Status != jobStatusPaused || now.Sub(job.UpdatedAt) <= pausedJobTTL {
+			continue
+		}
+		job.Status = jobStatusCanceled
+		job.Error = ""
+		job.UpdatedAt = now
+		ended := now
+		job.EndedAt = &ended
+		expired = append(expired, id)
+	}
+	m.mu.Unlock()
+	for _, id := range expired {
+		m.cancelActive(id)
+	}
+	if len(expired) > 0 {
+		_ = m.pruneHistory()
+	}
+	return len(expired)
 }
 
 func (m *jobManager) setActiveCancel(id string, cancel context.CancelFunc) {
@@ -597,8 +648,10 @@ func (m *jobManager) run(id string) {
 		runCancel()
 		m.clearActiveCancel(id)
 	}()
-	jobContext := withResourceBudget(runContext, budget)
-	err := m.execute(jobContext, &job)
+	// Background jobs are expected to queue for storage slots instead of failing
+	// with the short wait applied to interactive requests.
+	jobContext := withUnboundedGateWait(withResourceBudget(runContext, budget))
+	err := m.executeRecovered(jobContext, &job)
 	usage := budget.usage()
 	job.StorageRequests = usage.StorageRequests
 	job.StorageBytes = usage.StorageBytes
@@ -636,6 +689,18 @@ func (m *jobManager) run(id string) {
 	}
 	_ = m.put(job)
 	_ = m.pruneHistory()
+}
+
+// executeRecovered keeps a panic inside one job from taking down the process
+// or its worker; the job is marked failed instead.
+func (m *jobManager) executeRecovered(ctx context.Context, job *jobState) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			log.Printf("job %s (%s) panicked: %v", job.ID, job.Type, recovered)
+			err = apiError{Status: http.StatusInternalServerError, Code: "job_panicked", Message: "the job failed unexpectedly"}
+		}
+	}()
+	return m.execute(ctx, job)
 }
 
 func publicJobError(err error) string {
@@ -1110,11 +1175,19 @@ func (m *jobManager) runObjectJob(ctx context.Context, job *jobState, instance *
 }
 
 func (m *jobManager) controlState(id string) error {
-	job, ok := m.get(id)
+	// Read only the status under the lock. Cloning the whole job here would make
+	// per-iteration checks cost O(len(Entries)).
+	m.mu.RLock()
+	job, ok := m.jobs[id]
+	status := ""
+	if ok && job != nil {
+		status = job.Status
+	}
+	m.mu.RUnlock()
 	if !ok {
 		return errJobCanceled
 	}
-	switch job.Status {
+	switch status {
 	case jobStatusPaused:
 		return errJobPaused
 	case jobStatusCanceled:
@@ -1126,6 +1199,18 @@ func (m *jobManager) controlState(id string) error {
 	default:
 		return nil
 	}
+}
+
+// interrupted reports why a long CPU-bound loop inside a job should stop: its
+// run context was canceled (pause or cancel) or the job state changed.
+func (m *jobManager) interrupted(ctx context.Context, id string) error {
+	if err := ctx.Err(); err != nil {
+		if control := m.controlState(id); control != nil {
+			return control
+		}
+		return err
+	}
+	return m.controlState(id)
 }
 
 func forEachObjectAfter(ctx context.Context, instance *storageInstance, prefix, lastKey string, callback func(objectInfo, string) error) error {

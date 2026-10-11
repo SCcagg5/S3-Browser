@@ -156,7 +156,7 @@ func TestEmbeddedFirstPartyAssetsRevalidateWithETag(t *testing.T) {
 func TestEmbeddedVendorAssetsAreImmutable(t *testing.T) {
 	t.Parallel()
 	app := embeddedApplication(t)
-	recorder := fetchStatic(t, app, "/assets/vendor/vue/3.5.18/vue.runtime.global.prod.js", nil)
+	recorder := fetchStatic(t, app, "/assets/vendor/marked/12.0.2/marked.min.js", nil)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status %d", recorder.Code)
 	}
@@ -228,9 +228,9 @@ func TestPagesFingerprintEveryAssetAndFingerprintedAssetsAreImmutable(t *testing
 func TestGzipBodiesAreCompressedOncePerContent(t *testing.T) {
 	t.Parallel()
 	data := bytes.Repeat([]byte("body { color: red; }\n"), 200)
-	etag := contentETag(data)
-	first := gzipBody(etag, data)
-	second := gzipBody(etag, data)
+	entry := newStaticEntry(data)
+	first := entry.gzip()
+	second := entry.gzip()
 	if &first[0] != &second[0] {
 		t.Fatal("the gzip body was recompressed instead of being served from the cache")
 	}

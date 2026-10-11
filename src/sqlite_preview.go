@@ -16,6 +16,9 @@ import (
 const (
 	maxSQLitePreviewBytes     = int64(16 << 40)
 	maxInMemorySQLiteSessions = 4
+	// Idle expiry alone lets one client hold every slot by touching its
+	// sessions; no session lives longer than this multiple of the idle TTL.
+	sqliteSessionMaxAgeTTLs = 3
 )
 
 type sqliteColumnInfo struct {
@@ -131,11 +134,25 @@ func (m *sqliteSessionManager) cleanupLoop() {
 	}
 }
 
+func (m *sqliteSessionManager) sessionTTL() time.Duration {
+	if m.app == nil {
+		return (runtimePolicy{}).sessionTTL()
+	}
+	return m.app.config.Runtime.sessionTTL()
+}
+
+// expired reports whether the session is past its idle TTL or its absolute
+// maximum age. The caller must hold m.mu.
+func (m *sqliteSessionManager) expired(session *sqliteSession, now time.Time) bool {
+	ttl := m.sessionTTL()
+	return now.Sub(session.LastAccess) >= ttl || now.Sub(session.CreatedAt) >= ttl*sqliteSessionMaxAgeTTLs
+}
+
 func (m *sqliteSessionManager) cleanupExpired(now time.Time) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for id, session := range m.sessions {
-		if now.Sub(session.LastAccess) < m.app.config.Runtime.sessionTTL() {
+		if !m.expired(session, now) {
 			continue
 		}
 		if session.Source != nil {
@@ -178,7 +195,17 @@ func (m *sqliteSessionManager) get(id string) (*sqliteSession, bool) {
 	if !ok {
 		return nil, false
 	}
-	session.LastAccess = time.Now().UTC()
+	now := time.Now().UTC()
+	// Expiry is enforced here as well as by the periodic sweep, so a session
+	// past its limits cannot be revived by a request before the sweep runs.
+	if m.expired(session, now) {
+		if session.Source != nil {
+			session.Source.clearCache()
+		}
+		delete(m.sessions, id)
+		return nil, false
+	}
+	session.LastAccess = now
 	copySession := *session
 	copySession.Tables = append([]sqliteTableInfo(nil), session.Tables...)
 	copySession.Definitions = cloneSQLiteDefinitions(session.Definitions)
@@ -186,34 +213,28 @@ func (m *sqliteSessionManager) get(id string) (*sqliteSession, bool) {
 	return &copySession, true
 }
 
-func (m *sqliteSessionManager) hasSessionCapacity() bool {
-	if m == nil {
-		return false
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return len(m.sessions) < maxInMemorySQLiteSessions
-}
-
-func sqliteSessionCapacityError() error {
-	return apiError{
-		Status:  http.StatusTooManyRequests,
-		Code:    "sqlite_session_limit_reached",
-		Message: fmt.Sprintf("the server is already tracking %d active SQLite preview sessions", maxInMemorySQLiteSessions),
-	}
-}
-
 func (m *sqliteSessionManager) register(session *sqliteSession) error {
 	if m == nil || session == nil || strings.TrimSpace(session.ID) == "" {
 		return fmt.Errorf("SQLite preview session is invalid")
 	}
 	m.mu.Lock()
+	var evicted *sqliteSession
 	if _, exists := m.sessions[session.ID]; !exists && len(m.sessions) >= maxInMemorySQLiteSessions {
-		m.mu.Unlock()
-		return sqliteSessionCapacityError()
+		// A full table evicts the least recently used session rather than
+		// refusing newcomers, so no client can pin every slot.
+		var oldestID string
+		for id, candidate := range m.sessions {
+			if evicted == nil || candidate.LastAccess.Before(evicted.LastAccess) {
+				oldestID, evicted = id, candidate
+			}
+		}
+		delete(m.sessions, oldestID)
 	}
 	m.sessions[session.ID] = session
 	m.mu.Unlock()
+	if evicted != nil && evicted.Source != nil {
+		evicted.Source.clearCache()
+	}
 	return nil
 }
 
@@ -233,9 +254,6 @@ func (m *sqliteSessionManager) remove(id string) bool {
 func (m *sqliteSessionManager) create(ctx context.Context, request sqliteSessionRequest) (*sqliteSession, error) {
 	if m == nil || m.app == nil {
 		return nil, apiError{Status: http.StatusServiceUnavailable, Code: "sqlite_unavailable", Message: "SQLite preview is unavailable"}
-	}
-	if !m.hasSessionCapacity() {
-		return nil, sqliteSessionCapacityError()
 	}
 	instance := m.app.instances[strings.TrimSpace(request.Instance)]
 	if instance == nil {

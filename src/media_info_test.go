@@ -604,3 +604,33 @@ func TestDetailsRejectsProviderThatIgnoresRangeForLargeObject(t *testing.T) {
 		t.Fatalf("body = %s", recorder.Body.String())
 	}
 }
+
+func TestFITSHeaderScanIsIncrementalAndBounded(t *testing.T) {
+	app, _, backend := testApplication(t)
+	blank := strings.Repeat(" ", 80)
+	// A real header with many blocks of blank cards before the dimensions.
+	header := fitsCard("SIMPLE", "T") + strings.Repeat(blank, 3600) + fitsCard("NAXIS1", "640") + fitsCard("NAXIS2", "480") + fitsCard("END", "")
+	header += strings.Repeat(" ", 2880-len(header)%2880)
+	// A header without END that is larger than the scan cap.
+	endless := fitsCard("SIMPLE", "T") + strings.Repeat(blank, (1536<<10)/80)
+	backend.mu.Lock()
+	backend.objects["tenant/ok.fits"] = memoryObject{data: []byte(header), contentType: "image/fits", modified: time.Now().UTC()}
+	backend.objects["tenant/endless.fits"] = memoryObject{data: []byte(endless), contentType: "image/fits", modified: time.Now().UTC()}
+	backend.mu.Unlock()
+
+	response := requestMediaInfo(t, app, "ok.fits")
+	if response.Width != 640 || response.Height != 480 {
+		t.Fatalf("resolution = %dx%d", response.Width, response.Height)
+	}
+	if gets, _, _ := backendReadCounts(backend); gets > 12 {
+		t.Fatalf("GETs = %d, want a doubling read pattern", gets)
+	}
+	before, _, _ := backendReadCounts(backend)
+	response = requestMediaInfo(t, app, "endless.fits")
+	if response.Width != 0 || response.Height != 0 {
+		t.Fatalf("resolution = %dx%d, want none", response.Width, response.Height)
+	}
+	if gets, _, _ := backendReadCounts(backend); gets-before > 12 {
+		t.Fatalf("endless header used %d GETs", gets-before)
+	}
+}

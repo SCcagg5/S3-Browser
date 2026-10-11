@@ -20,6 +20,12 @@ const (
 	maxSQLiteBTreeDepth    = 128
 	maxSQLiteRecordPayload = int64(64 << 20)
 	maxSQLiteSortRows      = 150000
+	// The sort buffer holds decoded rows, so it needs a byte budget as well as
+	// a row cap: a few huge or aliased records would otherwise pin gigabytes.
+	maxSQLiteSortBytes      = int64(64 << 20)
+	maxSQLiteDisplayRunes   = 4096
+	sqliteSortRowOverhead   = 64
+	sqliteSortValueOverhead = 24
 )
 
 type sqliteDatabase struct {
@@ -57,6 +63,32 @@ type sqliteTableDefinition struct {
 }
 
 type sqliteBlob []byte
+
+// sqliteBlobSize stands in for a blob whose content is no longer needed, such
+// as a buffered sort row that only ever displays the blob length.
+type sqliteBlobSize int
+
+// sqlitePageSet is a bitmap of page numbers, used to notice an overflow page
+// that is reached twice during one B-tree walk.
+type sqlitePageSet struct {
+	bits []uint64
+}
+
+// add records the page and reports whether it was already present.
+func (s *sqlitePageSet) add(page uint32) bool {
+	word := int(page / 64)
+	if word >= len(s.bits) {
+		grown := make([]uint64, word+1+len(s.bits)/2)
+		copy(grown, s.bits)
+		s.bits = grown
+	}
+	mask := uint64(1) << (page % 64)
+	if s.bits[word]&mask != 0 {
+		return true
+	}
+	s.bits[word] |= mask
+	return false
+}
 
 func openSQLiteDatabase(path string) (*sqliteDatabase, error) {
 	file, err := os.Open(path)
@@ -199,7 +231,7 @@ func sqliteLocalPayloadSize(payloadSize int64, usableSize int, tableLeaf bool) (
 	return int(minimum), nil
 }
 
-func (db *sqliteDatabase) readPayload(page []byte, start int, payloadSize int64, tableLeaf bool) ([]byte, error) {
+func (db *sqliteDatabase) readPayload(page []byte, start int, payloadSize int64, tableLeaf bool, overflowSeen *sqlitePageSet) ([]byte, error) {
 	local, err := sqliteLocalPayloadSize(payloadSize, db.usableSize, tableLeaf)
 	if err != nil {
 		return nil, err
@@ -217,15 +249,19 @@ func (db *sqliteDatabase) readPayload(page []byte, start int, payloadSize int64,
 		return nil, apiError{Status: 422, Code: "invalid_sqlite_overflow", Message: "a SQLite overflow pointer is missing"}
 	}
 	nextPage := binary.BigEndian.Uint32(page[pointerOffset : pointerOffset+4])
-	visited := make(map[uint32]struct{})
+	if overflowSeen == nil {
+		overflowSeen = &sqlitePageSet{}
+	}
 	for copied < len(payload) {
 		if nextPage == 0 || nextPage > db.pageCount {
 			return nil, apiError{Status: 422, Code: "invalid_sqlite_overflow", Message: "a SQLite record references an invalid overflow page"}
 		}
-		if _, exists := visited[nextPage]; exists {
-			return nil, apiError{Status: 422, Code: "sqlite_overflow_cycle", Message: "a SQLite overflow chain contains a cycle"}
+		// The set spans the whole walk: a valid file never shares an overflow
+		// page between records, while a crafted one can make many cells re-read
+		// and re-decode the same chain.
+		if overflowSeen.add(nextPage) {
+			return nil, apiError{Status: 422, Code: "sqlite_overflow_cycle", Message: "a SQLite overflow page is referenced more than once"}
 		}
-		visited[nextPage] = struct{}{}
 		overflow, err := db.readPage(nextPage)
 		if err != nil {
 			return nil, err
@@ -371,10 +407,14 @@ func sqliteCellPointers(page []byte, headerOffset, headerSize, count int) ([]int
 		return nil, apiError{Status: 422, Code: "invalid_sqlite_btree", Message: "a SQLite B-tree page has an invalid cell pointer array"}
 	}
 	pointers := make([]int, count)
+	var seen sqlitePageSet
 	for index := 0; index < count; index++ {
 		pointer := int(binary.BigEndian.Uint16(page[start+index*2 : start+index*2+2]))
 		if pointer <= 0 || pointer >= len(page) {
 			return nil, apiError{Status: 422, Code: "invalid_sqlite_cell", Message: "a SQLite cell pointer points outside its page"}
+		}
+		if seen.add(uint32(pointer)) {
+			return nil, apiError{Status: 422, Code: "invalid_sqlite_cell", Message: "a SQLite page lists the same cell more than once"}
 		}
 		pointers[index] = pointer
 	}
@@ -385,6 +425,7 @@ type sqliteRecordVisitor func(rowID int64, values []any) error
 
 func (db *sqliteDatabase) walkTableBTree(ctx context.Context, rootPage uint32, visitor sqliteRecordVisitor) error {
 	visited := make(map[uint32]struct{})
+	var overflowSeen sqlitePageSet
 	var walk func(uint32, int) error
 	walk = func(pageNumber uint32, depth int) error {
 		if err := ctx.Err(); err != nil {
@@ -441,7 +482,7 @@ func (db *sqliteDatabase) walkTableBTree(ctx context.Context, rootPage uint32, v
 				if !ok {
 					return apiError{Status: 422, Code: "invalid_sqlite_cell", Message: "a SQLite table cell has an invalid row identifier"}
 				}
-				payload, err := db.readPayload(page, pointer+payloadWidth+rowIDWidth, int64(payloadSizeValue), true)
+				payload, err := db.readPayload(page, pointer+payloadWidth+rowIDWidth, int64(payloadSizeValue), true, &overflowSeen)
 				if err != nil {
 					return err
 				}
@@ -463,6 +504,7 @@ func (db *sqliteDatabase) walkTableBTree(ctx context.Context, rootPage uint32, v
 
 func (db *sqliteDatabase) walkIndexBTree(ctx context.Context, rootPage uint32, visitor sqliteRecordVisitor) error {
 	visited := make(map[uint32]struct{})
+	var overflowSeen sqlitePageSet
 	var walk func(uint32, int) error
 	walk = func(pageNumber uint32, depth int) error {
 		if err := ctx.Err(); err != nil {
@@ -506,7 +548,7 @@ func (db *sqliteDatabase) walkIndexBTree(ctx context.Context, rootPage uint32, v
 				if !ok {
 					return apiError{Status: 422, Code: "invalid_sqlite_cell", Message: "a SQLite index cell has an invalid payload size"}
 				}
-				payload, err := db.readPayload(page, pointer+4+width, int64(payloadSizeValue), false)
+				payload, err := db.readPayload(page, pointer+4+width, int64(payloadSizeValue), false, &overflowSeen)
 				if err != nil {
 					return err
 				}
@@ -530,7 +572,7 @@ func (db *sqliteDatabase) walkIndexBTree(ctx context.Context, rootPage uint32, v
 				if !ok {
 					return apiError{Status: 422, Code: "invalid_sqlite_cell", Message: "a SQLite index cell has an invalid payload size"}
 				}
-				payload, err := db.readPayload(page, pointer+width, int64(payloadSizeValue), false)
+				payload, err := db.readPayload(page, pointer+width, int64(payloadSizeValue), false, &overflowSeen)
 				if err != nil {
 					return err
 				}
@@ -562,6 +604,8 @@ func sqliteString(value any) string {
 		return strconv.FormatFloat(typed, 'g', -1, 64)
 	case sqliteBlob:
 		return fmt.Sprintf("[BLOB %d bytes]", len(typed))
+	case sqliteBlobSize:
+		return fmt.Sprintf("[BLOB %d bytes]", int(typed))
 	default:
 		return fmt.Sprint(value)
 	}
@@ -1078,20 +1122,51 @@ type sqliteSortableRow struct {
 	values map[string]any
 }
 
+// sqliteTruncateText cuts text to the display limit without converting the
+// whole value to runes.
+func sqliteTruncateText(value string) string {
+	if len(value) <= maxSQLiteDisplayRunes {
+		return value
+	}
+	count := 0
+	for index := range value {
+		if count == maxSQLiteDisplayRunes {
+			return value[:index] + "…"
+		}
+		count++
+	}
+	return value
+}
+
 func sqliteDisplayValue(value any) any {
 	switch typed := value.(type) {
 	case sqliteBlob:
 		return fmt.Sprintf("[BLOB %d bytes]", len(typed))
+	case sqliteBlobSize:
+		return fmt.Sprintf("[BLOB %d bytes]", int(typed))
 	case string:
-		const maximum = 4096
-		if utf8.RuneCountInString(typed) <= maximum {
-			return typed
-		}
-		runes := []rune(typed)
-		return string(runes[:maximum]) + "…"
+		return sqliteTruncateText(typed)
 	default:
 		return value
 	}
+}
+
+// sqliteCompactSortRow shrinks a decoded row to what sorting and display need
+// and returns its approximate retained size in bytes.
+func sqliteCompactSortRow(row map[string]any) int64 {
+	size := int64(sqliteSortRowOverhead)
+	for name, value := range row {
+		switch typed := value.(type) {
+		case string:
+			typed = sqliteTruncateText(typed)
+			row[name] = typed
+			size += int64(len(typed))
+		case sqliteBlob:
+			row[name] = sqliteBlobSize(len(typed))
+		}
+		size += sqliteSortValueOverhead
+	}
+	return size
 }
 
 func querySQLiteTable(ctx context.Context, databasePath string, definition sqliteTableDefinition, page, pageSize int, search string) (sqlitePageResponse, error) {
@@ -1140,6 +1215,7 @@ func querySQLiteTableDatabase(ctx context.Context, database *sqliteDatabase, def
 
 	if sortColumn != "" && (sortDirection == "asc" || sortDirection == "desc") {
 		matches := make([]sqliteSortableRow, 0, minInt(pageSize*4, maxSQLiteSortRows))
+		var bufferedBytes int64
 		err = walk(func(rowID int64, values []any) error {
 			if err := ctx.Err(); err != nil {
 				return err
@@ -1151,6 +1227,10 @@ func querySQLiteTableDatabase(ctx context.Context, database *sqliteDatabase, def
 			}
 			if len(matches) >= maxSQLiteSortRows {
 				return apiError{Status: http.StatusUnprocessableEntity, Code: "sort_result_too_large", Message: fmt.Sprintf("sorting is limited to %d matching SQLite rows; add filters to narrow the result", maxSQLiteSortRows)}
+			}
+			bufferedBytes += sqliteCompactSortRow(mapped)
+			if bufferedBytes > maxSQLiteSortBytes {
+				return apiError{Status: http.StatusUnprocessableEntity, Code: "sort_result_too_large", Message: fmt.Sprintf("sorting is limited to %d MiB of matching SQLite data; add filters to narrow the result", maxSQLiteSortBytes>>20)}
 			}
 			matches = append(matches, sqliteSortableRow{rowID: rowID, values: mapped})
 			return nil

@@ -869,9 +869,14 @@ func inspectParquetSummary(ctx context.Context, instance *storageInstance, key s
 // Minimal Thrift compact-protocol reader for the two FileMetaData fields needed
 // by Details: schema[0].num_children and num_rows. Unknown fields are skipped.
 type thriftCompactReader struct {
-	data []byte
-	pos  int
+	data  []byte
+	pos   int
+	depth int
 }
+
+// maxThriftSkipDepth bounds nested struct/collection skipping so a hostile
+// footer cannot exhaust the goroutine stack.
+const maxThriftSkipDepth = 64
 
 const (
 	compactStop         = 0
@@ -957,8 +962,24 @@ func (r *thriftCompactReader) collectionHeader() (int, byte, error) {
 }
 
 func (r *thriftCompactReader) skip(fieldType byte) error {
+	return r.skipValue(fieldType, false)
+}
+
+// skipValue skips one value. Inside lists, sets and maps every element,
+// including booleans, occupies at least one byte, which lets declared counts be
+// checked against the remaining data. Struct field booleans live in the field
+// header and take no extra bytes.
+func (r *thriftCompactReader) skipValue(fieldType byte, inCollection bool) error {
 	switch fieldType {
-	case compactStop, compactBooleanTrue, compactBooleanFalse:
+	case compactBooleanTrue, compactBooleanFalse:
+		if inCollection {
+			return r.advance(1)
+		}
+		return nil
+	case compactStop:
+		if inCollection {
+			return fmt.Errorf("invalid Thrift collection element type")
+		}
 		return nil
 	case compactByte:
 		_, err := r.readByte()
@@ -977,13 +998,33 @@ func (r *thriftCompactReader) skip(fieldType byte) error {
 			return io.ErrUnexpectedEOF
 		}
 		return r.advance(int(length))
+	case compactList, compactSet, compactMap, compactStruct:
+		if r.depth >= maxThriftSkipDepth {
+			return fmt.Errorf("Thrift metadata is nested too deeply")
+		}
+		r.depth++
+		defer func() { r.depth-- }()
+		return r.skipContainer(fieldType)
+	default:
+		return fmt.Errorf("unsupported Thrift compact type %d", fieldType)
+	}
+}
+
+func (r *thriftCompactReader) skipContainer(fieldType byte) error {
+	switch fieldType {
 	case compactList, compactSet:
 		size, elementType, err := r.collectionHeader()
 		if err != nil {
 			return err
 		}
+		if size == 0 {
+			return nil
+		}
+		if size > len(r.data)-r.pos {
+			return io.ErrUnexpectedEOF
+		}
 		for index := 0; index < size; index++ {
-			if err := r.skip(elementType); err != nil {
+			if err := r.skipValue(elementType, true); err != nil {
 				return err
 			}
 		}
@@ -996,21 +1037,24 @@ func (r *thriftCompactReader) skip(fieldType byte) error {
 		if size == 0 {
 			return nil
 		}
+		if size > uint64(len(r.data)-r.pos)/2 {
+			return io.ErrUnexpectedEOF
+		}
 		types, err := r.readByte()
 		if err != nil {
 			return err
 		}
 		keyType, valueType := types>>4, types&0x0f
 		for index := uint64(0); index < size; index++ {
-			if err := r.skip(keyType); err != nil {
+			if err := r.skipValue(keyType, true); err != nil {
 				return err
 			}
-			if err := r.skip(valueType); err != nil {
+			if err := r.skipValue(valueType, true); err != nil {
 				return err
 			}
 		}
 		return nil
-	case compactStruct:
+	default:
 		lastField := int16(0)
 		for {
 			_, nestedType, nextLast, err := r.fieldHeader(lastField)
@@ -1021,12 +1065,10 @@ func (r *thriftCompactReader) skip(fieldType byte) error {
 				return nil
 			}
 			lastField = nextLast
-			if err := r.skip(nestedType); err != nil {
+			if err := r.skipValue(nestedType, false); err != nil {
 				return err
 			}
 		}
-	default:
-		return fmt.Errorf("unsupported Thrift compact type %d", fieldType)
 	}
 }
 

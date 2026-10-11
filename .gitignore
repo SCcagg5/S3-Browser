@@ -9,5 +9,3 @@ service-account*.json
 test/garage/volume/
 
 !test/config.hcl
-test/e2e/node_modules/
-tools/node_modules/

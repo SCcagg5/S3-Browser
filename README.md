@@ -1,7 +1,5 @@
 # Object Storage Browser
 
-![frontpage](/.github/assets/front.png)
-
 Object Storage Browser is a self-contained Go application for browsing and operating on S3-compatible storage and Google Cloud Storage. It is designed for hosts with a small memory budget and for objects that can be hundreds of gigabytes.
 
 Core properties:
@@ -132,7 +130,6 @@ The application never downloads these files at runtime.
 - [Architecture](docs/ARCHITECTURE.md)
 - [Preview and metadata behavior](docs/PREVIEWS.md)
 - [Security model](docs/SECURITY.md)
-- [Frontend design system](docs/FRONTEND.md)
 - [Development and validation](docs/DEVELOPMENT.md)
 
 ## License

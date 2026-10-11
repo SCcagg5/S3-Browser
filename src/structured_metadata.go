@@ -193,13 +193,23 @@ func parsePDFMetadata(prefix, suffix []byte, size int64) map[string]string {
 	return props
 }
 
+// maxPDFPagesMarkers caps /Type /Pages markers examined; real files hold one
+// per page-tree node, and each marker costs a bounded window search.
+const maxPDFPagesMarkers = 4096
+
 func deterministicPDFPageCount(data []byte) int {
 	counts := make([]int, 0, 8)
-	markers := pdfPagesMarkerPattern.FindAllIndex(data, -1)
+	markers := pdfPagesMarkerPattern.FindAllIndex(data, maxPDFPagesMarkers)
 	for _, marker := range markers {
 		start := marker[0]
-		if objectStart := bytes.LastIndex(data[:marker[0]], []byte("obj")); objectStart >= 0 && marker[0]-objectStart <= 4096 {
-			start = objectStart
+		// Only the 4096 bytes before the marker can qualify, so search just that window.
+		windowStart := marker[0] - 4096
+		if windowStart < 0 {
+			windowStart = 0
+		}
+		window := data[windowStart:marker[0]]
+		if objectStart := bytes.LastIndex(window, []byte("obj")); objectStart >= 0 {
+			start = marker[0] - len(window) + objectStart
 		} else if start > 512 {
 			start -= 512
 		} else {
@@ -552,21 +562,50 @@ func parseICalendarMetadata(data []byte) map[string]string {
 	return props
 }
 
+// maxUnfoldedLineBytes caps one unfolded logical line; longer continuations are
+// dropped so a single crafted folded value cannot grow without bound.
+const maxUnfoldedLineBytes = 4 << 20
+
 func unfoldStructuredLines(text string) []string {
 	text = strings.ReplaceAll(text, "\r\n", "\n")
 	text = strings.ReplaceAll(text, "\r", "\n")
-	raw := strings.Split(text, "\n")
-	lines := make([]string, 0, len(raw))
-	for _, line := range raw {
+	lines := make([]string, 0, 16)
+	// Continuations are appended to a builder so unfolding stays linear instead
+	// of re-copying the accumulated line for every folded row.
+	var current strings.Builder
+	open := false
+	flush := func() {
+		if open {
+			lines = append(lines, current.String())
+			current.Reset()
+			open = false
+		}
+	}
+	for len(text) > 0 {
+		line := text
+		if idx := strings.IndexByte(text, '\n'); idx >= 0 {
+			line, text = text[:idx], text[idx+1:]
+		} else {
+			text = ""
+		}
 		if line == "" {
 			continue
 		}
-		if (strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t")) && len(lines) > 0 {
-			lines[len(lines)-1] += strings.TrimLeft(line, " \t")
+		if (line[0] == ' ' || line[0] == '\t') && open {
+			if room := maxUnfoldedLineBytes - current.Len(); room > 0 {
+				part := strings.TrimLeft(line, " \t")
+				if len(part) > room {
+					part = part[:room]
+				}
+				current.WriteString(part)
+			}
 			continue
 		}
-		lines = append(lines, strings.TrimRight(line, "\n"))
+		flush()
+		current.WriteString(line)
+		open = true
 	}
+	flush()
 	return lines
 }
 
