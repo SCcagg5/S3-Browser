@@ -571,9 +571,9 @@
       // Files in progress: MAX_ACTIVE rows at most, reused.
       const running = Array.from(current.running);
       view.active.hidden = ended || (!running.length && !current.queue.length);
-      setText(view.activeHead, current.queue.length
-        ? `In progress ${running.length}, waiting ${current.queue.length.toLocaleString('en-US')}`
-        : `In progress ${running.length}`);
+      const waiting = current.queue.length.toLocaleString('en-US');
+      setText(view.activeHead, !running.length ? `Waiting ${waiting}`
+        : (current.queue.length ? `In progress ${running.length}, waiting ${waiting}` : `In progress ${running.length}`));
       while (view.rows.length < running.length) {
         const name = h('span', { class: 'fileList__name' });
         const meta = h('span', { class: 'fileList__meta' });

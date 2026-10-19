@@ -1778,9 +1778,9 @@ a {
 
 .fileList--failed > li {
   grid-template-columns: minmax(0, 1fr);
-  gap: 1px;
-  padding: 6px 10px;
-  line-height: 1.35;
+  gap: 2px;
+  padding: 7px 10px;
+  line-height: 1.4;
 }
 
 .fileList__reason {
