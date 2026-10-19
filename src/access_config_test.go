@@ -224,6 +224,10 @@ access { mode = "open" }
 // is the text that the table of keys gives.
 func TestConfigurationReferenceIsCurrent(t *testing.T) {
 	t.Parallel()
+	if _, err := os.Stat(filepath.Join("..", "README.md")); err != nil {
+		// The image build copies only src: the repository root is not there.
+		t.Skip("the repository root is not present")
+	}
 	data, err := os.ReadFile(filepath.Join("..", "docs", "configuration-reference.md"))
 	if err != nil {
 		t.Fatal(err)
