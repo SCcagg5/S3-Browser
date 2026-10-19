@@ -79,6 +79,20 @@ A direct upload (`PUT /s3`) accepts the same header. The browser uses it for a f
 
 The resume token keeps the algorithm. After a restart, the server reads the digest of each part from the list of parts of the provider.
 
+## Object tags and lifecycle
+
+Only the S3 provider has object tags. A provider that does not know them answers `501`. The server turns this answer into the error `tagging_unsupported`. The interface then hides the tag controls. Garage does not support tags. SeaweedFS does.
+
+`GET /api/tags?key=` gives the tags of an object. `PUT /api/tags` replaces the whole set. An empty set removes all tags. The server checks the limits of S3 before it sends the request. An object has at most 10 tags. A key has 1 to 128 characters and does not start with `aws:`. A value has at most 256 characters. A tag has letters, digits, spaces and `+ - = . _ : / @` only.
+
+`POST /api/tags/bulk` starts the job `tag_prefix`. The body has `prefix`, `add` (tags to set) and `remove` (keys to remove). The job reads the tags of each object under the prefix. It writes them again only when the result is different. An object that would have more than 10 tags stops the job with its key in the message.
+
+An upload can carry tags. A direct upload takes the header `X-Amz-Tagging` (a query string such as `a=b&c=d`). `POST /api/uploads` takes the field `tags`. The server sends them to the provider in `x-amz-tagging`.
+
+`GET /api/lifecycle` gives the lifecycle rules of the bucket in read-only form. A bucket without rules gives an empty list. The details of a file use the rules to tell what happens to the object, also for tags that the person did not save yet.
+
+The listing of the provider does not give tags, and S3 has no request that lists objects by tag. The tag column reads the tags of the files on the page. It reads 4 files at the same time and at most 100. The tag filter hides rows of this page only.
+
 ## Background jobs
 
 Jobs are memory-only and use two workers. The manager admits no more than four active or queued jobs. Terminal results are retained only up to `job_history_limit`.

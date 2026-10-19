@@ -205,6 +205,10 @@ top-level folder, else the bucket.
 | `POST /api/copy` | `objects.read` on `src`, `objects.write` on `dst` | The node of each. |
 | `POST /api/rename` | `objects.read` and `objects.delete` on `src`, `objects.write` on `dst` | The node of each. |
 | `POST /api/delete-prefix` | `objects.read` and `objects.delete` | The node of `prefix`. |
+| `GET /api/tags` | `objects.read` | The node of `key`. |
+| `PUT /api/tags` | `objects.write` | The node of `key`. |
+| `POST /api/tags/bulk` | `objects.read` and `objects.write` | The node of `prefix`. The root of the bucket is the bucket. |
+| `GET /api/lifecycle` | `objects.read` | The bucket. |
 | `POST /api/archive-extract` | `objects.read` on the archive; `objects.write` and `objects.read` on the target folder | The target folder of the target bucket. An empty target is the bucket. |
 | `POST /api/uploads` and each request with an upload resume token | `objects.write` | The node of the key of the upload. |
 | `GET /api/jobs/<id>`, `POST /api/jobs/<id>/<pause\|resume\|cancel>` | The actions of the request that made the job | The resources of that request. |

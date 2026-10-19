@@ -20,10 +20,19 @@ This document uses ASD-STE100 Simplified Technical English.
   The buckets, the identities and the compose files use the name `seaweedfs`.
 - The browser tests open the page at `localhost`. A secure origin gives the page `crypto.subtle`.
 
+### Tags
+
+- New routes: `GET` and `PUT /api/tags`, `POST /api/tags/bulk` (a job for a prefix) and `GET /api/lifecycle`. A provider
+  without tags answers `501`. Refer to [docs/ACCESS.md](docs/ACCESS.md) for the actions.
+- An upload can carry tags: the header `X-Amz-Tagging` of `PUT /s3` and the field `tags` of `POST /api/uploads`.
+
 ### Interface `portal`
 
 - The test interface `portal` shows the display name of a bucket only. The permissions of the bucket are in a button at
   the left of the selector. The crumbs start with the mark of the bucket and a slash.
+- The details of a file show its tags. The person can add, remove and save them. The details tell which lifecycle rules
+  apply to the object. The menu Actions has "Show tags": a tag column and a filter for the files of the page. A folder
+  has the action "Tag objects". The menu Upload has "Tags of the new uploads".
 - A JSON file that fits in one page shows its totals at once and has no button to count lines and pages. The root of
   the JSON tree stays open.
 
