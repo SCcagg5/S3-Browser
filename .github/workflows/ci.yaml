@@ -99,3 +99,12 @@ jobs:
           BUILD_COMMIT: ${{ github.sha }}
           BUILD_DATE: ${{ github.event.repository.updated_at }}
         run: ./test/scratch-runtime.sh
+
+  portal-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Browser tests of the portal frontend
+        run: ./test/portal-frontend/run.sh
