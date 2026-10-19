@@ -104,7 +104,7 @@ jobs:
             echo "font binaries must not be shipped" >&2
             exit 1
           fi
-          if grep -R -E --exclude-dir=vendor --include='*.html' --include='*.js' --include='*.css' 'https?://|//cdn\.' src/public; then
+          if grep -R -E --exclude-dir=vendor --include='*.html' --include='*.js' --include='*.css' 'https?://|//cdn\.' src/public src/frontends; then
             echo "runtime frontend must not contact external asset domains" >&2
             exit 1
           fi

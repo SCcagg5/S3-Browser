@@ -25,6 +25,9 @@ var (
 	versionCache = map[string]string{}
 	htmlAssetRef = regexp.MustCompile(`((?:href|src)=")(assets/[^"?#]+)(")`)
 	cssIconRef   = regexp.MustCompile(`url\("(\.\./icons/[^"?)]+)"\)`)
+	// cssImportRef finds the relative stylesheets that a stylesheet imports (the clickhouse-dash frontend loads its
+	// cascade layers this way). An absolute or external URL does not match.
+	cssImportRef = regexp.MustCompile(`@import url\("([A-Za-z0-9_][A-Za-z0-9_./-]*\.css)"\)`)
 )
 
 // frontendVersion fingerprints every file of the embedded frontend. It is computed once per file system.
@@ -60,9 +63,11 @@ func versionHTML(html []byte, version string) []byte {
 	return htmlAssetRef.ReplaceAll(html, []byte("${1}${2}?v="+version+"${3}"))
 }
 
-// versionCSS fingerprints the icon URLs inside a stylesheet so icons are cacheable with their stylesheet.
+// versionCSS fingerprints the icon URLs and the imported stylesheets inside a stylesheet, so they are cacheable with
+// the stylesheet that names them.
 func versionCSS(css []byte, version string) []byte {
-	return cssIconRef.ReplaceAll(css, []byte(`url("${1}?v=`+version+`")`))
+	css = cssIconRef.ReplaceAll(css, []byte(`url("${1}?v=`+version+`")`))
+	return cssImportRef.ReplaceAll(css, []byte(`@import url("${1}?v=`+version+`")`))
 }
 
 // staticEntry is a frontend response prepared once: the final bytes (placeholders filled, URLs fingerprinted), their

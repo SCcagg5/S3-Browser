@@ -42,9 +42,14 @@ type application struct {
 }
 
 func newApplication(cfg appConfig) (*application, error) {
-	publicFS, err := fs.Sub(embeddedPublic, "public")
+	frontend := cfg.Frontend
+	if frontend == "" {
+		// A configuration that decodeConfig did not build (tests) keeps the documented default.
+		frontend = frontendDefault
+	}
+	publicFS, err := openFrontend(frontend)
 	if err != nil {
-		return nil, fmt.Errorf("open embedded frontend: %w", err)
+		return nil, err
 	}
 	concurrency := newStorageConcurrency(cfg.Runtime.MaxConcurrentStorageRequests)
 	app := &application{

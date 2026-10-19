@@ -49,6 +49,7 @@ Syntax: `server { ... }`. Zero or one block. The listener, the logs and the limi
 | `job_history_limit` | integer | 10 | 1 to 20 | value | no | The number of finished background jobs that the process keeps in memory. |
 | `access_mode` | text | "inherit_credentials" | inherit_credentials or force_read_only | value | no | force_read_only refuses each write and each delete. This key is not the access of humans (refer to the access block). |
 | `log_mode` | text | "anonymous" | anonymous or detailed | value | no | anonymous keeps the object keys out of the request log. detailed writes them. |
+| `frontend` | text | "default" | default or portal, exact (no change of case, no space) | value | no | The embedded browser interface that the server gives. portal is a test interface with the shell of the portal and the dense tables of ClickHouse Dash. |
 | `allow_full_object_fallback` | boolean | false |   | value | no | Let a parser read a full object when a format has no range reader. |
 | `memory_limit_bytes` | integer | 0 | 0, or 33554432 to 1125899906842624 | value | no | The soft memory limit of the Go runtime. 0 keeps the default of the runtime. |
 | `max_storage_bytes_per_request` | integer | 274877906944 | 1048576 to 1125899906842624 | value | no | The provider bytes that one HTTP request can transfer. |
