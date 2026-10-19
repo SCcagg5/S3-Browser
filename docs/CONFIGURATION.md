@@ -9,7 +9,7 @@ Supported top-level blocks:
 - zero or one `server` block;
 - one or more `auth "id"` blocks;
 - one or more `bucket "id"` blocks;
-- exactly one `access` block (since 1.1.0). It is mandatory.
+- exactly one `access` block (since 2.0.0). It is mandatory.
 
 Unknown blocks, attributes, nested blocks, and wrong value types are rejected. The HCL file is limited to 4 MiB. Individual secret files are limited to 1 MiB; a GCS service-account file is bounded separately by the provider parser.
 
@@ -80,7 +80,9 @@ S3 modes:
 - `access_key`: requires `access_key_id` or `access_key_id_file` and `secret_access_key` or `secret_access_key_file`; `session_token` is optional.
 - `anonymous`: rejects access-key fields.
 
-Every secret can be supplied directly, through its `_env` form (the name of an environment variable) or through its `_file` form. Give one form only. File paths relative to the HCL file are resolved from the HCL directory. The value in clear text is deprecated: the server writes a warning at start for it. Use `_env` or `_file`.
+A secret (`secret_access_key`, `session_token`) accepts only its `_env` form (the name of an environment variable) or its `_file` form. A secret in clear text in the file stops the start. `access_key_id` is an identifier, not a secret: it also accepts the value in the file. Give one form only. File paths relative to the HCL file are resolved from the HCL directory. The value of a file applies without its last line end; a secret with a space or a control character stops the start.
+
+Since 2.0.0, the server never changes a value to make it fit. It does not remove spaces, does not change the case (`provider = "S3"` is an error), does not remove the `/` at the end of `endpoint`, and does not add or remove a `/` in `root_prefix` (`root_prefix` is `""` or a prefix such as `"published/"`). The error gives the key, the expected form and the value.
 
 The endpoint must use HTTP or HTTPS and may not contain credentials, a query string, or a fragment. Redirects and process environment proxies are disabled.
 

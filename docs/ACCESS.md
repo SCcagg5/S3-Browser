@@ -321,6 +321,8 @@ S3-Browser and the PDP. For example, a NetworkPolicy admits only the pods of S3-
 
 ## Upgrade from 1.0.13
 
+S3-Browser 2.0.0 adds the access of humans. [CHANGELOG.md](../CHANGELOG.md) gives all the upgrade steps of 2.0.0.
+
 - Add the `access` block. `access { mode = "open" }` keeps the behavior of 1.0.13.
 - For `authzen`, give the public key of the access gateway and a token at the PDP. Then give the grants in the PDP.
   The PDP must read `properties.ancestors`, the match of the `context`, and the top-level `resource_types` of the list

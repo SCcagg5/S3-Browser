@@ -2,7 +2,10 @@
 
 This document uses ASD-STE100 Simplified Technical English.
 
-## 1.1.0
+## 2.0.0
+
+Version 2.0.0 is a major version: a configuration file of 1.0.x does not start without changes. Refer to
+[Upgrade from 1.0.x](#upgrade-from-10x).
 
 ### Access of humans (AuthZEN)
 
@@ -22,18 +25,44 @@ This document uses ASD-STE100 Simplified Technical English.
 - Each decision has a log line `access.decision`. The request log adds `subject` and `request_id`.
 - The user interface hides the upload and the delete controls of a folder that the human cannot change.
 
-### Configuration
+### Configuration (strict)
 
 - `s3-browser print-config -c <file>` and `s3-browser -c <file> --print-config` write the value and the source of
   each key, and exit. The server writes the same values in its log at start. Secrets are hidden.
 - `docs/configuration-reference.md` is generated from the table of keys in `src/config_keys.go`.
   `s3-browser config-reference` writes it.
-- The S3 secrets of the `auth` block accept the `_env` form. The value in clear text is deprecated: the server writes
-  a warning at start for it.
-- A value of an `_env` or `_file` form of the `access` block has no change other than the removal of the last line
-  end.
+- A secret accepts only `_env` and `_file`. A secret in clear text in the file stops the start. The secrets are
+  `auth.secret_access_key`, `auth.session_token` and `access.pdp.token`. `auth.access_key_id` is an identifier: it
+  keeps the value form, and `print-config` shows it.
+- The value of a `_file` form applies without its last line end, and with no other change. A secret with a space or a
+  control character stops the start. The error does not show the secret.
+- The server never changes a value to make it fit. Before 2.0.0, it removed spaces, changed the case of `provider`,
+  `mode`, `access_mode`, `log_mode` and `permissions`, removed the `/` at the end of `endpoint`, changed `root_prefix`
+  (`"/tenant"` became `"tenant/"`), and removed a duplicate permission. Now each of these values stops the start.
+  The error gives the key, the expected form and the value.
+- An empty text value (for example `name = ""`) stops the start. To use the default of a key, remove the key.
+- The only environment variables that the server reads are the ones that an `_env` attribute names. Only
+  `src/config_env.go` reads them, and the CI checks it.
 
-### Upgrade
+### Tests
 
-- Add the `access` block to each configuration file. Without it, the server does not start.
-- The CI permits `os.LookupEnv` only in `src/config_env.go`.
+- `test/smoke.sh` uses the current upload API: each chunk sends the resume token in
+  `X-S3-Browser-Resume-Token` to `PUT /api/uploads`. Insights accepts `200` (done at once) or `202` (a job).
+- The Garage test stack reads the S3 secret from `test/secrets/s3_secret_access_key`.
+
+### Upgrade from 1.0.x
+
+Do these steps on each configuration file before you start 2.0.0. Then run `s3-browser print-config -c <file>`: it
+stops with the error of each value that does not fit.
+
+1. Add the `access` block. `access { mode = "open" }` keeps the behavior of 1.0.x. For `authzen`, refer to
+   [docs/ACCESS.md](docs/ACCESS.md).
+2. Move each secret out of the file. Replace `secret_access_key = "..."` with `secret_access_key_file = "/path"` or
+   `secret_access_key_env = "VAR"`. Do the same for `session_token`.
+3. Write `provider`, `mode`, `server.access_mode`, `server.log_mode` and each item of `permissions` in lower case,
+   without spaces. Remove a duplicate item of `permissions`.
+4. Remove the `/` at the end of `endpoint`.
+5. Write `root_prefix` as `""` or as a prefix that ends with `/` and does not start with `/`. For example, write
+   `"tenant-a/"`, not `"/tenant-a"` or `"tenant-a"`.
+6. Remove the spaces at the start and at the end of each text value, and remove each key with an empty value.
+7. Make sure that each file of a `_file` form holds only the value and one optional line end.
