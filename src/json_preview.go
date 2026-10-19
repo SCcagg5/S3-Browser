@@ -168,7 +168,7 @@ func parsePositiveInt(value string, fallback, maximum int) (int, error) {
 }
 
 func (a *application) jsonObjectFromRequest(r *http.Request) (*storageInstance, string, string, error) {
-	instance, err := a.instanceFromRequest(r, "")
+	instance, err := a.readableInstance(r, cleanRelativeKey(r.URL.Query().Get("key")))
 	if err != nil {
 		return nil, "", "", err
 	}

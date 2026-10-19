@@ -1336,7 +1336,9 @@ func (a *application) handleJobs(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		job, ok := a.jobs.get(id)
-		if !ok {
+		// In the authzen mode, a job that the human cannot do gets the same
+		// answer as a job that does not exist.
+		if !ok || !a.jobAllowed(r, job) {
 			writeAPIError(w, apiError{Status: http.StatusNotFound, Code: "job_not_found", Message: "job was not found"})
 			return
 		}
@@ -1346,6 +1348,12 @@ func (a *application) handleJobs(w http.ResponseWriter, r *http.Request) {
 	if len(parts) != 2 || r.Method != http.MethodPost {
 		methodNotAllowed(w, http.MethodPost)
 		return
+	}
+	if a.config.Access.enforced() {
+		if current, ok := a.jobs.get(id); !ok || !a.jobAllowed(r, current) {
+			writeAPIError(w, apiError{Status: http.StatusNotFound, Code: "job_not_found", Message: "job was not found"})
+			return
+		}
 	}
 	job, err := a.jobs.changeStatus(id, parts[1])
 	if err != nil {

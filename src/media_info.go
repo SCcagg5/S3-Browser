@@ -46,7 +46,7 @@ func (a *application) handleMediaInfo(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, http.MethodGet)
 		return
 	}
-	instance, err := a.instanceFromRequest(r, "")
+	instance, err := a.readableInstance(r, cleanRelativeKey(r.URL.Query().Get("key")))
 	if err != nil {
 		writeAPIError(w, err)
 		return

@@ -158,7 +158,7 @@ func normalizeDelimitedRecord(record []string, columns int) ([]string, bool, boo
 }
 
 func (a *application) delimitedObjectFromRequest(r *http.Request) (*storageInstance, string, string, error) {
-	instance, err := a.instanceFromRequest(r, "")
+	instance, err := a.readableInstance(r, cleanRelativeKey(r.URL.Query().Get("key")))
 	if err != nil {
 		return nil, "", "", err
 	}
@@ -343,7 +343,7 @@ func (a *application) handleDocumentCount(w http.ResponseWriter, r *http.Request
 		methodNotAllowed(w, http.MethodGet)
 		return
 	}
-	instance, err := a.instanceFromRequest(r, "")
+	instance, err := a.readableInstance(r, cleanRelativeKey(r.URL.Query().Get("key")))
 	if err != nil {
 		writeAPIError(w, err)
 		return

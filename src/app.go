@@ -36,6 +36,9 @@ type application struct {
 	uploads         *uploadManager
 	sqlite          *sqliteSessionManager
 	resumeTokenKey  [32]byte
+	// identity and pdp exist only with access.mode = "authzen".
+	identity *identityVerifier
+	pdp      *pdpClient
 }
 
 func newApplication(cfg appConfig) (*application, error) {
@@ -52,6 +55,10 @@ func newApplication(cfg appConfig) (*application, error) {
 	}
 	if _, err := rand.Read(app.resumeTokenKey[:]); err != nil {
 		return nil, fmt.Errorf("generate upload resume token key: %w", err)
+	}
+	if cfg.Access.enforced() {
+		app.identity = newIdentityVerifier(cfg.Access)
+		app.pdp = newPDPClient(cfg.Access)
 	}
 	for _, authCfg := range cfg.Authentications {
 		auth, err := newSharedAuthentication(authCfg)
@@ -127,6 +134,7 @@ func (a *application) close() {
 		a.jobs.close()
 	}
 	a.closeAuthentications()
+	a.pdp.close()
 }
 
 func (a *application) routes() http.Handler {
@@ -169,6 +177,7 @@ func (a *application) routes() http.Handler {
 	mux.HandleFunc("/api/inspect", a.handleInspect)
 	mux.HandleFunc("/api/image-preview", a.handleImagePreview)
 	mux.HandleFunc("/healthz", a.handleHealth)
+	mux.HandleFunc(accessActionsPath, a.handleAccessActions)
 	mux.HandleFunc("/open/", a.handleOpenOriginal)
 	mux.Handle("/", secureStaticHandler(a.publicFS))
 	router := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -187,7 +196,7 @@ func (a *application) routes() http.Handler {
 		}
 		mux.ServeHTTP(w, r)
 	})
-	internal := requestLogMiddleware(a.config.Runtime.LogMode, requestBudgetMiddleware(a.config.Runtime, sameOriginMutationMiddleware(gzipJSONMiddleware(router))))
+	internal := requestLogMiddleware(a.config.Runtime.LogMode, a.accessMiddleware(requestBudgetMiddleware(a.config.Runtime, sameOriginMutationMiddleware(gzipJSONMiddleware(router)))))
 	return securityHeadersMiddleware(internal)
 }
 
@@ -196,12 +205,17 @@ func (a *application) handleInstances(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, http.MethodGet)
 		return
 	}
-	instances := make([]instanceInfo, 0, len(a.order))
-	for _, id := range a.order {
-		instances = append(instances, a.instances[id].publicInfo())
+	visible, decisions := a.visibleInstances(r)
+	instances := make([]instanceInfo, 0, len(visible))
+	for _, instance := range visible {
+		instances = append(instances, withAccessCapabilities(instance.publicInfo(), decisions[instance.cfg.ID]))
+	}
+	defaultID := ""
+	if len(visible) > 0 {
+		defaultID = visible[0].cfg.ID
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"default":   a.order[0],
+		"default":   defaultID,
 		"instances": instances,
 		"build":     currentBuildInfo(),
 		"runtime":   publicRuntimeInfo(a.config.Runtime),
@@ -222,7 +236,7 @@ func (a *application) handlePermissionRefresh(w http.ResponseWriter, r *http.Req
 		methodNotAllowed(w, http.MethodPost)
 		return
 	}
-	instance, err := a.instanceFromRequest(r, "")
+	instance, err := a.instanceFromRequest(r, "", permissionRead)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -230,6 +244,10 @@ func (a *application) handlePermissionRefresh(w http.ResponseWriter, r *http.Req
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 	caps := instance.refreshCapabilities(ctx)
+	if a.config.Access.enforced() {
+		info := instanceInfo{Capabilities: caps}
+		caps = withAccessCapabilities(info, a.bucketVisibility(r, []*storageInstance{instance})[instance.cfg.ID]).Capabilities
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"instance":     instance.cfg.ID,
 		"capabilities": caps,
@@ -256,6 +274,8 @@ type listResponseJSON struct {
 	IsTruncated           bool           `json:"isTruncated"`
 	ScanComplete          bool           `json:"scanComplete"`
 	SortAvailable         bool           `json:"sortAvailable"`
+	// Access gives the decisions of the listed node in the authzen mode.
+	Access *listAccessJSON `json:"access,omitempty"`
 }
 
 const providerListPageSize = 1000
@@ -299,16 +319,27 @@ func (a *application) handleList(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, http.MethodGet, http.MethodHead)
 		return
 	}
-	instance, err := a.instanceFromRequest(r, "")
+	instance, err := a.instanceFromRequest(r, "", permissionRead)
 	if err != nil {
 		writeAPIError(w, err)
 		return
+	}
+	prefix := cleanRelativeKey(r.URL.Query().Get("prefix"))
+	// A human who cannot read the node of the listing can still see the path to
+	// a folder that a grant below the bucket names (the navigation filter).
+	nodeAccess := a.nodeAccess(r, instance, prefix)
+	navigationOnly := false
+	if nodeAccess != nil && !nodeAccess.Read {
+		if a.nodeResource(instance, prefix).Type != resourceBucket {
+			writeAPIError(w, forbidden(actionObjectsRead))
+			return
+		}
+		navigationOnly = true
 	}
 	if err := requirePermission(instance, permissionRead); err != nil {
 		writeAPIError(w, err)
 		return
 	}
-	prefix := cleanRelativeKey(r.URL.Query().Get("prefix"))
 	delimiter := r.URL.Query().Get("delimiter")
 	if _, present := r.URL.Query()["delimiter"]; !present {
 		delimiter = "/"
@@ -380,6 +411,9 @@ func (a *application) handleList(w http.ResponseWriter, r *http.Request) {
 			ContentType:  object.ContentType,
 		})
 	}
+	if navigationOnly {
+		items = a.navigationFilter(r, instance, items)
+	}
 	sortListItems(items)
 	response := listResponseJSON{
 		Instance:              instance.cfg.ID,
@@ -390,6 +424,7 @@ func (a *application) handleList(w http.ResponseWriter, r *http.Request) {
 		IsTruncated:           page.NextPageToken != "",
 		ScanComplete:          scanComplete,
 		SortAvailable:         pageToken == "" && scanComplete,
+		Access:                nodeAccess,
 	}
 	if r.Method == http.MethodHead {
 		w.WriteHeader(http.StatusOK)
@@ -476,8 +511,13 @@ func (a *application) handleStats(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, http.MethodGet)
 		return
 	}
-	instance, err := a.instanceFromRequest(r, "")
+	instance, err := a.instanceFromRequest(r, "", permissionRead)
 	if err != nil {
+		writeAPIError(w, err)
+		return
+	}
+	prefix := normalizePrefix(cleanRelativeKey(r.URL.Query().Get("prefix")))
+	if err := a.requireAccess(r, instance, permissionRead, prefix); err != nil {
 		writeAPIError(w, err)
 		return
 	}
@@ -485,7 +525,6 @@ func (a *application) handleStats(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, err)
 		return
 	}
-	prefix := normalizePrefix(cleanRelativeKey(r.URL.Query().Get("prefix")))
 	job, found := a.jobs.reusableStatsJob(instance.cfg.ID, prefix, time.Now().UTC())
 	if !found {
 		job, err = a.jobs.create(jobState{
@@ -516,6 +555,16 @@ type objectOperationRequest struct {
 	IsPrefix bool   `json:"isPrefix"`
 }
 
+// accessKeys gives the source and the destination as the operation uses them,
+// for the questions to the PDP.
+func (o objectOperationRequest) accessKeys() (string, string) {
+	source, target := cleanRelativeKey(o.Source), cleanRelativeKey(o.Target)
+	if o.IsPrefix {
+		return normalizePrefix(source), normalizePrefix(target)
+	}
+	return source, target
+}
+
 func (a *application) handleCopy(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w, http.MethodPost)
@@ -526,9 +575,17 @@ func (a *application) handleCopy(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, err)
 		return
 	}
-	instance, err := a.instanceFromRequest(r, request.Instance)
+	instance, err := a.instanceFromRequest(r, request.Instance, permissionRead)
 	if err != nil {
 		writeAPIError(w, err)
+		return
+	}
+	source, target := request.accessKeys()
+	if action, ok := a.checkAccess(r,
+		accessRequirement{permissionRead, instance, source},
+		accessRequirement{permissionWrite, instance, target},
+	); !ok {
+		writeAPIError(w, forbidden(action))
 		return
 	}
 	for _, permission := range []string{permissionRead, permissionWrite} {
@@ -569,9 +626,18 @@ func (a *application) handleRename(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, err)
 		return
 	}
-	instance, err := a.instanceFromRequest(r, request.Instance)
+	instance, err := a.instanceFromRequest(r, request.Instance, permissionRead)
 	if err != nil {
 		writeAPIError(w, err)
+		return
+	}
+	source, target := request.accessKeys()
+	if action, ok := a.checkAccess(r,
+		accessRequirement{permissionRead, instance, source},
+		accessRequirement{permissionDelete, instance, source},
+		accessRequirement{permissionWrite, instance, target},
+	); !ok {
+		writeAPIError(w, forbidden(action))
 		return
 	}
 	for _, permission := range []string{permissionRead, permissionWrite, permissionDelete} {
@@ -617,9 +683,17 @@ func (a *application) handleDeletePrefix(w http.ResponseWriter, r *http.Request)
 		writeAPIError(w, err)
 		return
 	}
-	instance, err := a.instanceFromRequest(r, request.Instance)
+	instance, err := a.instanceFromRequest(r, request.Instance, permissionDelete)
 	if err != nil {
 		writeAPIError(w, err)
+		return
+	}
+	prefix := normalizePrefix(cleanRelativeKey(request.Prefix))
+	if action, ok := a.checkAccess(r,
+		accessRequirement{permissionRead, instance, prefix},
+		accessRequirement{permissionDelete, instance, prefix},
+	); !ok {
+		writeAPIError(w, forbidden(action))
 		return
 	}
 	for _, permission := range []string{permissionRead, permissionDelete} {
@@ -628,7 +702,6 @@ func (a *application) handleDeletePrefix(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
-	prefix := normalizePrefix(cleanRelativeKey(request.Prefix))
 	if prefix == "" {
 		writeAPIError(w, apiError{Status: http.StatusBadRequest, Code: "invalid_prefix", Message: "refusing to delete the whole bucket; prefix is required"})
 		return
@@ -745,8 +818,13 @@ func (a *application) handleOpenOriginal(w http.ResponseWriter, r *http.Request)
 		methodNotAllowed(w, http.MethodGet, http.MethodHead)
 		return
 	}
-	instance, err := a.instanceFromRequest(r, "")
+	instance, err := a.instanceFromRequest(r, "", permissionRead)
 	if err != nil {
+		writeGatewayError(w, err)
+		return
+	}
+	key := cleanRelativeKey(r.URL.Query().Get("key"))
+	if err := a.requireAccess(r, instance, permissionRead, key); err != nil {
 		writeGatewayError(w, err)
 		return
 	}
@@ -754,7 +832,6 @@ func (a *application) handleOpenOriginal(w http.ResponseWriter, r *http.Request)
 		writeGatewayError(w, err)
 		return
 	}
-	key := cleanRelativeKey(r.URL.Query().Get("key"))
 	if key == "" {
 		writeGatewayError(w, apiError{Status: http.StatusBadRequest, Code: "invalid_key", Message: "object key cannot be empty"})
 		return
@@ -848,7 +925,14 @@ func browserInlineContent(key, contentType string) bool {
 }
 
 func (a *application) handleObjectGateway(w http.ResponseWriter, r *http.Request) {
-	instance, err := a.instanceFromRequest(r, "")
+	permission := permissionRead
+	switch r.Method {
+	case http.MethodPut:
+		permission = permissionWrite
+	case http.MethodDelete:
+		permission = permissionDelete
+	}
+	instance, err := a.instanceFromRequest(r, "", permission)
 	if err != nil {
 		writeGatewayError(w, err)
 		return
@@ -861,6 +945,12 @@ func (a *application) handleObjectGateway(w http.ResponseWriter, r *http.Request
 	if key == "" {
 		a.handleRawList(w, r, instance)
 		return
+	}
+	if r.Method != http.MethodOptions {
+		if err := a.requireAccess(r, instance, permission, key); err != nil {
+			writeGatewayError(w, err)
+			return
+		}
 	}
 	fullKey := instance.fullKey(key)
 	version := strings.TrimSpace(r.URL.Query().Get("version"))
@@ -1119,11 +1209,15 @@ func (a *application) handleRawList(w http.ResponseWriter, r *http.Request, inst
 		methodNotAllowed(w, http.MethodGet, http.MethodHead)
 		return
 	}
+	query := r.URL.Query()
+	if err := a.requireAccess(r, instance, permissionRead, cleanRelativeKey(query.Get("prefix"))); err != nil {
+		writeGatewayError(w, err)
+		return
+	}
 	if err := requirePermission(instance, permissionRead); err != nil {
 		writeGatewayError(w, err)
 		return
 	}
-	query := r.URL.Query()
 	maxResults := parseBoundedInt(query.Get("max-keys"), 1000, 1, 1000)
 	startAfter := cleanRelativeKey(query.Get("start-after"))
 	if startAfter != "" {
@@ -1206,7 +1300,11 @@ func (a *application) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "instances": len(a.instances)})
 }
 
-func (a *application) instanceFromRequest(r *http.Request, bodyInstance string) (*storageInstance, error) {
+// instanceFromRequest finds the bucket of a request: the instance of the body,
+// else the query parameter instance, else the first bucket. The permission
+// gives the action of the 403 answer for a hidden or an unknown bucket in the
+// authzen mode. The handler then asks the action on its exact resource.
+func (a *application) instanceFromRequest(r *http.Request, bodyInstance, permission string) (*storageInstance, error) {
 	id := strings.TrimSpace(bodyInstance)
 	if id == "" {
 		id = strings.TrimSpace(r.URL.Query().Get("instance"))
@@ -1214,11 +1312,7 @@ func (a *application) instanceFromRequest(r *http.Request, bodyInstance string) 
 	if id == "" && len(a.order) > 0 {
 		id = a.order[0]
 	}
-	instance, ok := a.instances[id]
-	if !ok {
-		return nil, apiError{Status: http.StatusNotFound, Code: "unknown_instance", Message: fmt.Sprintf("storage instance %q does not exist", id)}
-	}
-	return instance, nil
+	return a.resolveInstance(r, id, permission)
 }
 
 func requirePermission(instance *storageInstance, permission string) error {
@@ -1420,6 +1514,8 @@ type apiError struct {
 	Status  int
 	Code    string
 	Message string
+	// Action is the action of the access policy of a 403 answer.
+	Action string
 }
 
 func (e apiError) Error() string { return e.Message }
@@ -1450,6 +1546,10 @@ func writeAPIError(w http.ResponseWriter, err error) {
 		status = apiErr.Status
 		code = apiErr.Code
 		message = apiErr.Message
+		if apiErr.Action != "" {
+			writeJSON(w, status, map[string]any{"error": map[string]any{"code": code, "message": message, "action": apiErr.Action}})
+			return
+		}
 	} else {
 		var upstream *upstreamError
 		if errors.As(err, &upstream) {
@@ -1470,6 +1570,11 @@ func writeGatewayError(w http.ResponseWriter, err error) {
 	message := publicStorageError(err)
 	var apiErr apiError
 	if errors.As(err, &apiErr) {
+		// The 403 of the access policy has the same JSON body on each route.
+		if apiErr.Action != "" {
+			writeAPIError(w, apiErr)
+			return
+		}
 		status = apiErr.Status
 		message = apiErr.Message
 	}
@@ -1570,7 +1675,8 @@ func (a *application) handleStorageFrontend(w http.ResponseWriter, r *http.Reque
 	segments := strings.Split(strings.TrimSuffix(relative, "/"), "/")
 	if len(segments) >= 2 {
 		hostID, bucketID := segments[0], segments[1]
-		if instance, ok := a.instances[bucketID]; ok && instance != nil && instance.cfg.AuthID == hostID {
+		// A hidden bucket gets the same 404 page as an unknown bucket.
+		if instance, ok := a.instances[bucketID]; ok && instance != nil && instance.cfg.AuthID == hostID && a.bucketVisible(r, instance) {
 			if len(segments) == 2 && !trailingSlash {
 				target := bucketID + "/"
 				if r.URL.RawQuery != "" {
@@ -1594,7 +1700,7 @@ func (a *application) handleStorageFrontend(w http.ResponseWriter, r *http.Reque
 	// preserving the public application prefix and the opaque encoded key.
 	legacyID := segments[0]
 	legacy, ok := a.instances[legacyID]
-	if !ok || legacy == nil {
+	if !ok || legacy == nil || !a.bucketVisible(r, legacy) {
 		a.notFoundPage(w, r)
 		return
 	}
@@ -1804,26 +1910,38 @@ func requestLogMiddleware(mode string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		recorder := &statusRecorder{ResponseWriter: w}
-		next.ServeHTTP(recorder, r)
+		info := &requestLogInfo{}
+		next.ServeHTTP(recorder, r.WithContext(context.WithValue(r.Context(), requestLogKey{}, info)))
 		status := recorder.status
 		if status == 0 {
 			status = http.StatusOK
 		}
-		loggedPath := r.URL.Path
-		if mode != logModeDetailed {
-			switch {
-			case strings.HasPrefix(loggedPath, "/api/jobs/"):
-				loggedPath = "/api/jobs/<id>"
-			case strings.HasPrefix(loggedPath, "/api/uploads/"):
-				loggedPath = "/api/uploads/<id>"
-			case strings.HasPrefix(loggedPath, "/api/sqlite/sessions/"):
-				loggedPath = "/api/sqlite/sessions/<id>"
-			case strings.HasPrefix(loggedPath, "/-/"):
-				// Frontend routes carry the decoded object key or prefix in the path.
-				loggedPath = "/-/<path>"
-			}
-		}
+		loggedPath := loggedRequestPath(mode, r.URL.Path)
 		// %q keeps a decoded %0A or other control byte in the path from forging log lines.
+		if info.Subject != "" {
+			log.Printf("%s %q %d %dB %s subject=%q request_id=%s", r.Method, loggedPath, status, recorder.bytes, time.Since(start).Round(time.Millisecond), info.Subject, info.RequestID)
+			return
+		}
 		log.Printf("%s %q %d %dB %s", r.Method, loggedPath, status, recorder.bytes, time.Since(start).Round(time.Millisecond))
 	})
+}
+
+// loggedRequestPath hides the object keys and the ids of a path in the
+// anonymous log mode.
+func loggedRequestPath(mode, loggedPath string) string {
+	if mode == logModeDetailed {
+		return loggedPath
+	}
+	switch {
+	case strings.HasPrefix(loggedPath, "/api/jobs/"):
+		return "/api/jobs/<id>"
+	case strings.HasPrefix(loggedPath, "/api/uploads/"):
+		return "/api/uploads/<id>"
+	case strings.HasPrefix(loggedPath, "/api/sqlite/sessions/"):
+		return "/api/sqlite/sessions/<id>"
+	case strings.HasPrefix(loggedPath, "/-/"):
+		// Frontend routes carry the decoded object key or prefix in the path.
+		return "/-/<path>"
+	}
+	return loggedPath
 }

@@ -81,7 +81,7 @@ func (a *application) handleParquetPreview(w http.ResponseWriter, r *http.Reques
 		methodNotAllowed(w, http.MethodGet)
 		return
 	}
-	instance, err := a.instanceFromRequest(r, "")
+	instance, err := a.readableInstance(r, strings.TrimLeft(r.URL.Query().Get("key"), "/"))
 	if err != nil {
 		writeAPIError(w, err)
 		return
