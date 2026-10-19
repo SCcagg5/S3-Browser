@@ -153,6 +153,9 @@ func (a *application) routes() http.Handler {
 	mux.HandleFunc("/api/copy", a.handleCopy)
 	mux.HandleFunc("/api/rename", a.handleRename)
 	mux.HandleFunc("/api/delete-prefix", a.handleDeletePrefix)
+	mux.HandleFunc("/api/tags", a.handleTags)
+	mux.HandleFunc("/api/tags/bulk", a.handleTagsBulk)
+	mux.HandleFunc("/api/lifecycle", a.handleLifecycle)
 	mux.HandleFunc("/api/jobs", http.NotFound)
 	mux.HandleFunc("/api/jobs/", a.handleJobs)
 	mux.HandleFunc("/api/uploads/resume", a.handleUploads)
@@ -1020,7 +1023,12 @@ func (a *application) handleObjectGateway(w http.ResponseWriter, r *http.Request
 			writeGatewayError(w, err)
 			return
 		}
-		putCtx := r.Context()
+		tags, err := parseTaggingHeader(r.Header)
+		if err != nil {
+			writeGatewayError(w, err)
+			return
+		}
+		putCtx := withUploadTags(r.Context(), tags)
 		var transfer *checksumTransfer
 		if digest != "" {
 			transfer = &checksumTransfer{SHA256: digest}

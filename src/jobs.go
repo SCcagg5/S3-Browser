@@ -155,6 +155,7 @@ type jobState struct {
 	ArchiveExtract               *archiveExtractResult         `json:"archive_extract,omitempty"`
 	ArchiveEntryIntegrityRequest *archiveEntryIntegrityRequest `json:"archive_entry_integrity_request,omitempty"`
 	ArchiveEntryIntegrity        *archiveEntryIntegrityResult  `json:"archive_entry_integrity,omitempty"`
+	TagChange                    *tagChange                    `json:"tag_change,omitempty"`
 	Error                        string                        `json:"error,omitempty"`
 	CreatedAt                    time.Time                     `json:"created_at"`
 	UpdatedAt                    time.Time                     `json:"updated_at"`
@@ -292,6 +293,12 @@ func cloneJobState(job jobState) jobState {
 	job.ArchiveExtract = cloneArchiveExtractResult(job.ArchiveExtract)
 	job.ArchiveEntryIntegrityRequest = cloneArchiveEntryIntegrityRequest(job.ArchiveEntryIntegrityRequest)
 	job.ArchiveEntryIntegrity = cloneArchiveEntryIntegrityResult(job.ArchiveEntryIntegrity)
+	if job.TagChange != nil {
+		change := *job.TagChange
+		change.Add = append([]objectTag(nil), change.Add...)
+		change.Remove = append([]string(nil), change.Remove...)
+		job.TagChange = &change
+	}
 	job.StartedAt = cloneTimePointer(job.StartedAt)
 	job.EndedAt = cloneTimePointer(job.EndedAt)
 	return job
@@ -750,6 +757,13 @@ func (m *jobManager) execute(ctx context.Context, job *jobState) error {
 			}
 		}
 		return m.runDeleteJob(ctx, job, instance)
+	case jobTypeTagPrefix:
+		for _, permission := range []string{permissionRead, permissionWrite} {
+			if err := requirePermission(instance, permission); err != nil {
+				return err
+			}
+		}
+		return m.runTagJob(ctx, job, instance)
 	case jobTypeStatsPrefix:
 		if err := requirePermission(instance, permissionRead); err != nil {
 			return err

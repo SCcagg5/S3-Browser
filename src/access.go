@@ -485,6 +485,8 @@ func (a *application) jobRequirements(job jobState) ([]accessRequirement, bool) 
 		return []accessRequirement{{permissionRead, source, job.Source}, {permissionDelete, source, job.Source}, {permissionWrite, source, job.Target}}, true
 	case jobTypeDeletePrefix:
 		return []accessRequirement{{permissionRead, source, job.Prefix}, {permissionDelete, source, job.Prefix}}, true
+	case jobTypeTagPrefix:
+		return []accessRequirement{{permissionRead, source, job.Prefix}, {permissionWrite, source, job.Prefix}}, true
 	case jobTypeStatsPrefix:
 		return []accessRequirement{{permissionRead, source, job.Prefix}}, true
 	case jobTypeIntegrity:

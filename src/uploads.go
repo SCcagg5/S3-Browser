@@ -347,6 +347,8 @@ type createUploadRequest struct {
 	ContentType string `json:"contentType"`
 	// Checksum is "" or "sha256". With "sha256" the client sends the SHA-256 digest of each chunk in X-Checksum-Sha256.
 	Checksum string `json:"checksum"`
+	// Tags are the object tags of the new object. Only an S3 provider that supports tags keeps them.
+	Tags []objectTag `json:"tags"`
 }
 
 const (
@@ -417,6 +419,10 @@ func (m *uploadManager) create(ctx context.Context, request createUploadRequest)
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
+	if err := validateTags(request.Tags); err != nil {
+		return uploadSession{}, err
+	}
+	ctx = withUploadTags(ctx, request.Tags)
 	if request.Checksum != "" && request.Checksum != uploadChecksumSHA256 {
 		return uploadSession{}, apiError{Status: http.StatusBadRequest, Code: "invalid_checksum", Message: `checksum must be "" or "sha256"`}
 	}

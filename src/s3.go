@@ -336,6 +336,7 @@ func (s *s3Backend) put(ctx context.Context, key string, body io.Reader, size in
 		headers.Set("If-None-Match", "*")
 	}
 	setChecksumRequest(ctx, headers)
+	setUploadTagsRequest(ctx, headers)
 	resp, err := s.do(ctx, http.MethodPut, key, nil, body, size, headers)
 	if err != nil {
 		return err
@@ -370,6 +371,7 @@ func (s *s3Backend) InitiateMultipart(ctx context.Context, key, contentType stri
 	if checksumAlgorithmFrom(ctx) {
 		headers.Set("x-amz-checksum-algorithm", "SHA256")
 	}
+	setUploadTagsRequest(ctx, headers)
 	resp, err := s.do(ctx, http.MethodPost, key, query, nil, 0, headers)
 	if err != nil {
 		return "", err
