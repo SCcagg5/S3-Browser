@@ -12,6 +12,9 @@ func TestOmittedPermissionsInheritCredentialCapabilities(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "config.hcl")
 	writeConfig(t, path, `
+access {
+  mode = "open"
+}
 auth "shared" {
   provider          = "s3"
   mode              = "access_key"
@@ -52,6 +55,9 @@ func TestLoadConfigSharesAuthenticationAcrossBuckets(t *testing.T) {
 	}
 	configPath := filepath.Join(dir, "config.hcl")
 	writeConfig(t, configPath, `
+access {
+  mode = "open"
+}
 server {
   listen            = ":9090"
   job_history_limit = 17
@@ -191,6 +197,9 @@ func TestLoadConfigSupportsGCSAuthentication(t *testing.T) {
 	}
 	configPath := filepath.Join(dir, "config.hcl")
 	writeConfig(t, configPath, `
+access {
+  mode = "open"
+}
 auth "gcs" {
   provider         = "gcs"
   mode             = "service_account"

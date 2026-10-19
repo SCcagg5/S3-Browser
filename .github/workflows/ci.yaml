@@ -51,8 +51,13 @@ jobs:
             echo "runtime source must not invoke external commands" >&2
             exit 1
           fi
-          if grep -R --include='*.go' -E 'os\.(Getenv|LookupEnv)|ProxyFromEnvironment' src; then
+          if grep -R --include='*.go' -E 'os\.(Getenv|Environ)|ProxyFromEnvironment' src; then
             echo "runtime configuration and provider clients must not use process environment variables" >&2
+            exit 1
+          fi
+          # Only the _env attributes of the configuration read the environment, in one place.
+          if grep -R --include='*.go' --exclude='config_env.go' -E 'os\.LookupEnv' src; then
+            echo "only src/config_env.go may read an environment variable that the configuration names" >&2
             exit 1
           fi
           if grep -R --include='*.go' --exclude='*_test.go' -E 'os\.(Create|Mkdir|MkdirAll|WriteFile|OpenFile|Remove|RemoveAll|Rename)|CreateTemp|MkdirTemp' src; then

@@ -967,6 +967,9 @@ func TestApplicationReusesAuthenticationAcrossBuckets(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	defer server.Close()
 	cfg, err := decodeConfig(`
+access {
+  mode = "open"
+}
 server {}
 
 auth "shared" {

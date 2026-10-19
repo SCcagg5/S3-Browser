@@ -26,18 +26,39 @@ func main() {
 			info := currentBuildInfo()
 			fmt.Printf("s3-browser %s\n", info.Display)
 			return
+		case "config-reference":
+			fmt.Print(configReference())
+			return
+		case "print-config":
+			runPrintConfig(os.Args[2:])
+			return
 		}
 	}
 
 	flags := flag.NewFlagSet("s3-browser", flag.ExitOnError)
 	var configPath string
+	var printConfig bool
 	flags.StringVar(&configPath, "c", "config.hcl", "path to the HCL configuration file")
 	flags.StringVar(&configPath, "config", "config.hcl", "path to the HCL configuration file")
+	flags.BoolVar(&printConfig, "print-config", false, "check the configuration, write the value and the source of each key, and exit")
 	_ = flags.Parse(os.Args[1:])
+	if flags.NArg() != 0 {
+		log.Fatalf("unexpected argument %q; use -c <path>, --print-config, healthcheck, print-config, config-reference or version", flags.Arg(0))
+	}
 
 	cfg, err := loadRuntimeConfig(configPath)
 	if err != nil {
 		log.Fatal(err)
+	}
+	if printConfig {
+		fmt.Print(formatEffectiveConfiguration(cfg))
+		return
+	}
+	for _, warning := range configWarnings(cfg) {
+		log.Print(warning)
+	}
+	for _, setting := range effectiveConfiguration(cfg) {
+		log.Printf("config.effective %s = %s  # %s", setting.Name, setting.Value, setting.Source)
 	}
 	if cfg.Runtime.MemoryLimitBytes > 0 {
 		debug.SetMemoryLimit(cfg.Runtime.MemoryLimitBytes)
@@ -58,7 +79,7 @@ func main() {
 	if cfg.Runtime.LogMode == logModeDetailed {
 		log.Printf("loaded configuration from %s", cfg.SourceName)
 	}
-	log.Printf("object browser listening on %s with %d bucket(s) using %d auth configuration(s); stateless=true access=%s", cfg.Listen, len(cfg.Buckets), len(cfg.Authentications), cfg.Runtime.AccessMode)
+	log.Printf("object browser listening on %s with %d bucket(s) using %d auth configuration(s); stateless=true access=%s access.mode=%s", cfg.Listen, len(cfg.Buckets), len(cfg.Authentications), cfg.Runtime.AccessMode, cfg.Access.Mode)
 	serverErrors := make(chan error, 1)
 	go func() {
 		serverErrors <- server.ListenAndServe()
@@ -80,6 +101,22 @@ func main() {
 			log.Fatal(err)
 		}
 	}
+}
+
+// runPrintConfig checks the configuration, writes the value that applies for
+// each key with its source, and exits with status 0. It hides each secret.
+func runPrintConfig(args []string) {
+	flags := flag.NewFlagSet("print-config", flag.ExitOnError)
+	var configPath string
+	flags.StringVar(&configPath, "c", "config.hcl", "path to the HCL configuration file")
+	flags.StringVar(&configPath, "config", "config.hcl", "path to the HCL configuration file")
+	_ = flags.Parse(args)
+	cfg, err := loadRuntimeConfig(configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "configuration error: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Print(formatEffectiveConfiguration(cfg))
 }
 
 func runHealthcheck(args []string) {

@@ -18,8 +18,12 @@ type appConfig struct {
 	Runtime         runtimePolicy
 	Authentications []authConfig
 	Buckets         []bucketConfig
+	Access          accessConfig
 	SourceDir       string
 	SourceName      string
+	// Sources gives the source of each key that the file sets: "file",
+	// "env:VAR" or "file:/path". A key that is not in it has its default.
+	Sources map[string]string
 }
 
 type authConfig struct {
@@ -108,6 +112,7 @@ func decodeConfig(data, sourceName, sourceDir string) (appConfig, error) {
 		Runtime:         defaultRuntimePolicy(),
 		SourceDir:       sourceDir,
 		SourceName:      sourceName,
+		Sources:         make(map[string]string),
 	}
 
 	if len(root.Attrs) != 0 {
@@ -116,7 +121,7 @@ func decodeConfig(data, sourceName, sourceDir string) (appConfig, error) {
 		}
 	}
 
-	var serverSeen bool
+	var serverSeen, accessSeen bool
 	authByID := make(map[string]authConfig)
 	bucketIDs := make(map[string]struct{})
 	bucketBlocks := make([]hclBlock, 0)
@@ -131,11 +136,21 @@ func decodeConfig(data, sourceName, sourceDir string) (appConfig, error) {
 			if err := decodeServerBlock(block, &cfg); err != nil {
 				return appConfig{}, err
 			}
+			recordSources(&cfg, "server", "server", block, sourceDir)
+		case "access":
+			if accessSeen {
+				return appConfig{}, block.errorf("only one access block is allowed")
+			}
+			accessSeen = true
+			if err := decodeAccessBlock(block, &cfg, sourceDir); err != nil {
+				return appConfig{}, err
+			}
 		case "auth":
 			auth, err := decodeAuthBlock(block, sourceDir)
 			if err != nil {
 				return appConfig{}, err
 			}
+			recordSources(&cfg, "auth "+strconv.Quote(auth.ID), "auth", block, sourceDir)
 			if _, exists := authByID[auth.ID]; exists {
 				return appConfig{}, block.errorf("duplicate auth id %q", auth.ID)
 			}
@@ -152,7 +167,7 @@ func decodeConfig(data, sourceName, sourceDir string) (appConfig, error) {
 			bucketIDs[id] = struct{}{}
 			bucketBlocks = append(bucketBlocks, block)
 		default:
-			return appConfig{}, block.errorf("unknown block type %q; supported blocks are server, auth, and bucket", block.Type)
+			return appConfig{}, block.errorf("unknown block type %q; supported blocks are server, auth, bucket and access", block.Type)
 		}
 	}
 
@@ -168,11 +183,22 @@ func decodeConfig(data, sourceName, sourceDir string) (appConfig, error) {
 			return appConfig{}, err
 		}
 		cfg.Buckets = append(cfg.Buckets, bucket)
+		recordSources(&cfg, "bucket "+strconv.Quote(bucket.ID), "bucket", block, sourceDir)
 	}
-
 	if err := validateRuntimePolicy(&cfg); err != nil {
 		return appConfig{}, err
 	}
+	if !accessSeen {
+		return appConfig{}, fmt.Errorf("the access block is required: add access { mode = \"authzen\" ... } or access { mode = \"open\" } (docs/ACCESS.md)")
+	}
+	if cfg.Access.enforced() {
+		for _, bucket := range cfg.Buckets {
+			if !validAccessID(bucket.ID) {
+				return appConfig{}, fmt.Errorf("bucket %q: with access.mode = \"authzen\", the label of a bucket block must have 1 to %d bytes", bucket.ID, maxAccessIDBytes)
+			}
+		}
+	}
+
 	return cfg, nil
 }
 
@@ -197,11 +223,7 @@ func decodeServerBlock(block hclBlock, cfg *appConfig) error {
 		"max_stats_folders": hclNumber, "max_archive_entries": hclNumber,
 		"max_background_storage_bytes": hclNumber, "max_background_storage_requests": hclNumber,
 	}
-	allowed := make([]string, 0, len(serverKinds))
-	for name := range serverKinds {
-		allowed = append(allowed, name)
-	}
-	if err := rejectUnknownAttrs(block, allowed...); err != nil {
+	if err := rejectUnknownAttrs(block, attributeNames("server")...); err != nil {
 		return err
 	}
 	if err := requireAttrKinds(block, serverKinds); err != nil {
@@ -335,13 +357,7 @@ func decodeAuthBlock(block hclBlock, baseDir string) (authConfig, error) {
 	if len(block.Labels) != 1 {
 		return authConfig{}, block.errorf("auth block requires exactly one quoted identifier")
 	}
-	allowed := []string{
-		"provider", "mode", "endpoint", "region",
-		"access_key_id", "access_key_id_file",
-		"secret_access_key", "secret_access_key_file",
-		"session_token", "session_token_file",
-		"credentials_file", "insecure_skip_verify",
-	}
+	allowed := attributeNames("auth")
 	if err := rejectUnknownAttrs(block, allowed...); err != nil {
 		return authConfig{}, err
 	}
@@ -477,8 +493,7 @@ func decodeBucketBlock(block hclBlock, authByID map[string]authConfig) (bucketCo
 	if len(block.Labels) != 1 {
 		return bucketConfig{}, block.errorf("bucket block requires exactly one quoted identifier")
 	}
-	allowed := []string{"name", "auth", "bucket", "permissions", "root_prefix", "max_scan_pages"}
-	if err := rejectUnknownAttrs(block, allowed...); err != nil {
+	if err := rejectUnknownAttrs(block, attributeNames("bucket")...); err != nil {
 		return bucketConfig{}, err
 	}
 	kinds := map[string]hclValueKind{
@@ -550,39 +565,21 @@ func decodeBucketBlock(block hclBlock, authByID map[string]authConfig) (bucketCo
 	return bucket, nil
 }
 
+// resolveSecretSource reads an S3 secret of an auth block. The secret has the
+// forms <name>, <name>_env and <name>_file. The server removes the spaces at
+// the start and at the end of the value, as the versions before 1.1.0 did.
 func resolveSecretSource(block hclBlock, name, baseDir string) (string, bool, error) {
-	direct, directOK := block.stringAttr(name)
-	fileName, fileOK := block.stringAttr(name + "_file")
-	if !directOK && !fileOK {
-		return "", false, nil
+	path := "auth"
+	if len(block.Labels) == 1 {
+		path = "auth " + strconv.Quote(block.Labels[0])
 	}
-	if directOK && fileOK {
-		return "", false, block.errorf("only one of %s or %s_file may be defined", name, name)
-	}
-	var value string
-	var source string
-	if directOK {
-		value = direct
-		source = name
-	} else {
-		fileName = strings.TrimSpace(fileName)
-		if fileName == "" {
-			return "", false, block.errorf("%s_file cannot be empty", name)
-		}
-		if !filepath.IsAbs(fileName) {
-			fileName = filepath.Join(baseDir, fileName)
-		}
-		cleaned := filepath.Clean(fileName)
-		data, err := readBoundedFile(cleaned, maxSecretFileBytes)
-		if err != nil {
-			return "", false, block.errorf("read %s_file %q: %v", name, cleaned, err)
-		}
-		value = string(data)
-		source = name + "_file"
+	value, defined, err := resolveValueSource(block, path, name, baseDir, formValue|formEnv|formFile)
+	if err != nil || !defined {
+		return "", false, err
 	}
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return "", false, block.errorf("%s resolved from %s is empty", name, source)
+		return "", false, block.errorf("%s.%s is empty", path, name)
 	}
 	return value, true, nil
 }

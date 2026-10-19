@@ -31,3 +31,8 @@ bucket "garage-archive" {
   permissions    = ["read", "write", "delete"]
   max_scan_pages = 15
 }
+
+# The test stack has no access gateway: the browser checks no identity.
+access {
+  mode = "open"
+}
