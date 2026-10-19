@@ -359,20 +359,25 @@ BB.cfg = config;
       }));
   }
 
-  // The subtitle of the default interface: bucket, display name, root prefix, provider.
-  function storageSubtitle(instance, { rootPrefix = false, provider = false } = {}) {
+  // One label for a bucket: its display name. The id, the host and the bucket name are in the tooltip.
+  function storageName(instance) {
+    return instance.name || instance.id;
+  }
+
+  function storageDetails(instance) {
     return [
-      instance.bucket,
-      instance.name !== instance.bucket ? instance.name : '',
-      rootPrefix && instance.rootPrefix ? `/${instance.rootPrefix}` : '',
-      provider ? String(instance.provider || '').toUpperCase() : ''
-    ].filter(Boolean).join(' · ');
+      storageName(instance),
+      `id: ${instance.id}`,
+      `host: ${instance.host}`,
+      `bucket: ${instance.rootPrefix ? `${instance.bucket}/${instance.rootPrefix}` : instance.bucket}`,
+      `provider: ${String(instance.provider || '').toUpperCase()}`,
+      permissionSummary(instance)
+    ].join('\n');
   }
 
   function switcherCopy(instance) {
     return h('span', { class: 'storageSwitcher__copy' },
-      h('span', { class: 'storageSwitcher__titleRow' }, h('strong', {}, `${instance.host} / ${instance.id}`), permissionDots(instance)),
-      h('small', {}, storageSubtitle(instance, { provider: true })));
+      h('span', { class: 'storageSwitcher__titleRow' }, h('strong', {}, storageName(instance)), permissionDots(instance)));
   }
 
   function renderSwitcher() {
@@ -396,7 +401,7 @@ BB.cfg = config;
           h('span', { class: 'storageSwitcher__copy' }, h('strong', {}, 'No bucket'),
             h('small', {}, state.loadError ? 'The list of buckets cannot be loaded' : 'No bucket is visible to you'))));
       } else if (!multiple) {
-        root.replaceChildren(h('div', { class: 'storageSwitcher__trigger is-static', title: permissionSummary(instance) },
+        root.replaceChildren(h('div', { class: 'storageSwitcher__trigger is-static', title: storageDetails(instance) },
           ic('database', 'storageSwitcher__icon'), switcherCopy(instance)));
       } else {
         const trigger = h('button', {
@@ -405,7 +410,7 @@ BB.cfg = config;
           'aria-haspopup': 'listbox',
           'aria-expanded': 'false',
           'aria-controls': 'storageSwitcherMenu',
-          title: `${instance.host} / ${instance.id}. ${permissionSummary(instance)}`,
+          title: storageDetails(instance),
           onclick: event => { event.stopPropagation(); toggleSwitcher(); },
           onkeydown: event => {
             if (event.key === 'ArrowDown') { event.preventDefault(); openSwitcher(true); }
@@ -424,13 +429,13 @@ BB.cfg = config;
               role: 'option',
               'aria-selected': entry.id === state.instanceId ? 'true' : 'false',
               'data-instance': entry.id,
-              title: permissionSummary(entry),
+              title: storageDetails(entry),
               onclick: () => { closeSwitcher(true); selectInstance(entry.id); }
             },
             ic('folder'),
             h('span', { class: 'storageBucket__copy' },
-              h('span', { class: 'storageBucket__titleRow' }, h('strong', {}, entry.id), permissionDots(entry)),
-              h('small', {}, storageSubtitle(entry, { rootPrefix: true }))),
+              h('span', { class: 'storageBucket__titleRow' }, h('strong', {}, storageName(entry)), permissionDots(entry)),
+              entry.rootPrefix ? h('small', {}, `/${entry.rootPrefix}`) : null),
             entry.id === state.instanceId ? ic('check', 'storageBucket__check') : null)));
           const row = h('button', {
             type: 'button', class: 'storageHost__row', 'aria-expanded': expanded ? 'true' : 'false', 'data-host': host.id,
@@ -499,7 +504,7 @@ BB.cfg = config;
   }
 
   // ---------------------------------------------------------------------------------------------------------------
-  // Crumbs: the display name of the bucket is the root, with a "root" tag
+  // Crumbs: in a folder, the display name of the bucket is the root crumb, with a "root" tag; at the root, no crumb
   // ---------------------------------------------------------------------------------------------------------------
 
   const CRUMB_EDGE = 2;
@@ -515,15 +520,19 @@ BB.cfg = config;
       return;
     }
     const atRoot = !list.length;
+    // At the root the selector already names the bucket: the crumbs show nothing.
+    if (atRoot) {
+      ui.crumbs.replaceChildren();
+      return;
+    }
     const where = instance.rootPrefix ? `${instance.bucket}/${instance.rootPrefix}` : instance.bucket;
     const nodes = [h('button', {
       type: 'button',
       class: 'crumb crumb--root',
-      'aria-current': atRoot ? 'page' : null,
       'aria-label': `${instance.name}, bucket root`,
       title: `Root of ${instance.name} (${where})`,
       'data-crumb': 'root',
-      onclick: () => { if (!atRoot) goToPrefix(''); }
+      onclick: () => goToPrefix('')
     }, ic('database'), h('span', {}, instance.name), h('span', { class: 'crumb__tag', 'aria-hidden': 'true' }, 'root'))];
     const separator = () => h('span', { class: 'crumbs__sep', 'aria-hidden': 'true' }, ic('chevron-right'));
 

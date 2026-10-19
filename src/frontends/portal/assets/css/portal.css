@@ -4,7 +4,7 @@
    1. Header of ClickHouse Dash in the 1400 px column of the page: the mark, the name and the version at the left (with
       "Back to panel" behind a path prefix), the bucket selector of the default interface and the theme selector at
       the right. The page is made of parts of the portal: 14 px corners, on --panel with a hairline edge. In the part
-      of the browser, the crumbs and the toolbar share one row when they fit; the crumbs are the title.
+      of the browser, the crumbs and the toolbar share one row when they fit; the crumbs show a folder path and show nothing at the root.
    2. Data of ClickHouse Dash. Tables are dense: 32 px rows (26 px compact), 13 px text, 12 px semibold muted heads,
       hairline dividers, a blue tint under the pointer. Measures (sizes, counts, times) use the sans face with
       tabular figures. Mono is only for what a person reads character by character: keys, paths, ids.
@@ -623,6 +623,12 @@ button.storageSwitcher__trigger:hover {
   font-weight: var(--fw-semibold);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.storageSwitcher__titleRow .permDots,
+.storageBucket__titleRow .permDots {
+  flex: none;
+  margin-left: auto;
 }
 
 .storageSwitcher__copy small,
