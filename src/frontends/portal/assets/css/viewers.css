@@ -3524,3 +3524,30 @@ td.size-column {
 .archive-entry-menu button.bb-menu-item {
   appearance: none;
 }
+
+/* JSON views. The tabs sit on the line above the panel and the active tab joins the panel below it: the panel has no
+   top border and no top corner, the line of the controls is its top edge. The root of the tree stays open. */
+.json-mode-controls {
+  margin-bottom: 0;
+  border-bottom: 1px solid var(--border-color);
+}
+.json-mode-controls .spreadsheet-tabs {
+  padding: 0;
+  overflow: visible;
+}
+.json-mode-controls .spreadsheet-tab.is-active {
+  position: relative;
+  height: 35px;
+  margin-bottom: -1px;
+  border-bottom-color: var(--panel);
+  box-shadow: inset 0 2px 0 var(--primary-color);
+}
+.json-preview > .json-panel > .json-text-host > .wrapped-code-viewer,
+.json-preview > .json-tree-panel {
+  border-top: 0;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+.json-tree-toggle.is-pinned {
+  visibility: hidden;
+}

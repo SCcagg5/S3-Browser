@@ -281,6 +281,80 @@ test('breadcrumb: another bucket gives its own root crumb, and the preview path 
   await page.context().close();
 });
 
+// ------------------------------------------------------------------------------------------------------------------
+// 2b. JSON preview: totals, tabs joined to the panel, root of the tree
+// ------------------------------------------------------------------------------------------------------------------
+
+test('json: a file that fits in one page shows its totals and no count button', async () => {
+  const page = await newPage();
+  await page.goto(`${BASE}${MAIN}config/ingest.json`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('.json-range-label');
+  assert.match(await page.textContent('.json-range-label'), /^Lines 1–\d+ of \d+ · page 1 of 1$/);
+  assert.equal(await page.locator('.json-count-button').isVisible(), false);
+  await page.click('[data-mode="beautify"]');
+  await until(page, () => /^Lines 1–\d+ of \d+ · page 1 of 1$/.test(document.querySelector('.json-range-label')?.textContent || ''));
+  assert.equal(await page.locator('.json-count-button').isVisible(), false);
+  await page.context().close();
+});
+
+test('json: a file of several pages keeps the count button until the totals are known', async () => {
+  const page = await newPage();
+  await page.goto(`${BASE}${MAIN}big/rows.json`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('.json-range-label');
+  assert.match(await page.textContent('.json-range-label'), /^Lines 1–[\d,]+ · page 1$/);
+  assert.equal(await page.locator('.json-count-button').isVisible(), true);
+  await page.click('.json-count-button');
+  await until(page, () => /of [\d,]+ · page 1 of [\d,]+$/.test(document.querySelector('.json-range-label')?.textContent || ''));
+  assert.equal(await page.locator('.json-count-button').isVisible(), false);
+  await page.context().close();
+});
+
+test('json: the tabs touch the left edge, the active tab joins the panel, and the panel has no open corner', async () => {
+  const page = await newPage();
+  await page.goto(`${BASE}${MAIN}config/ingest.json`, { waitUntil: 'networkidle' });
+  for (const mode of ['raw', 'beautify', 'tree']) {
+    await page.click(`[data-mode="${mode}"]`);
+    await until(page, () => !document.querySelector('.json-panel:not([hidden]) .is-loading, .json-panel:not([hidden]).is-loading'));
+    const box = await page.evaluate(mode => {
+      const panel = document.querySelector('.json-panel:not([hidden]) .wrapped-code-viewer, .json-tree-panel:not([hidden])');
+      const tab = document.querySelector(`[data-mode="${mode}"]`).getBoundingClientRect();
+      const first = document.querySelector('[data-mode="raw"]').getBoundingClientRect();
+      const controls = document.querySelector('.json-mode-controls').getBoundingClientRect();
+      const style = getComputedStyle(panel);
+      const rect = panel.getBoundingClientRect();
+      return { firstLeft: first.left, controlsLeft: controls.left, panelLeft: rect.left, panelTop: rect.top,
+        tabBottom: tab.bottom, controlsBottom: controls.bottom, radius: style.borderTopLeftRadius, top: style.borderTopWidth };
+    }, mode);
+    assert.equal(box.firstLeft, box.controlsLeft, `the first tab at the left edge (${mode}): ${JSON.stringify(box)}`);
+    assert.equal(box.firstLeft, box.panelLeft, `the first tab and the panel share the left edge (${mode})`);
+    assert.equal(box.radius, '0px', `no top corner on the panel (${mode})`);
+    assert.equal(box.top, '0px');
+    assert.ok(box.tabBottom >= box.controlsBottom, `the active tab reaches the panel (${mode}): ${JSON.stringify(box)}`);
+    assert.ok(Math.abs(box.panelTop - box.controlsBottom) < 1.01, `the panel starts at the line of the tabs (${mode}): ${JSON.stringify(box)}`);
+  }
+  await page.context().close();
+});
+
+test('json: the root of the tree stays open and cannot be closed', async () => {
+  const page = await newPage();
+  await page.goto(`${BASE}${MAIN}config/ingest.json`, { waitUntil: 'networkidle' });
+  await page.click('[data-mode="tree"]');
+  await page.waitForSelector('.json-tree-node .json-tree-children:not([hidden])');
+  const root = page.locator('.json-tree-panel > .json-tree-node > .json-tree-line .json-tree-toggle');
+  assert.equal(await root.isDisabled(), true);
+  assert.equal(await root.evaluate(node => getComputedStyle(node).visibility), 'hidden');
+  await page.click('.json-tree-panel > .json-tree-node > .json-tree-line .json-tree-key', { force: true });
+  await page.dblclick('.json-tree-panel > .json-tree-node > .json-tree-line', { force: true });
+  assert.equal(await page.locator('.json-tree-panel > .json-tree-node > .json-tree-children').isVisible(), true);
+  // A child still opens and closes.
+  const child = page.locator('.json-tree-children .json-tree-node:has(.json-tree-type.is-object) > .json-tree-line .json-tree-toggle').first();
+  await child.click();
+  await page.waitForSelector('.json-tree-children .json-tree-children:not([hidden])');
+  await child.click();
+  assert.equal(await page.locator('.json-tree-children .json-tree-children:not([hidden])').count(), 0);
+  await page.context().close();
+});
+
 test('header: the brand and the version of ClickHouse Dash, in the centred column of the page', async () => {
   const page = await newPage({ viewport: { width: 1700, height: 900 } });
   await open(page, MAIN);

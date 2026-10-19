@@ -73,10 +73,12 @@
     let pageIndex = 0;
     let current = null;
     let generation = 0;
+    // The last page tells the totals: the pages come in order, so its end is the last line and its index the page count.
+    let complete = null;
 
     function totals() {
       const summary = view.summary;
-      if (!summary) return null;
+      if (!summary) return complete;
       return mode === 'raw'
         ? { lines: Number(summary.rawLines || 0), pages: Number(summary.rawPages || 0) }
         : { lines: Number(summary.beautifyLines || 0), pages: Number(summary.beautifyPages || 0) };
@@ -128,7 +130,9 @@
         previous.disabled = target <= 0;
         next.disabled = payload.done === true || !payload.nextCursor;
         if (payload.nextCursor) cursors[target + 1] = payload.nextCursor;
+        if (payload.done === true) complete = { lines: Math.max(1, Number(payload.lineEnd) || 1), pages: target + 1 };
         updateRangeLabel();
+        panel.onLoad?.();
       } catch (error) {
         if (error?.name === 'AbortError') return;
         host.className = 'json-text-host is-error';
@@ -150,11 +154,13 @@
 
     panel.pager = pager;
     panel.refreshSummary = updateRangeLabel;
+    panel.isComplete = () => complete !== null;
     panel.load = () => loadPage(pageIndex);
     panel.reset = () => {
       cursors.splice(1);
       pageIndex = 0;
       current = null;
+      complete = null;
       return loadPage(0);
     };
     return panel;
@@ -208,6 +214,13 @@
     children.hidden = true;
     item.append(line, children);
 
+    // The root of the tree has its first page already and stays open: nothing closes it.
+    const pinned = options.initialPayload != null;
+    if (pinned) {
+      toggle.classList.add('is-pinned');
+      toggle.setAttribute('aria-label', 'Root of the JSON, always open');
+      toggle.tabIndex = -1;
+    }
     let expanded = false;
     let loading = false;
     let initialized = false;
@@ -275,13 +288,13 @@
         }
       } finally {
         loading = false;
-        toggle.disabled = false;
+        toggle.disabled = pinned || !node.container;
         toggleIcon.className = expanded ? 'mdi mdi-minus-box-outline' : 'mdi mdi-plus-box-outline';
       }
     }
 
     function setExpanded(value) {
-      if (!node.container || loading) return;
+      if (!node.container || loading || (pinned && !value)) return;
       expanded = value;
       children.hidden = !expanded;
       toggleIcon.className = expanded ? 'mdi mdi-minus-box-outline' : 'mdi mdi-plus-box-outline';
@@ -289,11 +302,12 @@
       if (expanded && !initialized) void appendPage();
     }
 
-    toggle.addEventListener('click', () => setExpanded(!expanded));
+    toggle.addEventListener('click', () => { if (!pinned) setExpanded(!expanded); });
 
-    if (options.initialPayload) {
+    if (pinned) {
       appendPayload(options.initialPayload);
       setExpanded(true);
+      toggle.disabled = true;
     }
     return item;
   }
@@ -386,8 +400,10 @@
     let activeMode = 'raw';
 
     const syncCountButton = () => {
-      countButton.hidden = activeMode === 'tree' || view.summaryState === 'ready';
+      countButton.hidden = activeMode === 'tree' || view.summaryState === 'ready' || panels[activeMode].isComplete?.() === true;
     };
+    rawPanel.onLoad = syncCountButton;
+    beautifyPanel.onLoad = syncCountButton;
 
     view.ensureSummary = () => {
       if (view.summaryPromise) return view.summaryPromise;

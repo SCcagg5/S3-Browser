@@ -5,6 +5,7 @@ const BASE = process.env.BASE;
 const md = `# Quarterly report\n\nThe numbers of **Q3 2026**, by region.\n\n| Region | Orders | Revenue |\n| --- | ---: | ---: |\n| North | 1,204 | 48,310 |\n| South | 987 | 39,072 |\n\n\`\`\`sql\nSELECT region, count() FROM orders GROUP BY region;\n\`\`\`\n\n> Figures are provisional.\n`;
 const csv = 'date,region,orders,revenue\n' + Array.from({ length: 120 }, (_, i) => `2026-09-${String(1 + (i % 30)).padStart(2, '0')},${['North', 'South', 'East', 'West'][i % 4]},${100 + (i * 37) % 400},${(4000 + (i * 911) % 9000).toFixed(2)}`).join('\n') + '\n';
 const json = JSON.stringify({ service: 'ingest', version: 3, replicas: 2, limits: { cpu: '500m', memory: '256Mi' }, regions: ['eu-west', 'us-east'], enabled: true, notes: null }, null, 2);
+const rows = JSON.stringify(Array.from({ length: 12000 }, (_, i) => ({ id: i, name: `row-${i}`, tags: ['a', 'b'], ok: i % 2 === 0 })), null, 1);
 const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="#1d2b44"/><circle cx="420" cy="150" r="90" fill="#356fe6"/><rect x="80" y="220" width="300" height="60" rx="12" fill="#93b4ff"/></svg>';
 const go = 'package main\n\nimport "fmt"\n\n// main prints a greeting.\nfunc main() {\n\tfmt.Println("hello, bucket")\n}\n';
 
@@ -22,6 +23,7 @@ const objects = {
     'logs/2026-10-18.log': Array.from({ length: 200 }, (_, i) => `2026-10-18T10:${String(i % 60).padStart(2, '0')}:00Z INFO request ${i} served in ${(i * 7) % 90} ms`).join('\n'),
     'archive/deep/level-3/level-4/level-5/notes.md': '# Deep notes\n\nA file five folders down.\n',
     'README.md': '# Main bucket\n\nTest data of the portal interface.\n',
+    'big/rows.json': rows,
     'big/blob-6mb.bin': 'x'.repeat(6 * 1024 * 1024),
   },
   'garage-archive': {
