@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark light" />
+  <meta name="robots" content="noindex" />
+  <meta name="bb-frontend" content="portal" />
+  <base href="{{APP_BASE}}" />
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <title>Page not found - Object storage</title>
+  <script src="assets/js/theme.js"></script>
+  <link rel="stylesheet" href="assets/css/icons.css" />
+  <link rel="stylesheet" href="assets/css/portal.css" />
+</head>
+<body>
+  <header class="appHeader">
+    <div class="appHeader__left">
+      <a class="backLink" href="./"><i class="ic ic-chevron-left" aria-hidden="true"></i>Back to the buckets</a>
+    </div>
+    <div class="appHeader__right">
+      <div class="themeSwitch" data-theme-switch role="group" aria-label="Theme">
+        <button type="button" data-theme-value="system" aria-pressed="false" aria-label="System theme" title="System theme"><i class="ic ic-device-desktop" aria-hidden="true"></i></button>
+        <button type="button" data-theme-value="dark" aria-pressed="false" aria-label="Dark theme" title="Dark theme"><i class="ic ic-moon" aria-hidden="true"></i></button>
+        <button type="button" data-theme-value="light" aria-pressed="false" aria-label="Light theme" title="Light theme"><i class="ic ic-sun" aria-hidden="true"></i></button>
+      </div>
+    </div>
+  </header>
+  <main class="page">
+    <section class="part">
+      <div class="empty">
+        <i class="ic ic-file-unknown" aria-hidden="true"></i>
+        <strong>Page not found</strong>
+        <span>This address does not match a bucket or an object that you can open.</span>
+        <a class="button" href="./">Back to the buckets</a>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

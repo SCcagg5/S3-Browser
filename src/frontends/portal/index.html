@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark light" />
+  <meta name="bb-frontend" content="portal" />
+  <meta name="bb-asset-version" content="{{ASSET_VERSION}}" />
+  <base href="{{APP_BASE}}" />
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <title>Object storage</title>
+  <script src="assets/js/theme.js"></script>
+  <link rel="stylesheet" href="assets/css/icons.css" />
+  <link rel="stylesheet" href="assets/css/dialogs.css" />
+  <link rel="stylesheet" href="assets/css/portal.css" />
+</head>
+<body>
+  <a class="skipLink" href="#main">Skip to the files</a>
+
+  <header class="appHeader">
+    <div class="appHeader__left">
+      <a id="backLink" class="backLink" href="/" hidden><i class="ic ic-chevron-left" aria-hidden="true"></i>Back to panel</a>
+      <span id="brand" class="brand"><i class="ic ic-database" aria-hidden="true"></i>Object storage</span>
+    </div>
+    <div class="appHeader__right">
+      <span id="buildVersion" class="buildTag" hidden></span>
+      <div class="themeSwitch" data-theme-switch role="group" aria-label="Theme">
+        <button type="button" data-theme-value="system" aria-pressed="false" aria-label="System theme" title="System theme"><i class="ic ic-device-desktop" aria-hidden="true"></i></button>
+        <button type="button" data-theme-value="dark" aria-pressed="false" aria-label="Dark theme" title="Dark theme"><i class="ic ic-moon" aria-hidden="true"></i></button>
+        <button type="button" data-theme-value="light" aria-pressed="false" aria-label="Light theme" title="Light theme"><i class="ic ic-sun" aria-hidden="true"></i></button>
+      </div>
+    </div>
+  </header>
+
+  <nav class="navRow" aria-label="Buckets">
+    <div id="bucketTabs" class="contentTabs">
+      <span class="contentTabs__skeleton" aria-hidden="true"></span>
+    </div>
+  </nav>
+
+  <main id="main" class="page" tabindex="-1">
+    <div id="notices" class="notices" aria-live="polite"></div>
+
+    <section id="browser" class="part browser" aria-labelledby="folderTitle">
+      <div class="browserHead">
+        <nav id="crumbs" class="crumbs" aria-label="Folder path"></nav>
+        <div class="part__head browserHead__title">
+          <h1 id="folderTitle" class="part__title">Loading the buckets</h1>
+          <span id="folderCount" class="part__count"></span>
+          <div class="part__controls toolbar" role="toolbar" aria-label="Folder actions">
+            <form id="searchForm" class="searchField" role="search">
+              <i class="ic ic-search" aria-hidden="true"></i>
+              <label class="visually-hidden" for="searchInput">Open a prefix in this folder</label>
+              <input id="searchInput" class="input" type="search" autocomplete="off" spellcheck="false" placeholder="Open a prefix in this folder" />
+              <kbd aria-hidden="true">Enter</kbd>
+            </form>
+            <span id="accessBadge" class="badge" hidden></span>
+            <button id="refreshButton" class="button button--icon" type="button" aria-label="Refresh" title="Refresh"><i class="ic ic-refresh" aria-hidden="true"></i></button>
+            <div class="menuWrap">
+              <button id="actionsButton" class="button" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="actionsMenu">
+                <i class="ic ic-dots-vertical" aria-hidden="true"></i><span class="button__label--wide">Actions</span><i class="ic ic-chevron-down button__chevron" aria-hidden="true"></i>
+              </button>
+              <div id="actionsMenu" class="menu" role="menu" hidden>
+                <button id="zipItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-file-zip" aria-hidden="true"></i>Download as ZIP</button>
+                <button id="insightsItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-chart-bar" aria-hidden="true"></i><span>Storage insights</span></button>
+                <div class="menu__sep" role="separator"></div>
+                <button id="accessItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-lock" aria-hidden="true"></i>Bucket permissions</button>
+              </div>
+            </div>
+            <div id="uploadWrap" class="menuWrap">
+              <button id="uploadButton" class="button button--primary" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="uploadMenu">
+                <i class="ic ic-upload" aria-hidden="true"></i>Upload<i class="ic ic-chevron-down button__chevron" aria-hidden="true"></i>
+              </button>
+              <div id="uploadMenu" class="menu" role="menu" hidden>
+                <button id="uploadFilesItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-file-upload" aria-hidden="true"></i>Upload files</button>
+                <button id="uploadFolderItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-folder-up" aria-hidden="true"></i>Upload a folder</button>
+                <p class="menu__hint">You can also drop files on the page.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="listing"></div>
+    </section>
+  </main>
+
+  <div id="dropOverlay" class="dropOverlay" role="status" aria-live="polite" hidden>
+    <div class="dropOverlay__card">
+      <i class="ic ic-cloud-upload" aria-hidden="true"></i>
+      <strong>Drop to upload</strong>
+      <span>Into <code id="dropTarget">/</code></span>
+    </div>
+  </div>
+
+  <aside id="uploadDock" class="uploadDock" aria-label="Uploads" hidden></aside>
+
+  <input id="fileInput" type="file" multiple hidden />
+  <input id="dirInput" type="file" webkitdirectory multiple hidden />
+
+  <script src="assets/js/session.js"></script>
+  <script src="assets/js/common/detect.js"></script>
+  <script src="assets/js/common/runtime.js"></script>
+  <script src="assets/js/common/api.js"></script>
+  <script src="assets/js/common/ui.js"></script>
+  <script src="assets/js/common/download-manager.js"></script>
+  <script src="assets/js/common/actions.js"></script>
+  <script src="assets/js/common/menu.js"></script>
+  <script src="assets/js/uploads.js"></script>
+  <script src="assets/js/app.js"></script>
+</body>
+</html>

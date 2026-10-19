@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en" class="preview-root">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="dark light" />
+  <meta name="bb-frontend" content="portal" />
+  <meta name="bb-asset-version" content="{{ASSET_VERSION}}" />
+  <base href="{{APP_BASE}}" />
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <title>Preview - Object storage</title>
+  <script src="assets/js/theme.js"></script>
+  <link rel="stylesheet" href="assets/css/icons.css" />
+  <link rel="stylesheet" href="assets/css/dialogs.css" />
+  <link rel="stylesheet" href="assets/css/viewers.css" />
+  <link rel="stylesheet" href="assets/css/portal.css" />
+  <link rel="stylesheet" href="assets/css/preview.css" />
+</head>
+<body class="preview-page">
+  <a class="skipLink" href="#viewer">Skip to the preview</a>
+
+  <header class="bar previewBar">
+    <div class="previewBar__inner bb-menu-constrain">
+      <a class="backLink previewBar__back" id="backBtn" title="Back to the folder"><i class="ic ic-chevron-left" aria-hidden="true"></i><span>Folder</span></a>
+      <div class="preview-title-group previewTitle">
+        <div class="previewTitle__line">
+          <h1 class="doc-name" id="docName">Loading</h1>
+          <span class="doc-size" id="docSize"></span>
+        </div>
+        <div class="preview-context previewTitle__path">
+          <i class="ic ic-database" aria-hidden="true"></i>
+          <span id="instanceMeta"></span><span class="doc-prefix" id="docPrefix"></span>
+        </div>
+      </div>
+      <div class="previewBar__tools">
+        <span class="buildTag" id="previewBuild" hidden><span></span></span>
+        <label class="select previewVersion" id="previewVersionControl" hidden>
+          <span class="visually-hidden">Version</span>
+          <select id="previewVersionSelect" aria-label="Object version"></select>
+        </label>
+        <a class="button button--icon" id="openRawBtn" title="Open the original" aria-label="Open the original" target="_blank" rel="noopener"><i class="ic ic-external-link" aria-hidden="true"></i></a>
+        <div class="bb-menu" id="previewMenu">
+          <button type="button" class="bb-kebab button button--icon" id="previewKebabBtn" aria-haspopup="menu" aria-expanded="false" aria-label="Actions" title="Actions"><i class="ic ic-dots-vertical" aria-hidden="true"></i></button>
+          <div class="bb-menu-popover" role="menu">
+            <div class="bb-menu-list">
+              <button type="button" class="bb-menu-item" role="menuitem" id="pv-download"><i class="mdi mdi-download" aria-hidden="true"></i>Download</button>
+              <button type="button" class="bb-menu-item" role="menuitem" id="pv-copy"><i class="mdi mdi-content-copy" aria-hidden="true"></i>Copy</button>
+              <button type="button" class="bb-menu-item" role="menuitem" id="pv-rename"><i class="mdi mdi-rename-outline" aria-hidden="true"></i>Rename</button>
+              <button type="button" class="bb-menu-item" role="menuitem" id="pv-details"><i class="mdi mdi-information-outline" aria-hidden="true"></i>Details</button>
+              <button type="button" class="bb-menu-item" role="menuitem" id="pv-versions"><i class="mdi mdi-source-commit" aria-hidden="true"></i>Versions</button>
+              <button type="button" class="bb-menu-item danger" role="menuitem" id="pv-delete"><i class="mdi mdi-delete-outline" aria-hidden="true"></i>Delete</button>
+            </div>
+          </div>
+        </div>
+        <div class="themeSwitch" data-theme-switch role="group" aria-label="Theme">
+          <button type="button" data-theme-value="system" aria-pressed="false" aria-label="System theme" title="System theme"><i class="ic ic-device-desktop" aria-hidden="true"></i></button>
+          <button type="button" data-theme-value="dark" aria-pressed="false" aria-label="Dark theme" title="Dark theme"><i class="ic ic-moon" aria-hidden="true"></i></button>
+          <button type="button" data-theme-value="light" aria-pressed="false" aria-label="Light theme" title="Light theme"><i class="ic ic-sun" aria-hidden="true"></i></button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="viewer">
+    <div class="bb-menu-constrain">
+      <div id="viewer" class="markdown-body preview-loading" tabindex="-1">
+        <i class="mdi mdi-loading mdi-spin" aria-hidden="true"></i>
+        <span>Loading the preview</span>
+      </div>
+    </div>
+  </main>
+
+  <script src="assets/js/session.js"></script>
+  <script src="assets/vendor/highlightjs/11/highlight.min.js"></script>
+  <script src="assets/vendor/marked/12.0.2/marked.min.js"></script>
+  <script src="assets/js/common/detect.js"></script>
+  <script src="assets/js/common/runtime.js"></script>
+  <script src="assets/js/common/api.js"></script>
+  <script src="assets/js/common/ui.js"></script>
+  <script src="assets/js/common/download-manager.js"></script>
+  <script src="assets/js/common/actions.js"></script>
+  <script src="assets/js/common/menu.js"></script>
+  <script src="assets/js/common/render.js"></script>
+  <script src="assets/js/common/json-viewer.js"></script>
+  <script src="assets/js/common/tabular.js"></script>
+  <script src="assets/js/common/sqlite-viewer.js"></script>
+  <script src="assets/js/common/structured-viewers.js"></script>
+  <script src="assets/js/preview.js"></script>
+</body>
+</html>
