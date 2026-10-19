@@ -15,14 +15,24 @@
 </head>
 <body>
   <header class="appHeader">
-    <div class="appHeader__left">
-      <a class="backLink" href="./"><i class="ic ic-chevron-left" aria-hidden="true"></i>Back to the buckets</a>
-    </div>
-    <div class="appHeader__right">
-      <div class="themeSwitch" data-theme-switch role="group" aria-label="Theme">
-        <button type="button" data-theme-value="system" aria-pressed="false" aria-label="System theme" title="System theme"><i class="ic ic-device-desktop" aria-hidden="true"></i></button>
-        <button type="button" data-theme-value="dark" aria-pressed="false" aria-label="Dark theme" title="Dark theme"><i class="ic ic-moon" aria-hidden="true"></i></button>
-        <button type="button" data-theme-value="light" aria-pressed="false" aria-label="Light theme" title="Light theme"><i class="ic ic-sun" aria-hidden="true"></i></button>
+    <div class="appHeader__inner">
+      <div class="appHeader__left">
+        <div class="appBrand">
+          <svg class="appBrand__logo" viewBox="0 0 18 18" aria-hidden="true"><rect x="1" y="1.5" width="16" height="2.6" rx="1.3"/><path d="M2.6 5.6h12.8l-1.36 9.66a1.6 1.6 0 0 1-1.58 1.38H5.54a1.6 1.6 0 0 1-1.58-1.38z"/></svg>
+          <span class="appBrand__text"><span class="appBrand__name">S3 Browser</span></span>
+        </div>
+      </div>
+      <div class="appHeader__right">
+        <div class="themeSelect" data-theme-select>
+          <button type="button" class="button button--icon themeSelect__button" data-theme-trigger aria-haspopup="listbox" aria-expanded="false" aria-controls="themeMenu" aria-label="Theme: system" title="Theme">
+            <span class="themeSelect__current" aria-hidden="true"><i class="ic ic-device-desktop themeIcon themeIcon--system"></i><i class="ic ic-moon themeIcon themeIcon--dark"></i><i class="ic ic-sun themeIcon themeIcon--light"></i></span>
+          </button>
+          <div id="themeMenu" class="themeSelect__menu" role="listbox" aria-label="Theme" hidden>
+            <button type="button" class="themeSelect__option" role="option" data-theme-value="system" aria-selected="true" aria-label="System theme" title="System"><i class="ic ic-device-desktop" aria-hidden="true"></i></button>
+            <button type="button" class="themeSelect__option" role="option" data-theme-value="dark" aria-selected="false" aria-label="Dark theme" title="Dark"><i class="ic ic-moon" aria-hidden="true"></i></button>
+            <button type="button" class="themeSelect__option" role="option" data-theme-value="light" aria-selected="false" aria-label="Light theme" title="Light"><i class="ic ic-sun" aria-hidden="true"></i></button>
+          </div>
+        </div>
       </div>
     </div>
   </header>

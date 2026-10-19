@@ -1,9 +1,10 @@
 /* S3-Browser, "portal" interface: the main stylesheet of every page.
 
    Design rules. The tokens below write them down; the components only name tokens.
-   1. Shell of the portal. A 56 px header in a 1400 px column: "Back to panel" at the left, the System / Dark / Light
-      control at the right. Under it, a row of underlined tab links (here: the buckets). The page is made of parts:
-      14 px corners, a sentence-case 16 px title and a muted count, on --panel with a hairline edge.
+   1. Header of ClickHouse Dash in the 1400 px column of the page: the mark, the name and the version at the left (with
+      "Back to panel" behind a path prefix), the bucket selector of the default interface and the theme selector at
+      the right. The page is made of parts of the portal: 14 px corners, on --panel with a hairline edge. In the part
+      of the browser, the crumbs and the toolbar share one row when they fit; the crumbs are the title.
    2. Data of ClickHouse Dash. Tables are dense: 32 px rows (26 px compact), 13 px text, 12 px semibold muted heads,
       hairline dividers, a blue tint under the pointer. Measures (sizes, counts, times) use the sans face with
       tabular figures. Mono is only for what a person reads character by character: keys, paths, ids.
@@ -14,8 +15,8 @@
    5. Flat surfaces. Only what opens over the page casts a shadow (menus, dialogs, toasts, the upload dock).
    6. Motion: 120 ms for hover and colour, 160 ms for menus and panels, one ease-out curve. The one authored moment is
       the upload dock: it rises from the bottom edge and its bar fills. Reduced motion stops every loop.
-   7. Theme: System (default), Dark or Light, saved in this browser under the key of the portal (theme.js) and applied
-      before the first paint. The dark values are the defaults; light is the System choice of a light OS or the
+   7. Theme: System (default), Dark or Light, from the theme selector of ClickHouse Dash, saved in this browser under the
+      key of the portal (theme.js) and applied before the first paint. The dark values are the defaults; light is the System choice of a light OS or the
       forced choice.
    8. Touch: each control reaches 44 px on a coarse pointer. The page has no horizontal scroll at 360 px. */
 
@@ -342,29 +343,36 @@ a {
   transform: none;
 }
 
-/* Header (portal) --------------------------------------------------------------------------------------------------- */
+/* Header: the band of ClickHouse Dash (brand and version at the left, the bucket selector and the theme selector at
+   the right), with its content in the centred column of the page. ------------------------------------------------- */
 
 .appHeader {
+  position: relative;
+  z-index: var(--z-header);
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+}
+
+.appHeader__inner {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  height: var(--header-h);
+  gap: 12px 16px;
   max-width: var(--page-width);
+  min-height: var(--header-h);
   margin: 0 auto;
-  padding: 0 var(--gutter);
+  padding: 8px var(--gutter);
 }
 
 .appHeader__left,
 .appHeader__right {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
 }
 
 .appHeader__right {
-  margin-left: auto;
+  flex: none;
 }
 
 .backLink {
@@ -373,8 +381,9 @@ a {
   gap: 4px;
   height: 34px;
   margin-left: -6px;
-  padding: 0 8px 0 4px;
-  border-radius: var(--radius-control);
+  padding: 0 10px 0 4px;
+  border-right: 1px solid var(--border);
+  border-radius: var(--radius-control) 0 0 var(--radius-control);
   color: var(--muted);
   font-weight: var(--fw-semibold);
   text-decoration: none;
@@ -390,19 +399,47 @@ a {
   --icon-size: 18px;
 }
 
-.brand {
-  display: inline-flex;
+/* The brand of ClickHouse Dash: a mark in the accent fill, the name, and the version in small muted text under it. */
+.appBrand {
+  display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
-  color: var(--text);
+}
+
+.appBrand__logo {
+  flex: 0 0 26px;
+  width: 26px;
+  height: 26px;
+  margin-right: -2px;
+  fill: var(--accent-fill);
+}
+
+.appBrand__text {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+}
+
+.appBrand__name {
   font-weight: var(--fw-semibold);
+  letter-spacing: 0.2px;
   white-space: nowrap;
 }
 
-.brand .ic {
-  --icon-size: 18px;
-  color: var(--accent-text);
+/* The version adds no width to the brand: it is as wide as the name, and a longer text ends with an ellipsis (the whole
+   text is in its title). */
+.versionBadge {
+  width: 0;
+  min-width: 100%;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .buildTag {
@@ -412,108 +449,365 @@ a {
   white-space: nowrap;
 }
 
-.themeSwitch {
+/* The theme selector of ClickHouse Dash: an icon button with the current choice, and the three choices in a column
+   under it, joined to the button. */
+.themeSelect {
+  position: relative;
   display: none;
-  gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  background: var(--raised);
 }
 
-.js .themeSwitch {
+.js .themeSelect {
   display: inline-flex;
 }
 
-.themeSwitch button {
-  display: grid;
-  place-items: center;
-  width: 30px;
-  height: 28px;
-  padding: 0;
-  border: 0;
-  border-radius: var(--radius-inner);
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-  transition: background-color var(--dur-quick) var(--ease), color var(--dur-quick) var(--ease);
+.themeSelect__button {
+  position: relative;
+  z-index: 1;
+  width: 34px;
+  height: 34px;
+  color: color-mix(in srgb, var(--muted) 82%, transparent);
 }
 
-.themeSwitch button:hover {
+.themeSelect__button:hover,
+.themeSelect.is-open .themeSelect__button {
   color: var(--text);
 }
 
-.themeSwitch button[aria-pressed="true"] {
-  background: var(--accent-tint);
-  box-shadow: inset 0 -2px 0 var(--accent-fill);
-  color: var(--accent-text);
+.themeSelect.is-open .themeSelect__button {
+  border-color: var(--border-strong);
+  border-bottom-color: transparent;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  background: var(--panel);
 }
 
-.themeSwitch .ic {
+.themeSelect__current {
+  display: inline-flex;
+}
+
+.themeSelect__current > .themeIcon {
+  display: none;
   --icon-size: 18px;
 }
 
-/* Tab row (portal settings): here, one tab for each bucket ------------------------------------------------------------- */
-
-.navRow {
-  border-bottom: 1px solid var(--border);
+html:not([data-theme-mode="dark"], [data-theme-mode="light"]) .themeSelect__current > .themeIcon--system,
+html[data-theme-mode="dark"] .themeSelect__current > .themeIcon--dark,
+html[data-theme-mode="light"] .themeSelect__current > .themeIcon--light {
+  display: inline-block;
 }
 
-.contentTabs {
-  display: flex;
+.themeSelect__menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: var(--z-menu);
+  display: grid;
   gap: 2px;
-  max-width: var(--page-width);
-  min-height: 41px;
-  margin: 0 auto;
-  padding: 0 var(--gutter);
-  overflow-x: auto;
-  scrollbar-width: none;
+  width: 34px;
+  margin-top: -1px;
+  padding: 4px 2px;
+  border: 1px solid var(--border-strong);
+  border-top: 0;
+  border-radius: 0 0 var(--radius-control) var(--radius-control);
+  background: var(--panel);
+  box-shadow: var(--shadow-overlay);
+  transform-origin: top center;
+  animation: drop-in var(--dur-base) var(--ease);
 }
 
-.contentTabs::-webkit-scrollbar {
+.themeSelect__menu[hidden] {
   display: none;
 }
 
-.contentTabs__tab {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: 6px;
-  height: 40px;
-  margin-bottom: -1px;
-  padding: 0 12px;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  background: none;
-  color: var(--muted);
-  font-weight: var(--fw-semibold);
-  text-decoration: none;
-  white-space: nowrap;
+@keyframes drop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scaleY(0.98);
+  }
+}
+
+.themeSelect__option {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-inner);
+  background: transparent;
+  color: color-mix(in srgb, var(--muted) 82%, transparent);
   cursor: pointer;
-  transition: color var(--dur-quick) var(--ease), border-color var(--dur-quick) var(--ease);
 }
 
-.contentTabs__tab:hover {
+.themeSelect__option .ic {
+  --icon-size: 18px;
+}
+
+.themeSelect__option:hover {
+  background: var(--row-hover);
   color: var(--text);
 }
 
-.contentTabs__tab[aria-current="page"] {
-  border-bottom-color: var(--accent-fill);
+.themeSelect__option[aria-selected="true"] {
+  border-color: var(--selected-edge);
+  background: var(--selected-bg);
   color: var(--text);
 }
 
-.contentTabs__tab .ic {
-  --icon-size: 14px;
+/* The bucket selector of the default interface: the buckets of each host, with their permissions. ------------------ */
+
+.storageSwitcher {
+  position: relative;
+  min-width: 0;
+  margin-left: auto;
+}
+
+.storageSwitcher__trigger {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: min(380px, 100%);
+  min-width: 240px;
+  min-height: 42px;
+  padding: 4px 10px 4px 12px;
+  border: 1px solid var(--button-border);
+  border-radius: var(--radius-control);
+  background: var(--button-bg);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--dur-quick) var(--ease), background-color var(--dur-quick) var(--ease);
+}
+
+button.storageSwitcher__trigger:hover {
+  border-color: var(--button-border-hover);
+  background: var(--button-bg-hover);
+}
+
+.storageSwitcher__trigger.is-static {
+  cursor: default;
+}
+
+.storageSwitcher.is-open .storageSwitcher__trigger {
+  border-color: var(--border-strong);
+  border-bottom-color: transparent;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  background: var(--panel);
+}
+
+.storageSwitcher__icon {
+  --icon-size: 18px;
+  color: var(--accent-text);
+}
+
+.storageSwitcher__copy {
+  display: grid;
+  flex: 1;
+  gap: 1px;
+  min-width: 0;
+}
+
+.storageSwitcher__titleRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.storageSwitcher__titleRow strong,
+.storageBucket__titleRow strong,
+.storageHost__copy strong {
+  overflow: hidden;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.storageSwitcher__copy small,
+.storageBucket__copy small,
+.storageHost__copy small {
+  overflow: hidden;
   color: var(--muted);
+  font-size: var(--fs-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.contentTabs__skeleton {
-  align-self: center;
-  width: 120px;
+.storageSwitcher__chevron {
+  --icon-size: 16px;
+  color: var(--muted);
+  transition: transform var(--dur-base) var(--ease);
+}
+
+.storageSwitcher.is-open .storageSwitcher__chevron {
+  transform: rotate(180deg);
+}
+
+.storageSwitcher__skeleton {
+  display: block;
+  width: 70%;
   height: 12px;
-  margin: 0 12px;
   border-radius: var(--radius-pill);
   background: var(--skeleton);
+}
+
+/* Read, write and delete of a bucket: an icon each. A denied right is red and struck through; the word is in the
+   title and in a hidden text, so colour is not the only sign. */
+.permDots {
+  display: inline-flex;
+  flex: none;
+  gap: 3px;
+}
+
+.permDot {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  color: var(--muted);
+}
+
+.permDot .ic {
+  --icon-size: 13px;
+}
+
+.permDot.is-allowed {
+  color: var(--success);
+}
+
+.permDot.is-denied {
+  color: var(--danger);
+}
+
+.permDot.is-denied::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 1px;
+  right: 1px;
+  height: 1.5px;
+  border-radius: 1px;
+  background: currentColor;
+  transform: rotate(-40deg);
+}
+
+.storageSwitcher__menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: var(--z-menu);
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  min-width: 300px;
+  max-height: min(70vh, 520px);
+  margin-top: -1px;
+  padding: 6px;
+  overflow-y: auto;
+  border: 1px solid var(--border-strong);
+  border-top: 0;
+  border-radius: 0 0 var(--radius-pop) var(--radius-pop);
+  background: var(--panel);
+  box-shadow: var(--shadow-overlay);
+  transform-origin: top center;
+  animation: drop-in var(--dur-base) var(--ease);
+}
+
+.storageSwitcher__menu[hidden] {
+  display: none;
+}
+
+.storageHost {
+  display: grid;
+  gap: 2px;
+}
+
+.storageHost__row,
+.storageBucket {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 40px;
+  padding: 5px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.storageHost__row:hover,
+.storageBucket:hover,
+.storageHost__row:focus-visible,
+.storageBucket:focus-visible {
+  background: var(--row-hover);
+}
+
+.storageHost__chevron {
+  --icon-size: 14px;
+  color: var(--muted);
+  transition: transform var(--dur-base) var(--ease);
+}
+
+.storageHost__row[aria-expanded="true"] .storageHost__chevron {
+  transform: rotate(90deg);
+}
+
+.storageHost__row > .ic-database {
+  --icon-size: 17px;
+  color: var(--accent-text);
+}
+
+.storageHost__copy,
+.storageBucket__copy {
+  display: grid;
+  flex: 1;
+  gap: 1px;
+  min-width: 0;
+}
+
+.storageHost__buckets {
+  display: grid;
+  gap: 2px;
+  padding-left: 22px;
+}
+
+.storageHost__buckets[hidden] {
+  display: none;
+}
+
+.storageBucket > .ic-folder {
+  --icon-size: 17px;
+  color: var(--folder);
+}
+
+.storageBucket__titleRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.storageBucket[aria-selected="true"] {
+  border-color: var(--selected-edge);
+  background: var(--selected-bg);
+}
+
+.storageBucket__check {
+  --icon-size: 16px;
+  color: var(--accent-text);
+}
+
+.storageSwitcher__foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: 4px 4px 0;
+  border-top: 1px solid var(--border);
 }
 
 /* Page and parts (portal) ------------------------------------------------------------------------------------------- */
@@ -1132,35 +1426,28 @@ a {
   justify-content: center;
 }
 
+/* One row for the crumbs and the toolbar when they fit. The crumbs keep their width (no shrink); when the two do not
+   fit, the toolbar goes to the next row, at the right. On a phone, the toolbar always has its own row. */
 .browserHead {
-  display: grid;
-  gap: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
 }
 
-.browserHead__title {
-  gap: 10px 12px;
-}
-
-.browserHead__title .part__title {
-  max-width: min(100%, 48ch);
-  font-size: var(--fs-2xl);
-  letter-spacing: -0.01em;
-}
-
-.browserHead__title .part__controls {
-  flex: 1 1 520px;
-  justify-content: flex-end;
+.browserHead > .crumbs {
+  flex: 0 0 auto;
+  max-width: 100%;
 }
 
 .toolbar {
   display: flex;
+  flex: 1 0 auto;
   flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
-}
-
-.toolbar__spacer {
-  flex: 1 1 auto;
+  margin-left: auto;
 }
 
 /* Dense table (ClickHouse Dash) ------------------------------------------------------------------------------------- */
@@ -2186,13 +2473,39 @@ a {
     order: 5;
   }
 
-  .browserHead__title .part__controls {
+  .browserHead > .toolbar {
     flex-basis: 100%;
     justify-content: flex-start;
+    margin-left: 0;
   }
 
-  .browserHead__title .part__title {
-    font-size: var(--fs-xl);
+  /* Two rows in the header, as in ClickHouse Dash: the brand, then the bucket selector and the theme selector. */
+  .appHeader__inner {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .appHeader__left {
+    flex: 1 1 auto;
+  }
+
+  .storageSwitcher {
+    flex: 1 1 100%;
+    order: 3;
+    margin-left: 0;
+  }
+
+  .appHeader__right {
+    order: 2;
+  }
+
+  .storageSwitcher__trigger {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .storageSwitcher__menu {
+    min-width: 0;
   }
 
   .searchField kbd {
@@ -2246,16 +2559,26 @@ a {
     --control-h-sm: 40px;
   }
 
-  .themeSwitch button {
-    width: 40px;
-    height: 40px;
-  }
-
-  .backLink {
+  .themeSelect__button {
+    width: 44px;
     height: 44px;
   }
 
-  .contentTabs__tab {
+  .themeSelect__menu {
+    width: 44px;
+  }
+
+  .themeSelect__option {
+    width: 38px;
+    height: 40px;
+  }
+
+  .storageHost__row,
+  .storageBucket {
+    min-height: 48px;
+  }
+
+  .backLink {
     height: 44px;
   }
 
@@ -2389,4 +2712,13 @@ a {
 .listing {
   display: grid;
   gap: 10px;
+}
+
+.tableFoot__count {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.tableFoot__count:empty {
+  display: none;
 }

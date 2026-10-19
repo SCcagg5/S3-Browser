@@ -153,6 +153,8 @@ BB.cfg = config;
     isInitializing: true,
     loadError: '',
     pageSize: config.pageSize,
+    // The hosts that the bucket selector shows open.
+    expandedHosts: {},
     dragDepth: 0,
     isDragActive: false,
     versionCountRequest: 0,
@@ -274,24 +276,43 @@ BB.cfg = config;
 
   // Behind the portal, a reverse proxy serves this page under a path prefix (for example /s3-browser/). The link then
   // goes back to the root of the site, which is the panel of the portal. Without a prefix, the page is the root of the
-  // site, so the header shows the name of the product instead.
+  // site and the link does not show.
   function renderHeaderLinks() {
-    const prefixed = new URL(BB.runtime.rootURL).pathname !== '/';
-    ui.backLink.hidden = !prefixed;
-    ui.brand.hidden = prefixed;
+    ui.backLink.hidden = new URL(BB.runtime.rootURL).pathname === '/';
+  }
+
+  // The version of the server under the name of the product, as ClickHouse Dash shows its backend version. The page
+  // keeps the last text in this browser, so a reload does not show "--" until /api/instances answers.
+  const VERSION_KEY = 's3-browser.portal.version';
+
+  function versionText(build) {
+    const version = String(build.version || build.display || 'dev');
+    const commit = String(build.shortCommit || '');
+    return commit && commit !== 'unknown' && !version.includes(commit) ? `${version} (${commit})` : version;
   }
 
   function renderBuild() {
     const build = state.build || {};
-    ui.buildVersion.hidden = !build.display;
-    if (!build.display) return;
-    const commit = build.commit && build.commit !== 'unknown' ? `, source ${build.commit}` : '';
-    ui.buildVersion.textContent = build.display;
-    ui.buildVersion.title = `Release ${build.version || 'dev'}${commit}${build.date ? `, built ${build.date}` : ''}`;
+    if (!build.version && !build.display) return;
+    const text = versionText(build);
+    const title = `Server version\n${text}${build.date ? `\nBuild: ${build.date}` : ''}`;
+    if (ui.versionBadge.textContent !== text) ui.versionBadge.textContent = text;
+    ui.versionBadge.title = title;
+    try { localStorage.setItem(VERSION_KEY, JSON.stringify({ text, title })); } catch (_) {}
+  }
+
+  function restoreVersion() {
+    try {
+      const last = JSON.parse(localStorage.getItem(VERSION_KEY) || 'null');
+      if (last && last.text) {
+        ui.versionBadge.textContent = String(last.text);
+        ui.versionBadge.title = String(last.title || '');
+      }
+    } catch (_) {}
   }
 
   // ---------------------------------------------------------------------------------------------------------------
-  // Bucket tabs
+  // Bucket selector: the control, the labels and the behaviour of the selector of the default interface
   // ---------------------------------------------------------------------------------------------------------------
 
   // A bucket is read only when its capabilities refuse the write and the delete. The decisions of a folder do not count.
@@ -300,36 +321,181 @@ BB.cfg = config;
     return !allowed('upload') && !allowed('delete');
   }
 
-  function renderTabs() {
-    const signature = JSON.stringify([state.isInitializing, state.instanceId, state.instances.map(item => [item.id, item.name, readOnly(item)])]);
-    if (ui.tabsSignature === signature) return;
-    ui.tabsSignature = signature;
-    if (!state.instances.length) {
-      ui.tabs.replaceChildren(...(state.isInitializing ? [h('span', { class: 'contentTabs__skeleton', 'aria-hidden': 'true' })] : []));
-      return;
+  function storageHosts() {
+    const hosts = [];
+    const byId = new Map();
+    for (const instance of state.instances) {
+      const id = String(instance.host || instance.id || '');
+      let host = byId.get(id);
+      if (!host) {
+        host = { id, provider: String(instance.provider || ''), instances: [] };
+        byId.set(id, host);
+        hosts.push(host);
+      }
+      host.instances.push(instance);
     }
-    ui.tabs.replaceChildren(...state.instances.map(instance => {
-      const current = instance.id === state.instanceId;
-      const locked = readOnly(instance);
-      const description = [`Bucket ${instance.bucket}`, instance.rootPrefix ? `under ${instance.rootPrefix}` : '',
-        `${String(instance.provider || '').toUpperCase()} on ${instance.host}`, locked ? 'read only' : ''].filter(Boolean).join(', ');
-      return h('a', {
-        class: 'contentTabs__tab',
-        href: BB.api.browserPageURL('', { instance: instance.id }),
-        'aria-current': current ? 'page' : null,
-        title: description,
-        'data-instance': instance.id,
-        onclick: event => {
-          if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
-          event.preventDefault();
-          selectInstance(instance.id);
-        }
-      }, instance.name || instance.id, locked && h('span', { class: 'visually-hidden' }, ', read only'), locked && ic('lock'));
-    }));
-    const active = ui.tabs.querySelector('[aria-current]');
-    if (active && ui.tabs.scrollWidth > ui.tabs.clientWidth) {
-      ui.tabs.scrollLeft = Math.max(0, active.offsetLeft - ui.tabs.clientWidth / 3);
+    return hosts;
+  }
+
+  function permissionStates(instance) {
+    const capabilities = instance?.capabilities || {};
+    return [
+      { key: 'read', label: 'Read', icon: 'eye', state: capabilities.read || {} },
+      { key: 'write', label: 'Write', icon: 'pencil', state: capabilities.write || {} },
+      { key: 'delete', label: 'Delete', icon: 'trash', state: capabilities.delete || {} }
+    ];
+  }
+
+  function permissionSummary(instance) {
+    return permissionStates(instance).map(item => `${item.label}: ${BB.capabilities.stateLabel(item.state)}`).join(', ');
+  }
+
+  function permissionDots(instance) {
+    return h('span', { class: 'permDots', title: permissionSummary(instance) },
+      permissionStates(instance).map(item => {
+        const name = BB.capabilities.normalizeState(item.state);
+        return h('span', { class: ['permDot', `is-${name}`], 'data-permission': item.key, 'data-state': name },
+          ic(item.icon), h('span', { class: 'visually-hidden' }, `${item.label} ${BB.capabilities.stateLabel(item.state).toLowerCase()}`));
+      }));
+  }
+
+  // The subtitle of the default interface: bucket, display name, root prefix, provider.
+  function storageSubtitle(instance, { rootPrefix = false, provider = false } = {}) {
+    return [
+      instance.bucket,
+      instance.name !== instance.bucket ? instance.name : '',
+      rootPrefix && instance.rootPrefix ? `/${instance.rootPrefix}` : '',
+      provider ? String(instance.provider || '').toUpperCase() : ''
+    ].filter(Boolean).join(' · ');
+  }
+
+  function switcherCopy(instance) {
+    return h('span', { class: 'storageSwitcher__copy' },
+      h('span', { class: 'storageSwitcher__titleRow' }, h('strong', {}, `${instance.host} / ${instance.id}`), permissionDots(instance)),
+      h('small', {}, storageSubtitle(instance, { provider: true })));
+  }
+
+  function renderSwitcher() {
+    const instance = currentInstance();
+    const multiple = state.instances.length > 1;
+    const signature = JSON.stringify([state.isInitializing, state.loadError, instance?.id,
+      state.instances.map(item => [item.id, item.host, item.name, item.bucket, item.rootPrefix, item.provider,
+        permissionStates(item).map(entry => BB.capabilities.normalizeState(entry.state))])]);
+    if (ui.switcherSignature !== signature) {
+      ui.switcherSignature = signature;
+      ui.switcherMenu = null;
+      ui.switcherTrigger = null;
+      const root = ui.switcher;
+      root.classList.toggle('is-loading', state.isInitializing);
+      root.classList.remove('is-open');
+      if (state.isInitializing) {
+        root.replaceChildren(h('div', { class: 'storageSwitcher__trigger is-static', 'aria-hidden': 'true' }, h('span', { class: 'storageSwitcher__skeleton' })));
+      } else if (!instance) {
+        root.replaceChildren(h('div', { class: 'storageSwitcher__trigger is-static', 'data-empty': 'true' },
+          ic('database', 'storageSwitcher__icon'),
+          h('span', { class: 'storageSwitcher__copy' }, h('strong', {}, 'No bucket'),
+            h('small', {}, state.loadError ? 'The list of buckets cannot be loaded' : 'No bucket is visible to you'))));
+      } else if (!multiple) {
+        root.replaceChildren(h('div', { class: 'storageSwitcher__trigger is-static', title: permissionSummary(instance) },
+          ic('database', 'storageSwitcher__icon'), switcherCopy(instance)));
+      } else {
+        const trigger = h('button', {
+          type: 'button',
+          class: 'storageSwitcher__trigger',
+          'aria-haspopup': 'listbox',
+          'aria-expanded': 'false',
+          'aria-controls': 'storageSwitcherMenu',
+          title: `${instance.host} / ${instance.id}. ${permissionSummary(instance)}`,
+          onclick: event => { event.stopPropagation(); toggleSwitcher(); },
+          onkeydown: event => {
+            if (event.key === 'ArrowDown') { event.preventDefault(); openSwitcher(true); }
+          }
+        }, ic('database', 'storageSwitcher__icon'), switcherCopy(instance), ic('chevron-down', 'storageSwitcher__chevron'));
+        const menu = h('div', {
+          id: 'storageSwitcherMenu', class: 'storageSwitcher__menu', role: 'listbox', 'aria-label': 'Storage hosts and buckets', hidden: true,
+          onclick: event => event.stopPropagation(),
+          onkeydown: onSwitcherKey
+        }, storageHosts().map(host => {
+          const expanded = state.expandedHosts[host.id] === true;
+          const list = h('div', { class: 'storageHost__buckets', role: 'group', 'aria-label': `${host.id} buckets`, hidden: !expanded },
+            host.instances.map(entry => h('button', {
+              type: 'button',
+              class: 'storageBucket',
+              role: 'option',
+              'aria-selected': entry.id === state.instanceId ? 'true' : 'false',
+              'data-instance': entry.id,
+              title: permissionSummary(entry),
+              onclick: () => { closeSwitcher(true); selectInstance(entry.id); }
+            },
+            ic('folder'),
+            h('span', { class: 'storageBucket__copy' },
+              h('span', { class: 'storageBucket__titleRow' }, h('strong', {}, entry.id), permissionDots(entry)),
+              h('small', {}, storageSubtitle(entry, { rootPrefix: true }))),
+            entry.id === state.instanceId ? ic('check', 'storageBucket__check') : null)));
+          const row = h('button', {
+            type: 'button', class: 'storageHost__row', 'aria-expanded': expanded ? 'true' : 'false', 'data-host': host.id,
+            onclick: () => {
+              const open = row.getAttribute('aria-expanded') !== 'true';
+              state.expandedHosts = { ...state.expandedHosts, [host.id]: open };
+              row.setAttribute('aria-expanded', String(open));
+              list.hidden = !open;
+            }
+          }, ic('chevron-right', 'storageHost__chevron'), ic('database'),
+          h('span', { class: 'storageHost__copy' }, h('strong', {}, host.id),
+            h('small', {}, `${host.provider.toUpperCase()} · ${plural(host.instances.length, 'bucket')}`)));
+          return h('section', { class: 'storageHost', 'data-host': host.id }, row, list);
+        }),
+        h('div', { class: 'storageSwitcher__foot' },
+          h('button', { type: 'button', class: 'button button--ghost button--small', onclick: () => { closeSwitcher(false); showPermissions(); } }, ic('lock'), 'Permissions of this bucket')));
+        root.replaceChildren(trigger, menu);
+        ui.switcherTrigger = trigger;
+        ui.switcherMenu = menu;
+      }
     }
+  }
+
+  function switcherItems() {
+    return Array.from(ui.switcherMenu?.querySelectorAll('.storageHost__row, .storageBucket:not([hidden]), .storageSwitcher__foot .button') || [])
+      .filter(node => node.offsetParent !== null);
+  }
+
+  function openSwitcher(focus = false) {
+    if (!ui.switcherMenu || !ui.switcherMenu.hidden) return;
+    closeMenu();
+    // The host of the current bucket opens with the menu.
+    const host = String(currentInstance()?.host || '');
+    if (host && state.expandedHosts[host] !== true) {
+      state.expandedHosts = { ...state.expandedHosts, [host]: true };
+      const row = ui.switcherMenu.querySelector(`.storageHost__row[data-host="${CSS.escape(host)}"]`);
+      row?.setAttribute('aria-expanded', 'true');
+      if (row) row.nextElementSibling.hidden = false;
+    }
+    ui.switcherMenu.hidden = false;
+    ui.switcher.classList.add('is-open');
+    ui.switcherTrigger.setAttribute('aria-expanded', 'true');
+    if (focus) (ui.switcherMenu.querySelector('.storageBucket[aria-selected="true"]') || switcherItems()[0])?.focus();
+  }
+
+  function closeSwitcher(focus = false) {
+    if (!ui.switcherMenu || ui.switcherMenu.hidden) return;
+    ui.switcherMenu.hidden = true;
+    ui.switcher.classList.remove('is-open');
+    ui.switcherTrigger.setAttribute('aria-expanded', 'false');
+    if (focus) ui.switcherTrigger.focus();
+  }
+
+  function toggleSwitcher() {
+    if (ui.switcherMenu?.hidden) openSwitcher(false);
+    else closeSwitcher(false);
+  }
+
+  function onSwitcherKey(event) {
+    const items = switcherItems();
+    const index = items.indexOf(document.activeElement);
+    if (event.key === 'ArrowDown') { event.preventDefault(); items[Math.min(items.length - 1, index + 1)]?.focus(); }
+    else if (event.key === 'ArrowUp') { event.preventDefault(); items[Math.max(0, index - 1)]?.focus(); }
+    else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeSwitcher(true); }
+    else if (event.key === 'Tab') closeSwitcher(false);
   }
 
   // ---------------------------------------------------------------------------------------------------------------
@@ -396,8 +562,9 @@ BB.cfg = config;
     let title = 'Loading the buckets';
     if (!state.isInitializing && !instance) title = state.loadError ? 'The buckets cannot be loaded' : 'No bucket';
     else if (instance) title = list.length ? list[list.length - 1].name : instance.name;
-    if (ui.title.textContent !== title) ui.title.textContent = title;
-    ui.title.title = instance ? `${instance.name} / ${state.pathPrefix}` : '';
+    // The heading is for screen readers: the crumbs show the place on the screen.
+    const heading = instance ? `${title}${list.length ? `, in ${instance.name}` : ', bucket root'}` : title;
+    if (ui.title.textContent !== heading) ui.title.textContent = heading;
 
     let countText = '';
     if (instance && !state.listError && canRead()) {
@@ -413,7 +580,8 @@ BB.cfg = config;
         countText = parts.join(', ') + (state.nextContinuationToken || state.previousContinuationTokens.length ? ' in this page of the listing' : '');
       }
     }
-    if (ui.count.textContent !== countText) ui.count.textContent = countText;
+    ui.countText = countText;
+    if (ui.table?.count && ui.table.count.textContent !== countText) ui.table.count.textContent = countText;
     document.title = instance ? `${title} - ${instance.name} - Object storage` : 'Object storage';
   }
 
@@ -451,6 +619,7 @@ BB.cfg = config;
         return;
       }
       closeMenu();
+      closeSwitcher(false);
       openMenu = { trigger, menu };
       menu.hidden = false;
       trigger.setAttribute('aria-expanded', 'true');
@@ -631,11 +800,13 @@ BB.cfg = config;
     const previous = h('button', { type: 'button', class: 'button button--small button--icon', 'aria-label': 'Previous page', title: 'Previous page', onclick: () => previousPage() }, ic('chevron-left'));
     const next = h('button', { type: 'button', class: 'button button--small button--icon', 'aria-label': 'Next page', title: 'Next page', onclick: () => nextPage() }, ic('chevron-right'));
     const pager = h('div', { class: 'tableFoot__pager' }, previous, next);
+    const count = h('span', { id: 'folderCount', class: 'tableFoot__count' }, ui.countText || '');
     const foot = h('div', { class: 'tableFoot' },
+      count,
       range,
       h('label', {}, 'Rows', h('span', { class: 'select' }, pageSize)),
       pager);
-    ui.table = { sorts, timeToggle, tbody, box, range, pageSize, previous, next, pager, foot };
+    ui.table = { sorts, timeToggle, tbody, box, range, count, pageSize, previous, next, pager, foot };
     return h('div', { class: 'listing' }, box, foot);
   }
 
@@ -745,7 +916,7 @@ BB.cfg = config;
 
   function update() {
     renderBuild();
-    renderTabs();
+    renderSwitcher();
     renderCrumbs();
     renderTitle();
     renderToolbar();
@@ -1264,8 +1435,8 @@ BB.cfg = config;
 
   function bindElements() {
     for (const [name, id] of Object.entries({
-      backLink: 'backLink', brand: 'brand', buildVersion: 'buildVersion', tabs: 'bucketTabs', crumbs: 'crumbs',
-      title: 'folderTitle', count: 'folderCount', searchForm: 'searchForm', searchInput: 'searchInput',
+      backLink: 'backLink', versionBadge: 'versionBadge', switcher: 'storageSwitcher', crumbs: 'crumbs',
+      title: 'folderTitle', searchForm: 'searchForm', searchInput: 'searchInput',
       refreshButton: 'refreshButton', actionsButton: 'actionsButton', actionsMenu: 'actionsMenu', zipItem: 'zipItem',
       insightsItem: 'insightsItem', accessItem: 'accessItem', accessBadge: 'accessBadge', uploadWrap: 'uploadWrap',
       uploadButton: 'uploadButton', uploadMenu: 'uploadMenu', uploadFilesItem: 'uploadFilesItem',
@@ -1293,9 +1464,13 @@ BB.cfg = config;
     window.addEventListener('popstate', updateFromLocation);
     document.addEventListener('click', event => {
       if (openMenu && !openMenu.menu.contains(event.target) && !openMenu.trigger.contains(event.target)) closeMenu();
+      if (ui.switcher && !ui.switcher.contains(event.target)) closeSwitcher(false);
     });
     document.addEventListener('keydown', event => {
-      if (event.key === 'Escape') closeMenu({ focus: true });
+      if (event.key === 'Escape') {
+        closeMenu({ focus: true });
+        closeSwitcher(false);
+      }
       // "/" puts the focus in the prefix field, as in ClickHouse Dash.
       if (event.key === '/' && !event.ctrlKey && !event.metaKey && !event.altKey
         && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '') && !document.querySelector('.bb-overlay')) {
@@ -1314,6 +1489,7 @@ BB.cfg = config;
   bindElements();
   bindEvents();
   renderHeaderLinks();
+  restoreVersion();
   update();
   initialize();
 

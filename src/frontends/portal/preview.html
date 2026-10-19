@@ -52,10 +52,15 @@
             </div>
           </div>
         </div>
-        <div class="themeSwitch" data-theme-switch role="group" aria-label="Theme">
-          <button type="button" data-theme-value="system" aria-pressed="false" aria-label="System theme" title="System theme"><i class="ic ic-device-desktop" aria-hidden="true"></i></button>
-          <button type="button" data-theme-value="dark" aria-pressed="false" aria-label="Dark theme" title="Dark theme"><i class="ic ic-moon" aria-hidden="true"></i></button>
-          <button type="button" data-theme-value="light" aria-pressed="false" aria-label="Light theme" title="Light theme"><i class="ic ic-sun" aria-hidden="true"></i></button>
+        <div class="themeSelect" data-theme-select>
+          <button type="button" class="button button--icon themeSelect__button" data-theme-trigger aria-haspopup="listbox" aria-expanded="false" aria-controls="themeMenu" aria-label="Theme: system" title="Theme">
+            <span class="themeSelect__current" aria-hidden="true"><i class="ic ic-device-desktop themeIcon themeIcon--system"></i><i class="ic ic-moon themeIcon themeIcon--dark"></i><i class="ic ic-sun themeIcon themeIcon--light"></i></span>
+          </button>
+          <div id="themeMenu" class="themeSelect__menu" role="listbox" aria-label="Theme" hidden>
+            <button type="button" class="themeSelect__option" role="option" data-theme-value="system" aria-selected="true" aria-label="System theme" title="System"><i class="ic ic-device-desktop" aria-hidden="true"></i></button>
+            <button type="button" class="themeSelect__option" role="option" data-theme-value="dark" aria-selected="false" aria-label="Dark theme" title="Dark"><i class="ic ic-moon" aria-hidden="true"></i></button>
+            <button type="button" class="themeSelect__option" role="option" data-theme-value="light" aria-selected="false" aria-label="Light theme" title="Light"><i class="ic ic-sun" aria-hidden="true"></i></button>
+          </div>
         </div>
       </div>
     </div>

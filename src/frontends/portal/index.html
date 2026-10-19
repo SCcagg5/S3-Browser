@@ -18,64 +18,72 @@
   <a class="skipLink" href="#main">Skip to the files</a>
 
   <header class="appHeader">
-    <div class="appHeader__left">
-      <a id="backLink" class="backLink" href="/" hidden><i class="ic ic-chevron-left" aria-hidden="true"></i>Back to panel</a>
-      <span id="brand" class="brand"><i class="ic ic-database" aria-hidden="true"></i>Object storage</span>
-    </div>
-    <div class="appHeader__right">
-      <span id="buildVersion" class="buildTag" hidden></span>
-      <div class="themeSwitch" data-theme-switch role="group" aria-label="Theme">
-        <button type="button" data-theme-value="system" aria-pressed="false" aria-label="System theme" title="System theme"><i class="ic ic-device-desktop" aria-hidden="true"></i></button>
-        <button type="button" data-theme-value="dark" aria-pressed="false" aria-label="Dark theme" title="Dark theme"><i class="ic ic-moon" aria-hidden="true"></i></button>
-        <button type="button" data-theme-value="light" aria-pressed="false" aria-label="Light theme" title="Light theme"><i class="ic ic-sun" aria-hidden="true"></i></button>
+    <div class="appHeader__inner">
+      <div class="appHeader__left">
+        <a id="backLink" class="backLink" href="/" hidden><i class="ic ic-chevron-left" aria-hidden="true"></i>Back to panel</a>
+        <div class="appBrand">
+          <svg class="appBrand__logo" viewBox="0 0 18 18" aria-hidden="true"><rect x="1" y="1.5" width="16" height="2.6" rx="1.3"/><path d="M2.6 5.6h12.8l-1.36 9.66a1.6 1.6 0 0 1-1.58 1.38H5.54a1.6 1.6 0 0 1-1.58-1.38z"/></svg>
+          <span class="appBrand__text">
+            <span class="appBrand__name">S3 Browser</span>
+            <span id="versionBadge" class="versionBadge" title="Version">--</span>
+          </span>
+        </div>
+      </div>
+      <div id="storageSwitcher" class="storageSwitcher is-loading" aria-label="Bucket">
+        <div class="storageSwitcher__trigger is-static" aria-hidden="true">
+          <span class="storageSwitcher__skeleton"></span>
+        </div>
+      </div>
+      <div class="appHeader__right">
+        <div class="themeSelect" data-theme-select>
+          <button type="button" class="button button--icon themeSelect__button" data-theme-trigger aria-haspopup="listbox" aria-expanded="false" aria-controls="themeMenu" aria-label="Theme: system" title="Theme">
+            <span class="themeSelect__current" aria-hidden="true"><i class="ic ic-device-desktop themeIcon themeIcon--system"></i><i class="ic ic-moon themeIcon themeIcon--dark"></i><i class="ic ic-sun themeIcon themeIcon--light"></i></span>
+          </button>
+          <div id="themeMenu" class="themeSelect__menu" role="listbox" aria-label="Theme" hidden>
+            <button type="button" class="themeSelect__option" role="option" data-theme-value="system" aria-selected="true" aria-label="System theme" title="System"><i class="ic ic-device-desktop" aria-hidden="true"></i></button>
+            <button type="button" class="themeSelect__option" role="option" data-theme-value="dark" aria-selected="false" aria-label="Dark theme" title="Dark"><i class="ic ic-moon" aria-hidden="true"></i></button>
+            <button type="button" class="themeSelect__option" role="option" data-theme-value="light" aria-selected="false" aria-label="Light theme" title="Light"><i class="ic ic-sun" aria-hidden="true"></i></button>
+          </div>
+        </div>
       </div>
     </div>
   </header>
-
-  <nav class="navRow" aria-label="Buckets">
-    <div id="bucketTabs" class="contentTabs">
-      <span class="contentTabs__skeleton" aria-hidden="true"></span>
-    </div>
-  </nav>
 
   <main id="main" class="page" tabindex="-1">
     <div id="notices" class="notices" aria-live="polite"></div>
 
     <section id="browser" class="part browser" aria-labelledby="folderTitle">
       <div class="browserHead">
+        <h1 id="folderTitle" class="visually-hidden">Loading the buckets</h1>
         <nav id="crumbs" class="crumbs" aria-label="Folder path"></nav>
-        <div class="part__head browserHead__title">
-          <h1 id="folderTitle" class="part__title">Loading the buckets</h1>
-          <span id="folderCount" class="part__count"></span>
-          <div class="part__controls toolbar" role="toolbar" aria-label="Folder actions">
-            <form id="searchForm" class="searchField" role="search">
-              <i class="ic ic-search" aria-hidden="true"></i>
-              <label class="visually-hidden" for="searchInput">Open a prefix in this folder</label>
-              <input id="searchInput" class="input" type="search" autocomplete="off" spellcheck="false" placeholder="Open a prefix in this folder" />
-              <kbd aria-hidden="true">Enter</kbd>
-            </form>
-            <span id="accessBadge" class="badge" hidden></span>
-            <button id="refreshButton" class="button button--icon" type="button" aria-label="Refresh" title="Refresh"><i class="ic ic-refresh" aria-hidden="true"></i></button>
-            <div class="menuWrap">
-              <button id="actionsButton" class="button" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="actionsMenu">
-                <i class="ic ic-dots-vertical" aria-hidden="true"></i><span class="button__label--wide">Actions</span><i class="ic ic-chevron-down button__chevron" aria-hidden="true"></i>
-              </button>
-              <div id="actionsMenu" class="menu" role="menu" hidden>
-                <button id="zipItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-file-zip" aria-hidden="true"></i>Download as ZIP</button>
-                <button id="insightsItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-chart-bar" aria-hidden="true"></i><span>Storage insights</span></button>
-                <div class="menu__sep" role="separator"></div>
-                <button id="accessItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-lock" aria-hidden="true"></i>Bucket permissions</button>
-              </div>
+        <div class="toolbar" role="toolbar" aria-label="Folder actions">
+          <form id="searchForm" class="searchField" role="search">
+            <i class="ic ic-search" aria-hidden="true"></i>
+            <label class="visually-hidden" for="searchInput">Open a prefix in this folder</label>
+            <input id="searchInput" class="input" type="search" autocomplete="off" spellcheck="false" placeholder="Open a prefix in this folder" />
+            <kbd aria-hidden="true">Enter</kbd>
+          </form>
+          <span id="accessBadge" class="badge" hidden></span>
+          <button id="refreshButton" class="button button--icon" type="button" aria-label="Refresh" title="Refresh"><i class="ic ic-refresh" aria-hidden="true"></i></button>
+          <div class="menuWrap">
+            <button id="actionsButton" class="button" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="actionsMenu">
+              <i class="ic ic-dots-vertical" aria-hidden="true"></i><span class="button__label--wide">Actions</span><i class="ic ic-chevron-down button__chevron" aria-hidden="true"></i>
+            </button>
+            <div id="actionsMenu" class="menu" role="menu" hidden>
+              <button id="zipItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-file-zip" aria-hidden="true"></i>Download as ZIP</button>
+              <button id="insightsItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-chart-bar" aria-hidden="true"></i><span>Storage insights</span></button>
+              <div class="menu__sep" role="separator"></div>
+              <button id="accessItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-lock" aria-hidden="true"></i>Bucket permissions</button>
             </div>
-            <div id="uploadWrap" class="menuWrap">
-              <button id="uploadButton" class="button button--primary" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="uploadMenu">
-                <i class="ic ic-upload" aria-hidden="true"></i>Upload<i class="ic ic-chevron-down button__chevron" aria-hidden="true"></i>
-              </button>
-              <div id="uploadMenu" class="menu" role="menu" hidden>
-                <button id="uploadFilesItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-file-upload" aria-hidden="true"></i>Upload files</button>
-                <button id="uploadFolderItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-folder-up" aria-hidden="true"></i>Upload a folder</button>
-                <p class="menu__hint">You can also drop files on the page.</p>
-              </div>
+          </div>
+          <div id="uploadWrap" class="menuWrap">
+            <button id="uploadButton" class="button button--primary" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="uploadMenu">
+              <i class="ic ic-upload" aria-hidden="true"></i>Upload<i class="ic ic-chevron-down button__chevron" aria-hidden="true"></i>
+            </button>
+            <div id="uploadMenu" class="menu" role="menu" hidden>
+              <button id="uploadFilesItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-file-upload" aria-hidden="true"></i>Upload files</button>
+              <button id="uploadFolderItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-folder-up" aria-hidden="true"></i>Upload a folder</button>
+              <p class="menu__hint">You can also drop files on the page.</p>
             </div>
           </div>
         </div>
