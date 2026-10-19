@@ -63,6 +63,7 @@ docker run \
   --name "$CONTAINER" \
   --read-only \
   --volume "$ROOT/test/config.hcl:/config/config.hcl:ro" \
+  --volume "$ROOT/test/secrets:/config/secrets:ro" \
   "$IMAGE" >/dev/null
 
 attempt=0

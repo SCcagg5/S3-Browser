@@ -26,4 +26,4 @@ http://localhost:8080/
 
 To expose the application under `/s3-browser/`, configure the reverse proxy to remove that prefix before forwarding. The frontend resolves all URLs relative to the public document path and requires no HCL path setting.
 
-The fixed credentials in `config.hcl` belong only to the isolated Garage service. Do not reuse them outside this test environment.
+The fixed credentials in `config.hcl` and `secrets/` belong only to the isolated Garage service. Do not reuse them outside this test environment. The secret key is in `secrets/s3_secret_access_key`, because the browser refuses a secret in clear text in the HCL file. The compose file mounts `secrets/` at `/config/secrets` in both containers.

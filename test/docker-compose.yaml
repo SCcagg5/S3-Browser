@@ -10,6 +10,7 @@ services:
     read_only: true
     volumes:
       - ./config.hcl:/config/config.hcl:ro
+      - ./secrets:/config/secrets:ro
     ports:
       - "8080:8080"
     depends_on:
@@ -33,3 +34,4 @@ services:
         hard: 262144
     volumes:
       - ./config.hcl:/config/config.hcl:ro
+      - ./secrets:/config/secrets:ro

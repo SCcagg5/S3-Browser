@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -68,21 +67,21 @@ var configKeys = []configKey{
 	{"server", "max_background_storage_bytes", "integer", "274877906944", "1048576 to 1125899906842624", formValue, false, "The provider bytes that one background job can transfer."},
 	{"server", "max_background_storage_requests", "integer", "100000", "1 to 10000000", formValue, false, "The provider calls that one background job can make."},
 
-	{"auth", "provider", "text", "(required)", "s3 or gcs", formValue, false, "The storage protocol."},
+	{"auth", "provider", "text", "(required)", "s3 or gcs (lower case)", formValue, false, "The storage protocol."},
 	{"auth", "mode", "text", "s3: access_key with credentials, else anonymous. gcs: service_account with credentials_file, else anonymous", "s3: access_key or anonymous. gcs: service_account or anonymous", formValue, false, "How the server signs the provider requests."},
-	{"auth", "endpoint", "URL", "s3: (required). gcs: https://storage.googleapis.com", "http or https, without credentials, query or fragment", formValue, false, "The base URL of the provider."},
+	{"auth", "endpoint", "URL", "s3: (required). gcs: https://storage.googleapis.com", "http or https, without credentials, query or fragment, and without a \"/\" at the end", formValue, false, "The base URL of the provider."},
 	{"auth", "region", "text", "s3: (required)", "", formValue, false, "The region that the S3 signature uses."},
-	{"auth", "access_key_id", "text", "(none)", "s3 access_key mode only", formValue | formEnv | formFile, true, "The S3 access key id. The form in clear text is deprecated: use _env or _file."},
-	{"auth", "secret_access_key", "text", "(none)", "s3 access_key mode only", formValue | formEnv | formFile, true, "The S3 secret access key. The form in clear text is deprecated: use _env or _file."},
-	{"auth", "session_token", "text", "(none)", "s3 only", formValue | formEnv | formFile, true, "The S3 session token. The form in clear text is deprecated: use _env or _file."},
+	{"auth", "access_key_id", "text", "(none)", "s3 access_key mode only; no space at the start or at the end", formValue | formEnv | formFile, false, "The S3 access key id. It is an identifier, not a secret: print-config shows it."},
+	{"auth", "secret_access_key", "text", "(none)", "s3 access_key mode only; no space and no control character", formEnv | formFile, true, "The S3 secret access key. It is a secret: the form in clear text stops the start."},
+	{"auth", "session_token", "text", "(none)", "s3 only; no space and no control character", formEnv | formFile, true, "The S3 session token. It is a secret: the form in clear text stops the start."},
 	{"auth", "credentials_file", "file path", "(none)", "gcs service_account mode only", formValue, false, "The JSON file of a GCS service account. A relative path starts at the directory of the configuration file."},
 	{"auth", "insecure_skip_verify", "boolean", "false", "", formValue, false, "Do not verify the TLS certificate of the provider. Use it only for a test."},
 
 	{"bucket", "name", "text", "the label of the block", "", formValue, false, "The name that the user interface shows."},
 	{"bucket", "auth", "text", "(required)", "the label of an auth block", formValue, false, "The auth block that this bucket uses."},
 	{"bucket", "bucket", "text", "(required)", "", formValue, false, "The name of the bucket at the provider."},
-	{"bucket", "permissions", "list of text", "(none: no ceiling)", "read, write, delete", formValue, false, "The operations that the server can do on this bucket. It is a ceiling: the provider and the access policy can refuse more."},
-	{"bucket", "root_prefix", "text", `""`, "", formValue, false, "The part of the bucket that the browser shows. The keys are relative to it."},
+	{"bucket", "permissions", "list of text", "(none: no ceiling)", "read, write, delete (lower case, each one time)", formValue, false, "The operations that the server can do on this bucket. It is a ceiling: the provider and the access policy can refuse more."},
+	{"bucket", "root_prefix", "text", `""`, "\"\", or a prefix that ends with \"/\" and does not start with \"/\"", formValue, false, "The part of the bucket that the browser shows. The keys are relative to it."},
 	{"bucket", "max_scan_pages", "integer", "1", "0 to 1000000", formValue, false, "The 1000-entry provider pages that one listing combines. 0 = no limit."},
 
 	{"access", "mode", "text", "(required)", "authzen or open", formValue, false, "authzen: verify the identity token and ask the PDP for each action. open: no check of identity or permission. The server writes a warning at each start."},
@@ -191,9 +190,13 @@ func configReference() string {
 	b.WriteString("Give one form only. Two forms stop the start. A variable that does not exist, an empty value, or a file that the\n")
 	b.WriteString("server cannot read stops the start. The server reads each variable and each file one time, at start. The server reads\n")
 	b.WriteString("no environment variable that the file does not name.\n\n")
-	b.WriteString("A secret key has *yes* in the column *Secret*. The output of `print-config` and the log show `<hidden>` for it.\n")
-	b.WriteString("The secret `access.pdp.token` accepts only `_env` and `_file`. The S3 secrets of the `auth` block still accept the\n")
-	b.WriteString("value in clear text for compatibility. The server writes a warning at start when it finds one.\n")
+	b.WriteString("A secret key has *yes* in the column *Secret*. A secret accepts only `_env` and `_file`: a secret in clear text in\n")
+	b.WriteString("the file stops the start. The output of `print-config` and the log show `<hidden>` for it.\n\n")
+	b.WriteString("## No change of a value\n\n")
+	b.WriteString("The value in the file is the value that applies. The server does not remove spaces, does not change the case, and does\n")
+	b.WriteString("not add or remove a `/`. A value that does not fit stops the start. The error gives the key, the expected form and the\n")
+	b.WriteString("value. An error about a secret does not show the value. A text value must not be empty and must not have a space at\n")
+	b.WriteString("the start or at the end: to use the default of a key, remove the key.\n")
 	for _, block := range configBlocks {
 		fmt.Fprintf(&b, "\n## `%s`\n\n", block.Path)
 		fmt.Fprintf(&b, "Syntax: `%s`. %s\n\n", block.Syntax, block.Description)
@@ -290,7 +293,7 @@ func effectiveConfiguration(cfg appConfig) []effectiveSetting {
 			"provider":             strconv.Quote(auth.Provider),
 			"mode":                 strconv.Quote(auth.Mode),
 			"endpoint":             strconv.Quote(auth.Endpoint),
-			"access_key_id":        hidden(auth.AccessKeyID),
+			"access_key_id":        quotedOrNone(auth.AccessKeyID),
 			"secret_access_key":    hidden(auth.SecretAccessKey),
 			"session_token":        hidden(auth.SessionToken),
 			"insecure_skip_verify": strconv.FormatBool(auth.InsecureSkipVerify),
@@ -337,6 +340,13 @@ func effectiveConfiguration(cfg appConfig) []effectiveSetting {
 	return out
 }
 
+func quotedOrNone(value string) string {
+	if value == "" {
+		return "<none>"
+	}
+	return strconv.Quote(value)
+}
+
 func quotedList(values []string) string {
 	quoted := make([]string, 0, len(values))
 	for _, value := range values {
@@ -360,21 +370,6 @@ func configWarnings(cfg appConfig) []string {
 	warnings := make([]string, 0, 2)
 	if !cfg.Access.enforced() {
 		warnings = append(warnings, "config.warning access.mode = \"open\": the server checks no identity and no permission; use it only on a closed network")
-	}
-	keys := make([]string, 0, len(cfg.Sources))
-	for name := range cfg.Sources {
-		keys = append(keys, name)
-	}
-	sort.Strings(keys)
-	for _, name := range keys {
-		if !strings.HasPrefix(name, "auth ") || cfg.Sources[name] != "file" {
-			continue
-		}
-		for _, secret := range []string{".access_key_id", ".secret_access_key", ".session_token"} {
-			if strings.HasSuffix(name, secret) {
-				warnings = append(warnings, fmt.Sprintf("config.warning %s is a secret in clear text; use %s_env or %s_file", name, strings.TrimPrefix(secret, "."), strings.TrimPrefix(secret, ".")))
-			}
-		}
 	}
 	return warnings
 }

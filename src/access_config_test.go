@@ -212,12 +212,11 @@ access { mode = "open" }
 		t.Fatalf("auth = %+v", cfg.Authentications[0])
 	}
 	printed := formatEffectiveConfiguration(cfg)
-	if !strings.Contains(printed, `auth "s3".secret_access_key = <hidden>  # env:S3_BROWSER_TEST_SECRET`) || strings.Contains(printed, "secret-from-env") || strings.Contains(printed, "clear-key") {
+	if !strings.Contains(printed, `auth "s3".secret_access_key = <hidden>  # env:S3_BROWSER_TEST_SECRET`) || strings.Contains(printed, "secret-from-env") ||
+		!strings.Contains(printed, `auth "s3".access_key_id = "clear-key"  # file`) {
 		t.Fatalf("print-config:\n%s", printed)
 	}
-	if warnings := strings.Join(configWarnings(cfg), "\n"); !strings.Contains(warnings, `auth "s3".access_key_id is a secret in clear text`) {
-		t.Fatalf("warnings = %q", warnings)
-	}
+
 }
 
 // TestConfigurationReferenceIsCurrent makes sure that docs/configuration-reference.md

@@ -217,8 +217,8 @@ func decodePDPBlock(block hclBlock, cfg *appConfig, access *accessConfig, baseDi
 	if len(block.Blocks) != 0 {
 		return block.errorf("nested blocks are not supported inside %s", path)
 	}
-	if _, ok := block.Attrs["token"]; ok {
-		return block.errorf("%s.token is a secret: use token_env or token_file, not the value in clear text", path)
+	if err := rejectClearSecrets(block, path, path); err != nil {
+		return err
 	}
 	if err := rejectUnknownAttrs(block, attributeNames(path)...); err != nil {
 		return err

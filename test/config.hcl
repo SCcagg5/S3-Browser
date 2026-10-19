@@ -8,12 +8,13 @@ server {
 }
 
 auth "garage" {
-  provider          = "s3"
-  mode              = "access_key"
-  endpoint          = "http://garage:3900"
-  region            = "garage"
-  access_key_id     = "GK0123456789abcdef01234567"
-  secret_access_key = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  provider               = "s3"
+  mode                   = "access_key"
+  endpoint               = "http://garage:3900"
+  region                 = "garage"
+  access_key_id          = "GK0123456789abcdef01234567"
+  # A secret accepts only _env and _file. The test compose and scratch-runtime.sh mount test/secrets here.
+  secret_access_key_file = "/config/secrets/s3_secret_access_key"
 }
 
 bucket "garage-main" {

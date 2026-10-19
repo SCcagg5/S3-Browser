@@ -22,10 +22,15 @@ read_hcl_string() {
 }
 
 KEY_ID="$(read_hcl_string access_key_id)"
-KEY_SECRET="$(read_hcl_string secret_access_key)"
+# The browser reads the secret from a file (a secret is never in clear text in the HCL file).
+KEY_SECRET_FILE="$(read_hcl_string secret_access_key_file)"
+KEY_SECRET=""
+if [ -n "$KEY_SECRET_FILE" ] && [ -r "$KEY_SECRET_FILE" ]; then
+  KEY_SECRET="$(head -n 1 "$KEY_SECRET_FILE")"
+fi
 
 if [ -z "$KEY_ID" ] || [ -z "$KEY_SECRET" ]; then
-  echo "The S3 auth block in $CONFIG_FILE must define access_key_id and secret_access_key" >&2
+  echo "The S3 auth block in $CONFIG_FILE must define access_key_id and a readable secret_access_key_file" >&2
   exit 1
 fi
 

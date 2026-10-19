@@ -29,9 +29,15 @@ Give one form only. Two forms stop the start. A variable that does not exist, an
 server cannot read stops the start. The server reads each variable and each file one time, at start. The server reads
 no environment variable that the file does not name.
 
-A secret key has *yes* in the column *Secret*. The output of `print-config` and the log show `<hidden>` for it.
-The secret `access.pdp.token` accepts only `_env` and `_file`. The S3 secrets of the `auth` block still accept the
-value in clear text for compatibility. The server writes a warning at start when it finds one.
+A secret key has *yes* in the column *Secret*. A secret accepts only `_env` and `_file`: a secret in clear text in
+the file stops the start. The output of `print-config` and the log show `<hidden>` for it.
+
+## No change of a value
+
+The value in the file is the value that applies. The server does not remove spaces, does not change the case, and does
+not add or remove a `/`. A value that does not fit stops the start. The error gives the key, the expected form and the
+value. An error about a secret does not show the value. A text value must not be empty and must not have a space at
+the start or at the end: to use the default of a key, remove the key.
 
 ## `server`
 
@@ -62,13 +68,13 @@ Syntax: `auth "<id>" { ... }`. One or more blocks. A credential set and an endpo
 
 | Key | Type | Default | Range | Forms | Secret | Use |
 |---|---|---|---|---|---|---|
-| `provider` | text | (required) | s3 or gcs | value | no | The storage protocol. |
+| `provider` | text | (required) | s3 or gcs (lower case) | value | no | The storage protocol. |
 | `mode` | text | s3: access_key with credentials, else anonymous. gcs: service_account with credentials_file, else anonymous | s3: access_key or anonymous. gcs: service_account or anonymous | value | no | How the server signs the provider requests. |
-| `endpoint` | URL | s3: (required). gcs: https://storage.googleapis.com | http or https, without credentials, query or fragment | value | no | The base URL of the provider. |
+| `endpoint` | URL | s3: (required). gcs: https://storage.googleapis.com | http or https, without credentials, query or fragment, and without a "/" at the end | value | no | The base URL of the provider. |
 | `region` | text | s3: (required) |   | value | no | The region that the S3 signature uses. |
-| `access_key_id` | text | (none) | s3 access_key mode only | value, `_env`, `_file` | yes | The S3 access key id. The form in clear text is deprecated: use _env or _file. |
-| `secret_access_key` | text | (none) | s3 access_key mode only | value, `_env`, `_file` | yes | The S3 secret access key. The form in clear text is deprecated: use _env or _file. |
-| `session_token` | text | (none) | s3 only | value, `_env`, `_file` | yes | The S3 session token. The form in clear text is deprecated: use _env or _file. |
+| `access_key_id` | text | (none) | s3 access_key mode only; no space at the start or at the end | value, `_env`, `_file` | no | The S3 access key id. It is an identifier, not a secret: print-config shows it. |
+| `secret_access_key` | text | (none) | s3 access_key mode only; no space and no control character | `_env`, `_file` | yes | The S3 secret access key. It is a secret: the form in clear text stops the start. |
+| `session_token` | text | (none) | s3 only; no space and no control character | `_env`, `_file` | yes | The S3 session token. It is a secret: the form in clear text stops the start. |
 | `credentials_file` | file path | (none) | gcs service_account mode only | value | no | The JSON file of a GCS service account. A relative path starts at the directory of the configuration file. |
 | `insecure_skip_verify` | boolean | false |   | value | no | Do not verify the TLS certificate of the provider. Use it only for a test. |
 
@@ -81,8 +87,8 @@ Syntax: `bucket "<id>" { ... }`. One or more blocks. One bucket that the browser
 | `name` | text | the label of the block |   | value | no | The name that the user interface shows. |
 | `auth` | text | (required) | the label of an auth block | value | no | The auth block that this bucket uses. |
 | `bucket` | text | (required) |   | value | no | The name of the bucket at the provider. |
-| `permissions` | list of text | (none: no ceiling) | read, write, delete | value | no | The operations that the server can do on this bucket. It is a ceiling: the provider and the access policy can refuse more. |
-| `root_prefix` | text | "" |   | value | no | The part of the bucket that the browser shows. The keys are relative to it. |
+| `permissions` | list of text | (none: no ceiling) | read, write, delete (lower case, each one time) | value | no | The operations that the server can do on this bucket. It is a ceiling: the provider and the access policy can refuse more. |
+| `root_prefix` | text | "" | "", or a prefix that ends with "/" and does not start with "/" | value | no | The part of the bucket that the browser shows. The keys are relative to it. |
 | `max_scan_pages` | integer | 1 | 0 to 1000000 | value | no | The 1000-entry provider pages that one listing combines. 0 = no limit. |
 
 ## `access`

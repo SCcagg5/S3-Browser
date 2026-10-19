@@ -10,7 +10,11 @@ import (
 
 func TestOmittedPermissionsInheritCredentialCapabilities(t *testing.T) {
 	t.Parallel()
-	path := filepath.Join(t.TempDir(), "config.hcl")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.hcl")
+	if err := os.WriteFile(filepath.Join(dir, "secret"), []byte("secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	writeConfig(t, path, `
 access {
   mode = "open"
@@ -20,8 +24,8 @@ auth "shared" {
   mode              = "access_key"
   endpoint          = "http://localhost:9000"
   region            = "test"
-  access_key_id     = "key"
-  secret_access_key = "secret"
+  access_key_id          = "key"
+  secret_access_key_file = "secret"
 }
 
 bucket "inherited" {
@@ -66,7 +70,7 @@ server {
 auth "production" {
   provider               = "s3"
   mode                   = "access_key"
-  endpoint               = "http://127.0.0.1:9000/"
+  endpoint               = "http://127.0.0.1:9000"
   region                 = "us-east-1"
   access_key_id          = "shared-key"
   secret_access_key_file = "./s3-secret.txt"
@@ -77,7 +81,7 @@ bucket "documents" {
   auth           = "production"
   bucket         = "documents"
   permissions    = ["read", "write", "delete"]
-  root_prefix    = "/tenant-a"
+  root_prefix    = "tenant-a/"
   max_scan_pages = 15
 }
 
@@ -249,7 +253,7 @@ func TestLoadConfigRejectsUnknownAuthentication(t *testing.T) {
 bucket "broken" { auth = "missing" bucket = "bucket" }
 `)
 	_, err := loadConfig(path)
-	if err == nil || !strings.Contains(err.Error(), `auth "missing" is not defined`) {
+	if err == nil || !strings.Contains(err.Error(), `bucket "broken".auth: no auth block has the label "missing"`) {
 		t.Fatalf("error = %v", err)
 	}
 }
@@ -404,5 +408,56 @@ func writeConfig(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestStrictValuesStopTheStart: the server never changes a value to make it
+// fit. A value that does not fit stops the start, and the error names the key
+// and the value (but never the value of a secret).
+func TestStrictValuesStopTheStart(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "spaced"), []byte(" secret-with-space\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "good"), []byte("good-secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	auth := func(lines string) string {
+		return "access { mode = \"open\" }\nauth \"s3\" {\n" + lines + "\n}\nbucket \"b\" {\n  auth = \"s3\"\n  bucket = \"b\"\n}\n"
+	}
+	base := "provider = \"s3\"\nendpoint = \"http://localhost:9000\"\nregion = \"test\"\n"
+	withBucket := func(lines string) string {
+		return "access { mode = \"open\" }\nauth \"s3\" {\n" + base + "}\nbucket \"b\" {\n  auth = \"s3\"\n" + lines + "\n}\n"
+	}
+	for name, test := range map[string]struct {
+		config string
+		want   string
+		hidden string
+	}{
+		"upper-case provider":   {auth(strings.Replace(base, `"s3"`, `"S3"`, 1)), `auth "s3".provider must be "s3" or "gcs", got "S3"`, ""},
+		"space in mode":         {auth(base + `mode = " anonymous"`), `auth "s3".mode must not have a space at the start or at the end, got " anonymous"`, ""},
+		"endpoint slash":        {auth(strings.Replace(base, `9000"`, `9000/"`, 1)), `auth "s3".endpoint must not end with "/", got "http://localhost:9000/"`, ""},
+		"region space":          {auth(strings.Replace(base, `"test"`, `"test "`, 1)), `auth "s3".region must not have a space`, ""},
+		"clear secret":          {auth(base + "access_key_id = \"k\"\nsecret_access_key = \"top-secret-value\""), `auth "s3".secret_access_key is a secret: use secret_access_key_env or secret_access_key_file`, "top-secret-value"},
+		"clear session token":   {auth(base + "session_token = \"top-secret-value\""), `auth "s3".session_token is a secret`, "top-secret-value"},
+		"secret with space":     {auth(base + "access_key_id = \"k\"\nsecret_access_key_file = \"spaced\""), `auth "s3".secret_access_key must not contain a space or a control character`, "secret-with-space"},
+		"two secret forms":      {auth(base + "access_key_id = \"k\"\nsecret_access_key_file = \"good\"\nsecret_access_key_env = \"X\""), "give only one of secret_access_key, secret_access_key_env and secret_access_key_file", "good-secret"},
+		"root prefix slash":     {withBucket(`  bucket = "b"` + "\n" + `  root_prefix = "/tenant"`), `bucket "b".root_prefix must be "" or a prefix that ends with "/"`, ""},
+		"root prefix no end":    {withBucket(`  bucket = "b"` + "\n" + `  root_prefix = "tenant"`), `got "tenant"`, ""},
+		"upper-case permission": {withBucket(`  bucket = "b"` + "\n" + `  permissions = ["Read"]`), `bucket "b".permissions must contain only "read", "write" and "delete", got "Read"`, ""},
+		"duplicate permission":  {withBucket(`  bucket = "b"` + "\n" + `  permissions = ["read", "read"]`), `bucket "b".permissions contains "read" two times`, ""},
+		"empty name":            {withBucket(`  bucket = "b"` + "\n" + `  name = ""`), `bucket "b".name must not be empty`, ""},
+		"bucket name space":     {withBucket(`  bucket = " b"`), `bucket "b".bucket must not have a space at the start or at the end, got " b"`, ""},
+		"upper-case log mode":   {"server { log_mode = \"Detailed\" }\n" + withBucket(`  bucket = "b"`), `server.log_mode must be "anonymous" or "detailed", got "Detailed"`, ""},
+		"listen space":          {"server { listen = \" :8080\" }\n" + withBucket(`  bucket = "b"`), `server.listen`, ""},
+	} {
+		_, err := decodeConfig(test.config, filepath.Join(dir, "config.hcl"), dir)
+		if err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Fatalf("%s: error = %v, want %q", name, err, test.want)
+		}
+		if test.hidden != "" && strings.Contains(err.Error(), test.hidden) {
+			t.Fatalf("%s: the error shows the secret: %v", name, err)
+		}
 	}
 }

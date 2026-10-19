@@ -160,7 +160,7 @@ func decodeConfig(data, sourceName, sourceDir string) (appConfig, error) {
 			if len(block.Labels) != 1 {
 				return appConfig{}, block.errorf("bucket block requires exactly one quoted identifier")
 			}
-			id := strings.TrimSpace(block.Labels[0])
+			id := block.Labels[0]
 			if _, exists := bucketIDs[id]; exists {
 				return appConfig{}, block.errorf("duplicate bucket id %q", id)
 			}
@@ -232,21 +232,21 @@ func decodeServerBlock(block hclBlock, cfg *appConfig) error {
 	if value, ok := block.stringAttr("listen"); ok {
 		listen, err := normalizeListenAddress(value)
 		if err != nil {
-			return block.errorf("server.listen: %v", err)
+			return block.errorf("server.listen: %v, got %q", err, value)
 		}
 		cfg.Listen = listen
 	}
 	if value, ok := block.intAttr("job_history_limit"); ok {
 		if value < 1 || value > 20 {
-			return block.errorf("server.job_history_limit must be between 1 and 20")
+			return block.errorf("server.job_history_limit must be between 1 and 20, got %d", value)
 		}
 		cfg.JobHistoryLimit = int(value)
 	}
 	if value, ok := block.stringAttr("access_mode"); ok {
-		cfg.Runtime.AccessMode = strings.ToLower(strings.TrimSpace(value))
+		cfg.Runtime.AccessMode = value
 	}
 	if value, ok := block.stringAttr("log_mode"); ok {
-		cfg.Runtime.LogMode = strings.ToLower(strings.TrimSpace(value))
+		cfg.Runtime.LogMode = value
 	}
 	if value, ok := block.boolAttr("allow_full_object_fallback"); ok {
 		cfg.Runtime.AllowFullObjectFallback = value
@@ -297,16 +297,16 @@ func validateRuntimePolicy(cfg *appConfig) error {
 	switch cfg.Runtime.AccessMode {
 	case accessModeInheritCredentials, accessModeForceReadOnly:
 	default:
-		return fmt.Errorf("server.access_mode must be %q or %q", accessModeInheritCredentials, accessModeForceReadOnly)
+		return fmt.Errorf("server.access_mode must be %q or %q, got %q", accessModeInheritCredentials, accessModeForceReadOnly, cfg.Runtime.AccessMode)
 	}
 	switch cfg.Runtime.LogMode {
 	case logModeAnonymous, logModeDetailed:
 	default:
-		return fmt.Errorf("server.log_mode must be %q or %q", logModeAnonymous, logModeDetailed)
+		return fmt.Errorf("server.log_mode must be %q or %q, got %q", logModeAnonymous, logModeDetailed, cfg.Runtime.LogMode)
 	}
 	validateRange := func(name string, value, minimum, maximum int64) error {
 		if value < minimum || value > maximum {
-			return fmt.Errorf("server.%s must be between %d and %d", name, minimum, maximum)
+			return fmt.Errorf("server.%s must be between %d and %d, got %d", name, minimum, maximum, value)
 		}
 		return nil
 	}
@@ -330,22 +330,22 @@ func validateRuntimePolicy(cfg *appConfig) error {
 		}
 	}
 	if cfg.Runtime.MaxConcurrentStorageRequests < 1 || cfg.Runtime.MaxConcurrentStorageRequests > 1024 {
-		return fmt.Errorf("server.max_concurrent_storage_requests must be between 1 and 1024")
+		return fmt.Errorf("server.max_concurrent_storage_requests must be between 1 and 1024, got %d", cfg.Runtime.MaxConcurrentStorageRequests)
 	}
 	if cfg.Runtime.MaxConcurrentRequestsPerStore < 1 || cfg.Runtime.MaxConcurrentRequestsPerStore > 256 {
-		return fmt.Errorf("server.max_concurrent_requests_per_storage must be between 1 and 256")
+		return fmt.Errorf("server.max_concurrent_requests_per_storage must be between 1 and 256, got %d", cfg.Runtime.MaxConcurrentRequestsPerStore)
 	}
 	if cfg.Runtime.MaxConcurrentRequestsPerStore > cfg.Runtime.MaxConcurrentStorageRequests {
-		return fmt.Errorf("server.max_concurrent_requests_per_storage cannot exceed max_concurrent_storage_requests")
+		return fmt.Errorf("server.max_concurrent_requests_per_storage (%d) cannot exceed max_concurrent_storage_requests (%d)", cfg.Runtime.MaxConcurrentRequestsPerStore, cfg.Runtime.MaxConcurrentStorageRequests)
 	}
 	if cfg.Runtime.SessionTTLSeconds < 30 || cfg.Runtime.SessionTTLSeconds > 7*24*60*60 {
-		return fmt.Errorf("server.session_ttl_seconds must be between 30 and 604800")
+		return fmt.Errorf("server.session_ttl_seconds must be between 30 and 604800, got %d", cfg.Runtime.SessionTTLSeconds)
 	}
 	if cfg.Runtime.MaxStatsFolders < 100 || cfg.Runtime.MaxStatsFolders > 1_000_000 {
-		return fmt.Errorf("server.max_stats_folders must be between 100 and 1000000")
+		return fmt.Errorf("server.max_stats_folders must be between 100 and 1000000, got %d", cfg.Runtime.MaxStatsFolders)
 	}
 	if cfg.Runtime.MaxArchiveEntries < 1 || cfg.Runtime.MaxArchiveEntries > 1_000_000 {
-		return fmt.Errorf("server.max_archive_entries must be between 1 and 1000000")
+		return fmt.Errorf("server.max_archive_entries must be between 1 and 1000000, got %d", cfg.Runtime.MaxArchiveEntries)
 	}
 	return nil
 }
@@ -356,6 +356,9 @@ var instanceIDPattern = regexp.MustCompile(`^(?:[A-Za-z0-9][A-Za-z0-9._-]*|-)$`)
 func decodeAuthBlock(block hclBlock, baseDir string) (authConfig, error) {
 	if len(block.Labels) != 1 {
 		return authConfig{}, block.errorf("auth block requires exactly one quoted identifier")
+	}
+	if err := rejectClearSecrets(block, "auth "+strconv.Quote(block.Labels[0]), "auth"); err != nil {
+		return authConfig{}, err
 	}
 	allowed := attributeNames("auth")
 	if err := rejectUnknownAttrs(block, allowed...); err != nil {
@@ -373,10 +376,11 @@ func decodeAuthBlock(block hclBlock, baseDir string) (authConfig, error) {
 		return authConfig{}, block.errorf("nested blocks are not supported inside auth")
 	}
 
-	auth := authConfig{ID: strings.TrimSpace(block.Labels[0])}
+	auth := authConfig{ID: block.Labels[0]}
 	if !configIDPattern.MatchString(auth.ID) {
-		return authConfig{}, block.errorf("auth id %q must match %s", auth.ID, configIDPattern.String())
+		return authConfig{}, block.errorf("auth label must match %s, got %q", configIDPattern.String(), auth.ID)
 	}
+	path := "auth " + strconv.Quote(auth.ID)
 	for _, field := range []struct {
 		name string
 		dst  *string
@@ -387,27 +391,32 @@ func decodeAuthBlock(block hclBlock, baseDir string) (authConfig, error) {
 		{"region", &auth.Region},
 		{"credentials_file", &auth.CredentialsFile},
 	} {
-		if value, ok := block.stringAttr(field.name); ok {
-			*field.dst = value
+		value, _, err := textAttr(block, path, field.name)
+		if err != nil {
+			return authConfig{}, err
 		}
+		*field.dst = value
 	}
 	if value, ok := block.boolAttr("insecure_skip_verify"); ok {
 		auth.InsecureSkipVerify = value
 	}
-	auth.Provider = strings.ToLower(strings.TrimSpace(auth.Provider))
-	auth.Mode = strings.ToLower(strings.TrimSpace(auth.Mode))
-	auth.Endpoint = strings.TrimRight(strings.TrimSpace(auth.Endpoint), "/")
-	auth.Region = strings.TrimSpace(auth.Region)
+	if strings.HasSuffix(auth.Endpoint, "/") {
+		return authConfig{}, block.errorf("%s.endpoint must not end with \"/\", got %q", path, auth.Endpoint)
+	}
 
-	accessKey, accessDefined, err := resolveSecretSource(block, "access_key_id", baseDir)
+	// access_key_id is an identifier, not a secret: it accepts the three forms.
+	accessKey, accessDefined, err := resolveValueSource(block, path, "access_key_id", baseDir, formValue|formEnv|formFile)
 	if err != nil {
 		return authConfig{}, err
 	}
-	secretAccessKey, secretDefined, err := resolveSecretSource(block, "secret_access_key", baseDir)
+	if accessDefined && (strings.TrimSpace(accessKey) != accessKey || hasControlCharacter(accessKey)) {
+		return authConfig{}, block.errorf("%s.access_key_id must not have a space at the start or at the end or a control character, got %q", path, accessKey)
+	}
+	secretAccessKey, secretDefined, err := resolveSecretSource(block, path, "secret_access_key", baseDir)
 	if err != nil {
 		return authConfig{}, err
 	}
-	sessionToken, sessionDefined, err := resolveSecretSource(block, "session_token", baseDir)
+	sessionToken, sessionDefined, err := resolveSecretSource(block, path, "session_token", baseDir)
 	if err != nil {
 		return authConfig{}, err
 	}
@@ -416,18 +425,18 @@ func decodeAuthBlock(block hclBlock, baseDir string) (authConfig, error) {
 	auth.SessionToken = sessionToken
 
 	if auth.Provider == "" {
-		return authConfig{}, block.errorf("provider is required")
+		return authConfig{}, block.errorf("%s.provider is required: \"s3\" or \"gcs\"", path)
 	}
 	switch auth.Provider {
 	case "s3":
-		if strings.TrimSpace(auth.CredentialsFile) != "" {
-			return authConfig{}, block.errorf("credentials_file is only supported for provider gcs")
+		if auth.CredentialsFile != "" {
+			return authConfig{}, block.errorf("%s.credentials_file is only supported for provider \"gcs\"", path)
 		}
 		if auth.Endpoint == "" {
-			return authConfig{}, block.errorf("endpoint is required for provider s3")
+			return authConfig{}, block.errorf("%s.endpoint is required for provider \"s3\"", path)
 		}
 		if auth.Region == "" {
-			return authConfig{}, block.errorf("region is required for provider s3")
+			return authConfig{}, block.errorf("%s.region is required for provider \"s3\"", path)
 		}
 		if auth.Mode == "" {
 			if accessDefined || secretDefined || sessionDefined {
@@ -439,24 +448,24 @@ func decodeAuthBlock(block hclBlock, baseDir string) (authConfig, error) {
 		switch auth.Mode {
 		case "access_key":
 			if !accessDefined || !secretDefined {
-				return authConfig{}, block.errorf("s3 access_key mode requires access_key_id and secret_access_key")
+				return authConfig{}, block.errorf("%s: mode \"access_key\" requires access_key_id and secret_access_key (_env or _file)", path)
 			}
 		case "anonymous":
 			if accessDefined || secretDefined || sessionDefined {
-				return authConfig{}, block.errorf("s3 anonymous mode cannot define access credentials")
+				return authConfig{}, block.errorf("%s: mode \"anonymous\" cannot define access credentials", path)
 			}
 		default:
-			return authConfig{}, block.errorf("s3 mode must be access_key or anonymous")
+			return authConfig{}, block.errorf("%s.mode must be \"access_key\" or \"anonymous\" for provider \"s3\", got %q", path, auth.Mode)
 		}
 	case "gcs":
 		if accessDefined || secretDefined || sessionDefined {
-			return authConfig{}, block.errorf("S3 credential attributes are only supported for provider s3")
+			return authConfig{}, block.errorf("%s: the S3 credential attributes are only supported for provider \"s3\"", path)
 		}
 		if auth.Endpoint == "" {
 			auth.Endpoint = "https://storage.googleapis.com"
 		}
 		if auth.Mode == "" {
-			if strings.TrimSpace(auth.CredentialsFile) != "" {
+			if auth.CredentialsFile != "" {
 				auth.Mode = "service_account"
 			} else {
 				auth.Mode = "anonymous"
@@ -464,18 +473,18 @@ func decodeAuthBlock(block hclBlock, baseDir string) (authConfig, error) {
 		}
 		switch auth.Mode {
 		case "service_account":
-			if strings.TrimSpace(auth.CredentialsFile) == "" {
-				return authConfig{}, block.errorf("gcs service_account mode requires credentials_file")
+			if auth.CredentialsFile == "" {
+				return authConfig{}, block.errorf("%s: mode \"service_account\" requires credentials_file", path)
 			}
 		case "anonymous":
-			if strings.TrimSpace(auth.CredentialsFile) != "" {
-				return authConfig{}, block.errorf("gcs anonymous mode cannot define credentials_file")
+			if auth.CredentialsFile != "" {
+				return authConfig{}, block.errorf("%s: mode \"anonymous\" cannot define credentials_file", path)
 			}
 		default:
-			return authConfig{}, block.errorf("gcs mode must be service_account or anonymous")
+			return authConfig{}, block.errorf("%s.mode must be \"service_account\" or \"anonymous\" for provider \"gcs\", got %q", path, auth.Mode)
 		}
 	default:
-		return authConfig{}, block.errorf("provider must be s3 or gcs, got %q", auth.Provider)
+		return authConfig{}, block.errorf("%s.provider must be \"s3\" or \"gcs\", got %q", path, auth.Provider)
 	}
 	if auth.CredentialsFile != "" && !filepath.IsAbs(auth.CredentialsFile) {
 		auth.CredentialsFile = filepath.Join(baseDir, auth.CredentialsFile)
@@ -484,7 +493,7 @@ func decodeAuthBlock(block hclBlock, baseDir string) (authConfig, error) {
 		auth.CredentialsFile = filepath.Clean(auth.CredentialsFile)
 	}
 	if _, err := parseStorageEndpoint(auth.Provider, auth.Endpoint); err != nil {
-		return authConfig{}, block.errorf("%v", err)
+		return authConfig{}, block.errorf("%s.endpoint: %v, got %q", path, err, auth.Endpoint)
 	}
 	return auth, nil
 }
@@ -508,80 +517,113 @@ func decodeBucketBlock(block hclBlock, authByID map[string]authConfig) (bucketCo
 	}
 
 	bucket := bucketConfig{
-		ID:           strings.TrimSpace(block.Labels[0]),
-		Name:         strings.TrimSpace(block.Labels[0]),
+		ID:           block.Labels[0],
+		Name:         block.Labels[0],
 		MaxScanPages: 1,
 	}
 	if !instanceIDPattern.MatchString(bucket.ID) {
-		return bucketConfig{}, block.errorf("bucket id %q must match %s", bucket.ID, instanceIDPattern.String())
+		return bucketConfig{}, block.errorf("bucket label must match %s, got %q", instanceIDPattern.String(), bucket.ID)
 	}
-	if value, ok := block.stringAttr("name"); ok {
-		bucket.Name = strings.TrimSpace(value)
+	path := "bucket " + strconv.Quote(bucket.ID)
+	if value, ok, err := textAttr(block, path, "name"); err != nil {
+		return bucketConfig{}, err
+	} else if ok {
+		bucket.Name = value
 	}
-	if value, ok := block.stringAttr("auth"); ok {
-		bucket.AuthID = strings.TrimSpace(value)
+	var err error
+	if bucket.AuthID, _, err = textAttr(block, path, "auth"); err != nil {
+		return bucketConfig{}, err
 	}
-	if value, ok := block.stringAttr("bucket"); ok {
-		bucket.Bucket = strings.TrimSpace(value)
+	if bucket.Bucket, _, err = textAttr(block, path, "bucket"); err != nil {
+		return bucketConfig{}, err
 	}
 	if value, ok := block.stringAttr("root_prefix"); ok {
-		bucket.RootPrefix = normalizePrefix(strings.TrimSpace(value))
+		// The value applies as it is: "" (the whole bucket), or a key prefix that ends with "/".
+		if value != "" && (strings.HasPrefix(value, "/") || !strings.HasSuffix(value, "/") || strings.Contains(value, "\x00")) {
+			return bucketConfig{}, block.errorf("%s.root_prefix must be \"\" or a prefix that ends with \"/\" and does not start with \"/\" (for example \"published/\"), got %q", path, value)
+		}
+		bucket.RootPrefix = value
 	}
 	if value, ok := block.intAttr("max_scan_pages"); ok {
 		if value < 0 || value > 1_000_000 {
-			return bucketConfig{}, block.errorf("max_scan_pages must be between 0 and 1000000")
+			return bucketConfig{}, block.errorf("%s.max_scan_pages must be between 0 and 1000000, got %d", path, value)
 		}
 		bucket.MaxScanPages = int(value)
 	}
 	if values, ok := block.stringListAttr("permissions"); ok {
 		bucket.PermissionsDefined = true
 		for _, value := range values {
-			value = strings.ToLower(strings.TrimSpace(value))
 			switch value {
 			case permissionRead, permissionWrite, permissionDelete:
-				if !containsString(bucket.Permissions, value) {
-					bucket.Permissions = append(bucket.Permissions, value)
+				if containsString(bucket.Permissions, value) {
+					return bucketConfig{}, block.errorf("%s.permissions contains %q two times", path, value)
 				}
+				bucket.Permissions = append(bucket.Permissions, value)
 			default:
-				return bucketConfig{}, block.errorf("permissions contains unsupported value %q", value)
+				return bucketConfig{}, block.errorf("%s.permissions must contain only \"read\", \"write\" and \"delete\", got %q", path, value)
 			}
 		}
 	}
-	if bucket.Name == "" {
-		bucket.Name = bucket.ID
-	}
 	if bucket.AuthID == "" {
-		return bucketConfig{}, block.errorf("auth is required")
+		return bucketConfig{}, block.errorf("%s.auth is required", path)
 	}
 	if bucket.Bucket == "" {
-		return bucketConfig{}, block.errorf("bucket is required")
+		return bucketConfig{}, block.errorf("%s.bucket is required", path)
 	}
 	auth, ok := authByID[bucket.AuthID]
 	if !ok {
-		return bucketConfig{}, block.errorf("auth %q is not defined", bucket.AuthID)
+		return bucketConfig{}, block.errorf("%s.auth: no auth block has the label %q", path, bucket.AuthID)
 	}
 	bucket.Provider = auth.Provider
 	bucket.Region = auth.Region
 	return bucket, nil
 }
 
-// resolveSecretSource reads an S3 secret of an auth block. The secret has the
-// forms <name>, <name>_env and <name>_file. The server removes the spaces at
-// the start and at the end of the value, as the versions before 1.1.0 did.
-func resolveSecretSource(block hclBlock, name, baseDir string) (string, bool, error) {
-	path := "auth"
-	if len(block.Labels) == 1 {
-		path = "auth " + strconv.Quote(block.Labels[0])
-	}
-	value, defined, err := resolveValueSource(block, path, name, baseDir, formValue|formEnv|formFile)
+// resolveSecretSource reads an S3 secret of an auth block. A secret accepts
+// only the forms <name>_env and <name>_file: a secret in clear text in the file
+// stops the start. The value applies as it is, without its last line end. A
+// value with a space or a control character is an error, and the error does
+// not show the value.
+func resolveSecretSource(block hclBlock, path, name, baseDir string) (string, bool, error) {
+	value, defined, err := resolveValueSource(block, path, name, baseDir, formEnv|formFile)
 	if err != nil || !defined {
 		return "", false, err
 	}
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return "", false, block.errorf("%s.%s is empty", path, name)
+	if strings.ContainsFunc(value, func(r rune) bool { return r <= ' ' || r == 0x7f }) {
+		return "", false, block.errorf("%s.%s must not contain a space or a control character", path, name)
 	}
 	return value, true, nil
+}
+
+// textAttr reads a text attribute as it is in the file. The server does not
+// change the value: an empty value, or a value with a space at the start or at
+// the end, is an error.
+func textAttr(block hclBlock, path, name string) (string, bool, error) {
+	value, ok := block.stringAttr(name)
+	if !ok {
+		return "", false, nil
+	}
+	if value == "" {
+		return "", false, block.errorf("%s.%s must not be empty; remove the attribute to use its default", path, name)
+	}
+	if strings.TrimSpace(value) != value {
+		return "", false, block.errorf("%s.%s must not have a space at the start or at the end, got %q", path, name, value)
+	}
+	return value, true, nil
+}
+
+// rejectClearSecrets stops the start when the block has a secret in clear
+// text. The error names the key and never shows the value.
+func rejectClearSecrets(block hclBlock, path, blockType string) error {
+	for _, key := range keysOfBlock(blockType) {
+		if !key.Secret || key.Forms&formValue != 0 {
+			continue
+		}
+		if attr, ok := block.Attrs[key.Name]; ok {
+			return fmt.Errorf("line %d:%d: %s.%s is a secret: use %s_env or %s_file, not the value in clear text", attr.Line, attr.Column, path, key.Name, key.Name, key.Name)
+		}
+	}
+	return nil
 }
 
 func rejectUnknownAttrs(block hclBlock, allowed ...string) error {
@@ -610,9 +652,11 @@ func requireAttrKinds(block hclBlock, kinds map[string]hclValueKind) error {
 }
 
 func normalizeListenAddress(value string) (string, error) {
-	value = strings.TrimSpace(value)
 	if value == "" {
 		return "", fmt.Errorf("cannot be empty")
+	}
+	if strings.ContainsFunc(value, func(r rune) bool { return r <= ' ' }) {
+		return "", fmt.Errorf("must not contain a space or a control character")
 	}
 	if strings.Contains(value, "://") {
 		return "", fmt.Errorf("must be a host:port address, not a URL")
