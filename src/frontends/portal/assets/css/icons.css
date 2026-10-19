@@ -1,0 +1,248 @@
+/* Icons: Tabler Icons outline (MIT, assets/icons/tabler/LICENSE.txt), one file for each icon, painted as a mask in
+   currentColor. The scripts write <i class="mdi mdi-NAME">, with the names of the default interface. The rules below
+   give the Tabler drawing for each name. The shell writes <i class="ic ic-NAME"> with the Tabler name. */
+
+.mdi,
+.ic {
+  display: inline-block;
+  flex: none;
+  width: var(--icon-size, 1.15em);
+  height: var(--icon-size, 1.15em);
+  font-style: normal;
+  line-height: 1;
+  vertical-align: -0.2em;
+  background-color: currentColor;
+  -webkit-mask: var(--icon, url("../icons/tabler/file.svg")) center / contain no-repeat;
+  mask: var(--icon, url("../icons/tabler/file.svg")) center / contain no-repeat;
+}
+
+.mdi-24px {
+  --icon-size: 18px;
+}
+
+.mdi-spin,
+.ic-spin {
+  animation: icon-spin var(--dur-spin, 800ms) linear infinite;
+}
+
+@keyframes icon-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mdi-spin,
+  .ic-spin {
+    animation: none;
+  }
+}
+
+.mdi-alert-circle-outline { --icon: url("../icons/tabler/alert-circle.svg"); }
+.mdi-archive-arrow-down-outline { --icon: url("../icons/tabler/file-zip.svg"); }
+.mdi-arrow-collapse { --icon: url("../icons/tabler/minimize.svg"); }
+.mdi-arrow-down { --icon: url("../icons/tabler/arrow-down.svg"); }
+.mdi-arrow-left { --icon: url("../icons/tabler/arrow-left.svg"); }
+.mdi-arrow-right { --icon: url("../icons/tabler/arrow-right.svg"); }
+.mdi-arrow-up { --icon: url("../icons/tabler/arrow-up.svg"); }
+.mdi-chart-box-outline { --icon: url("../icons/tabler/chart-bar.svg"); }
+.mdi-chart-donut { --icon: url("../icons/tabler/chart-donut.svg"); }
+.mdi-chart-tree { --icon: url("../icons/tabler/layout-grid.svg"); }
+.mdi-check { --icon: url("../icons/tabler/check.svg"); }
+.mdi-check-circle-outline { --icon: url("../icons/tabler/circle-check.svg"); }
+.mdi-chevron-down { --icon: url("../icons/tabler/chevron-down.svg"); }
+.mdi-chevron-left { --icon: url("../icons/tabler/chevron-left.svg"); }
+.mdi-chevron-right { --icon: url("../icons/tabler/chevron-right.svg"); }
+.mdi-chevron-up { --icon: url("../icons/tabler/chevron-up.svg"); }
+.mdi-circle-outline { --icon: url("../icons/tabler/circle.svg"); }
+.mdi-circle-small { --icon: url("../icons/tabler/point.svg"); }
+.mdi-clock-outline { --icon: url("../icons/tabler/clock.svg"); }
+.mdi-close { --icon: url("../icons/tabler/x.svg"); }
+.mdi-close-circle-outline { --icon: url("../icons/tabler/circle-x.svg"); }
+.mdi-cloud-alert-outline { --icon: url("../icons/tabler/cloud-off.svg"); }
+.mdi-cloud-download-outline { --icon: url("../icons/tabler/cloud-download.svg"); }
+.mdi-cloud-upload-outline { --icon: url("../icons/tabler/cloud-upload.svg"); }
+.mdi-code-json { --icon: url("../icons/tabler/braces.svg"); }
+.mdi-cogs { --icon: url("../icons/tabler/settings.svg"); }
+.mdi-content-copy { --icon: url("../icons/tabler/copy.svg"); }
+.mdi-counter { --icon: url("../icons/tabler/number-123.svg"); }
+.mdi-database-off-outline { --icon: url("../icons/tabler/ban.svg"); }
+.mdi-database-outline { --icon: url("../icons/tabler/database.svg"); }
+.mdi-database-search-outline { --icon: url("../icons/tabler/search.svg"); }
+.mdi-delete { --icon: url("../icons/tabler/trash.svg"); }
+.mdi-delete-outline { --icon: url("../icons/tabler/trash.svg"); }
+.mdi-dots-horizontal { --icon: url("../icons/tabler/dots.svg"); }
+.mdi-dots-vertical { --icon: url("../icons/tabler/dots-vertical.svg"); }
+.mdi-download { --icon: url("../icons/tabler/download.svg"); }
+.mdi-eye-off-outline { --icon: url("../icons/tabler/eye-off.svg"); }
+.mdi-eye-outline { --icon: url("../icons/tabler/eye.svg"); }
+.mdi-fast-forward { --icon: url("../icons/tabler/player-track-next.svg"); }
+.mdi-file { --icon: url("../icons/tabler/file.svg"); }
+.mdi-file-code-outline { --icon: url("../icons/tabler/file-code.svg"); }
+.mdi-file-document-outline { --icon: url("../icons/tabler/file-description.svg"); }
+.mdi-file-excel-outline { --icon: url("../icons/tabler/file-spreadsheet.svg"); }
+.mdi-file-image-outline { --icon: url("../icons/tabler/photo.svg"); }
+.mdi-file-music-outline { --icon: url("../icons/tabler/file-music.svg"); }
+.mdi-file-outline { --icon: url("../icons/tabler/file.svg"); }
+.mdi-file-pdf-box { --icon: url("../icons/tabler/file-type-pdf.svg"); }
+.mdi-file-powerpoint-outline { --icon: url("../icons/tabler/file-description.svg"); }
+.mdi-file-question-outline { --icon: url("../icons/tabler/file-unknown.svg"); }
+.mdi-file-search-outline { --icon: url("../icons/tabler/file-search.svg"); }
+.mdi-file-table-outline { --icon: url("../icons/tabler/file-spreadsheet.svg"); }
+.mdi-file-upload-outline { --icon: url("../icons/tabler/file-upload.svg"); }
+.mdi-file-video-outline { --icon: url("../icons/tabler/movie.svg"); }
+.mdi-file-word-outline { --icon: url("../icons/tabler/file-text.svg"); }
+.mdi-files { --icon: url("../icons/tabler/file.svg"); }
+.mdi-filter-remove-outline { --icon: url("../icons/tabler/filter.svg"); }
+.mdi-filter-variant { --icon: url("../icons/tabler/filter.svg"); }
+.mdi-fit-to-page-outline { --icon: url("../icons/tabler/fit.svg"); }
+.mdi-folder { --icon: url("../icons/tabler/folder.svg"); }
+.mdi-folder-download-outline { --icon: url("../icons/tabler/folder-down.svg"); }
+.mdi-folder-open-outline { --icon: url("../icons/tabler/folder-open.svg"); }
+.mdi-folder-upload { --icon: url("../icons/tabler/folder-up.svg"); }
+.mdi-folder-upload-outline { --icon: url("../icons/tabler/folder-up.svg"); }
+.mdi-folder-zip-outline { --icon: url("../icons/tabler/file-zip.svg"); }
+.mdi-format-list-numbered { --icon: url("../icons/tabler/list.svg"); }
+.mdi-fullscreen { --icon: url("../icons/tabler/maximize.svg"); }
+.mdi-fullscreen-exit { --icon: url("../icons/tabler/minimize.svg"); }
+.mdi-image-convert { --icon: url("../icons/tabler/photo.svg"); }
+.mdi-information-outline { --icon: url("../icons/tabler/info-circle.svg"); }
+.mdi-loading { --icon: url("../icons/tabler/loader-2.svg"); }
+.mdi-magnify { --icon: url("../icons/tabler/search.svg"); }
+.mdi-minus { --icon: url("../icons/tabler/minus.svg"); }
+.mdi-minus-box-outline { --icon: url("../icons/tabler/circle-minus.svg"); }
+.mdi-open-in-new { --icon: url("../icons/tabler/external-link.svg"); }
+.mdi-page-first { --icon: url("../icons/tabler/chevrons-left.svg"); }
+.mdi-page-last { --icon: url("../icons/tabler/chevrons-right.svg"); }
+.mdi-pause { --icon: url("../icons/tabler/player-pause.svg"); }
+.mdi-pause-circle-outline { --icon: url("../icons/tabler/player-pause.svg"); }
+.mdi-pencil-outline { --icon: url("../icons/tabler/pencil.svg"); }
+.mdi-play { --icon: url("../icons/tabler/player-play.svg"); }
+.mdi-playlist-music { --icon: url("../icons/tabler/list.svg"); }
+.mdi-plus { --icon: url("../icons/tabler/plus.svg"); }
+.mdi-plus-box-outline { --icon: url("../icons/tabler/circle-plus.svg"); }
+.mdi-printer { --icon: url("../icons/tabler/printer.svg"); }
+.mdi-progress-wrench { --icon: url("../icons/tabler/settings.svg"); }
+.mdi-raw-image { --icon: url("../icons/tabler/photo.svg"); }
+.mdi-refresh { --icon: url("../icons/tabler/refresh.svg"); }
+.mdi-rename-outline { --icon: url("../icons/tabler/pencil.svg"); }
+.mdi-rewind { --icon: url("../icons/tabler/player-track-prev.svg"); }
+.mdi-rotate-left { --icon: url("../icons/tabler/rotate.svg"); }
+.mdi-rotate-right { --icon: url("../icons/tabler/rotate-clockwise.svg"); }
+.mdi-search-web { --icon: url("../icons/tabler/world.svg"); }
+.mdi-shield-key-outline { --icon: url("../icons/tabler/shield-lock.svg"); }
+.mdi-shield-lock-outline { --icon: url("../icons/tabler/shield-lock.svg"); }
+.mdi-source-commit { --icon: url("../icons/tabler/git-commit.svg"); }
+.mdi-spreadsheet { --icon: url("../icons/tabler/file-spreadsheet.svg"); }
+.mdi-subdirectory-arrow-right { --icon: url("../icons/tabler/corner-down-right.svg"); }
+.mdi-swap-vertical { --icon: url("../icons/tabler/arrows-sort.svg"); }
+.mdi-table { --icon: url("../icons/tabler/table.svg"); }
+.mdi-table-large { --icon: url("../icons/tabler/table.svg"); }
+.mdi-table-row { --icon: url("../icons/tabler/table-row.svg"); }
+.mdi-table-search { --icon: url("../icons/tabler/search.svg"); }
+.mdi-tag-multiple-outline { --icon: url("../icons/tabler/tags.svg"); }
+.mdi-text-search { --icon: url("../icons/tabler/search.svg"); }
+.mdi-unfold-more-horizontal { --icon: url("../icons/tabler/selector.svg"); }
+.mdi-volume-high { --icon: url("../icons/tabler/volume.svg"); }
+.mdi-volume-off { --icon: url("../icons/tabler/volume-off.svg"); }
+.mdi-web { --icon: url("../icons/tabler/world.svg"); }
+.mdi-word { --icon: url("../icons/tabler/file-text.svg"); }
+.mdi-zip-box { --icon: url("../icons/tabler/file-zip.svg"); }
+.mdi-zoom-in { --icon: url("../icons/tabler/zoom-in.svg"); }
+.mdi-zoom-out { --icon: url("../icons/tabler/zoom-out.svg"); }
+
+.ic-alert-circle { --icon: url("../icons/tabler/alert-circle.svg"); }
+.ic-alert-triangle { --icon: url("../icons/tabler/alert-triangle.svg"); }
+.ic-arrow-down { --icon: url("../icons/tabler/arrow-down.svg"); }
+.ic-arrow-left { --icon: url("../icons/tabler/arrow-left.svg"); }
+.ic-arrow-right { --icon: url("../icons/tabler/arrow-right.svg"); }
+.ic-arrow-up { --icon: url("../icons/tabler/arrow-up.svg"); }
+.ic-arrows-sort { --icon: url("../icons/tabler/arrows-sort.svg"); }
+.ic-ban { --icon: url("../icons/tabler/ban.svg"); }
+.ic-braces { --icon: url("../icons/tabler/braces.svg"); }
+.ic-chart-bar { --icon: url("../icons/tabler/chart-bar.svg"); }
+.ic-chart-donut { --icon: url("../icons/tabler/chart-donut.svg"); }
+.ic-check { --icon: url("../icons/tabler/check.svg"); }
+.ic-chevron-down { --icon: url("../icons/tabler/chevron-down.svg"); }
+.ic-chevron-left { --icon: url("../icons/tabler/chevron-left.svg"); }
+.ic-chevron-right { --icon: url("../icons/tabler/chevron-right.svg"); }
+.ic-chevron-up { --icon: url("../icons/tabler/chevron-up.svg"); }
+.ic-chevrons-left { --icon: url("../icons/tabler/chevrons-left.svg"); }
+.ic-chevrons-right { --icon: url("../icons/tabler/chevrons-right.svg"); }
+.ic-circle { --icon: url("../icons/tabler/circle.svg"); }
+.ic-circle-check { --icon: url("../icons/tabler/circle-check.svg"); }
+.ic-circle-minus { --icon: url("../icons/tabler/circle-minus.svg"); }
+.ic-circle-plus { --icon: url("../icons/tabler/circle-plus.svg"); }
+.ic-circle-x { --icon: url("../icons/tabler/circle-x.svg"); }
+.ic-clock { --icon: url("../icons/tabler/clock.svg"); }
+.ic-cloud-download { --icon: url("../icons/tabler/cloud-download.svg"); }
+.ic-cloud-off { --icon: url("../icons/tabler/cloud-off.svg"); }
+.ic-cloud-upload { --icon: url("../icons/tabler/cloud-upload.svg"); }
+.ic-copy { --icon: url("../icons/tabler/copy.svg"); }
+.ic-corner-down-right { --icon: url("../icons/tabler/corner-down-right.svg"); }
+.ic-database { --icon: url("../icons/tabler/database.svg"); }
+.ic-device-desktop { --icon: url("../icons/tabler/device-desktop.svg"); }
+.ic-dots { --icon: url("../icons/tabler/dots.svg"); }
+.ic-dots-vertical { --icon: url("../icons/tabler/dots-vertical.svg"); }
+.ic-download { --icon: url("../icons/tabler/download.svg"); }
+.ic-external-link { --icon: url("../icons/tabler/external-link.svg"); }
+.ic-eye { --icon: url("../icons/tabler/eye.svg"); }
+.ic-eye-off { --icon: url("../icons/tabler/eye-off.svg"); }
+.ic-file { --icon: url("../icons/tabler/file.svg"); }
+.ic-file-code { --icon: url("../icons/tabler/file-code.svg"); }
+.ic-file-description { --icon: url("../icons/tabler/file-description.svg"); }
+.ic-file-music { --icon: url("../icons/tabler/file-music.svg"); }
+.ic-file-search { --icon: url("../icons/tabler/file-search.svg"); }
+.ic-file-spreadsheet { --icon: url("../icons/tabler/file-spreadsheet.svg"); }
+.ic-file-text { --icon: url("../icons/tabler/file-text.svg"); }
+.ic-file-type-pdf { --icon: url("../icons/tabler/file-type-pdf.svg"); }
+.ic-file-unknown { --icon: url("../icons/tabler/file-unknown.svg"); }
+.ic-file-upload { --icon: url("../icons/tabler/file-upload.svg"); }
+.ic-file-zip { --icon: url("../icons/tabler/file-zip.svg"); }
+.ic-filter { --icon: url("../icons/tabler/filter.svg"); }
+.ic-fit { --icon: url("../icons/tabler/fit.svg"); }
+.ic-folder { --icon: url("../icons/tabler/folder.svg"); }
+.ic-folder-down { --icon: url("../icons/tabler/folder-down.svg"); }
+.ic-folder-open { --icon: url("../icons/tabler/folder-open.svg"); }
+.ic-folder-plus { --icon: url("../icons/tabler/folder-plus.svg"); }
+.ic-folder-up { --icon: url("../icons/tabler/folder-up.svg"); }
+.ic-git-commit { --icon: url("../icons/tabler/git-commit.svg"); }
+.ic-info-circle { --icon: url("../icons/tabler/info-circle.svg"); }
+.ic-layout-grid { --icon: url("../icons/tabler/layout-grid.svg"); }
+.ic-list { --icon: url("../icons/tabler/list.svg"); }
+.ic-loader-2 { --icon: url("../icons/tabler/loader-2.svg"); }
+.ic-lock { --icon: url("../icons/tabler/lock.svg"); }
+.ic-maximize { --icon: url("../icons/tabler/maximize.svg"); }
+.ic-minimize { --icon: url("../icons/tabler/minimize.svg"); }
+.ic-minus { --icon: url("../icons/tabler/minus.svg"); }
+.ic-moon { --icon: url("../icons/tabler/moon.svg"); }
+.ic-movie { --icon: url("../icons/tabler/movie.svg"); }
+.ic-number-123 { --icon: url("../icons/tabler/number-123.svg"); }
+.ic-pencil { --icon: url("../icons/tabler/pencil.svg"); }
+.ic-photo { --icon: url("../icons/tabler/photo.svg"); }
+.ic-player-pause { --icon: url("../icons/tabler/player-pause.svg"); }
+.ic-player-play { --icon: url("../icons/tabler/player-play.svg"); }
+.ic-player-track-next { --icon: url("../icons/tabler/player-track-next.svg"); }
+.ic-player-track-prev { --icon: url("../icons/tabler/player-track-prev.svg"); }
+.ic-plus { --icon: url("../icons/tabler/plus.svg"); }
+.ic-point { --icon: url("../icons/tabler/point.svg"); }
+.ic-printer { --icon: url("../icons/tabler/printer.svg"); }
+.ic-refresh { --icon: url("../icons/tabler/refresh.svg"); }
+.ic-rotate { --icon: url("../icons/tabler/rotate.svg"); }
+.ic-rotate-clockwise { --icon: url("../icons/tabler/rotate-clockwise.svg"); }
+.ic-search { --icon: url("../icons/tabler/search.svg"); }
+.ic-selector { --icon: url("../icons/tabler/selector.svg"); }
+.ic-settings { --icon: url("../icons/tabler/settings.svg"); }
+.ic-shield-lock { --icon: url("../icons/tabler/shield-lock.svg"); }
+.ic-sun { --icon: url("../icons/tabler/sun.svg"); }
+.ic-table { --icon: url("../icons/tabler/table.svg"); }
+.ic-table-row { --icon: url("../icons/tabler/table-row.svg"); }
+.ic-tags { --icon: url("../icons/tabler/tags.svg"); }
+.ic-trash { --icon: url("../icons/tabler/trash.svg"); }
+.ic-upload { --icon: url("../icons/tabler/upload.svg"); }
+.ic-volume { --icon: url("../icons/tabler/volume.svg"); }
+.ic-volume-off { --icon: url("../icons/tabler/volume-off.svg"); }
+.ic-world { --icon: url("../icons/tabler/world.svg"); }
+.ic-x { --icon: url("../icons/tabler/x.svg"); }
+.ic-zoom-in { --icon: url("../icons/tabler/zoom-in.svg"); }
+.ic-zoom-out { --icon: url("../icons/tabler/zoom-out.svg"); }
