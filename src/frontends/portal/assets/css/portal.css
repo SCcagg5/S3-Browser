@@ -563,6 +563,19 @@ html[data-theme-mode="light"] .themeSelect__current > .themeIcon--light {
   margin-left: auto;
 }
 
+.button.permButton {
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+
+.button.permButton:hover,
+.button.permButton:focus-visible {
+  border-color: transparent;
+  background: transparent;
+  color: var(--accent-text);
+}
+
 .button.permButton[hidden] {
   display: none;
 }

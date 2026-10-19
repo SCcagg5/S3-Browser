@@ -461,6 +461,20 @@ test('selector: an icon button at the left of the selector opens the permissions
   assert.equal(geometry.text, '');
   assert.equal(Math.round(geometry.buttonHeight), Math.round(geometry.triggerHeight));
   assert.equal(await page.getAttribute('#permButton', 'aria-label'), 'Permissions of this bucket');
+  assert.equal(await page.locator('#permButton .ic-shield-check').count(), 1);
+  const look = () => page.locator('#permButton').evaluate(node => {
+    const style = getComputedStyle(node);
+    return { color: style.color, background: style.backgroundColor, border: style.borderTopColor };
+  });
+  const rest = await look();
+  assert.equal(rest.background, 'rgba(0, 0, 0, 0)');
+  assert.equal(rest.border, 'rgba(0, 0, 0, 0)');
+  await page.hover('#permButton');
+  const hover = await look();
+  assert.notEqual(hover.color, rest.color);
+  assert.equal(hover.background, 'rgba(0, 0, 0, 0)');
+  assert.equal(hover.border, 'rgba(0, 0, 0, 0)');
+  await page.mouse.move(5, 400);
   await page.click('.storageSwitcher__trigger');
   assert.equal(await page.locator('.storageSwitcher__menu .button').count(), 0);
   assert.equal(await page.locator('.storageSwitcher__menu', { hasText: 'Permissions of this bucket' }).count(), 0);
