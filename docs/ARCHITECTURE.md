@@ -122,6 +122,24 @@ ZIP-compatible archives use their central directory. A selected member is read f
 
 The server never writes a temporary archive or member to disk. Unsafe paths, symbolic links, encrypted members, collisions, oversized expansion, and existing destinations are rejected. An interrupted provider upload is aborted where the provider API allows it.
 
+## Frontend trees
+
+The binary embeds two frontend trees. The HCL key `server.frontend` selects one tree at start (see [Configuration](CONFIGURATION.md#frontend-selection)). The server then gives only the files of that tree.
+
+- `default` is `src/public/`.
+- `portal` is `src/frontends/portal/`. It is a test of the s3-browser interface with the shell of the portal and the dense tables of ClickHouse Dash. The top of `assets/css/portal.css` gives the design rules as tokens.
+
+The `portal` tree contains its own pages and scripts:
+
+- `assets/js/common/` has copies of the shared scripts of the default tree (API, previews, dialogs). `preview.js` is a copy with the header of the portal.
+- `assets/js/app.js` is the browser page. `uploads.js` is the bulk upload. `theme.js` applies the theme before the first paint. `session.js` gives one message for an ended sign-in (401) or a server that does not answer.
+- `assets/css/dialogs.css` and `assets/css/viewers.css` have the rules of the default tree for the dialogs and the previews. Each colour is a token of `portal.css`, so these rules follow the theme.
+- `assets/icons/tabler/` has one Tabler icon (MIT) for each name. `assets/css/icons.css` gives the icon for each `mdi-*` name of the shared scripts.
+
+The tree does not contain `assets/vendor/`: a small overlay file system (`src/frontend.go`) gives that directory from the default tree, so the binary contains the vendored libraries one time. No other file of the default tree is visible through the overlay.
+
+The two trees have different fingerprints, because the fingerprint covers all the files of the selected tree. The server also adds the fingerprint to each `@import` of a stylesheet.
+
 ## Frontend path model
 
 Assets and API URLs are relative to `document.baseURI`. A path-stripping reverse proxy can therefore expose the same build at `/`, `/s3-browser/`, or another prefix without an HCL public-path setting or a frontend rebuild.

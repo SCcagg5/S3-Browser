@@ -21,6 +21,7 @@ server {
   job_history_limit = 10
   access_mode       = "inherit_credentials"
   log_mode          = "anonymous"
+  frontend          = "default"
 
   memory_limit_bytes = 67108864
 
@@ -45,6 +46,7 @@ server {
 | `job_history_limit` | `10` | Number of terminal job results retained in process memory. Valid range: 1-20. |
 | `access_mode` | `inherit_credentials` | `inherit_credentials` or `force_read_only`. |
 | `log_mode` | `anonymous` | `anonymous` avoids object keys in request logs; `detailed` is for controlled diagnostics. |
+| `frontend` | `default` | The embedded browser interface: `default` or `portal`. See [Frontend selection](#frontend-selection). |
 | `allow_full_object_fallback` | `false` | Allows explicitly implemented parser fallbacks that require a complete object. It never changes strict Range validation into an implicit oversized response. |
 | `memory_limit_bytes` | `0` | Optional Go soft memory limit. `0` leaves the Go runtime default unchanged. |
 | `max_storage_bytes_per_request` | 256 GiB | Provider bytes allowed for one interactive HTTP request. |
@@ -59,6 +61,21 @@ server {
 | `max_background_storage_requests` | `100000` | Provider-call budget for an explicit background job. |
 
 The server never creates a data directory. All sessions and jobs are memory-only. At most four jobs may be active or queued at once.
+
+### Frontend selection
+
+The binary contains two browser interfaces. `frontend` selects one of them at start. The two interfaces use the same routes, the same API and the same security headers.
+
+- `default`: the standard interface (`src/public/`).
+- `portal`: a test interface (`src/frontends/portal/`). It has the shell of the portal and the dense tables of ClickHouse Dash. It has a System, Dark and Light theme control. The browser keeps the choice.
+
+The value must be one of these two names, as written. The server does not change the case and does not remove spaces. A different value or a value that is not a string stops the server at start. The error gives the line, the key, the permitted values and the value. The start log line gives the frontend that applies (`frontend=default`).
+
+```hcl
+server {
+  frontend = "portal"
+}
+```
 
 ## S3 authentication
 

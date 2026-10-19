@@ -44,6 +44,22 @@ The frontend under `src/public` is plain HTML, CSS and JavaScript embedded into 
 JavaScript toolchain: edit the files, rebuild the binary (or the test image) and reload. The object browser page
 (`public/index.html`, `assets/js/app.js`) renders its DOM directly; there is no framework.
 
+The test frontend under `src/frontends/portal` follows the same rules. To use it, set `frontend = "portal"` in the `server` block.
+
+- Change a colour, a size, a radius or a duration in the tokens at the top of `assets/css/portal.css`. The components name tokens only.
+- A new icon name needs a rule in `assets/css/icons.css` and a Tabler file in `assets/icons/tabler/`.
+- `go test ./...` runs `TestPortalFrontendIsSelfContained`. It finds an external URL, a missing asset, a missing icon file and an icon name without a rule.
+
+### Browser tests of the portal frontend
+
+`test/portal-frontend/run.sh` starts Garage and S3-Browser with `frontend = "portal"`. It uses Docker Compose with the project name `s3-portal-tests`. Then it puts test objects in the buckets and runs `browser-tests.js` in the Playwright container. The tests cover the theme control, the breadcrumb, the bulk upload and the access behaviour. At the end, the script stops the stack.
+
+```sh
+./test/portal-frontend/run.sh
+```
+
+The Playwright container installs the `playwright` package one time, in a Docker volume. To use a copy that is already on disk, set `PLAYWRIGHT_NODE_MODULES` to its `node_modules` directory. To run some tests only, set `ONLY` to a part of their names.
+
 ## Filesystem-write check
 
 Production Go source must not call local filesystem write APIs:
