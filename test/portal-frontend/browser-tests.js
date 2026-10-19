@@ -448,6 +448,71 @@ test('selector: the bucket selector of the default interface, by host, with the 
 // 3. Bulk upload of hundreds of files
 // ------------------------------------------------------------------------------------------------------------------
 
+test('selector: an icon button at the left of the selector opens the permissions; the menu has no foot', async () => {
+  const page = await newPage();
+  await open(page, MAIN);
+  const geometry = await page.evaluate(() => {
+    const button = document.querySelector('#permButton').getBoundingClientRect();
+    const trigger = document.querySelector('.storageSwitcher__trigger').getBoundingClientRect();
+    return { buttonRight: button.right, triggerLeft: trigger.left, buttonHeight: button.height, triggerHeight: trigger.height,
+      text: document.querySelector('#permButton').textContent.trim() };
+  });
+  assert.ok(geometry.buttonRight <= geometry.triggerLeft - 8, `the button at the left of the selector: ${JSON.stringify(geometry)}`);
+  assert.equal(geometry.text, '');
+  assert.equal(Math.round(geometry.buttonHeight), Math.round(geometry.triggerHeight));
+  assert.equal(await page.getAttribute('#permButton', 'aria-label'), 'Permissions of this bucket');
+  await page.click('.storageSwitcher__trigger');
+  assert.equal(await page.locator('.storageSwitcher__menu .button').count(), 0);
+  assert.equal(await page.locator('.storageSwitcher__menu', { hasText: 'Permissions of this bucket' }).count(), 0);
+  await page.keyboard.press('Escape');
+  await page.click('#permButton');
+  await page.waitForSelector('.permList');
+  assert.match(await page.textContent('.permissions'), /Garage - primary/);
+  assert.equal(await page.locator('.permRow').count(), 3);
+  await page.context().close();
+});
+
+test('selector: on a phone the permission button is at the left of the selector, on its row', async () => {
+  const page = await newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  await open(page, MAIN);
+  const box = await page.evaluate(() => {
+    const button = document.querySelector('#permButton').getBoundingClientRect();
+    const trigger = document.querySelector('.storageSwitcher__trigger').getBoundingClientRect();
+    return { buttonRight: button.right, triggerLeft: trigger.left, buttonTop: button.top, triggerTop: trigger.top,
+      overflow: document.scrollingElement.scrollWidth - window.innerWidth };
+  });
+  assert.ok(box.buttonRight <= box.triggerLeft, `the button at the left: ${JSON.stringify(box)}`);
+  assert.ok(Math.abs(box.buttonTop - box.triggerTop) < 2, `the same row: ${JSON.stringify(box)}`);
+  assert.ok(box.overflow <= 0);
+  await page.context().close();
+});
+
+test('selector: the open menu has a rounded top-left corner and a top line up to the vertical border of the selector', async () => {
+  const page = await newPage();
+  await open(page, MAIN);
+  await page.click('.storageSwitcher__trigger');
+  const box = await page.evaluate(() => {
+    const trigger = document.querySelector('.storageSwitcher__trigger');
+    const menu = document.querySelector('#storageSwitcherMenu');
+    const t = trigger.getBoundingClientRect();
+    const m = menu.getBoundingClientRect();
+    const style = getComputedStyle(menu);
+    const triggerStyle = getComputedStyle(trigger);
+    return { stub: t.left - m.left, right: t.right - m.right, top: style.borderTopWidth, radius: style.borderTopLeftRadius,
+      rightRadius: style.borderTopRightRadius, triggerBottomLeft: triggerStyle.borderBottomLeftRadius, triggerBottom: t.bottom, menuTop: m.top,
+      triggerZ: triggerStyle.zIndex, menuZ: style.zIndex };
+  });
+  assert.equal(box.stub, 8, `the menu goes 8 px past the left border of the selector: ${JSON.stringify(box)}`);
+  assert.equal(box.right, 0);
+  assert.equal(box.top, '1px');
+  assert.equal(box.radius, '8px');
+  assert.equal(box.rightRadius, '0px');
+  assert.equal(box.triggerBottomLeft, '0px');
+  assert.ok(box.menuTop <= box.triggerBottom, `the menu touches the selector: ${JSON.stringify(box)}`);
+  assert.ok(Number(box.triggerZ) > Number(box.menuZ), 'the selector covers the line of the menu under it');
+  await page.context().close();
+});
+
 test('upload: 300 files, bounded concurrency and rendering, progress, summary', async () => {
   const page = await newPage();
   await deletePrefix(page, 'garage-main', 'bulk/');

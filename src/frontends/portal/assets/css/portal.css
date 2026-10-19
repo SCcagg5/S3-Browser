@@ -556,6 +556,21 @@ html[data-theme-mode="light"] .themeSelect__current > .themeIcon--light {
 
 /* The bucket selector of the default interface: the buckets of each host, with their permissions. ------------------ */
 
+/* The permission button and the selector sit at the right of the header: the button first, then the selector. */
+.button.permButton {
+  width: 42px;
+  height: 42px;
+  margin-left: auto;
+}
+
+.button.permButton[hidden] {
+  display: none;
+}
+
+.permButton + .storageSwitcher {
+  margin-left: 0;
+}
+
 .storageSwitcher {
   position: relative;
   min-width: 0;
@@ -567,7 +582,7 @@ html[data-theme-mode="light"] .themeSelect__current > .themeIcon--light {
   align-items: center;
   gap: 10px;
   width: min(380px, 100%);
-  min-width: 240px;
+  min-width: 292px;
   min-height: 42px;
   padding: 4px 10px 4px 12px;
   border: 1px solid var(--button-border);
@@ -594,6 +609,9 @@ button.storageSwitcher__trigger:hover {
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
   background: var(--panel);
+  /* Above the menu: the trigger covers the top line of the menu, which stays visible only in the 8 px left of it. */
+  position: relative;
+  z-index: calc(var(--z-menu) + 1);
 }
 
 .storageSwitcher__icon {
@@ -704,18 +722,16 @@ button.storageSwitcher__trigger:hover {
   position: absolute;
   top: 100%;
   right: 0;
+  left: -8px;
   z-index: var(--z-menu);
   display: grid;
   gap: 4px;
-  width: 100%;
-  min-width: 300px;
   max-height: min(70vh, 520px);
   margin-top: -1px;
   padding: 6px;
   overflow-y: auto;
   border: 1px solid var(--border-strong);
-  border-top: 0;
-  border-radius: 0 0 var(--radius-pop) var(--radius-pop);
+  border-radius: var(--radius-control) 0 var(--radius-pop) var(--radius-pop);
   background: var(--panel);
   box-shadow: var(--shadow-overlay);
   transform-origin: top center;
@@ -815,13 +831,6 @@ button.storageSwitcher__trigger:hover {
 .storageBucket__check {
   --icon-size: 16px;
   color: var(--accent-text);
-}
-
-.storageSwitcher__foot {
-  display: flex;
-  justify-content: flex-end;
-  padding: 4px 4px 0;
-  border-top: 1px solid var(--border);
 }
 
 /* Page and parts (portal) ------------------------------------------------------------------------------------------- */
@@ -2470,12 +2479,18 @@ button.storageSwitcher__trigger:hover {
     gap: 8px;
   }
 
+  /* The brand and the theme selector fill the first row, so the permission button goes to the row of the selector. */
   .appHeader__left {
-    flex: 1 1 auto;
+    flex: 1 1 calc(100% - 60px);
+  }
+
+  .button.permButton {
+    order: 3;
+    margin-left: 0;
   }
 
   .storageSwitcher {
-    flex: 1 1 100%;
+    flex: 1 1 calc(100% - 50px);
     order: 3;
     margin-left: 0;
   }
@@ -2490,7 +2505,8 @@ button.storageSwitcher__trigger:hover {
   }
 
   .storageSwitcher__menu {
-    min-width: 0;
+    left: 0;
+    border-top-left-radius: 0;
   }
 
   .searchField kbd {

@@ -388,6 +388,8 @@ BB.cfg = config;
         permissionStates(item).map(entry => BB.capabilities.normalizeState(entry.state))])]);
     if (ui.switcherSignature !== signature) {
       ui.switcherSignature = signature;
+      // The icon button at the left of the selector opens the permissions of the current bucket.
+      ui.permButton.hidden = state.isInitializing || !instance;
       ui.switcherMenu = null;
       ui.switcherTrigger = null;
       const root = ui.switcher;
@@ -449,9 +451,7 @@ BB.cfg = config;
           h('span', { class: 'storageHost__copy' }, h('strong', {}, host.id),
             h('small', {}, `${host.provider.toUpperCase()} · ${plural(host.instances.length, 'bucket')}`)));
           return h('section', { class: 'storageHost', 'data-host': host.id }, row, list);
-        }),
-        h('div', { class: 'storageSwitcher__foot' },
-          h('button', { type: 'button', class: 'button button--ghost button--small', onclick: () => { closeSwitcher(false); showPermissions(); } }, ic('lock'), 'Permissions of this bucket')));
+        }));
         root.replaceChildren(trigger, menu);
         ui.switcherTrigger = trigger;
         ui.switcherMenu = menu;
@@ -460,7 +460,7 @@ BB.cfg = config;
   }
 
   function switcherItems() {
-    return Array.from(ui.switcherMenu?.querySelectorAll('.storageHost__row, .storageBucket:not([hidden]), .storageSwitcher__foot .button') || [])
+    return Array.from(ui.switcherMenu?.querySelectorAll('.storageHost__row, .storageBucket:not([hidden])') || [])
       .filter(node => node.offsetParent !== null);
   }
 
@@ -1440,7 +1440,7 @@ BB.cfg = config;
 
   function bindElements() {
     for (const [name, id] of Object.entries({
-      backLink: 'backLink', versionBadge: 'versionBadge', switcher: 'storageSwitcher', crumbs: 'crumbs',
+      backLink: 'backLink', versionBadge: 'versionBadge', switcher: 'storageSwitcher', permButton: 'permButton', crumbs: 'crumbs',
       title: 'folderTitle', searchForm: 'searchForm', searchInput: 'searchInput',
       refreshButton: 'refreshButton', actionsButton: 'actionsButton', actionsMenu: 'actionsMenu', zipItem: 'zipItem',
       insightsItem: 'insightsItem', accessItem: 'accessItem', accessBadge: 'accessBadge', uploadWrap: 'uploadWrap',
@@ -1462,6 +1462,7 @@ BB.cfg = config;
     ui.zipItem.addEventListener('click', downloadAll);
     ui.insightsItem.addEventListener('click', () => { if (canRead()) BB.actions.showPrefixInsights(state.pathPrefix); });
     ui.accessItem.addEventListener('click', showPermissions);
+    ui.permButton.addEventListener('click', () => { closeSwitcher(false); showPermissions(); });
     ui.uploadFilesItem.addEventListener('click', triggerUploadFiles);
     ui.uploadFolderItem.addEventListener('click', triggerUploadFolder);
     ui.fileInput.addEventListener('change', onFileInput);
