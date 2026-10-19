@@ -346,7 +346,7 @@ test('upload: 300 files, bounded concurrency and rendering, progress, summary', 
   assert.ok((await page.locator('.uploadDock li').count()) <= 4);
   assert.equal((await listKeys(page, 'garage-main', 'bulk/')).length, 300);
   // The listing refreshes at the end of the batch.
-  await until(page, () => /300 files/.test(document.querySelector('#folderCount').textContent));
+  await until(page, () => /300 files/.test(document.querySelector('#folderCount')?.textContent || ''));
   await page.click('.uploadDock .button >> text=Close');
   assert.equal(await page.isHidden('#uploadDock'), true);
   assert.deepEqual(page.errors, []);
