@@ -3,7 +3,7 @@
 ## Requirements
 
 - Go 1.22 or newer;
-- Docker only for the optional Garage and scratch-image tests.
+- Docker only for the optional SeaweedFS and scratch-image tests.
 
 ## Build
 
@@ -52,7 +52,7 @@ The test frontend under `src/frontends/portal` follows the same rules. To use it
 
 ### Browser tests of the portal frontend
 
-`test/portal-frontend/run.sh` starts Garage and S3-Browser with `frontend = "portal"`. It uses Docker Compose with the project name `s3-portal-tests`. Then it puts test objects in the buckets and runs `browser-tests.js` in the Playwright container. The tests cover the theme selector, the header, the bucket selector, the breadcrumb and the toolbar row, the bulk upload and the access behaviour. At the end, the script stops the stack.
+`test/portal-frontend/run.sh` starts SeaweedFS and S3-Browser with `frontend = "portal"`. It uses Docker Compose with the project name `s3-portal-tests`. Then it puts test objects in the buckets and runs `browser-tests.js` in the Playwright container. The tests cover the theme selector, the header, the bucket selector, the breadcrumb and the toolbar row, the bulk upload and the access behaviour. At the end, the script stops the stack.
 
 ```sh
 ./test/portal-frontend/run.sh
@@ -76,7 +76,7 @@ Tests may create fixtures inside their temporary test directories.
 ## Shell syntax
 
 ```sh
-for file in test/*.sh test/garage/scripts/*.sh; do
+for file in test/*.sh test/seaweedfs/scripts/*.sh; do
   [ -e "$file" ] || continue
   sh -n "$file"
 done
@@ -93,14 +93,14 @@ src/public/assets/vendor/pdfjs/4.10.38/pdf.worker.min.mjs
 
 Keep the Apache-2.0 license notice in the same directory. The application does not fetch these assets at startup or at runtime.
 
-## Optional Garage stack
+## Optional SeaweedFS stack
 
 ```sh
 cd test
 docker compose up --build
 ```
 
-The browser container is read-only and has no application data volume. Garage keeps its own provider storage as required by the test service. Garage may return HTTP 501 for version listing; the browser must start normally and omit version controls for those buckets.
+The browser container is read-only and has no application data volume. SeaweedFS keeps its own provider storage as required by the test service. A provider can return HTTP 501 for version listing. The browser must start normally and omit version controls for those buckets.
 
 ## Scratch runtime
 

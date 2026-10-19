@@ -1,4 +1,4 @@
-// Puts the test objects in the two Garage buckets through the API of S3-Browser (PUT /s3).
+// Puts the test objects in the two SeaweedFS buckets through the API of S3-Browser (PUT /s3).
 const { request } = require('playwright');
 const BASE = process.env.BASE;
 
@@ -10,7 +10,7 @@ const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><r
 const go = 'package main\n\nimport "fmt"\n\n// main prints a greeting.\nfunc main() {\n\tfmt.Println("hello, bucket")\n}\n';
 
 const objects = {
-  'garage-main': {
+  'seaweedfs-main': {
     'reports/2026/q3/summary.md': md,
     'reports/2026/q3/orders.csv': csv,
     'reports/2026/q2/summary.md': md.replace('Q3', 'Q2'),
@@ -26,7 +26,7 @@ const objects = {
     'big/rows.json': rows,
     'big/blob-6mb.bin': 'x'.repeat(6 * 1024 * 1024),
   },
-  'garage-archive': {
+  'seaweedfs-archive': {
     'backups/2026-10-01.tar': 'backup'.repeat(20000),
     'backups/2026-10-08.tar': 'backup'.repeat(26000),
     'exports/users.csv': 'id,name\n1,Ada\n2,Grace\n',

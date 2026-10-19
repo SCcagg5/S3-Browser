@@ -1,9 +1,9 @@
-# The test stack of the "portal" interface: one Garage and one S3-Browser with server.frontend = "portal".
+# The test stack of the "portal" interface: one SeaweedFS and one S3-Browser with server.frontend = "portal".
 # run.sh starts it under its own project name. No port is published: the Playwright container joins the network.
 services:
-  garage:
+  seaweedfs:
     build:
-      context: ../garage
+      context: ../seaweedfs
     ulimits:
       nofile:
         soft: 262144
@@ -23,5 +23,5 @@ services:
       - ./config.hcl:/config/config.hcl:ro
       - ../secrets:/config/secrets:ro
     depends_on:
-      garage:
+      seaweedfs:
         condition: service_healthy

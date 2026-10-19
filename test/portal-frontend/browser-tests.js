@@ -1,12 +1,12 @@
 // Browser tests of the "portal" interface (server.frontend = "portal"). They cover these parts:
 // 1 the theme selector, 2 the breadcrumb and the toolbar row, the header and the bucket selector, 3 the bulk upload,
 // 4 the access behaviour of 2.0.0.
-// run.sh starts S3-Browser and Garage, puts the test objects (seed.js) and runs this file in the Playwright container.
+// run.sh starts S3-Browser and SeaweedFS, puts the test objects (seed.js) and runs this file in the Playwright container.
 // The tests change the answers of the server with page.route where a case needs it (403, 401, no answer, access).
 const { chromium } = require('playwright');
 const assert = require('assert/strict');
 const BASE = process.env.BASE;
-const MAIN = '-/garage/garage-main/';
+const MAIN = '-/seaweedfs/seaweedfs-main/';
 const ONLY = process.env.ONLY || '';
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const tests = [];
@@ -179,11 +179,11 @@ test('breadcrumb: at the root, the bucket mark and a slash, with no frame and no
   assert.equal(await root.locator('.ic').count(), 1);
   assert.equal((await page.textContent('.crumbs .crumbs__sep')).trim(), '/');
   assert.equal(await root.getAttribute('aria-current'), 'page');
-  assert.equal(await root.getAttribute('aria-label'), 'Garage - primary, bucket root');
+  assert.equal(await root.getAttribute('aria-label'), 'SeaweedFS - primary, bucket root');
   const frame = await root.evaluate(node => { const style = getComputedStyle(node); return [style.borderTopWidth, style.backgroundColor]; });
   assert.deepEqual(frame, ['0px', 'rgba(0, 0, 0, 0)']);
   // No visible folder title: the heading stays for screen readers.
-  assert.equal(await page.textContent('#folderTitle'), 'Garage - primary, bucket root');
+  assert.equal(await page.textContent('#folderTitle'), 'SeaweedFS - primary, bucket root');
   assert.equal(await page.evaluate(() => document.getElementById('folderTitle').classList.contains('visually-hidden')), true);
   assert.equal(await page.locator('.part__title').count(), 0);
   await page.context().close();
@@ -220,7 +220,7 @@ test('breadcrumb: in a folder, the mark leads back to the bucket root', async ()
   assert.equal(await page.getAttribute('.crumb--root', 'aria-current'), null);
   assert.equal(await page.getAttribute('.crumbs .crumb:last-of-type', 'aria-current'), 'page');
   await page.click('.crumb--root');
-  await until(page, () => location.pathname.endsWith('/-/garage/garage-main/'));
+  await until(page, () => location.pathname.endsWith('/-/seaweedfs/seaweedfs-main/'));
   await page.waitForSelector('tr[data-name="reports"]');
   assert.equal(await page.getAttribute('.crumb--root', 'aria-current'), 'page');
   assert.equal(await page.locator('.crumbs .crumb').count(), 1);
@@ -271,11 +271,11 @@ test('breadcrumb: another bucket gives its own root crumb, and the preview path 
   const page = await newPage();
   await open(page, MAIN);
   await page.click('.storageSwitcher__trigger');
-  await page.click('.storageBucket[data-instance="garage-archive"]');
-  await until(page, () => document.querySelector('.storageSwitcher__trigger strong')?.textContent === 'Garage - archive');
-  assert.equal(await page.getAttribute('.crumb--root', 'aria-label'), 'Garage - archive, bucket root');
+  await page.click('.storageBucket[data-instance="seaweedfs-archive"]');
+  await until(page, () => document.querySelector('.storageSwitcher__trigger strong')?.textContent === 'SeaweedFS - archive');
+  assert.equal(await page.getAttribute('.crumb--root', 'aria-label'), 'SeaweedFS - archive, bucket root');
   await page.goto(`${BASE}${MAIN}reports/2026/q3/summary.md`, { waitUntil: 'networkidle' });
-  assert.equal(await page.textContent('#instanceMeta'), 'Garage - primary');
+  assert.equal(await page.textContent('#instanceMeta'), 'SeaweedFS - primary');
   assert.equal((await page.textContent('#docPrefix')).trim(), '/ reports / 2026 / q3');
   assert.equal((await page.textContent('#backBtn')).trim(), 'q3');
   await page.context().close();
@@ -387,7 +387,7 @@ test('selector: the bucket selector of the default interface, by host, with the 
   const page = await newPage();
   await open(page, MAIN);
   const trigger = page.locator('.storageSwitcher__trigger');
-  assert.equal(await trigger.locator('strong').innerText(), 'Garage - primary');
+  assert.equal(await trigger.locator('strong').innerText(), 'SeaweedFS - primary');
   assert.equal(await trigger.locator('small').count(), 0);
   const edge = await page.evaluate(() => {
     const dots = document.querySelector('.storageSwitcher__trigger .permDots').getBoundingClientRect();
@@ -397,24 +397,24 @@ test('selector: the bucket selector of the default interface, by host, with the 
   });
   assert.ok(edge.chevronLeft - edge.dotsRight < 24 && edge.dotsLeft > edge.nameRight, `the permission dots at the right: ${JSON.stringify(edge)}`);
   const details = await trigger.getAttribute('title');
-  assert.match(details, /id: garage-main/);
-  assert.match(details, /host: garage/);
+  assert.match(details, /id: seaweedfs-main/);
+  assert.match(details, /host: seaweedfs/);
   assert.match(details, /bucket: default/);
   assert.equal(await trigger.locator('.permDot').count(), 3);
   assert.equal(await page.isHidden('#storageSwitcherMenu'), true);
   await trigger.click();
   assert.equal(await trigger.getAttribute('aria-expanded'), 'true');
-  assert.match(await page.textContent('.storageHost__row'), /garage\s*S3 · 2 buckets/);
+  assert.match(await page.textContent('.storageHost__row'), /seaweedfs\s*S3 · 2 buckets/);
   assert.equal(await page.getAttribute('.storageHost__row', 'aria-expanded'), 'true');
-  assert.deepEqual(await page.locator('.storageBucket strong').allInnerTexts(), ['Garage - primary', 'Garage - archive']);
-  assert.equal(await page.getAttribute('.storageBucket[data-instance="garage-main"]', 'aria-selected'), 'true');
-  assert.equal(await page.locator('.storageBucket[data-instance="garage-main"] .storageBucket__check').count(), 1);
+  assert.deepEqual(await page.locator('.storageBucket strong').allInnerTexts(), ['SeaweedFS - primary', 'SeaweedFS - archive']);
+  assert.equal(await page.getAttribute('.storageBucket[data-instance="seaweedfs-main"]', 'aria-selected'), 'true');
+  assert.equal(await page.locator('.storageBucket[data-instance="seaweedfs-main"] .storageBucket__check').count(), 1);
   const columns = await page.evaluate(() => {
     const box = selector => document.querySelector(selector).getBoundingClientRect();
     const rows = Array.from(document.querySelectorAll('.storageBucket'));
     return {
-      checkRight: box('.storageBucket[data-instance="garage-main"] .storageBucket__check').right,
-      folderLeft: box('.storageBucket[data-instance="garage-main"] .ic-folder').left,
+      checkRight: box('.storageBucket[data-instance="seaweedfs-main"] .storageBucket__check').right,
+      folderLeft: box('.storageBucket[data-instance="seaweedfs-main"] .ic-folder').left,
       folders: rows.map(row => Math.round(row.querySelector('.ic-folder').getBoundingClientRect().left)),
       dots: rows.map(row => Math.round(row.querySelector('.permDots').getBoundingClientRect().right))
     };
@@ -431,12 +431,12 @@ test('selector: the bucket selector of the default interface, by host, with the 
   // The keyboard: ArrowDown opens the menu on the current bucket.
   await trigger.focus();
   await page.keyboard.press('ArrowDown');
-  assert.equal(await page.evaluate(() => document.activeElement.dataset.instance), 'garage-main');
+  assert.equal(await page.evaluate(() => document.activeElement.dataset.instance), 'seaweedfs-main');
   await page.keyboard.press('ArrowDown');
-  assert.equal(await page.evaluate(() => document.activeElement.dataset.instance), 'garage-archive');
+  assert.equal(await page.evaluate(() => document.activeElement.dataset.instance), 'seaweedfs-archive');
   await page.keyboard.press('Enter');
-  await until(page, () => location.pathname.endsWith('/-/garage/garage-archive/'));
-  assert.match(await page.locator('.storageSwitcher__trigger').innerText(), /Garage - archive/);
+  await until(page, () => location.pathname.endsWith('/-/seaweedfs/seaweedfs-archive/'));
+  assert.match(await page.locator('.storageSwitcher__trigger').innerText(), /SeaweedFS - archive/);
   // A click outside closes the menu.
   await page.click('.storageSwitcher__trigger');
   await page.click('#listing');
@@ -482,7 +482,7 @@ test('selector: an icon button at the left of the selector opens the permissions
   await page.keyboard.press('Escape');
   await page.click('#permButton');
   await page.waitForSelector('.permList');
-  assert.match(await page.textContent('.permissions'), /Garage - primary/);
+  assert.match(await page.textContent('.permissions'), /SeaweedFS - primary/);
   assert.equal(await page.locator('.permRow').count(), 3);
   await page.context().close();
 });
@@ -530,7 +530,7 @@ test('selector: the open menu has a rounded top-left corner and a top line up to
 
 test('upload: 300 files, bounded concurrency and rendering, progress, summary', async () => {
   const page = await newPage();
-  await deletePrefix(page, 'garage-main', 'bulk/');
+  await deletePrefix(page, 'seaweedfs-main', 'bulk/');
   await open(page, `${MAIN}bulk/`);
   const puts = await watchPuts(page, { delay: 60 });
   await page.setInputFiles('#fileInput', files(300, 'bulk'));
@@ -551,32 +551,32 @@ test('upload: 300 files, bounded concurrency and rendering, progress, summary', 
   assert.match(await page.textContent('.uploadDock .summary'), /^300 files uploaded \([\d.]+ KB\), 300 checked with SHA-256\.$/);
   assert.equal(await page.textContent('[data-stat="files"]'), '300 / 300');
   assert.ok((await page.locator('.uploadDock li').count()) <= 4);
-  assert.equal((await listKeys(page, 'garage-main', 'bulk/')).length, 300);
+  assert.equal((await listKeys(page, 'seaweedfs-main', 'bulk/')).length, 300);
   // The listing refreshes at the end of the batch.
   await until(page, () => /300 files/.test(document.querySelector('#folderCount')?.textContent || ''));
   await page.click('.uploadDock .button >> text=Close');
   assert.equal(await page.isHidden('#uploadDock'), true);
   assert.deepEqual(page.errors, []);
-  await deletePrefix(page, 'garage-main', 'bulk/');
+  await deletePrefix(page, 'seaweedfs-main', 'bulk/');
   await page.context().close();
 });
 
 test('upload: a page without crypto.subtle uploads with no checksum', async () => {
   const page = await newPage();
   await page.addInitScript(() => { Object.defineProperty(window, 'crypto', { value: { getRandomValues: crypto.getRandomValues.bind(crypto), randomUUID: crypto.randomUUID?.bind(crypto) } }); });
-  await deletePrefix(page, 'garage-main', 'nosum/');
+  await deletePrefix(page, 'seaweedfs-main', 'nosum/');
   await open(page, `${MAIN}nosum/`);
   await page.setInputFiles('#fileInput', files(3, 'nosum'));
   await page.waitForSelector('.uploadDock[data-state="done"]', { timeout: 60000 });
   assert.match(await page.textContent('.uploadDock .summary'), /^3 files uploaded \([\d.]+ KB\)\.$/);
-  assert.equal((await listKeys(page, 'garage-main', 'nosum/')).length, 3);
-  await deletePrefix(page, 'garage-main', 'nosum/');
+  assert.equal((await listKeys(page, 'seaweedfs-main', 'nosum/')).length, 3);
+  await deletePrefix(page, 'seaweedfs-main', 'nosum/');
   await page.context().close();
 });
 
 test('upload: a large file goes in parts, each part carries its SHA-256, and the provider confirms them', async () => {
   const page = await newPage();
-  await deletePrefix(page, 'garage-main', 'sum/');
+  await deletePrefix(page, 'seaweedfs-main', 'sum/');
   await open(page, `${MAIN}sum/`);
   const requests = [];
   page.on('request', request => { if (request.method() === 'PUT' && request.url().includes('/api/uploads')) requests.push(request.headers()['x-checksum-sha256'] || ''); });
@@ -585,14 +585,14 @@ test('upload: a large file goes in parts, each part carries its SHA-256, and the
   assert.match(await page.textContent('.uploadDock .summary'), /^1 file uploaded \([\d.]+ MB\), 1 checked with SHA-256\.$/);
   assert.ok(requests.length >= 2, `chunks: ${requests.length}`);
   assert.ok(requests.every(value => /^[A-Za-z0-9+/]{43}=$/.test(value)), `every chunk has a digest: ${requests}`);
-  assert.equal((await listKeys(page, 'garage-main', 'sum/')).length, 1);
-  await deletePrefix(page, 'garage-main', 'sum/');
+  assert.equal((await listKeys(page, 'seaweedfs-main', 'sum/')).length, 1);
+  await deletePrefix(page, 'seaweedfs-main', 'sum/');
   await page.context().close();
 });
 
 test('upload: failed files with their reasons, bounded list, then "Retry failed"', async () => {
   const page = await newPage();
-  await deletePrefix(page, 'garage-main', 'retry/');
+  await deletePrefix(page, 'seaweedfs-main', 'retry/');
   await open(page, `${MAIN}retry/`);
   let refuse = true;
   const puts = await watchPuts(page, {
@@ -616,15 +616,15 @@ test('upload: failed files with their reasons, bounded list, then "Retry failed"
   await page.click('.uploadDock .button >> text=Retry failed');
   await page.waitForSelector('.uploadDock[data-state="done"]', { timeout: 60000 });
   assert.equal(await page.isHidden('.fileList--failed'), true);
-  assert.equal((await listKeys(page, 'garage-main', 'retry/')).length, 100);
+  assert.equal((await listKeys(page, 'seaweedfs-main', 'retry/')).length, 100);
   assert.equal(puts.total, 160);
-  await deletePrefix(page, 'garage-main', 'retry/');
+  await deletePrefix(page, 'seaweedfs-main', 'retry/');
   await page.context().close();
 });
 
 test('upload: cancel stops the queue and the summary counts the canceled files', async () => {
   const page = await newPage();
-  await deletePrefix(page, 'garage-main', 'cancel/');
+  await deletePrefix(page, 'seaweedfs-main', 'cancel/');
   await open(page, `${MAIN}cancel/`);
   const puts = await watchPuts(page, { delay: 400 });
   await page.setInputFiles('#fileInput', files(200, 'cancel'));
@@ -637,13 +637,13 @@ test('upload: cancel stops the queue and the summary counts the canceled files',
   assert.ok(sent < 200);
   assert.match(await page.textContent('.uploadDock .summary'), /files? uploaded .*, \d+ canceled\.$/);
   assert.equal(await page.textContent('.uploadDock__title'), 'Upload canceled');
-  await deletePrefix(page, 'garage-main', 'cancel/');
+  await deletePrefix(page, 'seaweedfs-main', 'cancel/');
   await page.context().close();
 });
 
 test('upload: an unreachable server gives one message, the queue waits, then the upload continues', async () => {
   const page = await newPage();
-  await deletePrefix(page, 'garage-main', 'offline/');
+  await deletePrefix(page, 'seaweedfs-main', 'offline/');
   await open(page, `${MAIN}offline/`);
   let down = false;
   let tripped = false;
@@ -671,9 +671,9 @@ test('upload: an unreachable server gives one message, the queue waits, then the
   await page.click('.uploadDock .callout .button >> text=Try now');
   await page.waitForSelector('.uploadDock[data-state="done"]', { timeout: 60000 });
   assert.match(await page.textContent('.uploadDock .summary'), /^150 files uploaded/);
-  assert.equal((await listKeys(page, 'garage-main', 'offline/')).length, 150);
+  assert.equal((await listKeys(page, 'seaweedfs-main', 'offline/')).length, 150);
   assert.ok(puts.total > 150);
-  await deletePrefix(page, 'garage-main', 'offline/');
+  await deletePrefix(page, 'seaweedfs-main', 'offline/');
   await page.context().close();
 });
 
@@ -697,7 +697,8 @@ test('access: read only in a folder hides the upload and every change of the row
   assert.equal(await page.isHidden('#uploadWrap'), true);
   assert.match(await page.textContent('#accessBadge'), /Read only/);
   const items = await page.locator('tr[data-name="orders.csv"] .bb-menu-item').allInnerTexts();
-  assert.deepEqual(items.map(item => item.trim()), ['Details', 'Download']);
+  // SeaweedFS lists versions: the menu can have Versions, a read action. No item changes the object.
+  assert.deepEqual(items.map(item => item.trim()).filter(item => item !== 'Versions'), ['Details', 'Download']);
   const folderItems = await page.locator('tr').first().locator('.bb-menu-item').allInnerTexts();
   assert.ok(!folderItems.some(item => /Delete|Rename|Copy/.test(item)));
   // A file dropped on a read-only folder is refused.
@@ -722,16 +723,16 @@ test('access: the selector shows only the visible buckets; no visible bucket giv
   await page.route(/\/api\/instances/, async route => {
     const response = await route.fetch();
     const body = await response.json();
-    body.instances = body.instances.filter(instance => instance.id === 'garage-archive');
-    body.default = 'garage-archive';
+    body.instances = body.instances.filter(instance => instance.id === 'seaweedfs-archive');
+    body.default = 'seaweedfs-archive';
     await route.fulfill({ response, json: body });
   });
   await open(page, '');
   // One visible bucket: the selector is static (no menu), as in the default interface.
   assert.equal(await page.locator('button.storageSwitcher__trigger').count(), 0);
-  assert.match(await page.textContent('.storageSwitcher__trigger'), /Garage - archive/);
+  assert.match(await page.textContent('.storageSwitcher__trigger'), /SeaweedFS - archive/);
   assert.equal(await page.locator('#storageSwitcherMenu').count(), 0);
-  assert.equal(await page.getAttribute('.crumb--root', 'aria-label'), 'Garage - archive, bucket root');
+  assert.equal(await page.getAttribute('.crumb--root', 'aria-label'), 'SeaweedFS - archive, bucket root');
   await page.unroute(/\/api\/instances/);
   await page.route(/\/api\/instances/, async route => {
     const response = await route.fetch();
@@ -752,17 +753,17 @@ test('access: a bucket that refuses write and delete shows it in the selector, a
     const response = await route.fetch();
     const body = await response.json();
     for (const instance of body.instances) {
-      if (instance.id !== 'garage-archive') continue;
+      if (instance.id !== 'seaweedfs-archive') continue;
       for (const name of ['write', 'delete']) instance.capabilities[name] = { state: 'denied', allowed: false, verified: true, source: 'access', reason: 'The access policy refuses it.' };
       for (const name of ['upload', 'overwrite', 'createFolder', 'delete', 'copy', 'move', 'rename']) instance.operations[name] = { state: 'denied', allowed: false, verified: true, source: 'access' };
     }
     await route.fulfill({ response, json: body });
   });
-  await open(page, '-/garage/garage-archive/');
+  await open(page, '-/seaweedfs/seaweedfs-archive/');
   const states = await page.locator('.storageSwitcher__trigger .permDot').evaluateAll(nodes => nodes.map(node => `${node.dataset.permission}:${node.dataset.state}`));
   assert.deepEqual(states.slice(1), ['write:denied', 'delete:denied']);
   await page.click('.storageSwitcher__trigger');
-  const main = await page.locator('.storageBucket[data-instance="garage-main"] .permDot').evaluateAll(nodes => nodes.map(node => node.dataset.state));
+  const main = await page.locator('.storageBucket[data-instance="seaweedfs-main"] .permDot').evaluateAll(nodes => nodes.map(node => node.dataset.state));
   assert.ok(!main.includes('denied'));
   assert.equal(await page.isHidden('#uploadWrap'), true);
   assert.match(await page.textContent('#accessBadge'), /Read only/);
@@ -788,7 +789,7 @@ test('access: 403 on an action shows the refusal of the server', async () => {
   await page.click('.bb-menu.is-open .bb-menu-item >> text=Delete');
   await page.click('.bb-overlay .bb-btn-primary');
   await page.waitForSelector('text=The action objects.delete is not allowed.', { timeout: 10000 });
-  assert.ok((await listKeys(page, 'garage-main', 'reports/2026/q3/')).includes('reports/2026/q3/orders.csv'));
+  assert.ok((await listKeys(page, 'seaweedfs-main', 'reports/2026/q3/')).includes('reports/2026/q3/orders.csv'));
   await page.context().close();
 });
 

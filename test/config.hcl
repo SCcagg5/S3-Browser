@@ -7,27 +7,27 @@ server {
   max_concurrent_requests_per_storage  = 2
 }
 
-auth "garage" {
+auth "seaweedfs" {
   provider               = "s3"
   mode                   = "access_key"
-  endpoint               = "http://garage:3900"
-  region                 = "garage"
+  endpoint               = "http://seaweedfs:8333"
+  region                 = "us-east-1"
   access_key_id          = "GK0123456789abcdef01234567"
   # A secret accepts only _env and _file. The test compose and scratch-runtime.sh mount test/secrets here.
   secret_access_key_file = "/config/secrets/s3_secret_access_key"
 }
 
-bucket "garage-main" {
-  name           = "Garage - primary"
-  auth           = "garage"
+bucket "seaweedfs-main" {
+  name           = "SeaweedFS - primary"
+  auth           = "seaweedfs"
   bucket         = "default"
   permissions    = ["read", "write", "delete"]
   max_scan_pages = 15
 }
 
-bucket "garage-archive" {
-  name           = "Garage - archive"
-  auth           = "garage"
+bucket "seaweedfs-archive" {
+  name           = "SeaweedFS - archive"
+  auth           = "seaweedfs"
   bucket         = "archive"
   permissions    = ["read", "write", "delete"]
   max_scan_pages = 15

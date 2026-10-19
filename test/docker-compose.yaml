@@ -14,7 +14,7 @@ services:
     ports:
       - "8080:8080"
     depends_on:
-      garage:
+      seaweedfs:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "/s3-browser", "healthcheck", "-c", "/config/config.hcl"]
@@ -22,11 +22,11 @@ services:
       timeout: 3s
       retries: 10
 
-  garage:
+  seaweedfs:
     build:
-      context: ./garage
+      context: ./seaweedfs
       dockerfile: Dockerfile
-    container_name: garage
+    container_name: seaweedfs
     restart: unless-stopped
     ulimits:
       nofile:

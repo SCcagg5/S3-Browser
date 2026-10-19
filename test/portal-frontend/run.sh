@@ -1,7 +1,7 @@
 #!/bin/sh
 # Browser tests of the "portal" interface (server.frontend = "portal").
 #
-# The script starts the stack of compose.yaml (Garage and S3-Browser) under its own project name, puts the test
+# The script starts the stack of compose.yaml (SeaweedFS and S3-Browser) under its own project name, puts the test
 # objects in the buckets (seed.js), runs browser-tests.js in the Playwright container, and stops the stack.
 # Everything runs in Docker. The Playwright container installs the playwright package (PLAYWRIGHT_VERSION) in a
 # Docker volume, one time. To use a copy that is already on disk, set PLAYWRIGHT_NODE_MODULES to its node_modules.

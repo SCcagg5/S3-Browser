@@ -735,15 +735,25 @@ func (m *uploadManager) synchronizeS3Parts(ctx context.Context, instance *storag
 	}
 	state := make([]uploadPartState, 0, len(parts))
 	var uploaded int64
+	known := make(map[int]uploadPartState, len(upload.Parts))
+	for _, part := range upload.Parts {
+		known[part.PartNumber] = part
+	}
 	for index, part := range parts {
 		if part.PartNumber != index+1 || part.Size <= 0 || strings.TrimSpace(part.ETag) == "" {
 			return fmt.Errorf("s3 multipart upload contains a non-contiguous or invalid part sequence")
 		}
 		item := uploadPartState{PartNumber: part.PartNumber, ETag: part.ETag, Size: part.Size}
 		if upload.Checksum == uploadChecksumSHA256 {
-			// The provider lists the digest of each stored part: it is what it checked.
-			item.ChecksumSHA256 = part.ChecksumSHA256
-			item.ChecksumStored = part.ChecksumSHA256 != ""
+			if local, ok := known[part.PartNumber]; ok && local.ETag == part.ETag && local.ChecksumSHA256 != "" {
+				// The server sent this part and the provider confirmed its digest: keep what it knows.
+				item.ChecksumSHA256 = local.ChecksumSHA256
+				item.ChecksumStored = local.ChecksumStored
+			} else {
+				// A provider such as Garage lists the digest of each stored part: it is what it checked.
+				item.ChecksumSHA256 = part.ChecksumSHA256
+				item.ChecksumStored = part.ChecksumSHA256 != ""
+			}
 		}
 		state = append(state, item)
 		uploaded += part.Size

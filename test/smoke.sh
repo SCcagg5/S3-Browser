@@ -71,10 +71,10 @@ request 200 "$TMP_DIR/health.json" "$BASE_URL/healthz"
 grep -q '"instances":2' "$TMP_DIR/health.json"
 
 request 200 "$TMP_DIR/instances.json" "$BASE_URL/api/instances"
-grep -q '"id":"garage-main"' "$TMP_DIR/instances.json"
-grep -q '"id":"garage-archive"' "$TMP_DIR/instances.json"
+grep -q '"id":"seaweedfs-main"' "$TMP_DIR/instances.json"
+grep -q '"id":"seaweedfs-archive"' "$TMP_DIR/instances.json"
 
-for instance in garage-main garage-archive; do
+for instance in seaweedfs-main seaweedfs-archive; do
   payload="test-${instance}"
 
   request 204 "$TMP_DIR/put" -X PUT \
@@ -96,13 +96,13 @@ done
 
 request 200 "$TMP_DIR/copy.json" -X POST \
   -H 'Content-Type: application/json' \
-  --data '{"instance":"garage-main","src":"smoke/garage-main.txt","dst":"smoke/copied.txt","isPrefix":false}' \
+  --data '{"instance":"seaweedfs-main","src":"smoke/seaweedfs-main.txt","dst":"smoke/copied.txt","isPrefix":false}' \
   "$BASE_URL/api/copy"
 grep -q '"copied":1' "$TMP_DIR/copy.json"
 
 request 200 "$TMP_DIR/rename.json" -X POST \
   -H 'Content-Type: application/json' \
-  --data '{"instance":"garage-main","src":"smoke/copied.txt","dst":"smoke/renamed.txt","isPrefix":false}' \
+  --data '{"instance":"seaweedfs-main","src":"smoke/copied.txt","dst":"smoke/renamed.txt","isPrefix":false}' \
   "$BASE_URL/api/rename"
 grep -q '"moved":1' "$TMP_DIR/rename.json"
 
@@ -110,7 +110,7 @@ grep -q '"moved":1' "$TMP_DIR/rename.json"
 dd if=/dev/zero of="$TMP_DIR/large.bin" bs=1048576 count=17 2>/dev/null
 request 201 "$TMP_DIR/upload-create.json" -X POST \
   -H 'Content-Type: application/json' \
-  --data '{"instance":"garage-main","key":"smoke/large.bin","size":17825792,"contentType":"application/octet-stream"}' \
+  --data '{"instance":"seaweedfs-main","key":"smoke/large.bin","size":17825792,"contentType":"application/octet-stream"}' \
   "$BASE_URL/api/uploads"
 # The upload API keeps no server state that the client must name: each chunk
 # carries the resume token of the session in X-S3-Browser-Resume-Token.
@@ -133,15 +133,15 @@ request 200 "$TMP_DIR/upload-part-2.json" -X PUT \
   "$BASE_URL/api/uploads"
 grep -q '"status":"completed"' "$TMP_DIR/upload-part-2.json"
 request 200 "$TMP_DIR/large-head.txt" -I \
-  "$BASE_URL/s3?instance=garage-main&key=smoke%2Flarge.bin"
+  "$BASE_URL/s3?instance=seaweedfs-main&key=smoke%2Flarge.bin"
 grep -qi 'content-length: 17825792' "$TMP_DIR/large-head.txt"
 
 request_either 200 202 "$TMP_DIR/stats-created.json" \
-  "$BASE_URL/api/stats?instance=garage-main&prefix=smoke%2F"
+  "$BASE_URL/api/stats?instance=seaweedfs-main&prefix=smoke%2F"
 wait_job "$TMP_DIR/stats-created.json" "$TMP_DIR/stats.json"
 grep -q '"count":3' "$TMP_DIR/stats.json"
 
-for instance in garage-main garage-archive; do
+for instance in seaweedfs-main seaweedfs-archive; do
   request 202 "$TMP_DIR/delete-created-$instance.json" -X POST \
     -H 'Content-Type: application/json' \
     --data "{\"instance\":\"$instance\",\"prefix\":\"smoke/\"}" \

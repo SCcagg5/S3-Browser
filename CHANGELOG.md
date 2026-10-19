@@ -14,6 +14,12 @@ This document uses ASD-STE100 Simplified Technical English.
 - The delete of a prefix and the move of a prefix delete the objects in batches of 1000 keys (`DeleteObjects`). A
   provider that refuses the batch request gets one request for each key.
 
+### Tests
+
+- The test stacks use SeaweedFS 4.41 in place of Garage. The image downloads the release and checks its checksum.
+  The buckets, the identities and the compose files use the name `seaweedfs`.
+- The browser tests open the page at `localhost`. A secure origin gives the page `crypto.subtle`.
+
 ### Interface `portal`
 
 - The test interface `portal` shows the display name of a bucket only. The permissions of the bucket are in a button at

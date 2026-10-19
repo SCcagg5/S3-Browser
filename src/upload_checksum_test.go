@@ -31,6 +31,8 @@ type checksumMemory struct {
 	completed  []s3CompletedPart
 	objectHash map[string]string
 	silent     bool
+	// noPartChecksums makes the list of parts omit the digests, as SeaweedFS does.
+	noPartChecksums bool
 }
 
 func newChecksumMemory(memory *memoryBackend) *checksumMemory {
@@ -69,7 +71,9 @@ func (c *checksumMemory) ListMultipartParts(ctx context.Context, key, uploadID s
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for index := range parts {
-		parts[index].ChecksumSHA256 = c.digests[uploadID][parts[index].PartNumber]
+		if !c.noPartChecksums {
+			parts[index].ChecksumSHA256 = c.digests[uploadID][parts[index].PartNumber]
+		}
 	}
 	return parts, err
 }
@@ -376,5 +380,29 @@ func TestS3BackendSendsAndReadsChecksums(t *testing.T) {
 	single := &checksumTransfer{SHA256: digest}
 	if err := backend.Put(withChecksumTransfer(ctx, single), "o", strings.NewReader("part-one"), 8, "text/plain"); err != nil || single.Echoed != digest {
 		t.Fatalf("put: echoed = %q, err = %v", single.Echoed, err)
+	}
+}
+
+func TestChecksumUploadKeepsThePartDigestsThatAProviderDoesNotList(t *testing.T) {
+	app, backend := checksumTestApplication(t)
+	backend.noPartChecksums = true
+	const total = int64(10 << 20)
+	created := decodeUpload(t, createChecksumUpload(t, app, "keep.bin", total, "sha256"))
+	first := bytes.Repeat([]byte{'k'}, 5<<20)
+	if got := putChecksumChunk(app, created.ResumeToken, first, 0, total, sha256Base64(first)); got.Code != http.StatusOK {
+		t.Fatalf("first chunk = %d %s", got.Code, got.Body.String())
+	}
+	// A status request reads the parts of the provider again. The provider lists no digest: the server keeps its own.
+	status := postJSON(t, app.routes(), "/api/uploads/resume", map[string]string{"resumeToken": created.ResumeToken})
+	if status.Code != http.StatusOK {
+		t.Fatalf("status = %d %s", status.Code, status.Body.String())
+	}
+	second := bytes.Repeat([]byte{'l'}, 5<<20)
+	got := putChecksumChunk(app, created.ResumeToken, second, int64(len(first)), total, sha256Base64(second))
+	if got.Code != http.StatusOK {
+		t.Fatalf("second chunk = %d %s", got.Code, got.Body.String())
+	}
+	if done := decodeUpload(t, got); done.Status != uploadStatusCompleted || !done.ChecksumVerified {
+		t.Fatalf("completed = %+v", done)
 	}
 }
