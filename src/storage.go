@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -247,6 +248,11 @@ type ConditionalObjectWriter interface {
 type ObjectDeleter interface {
 	Delete(context.Context, string) error
 }
+
+// ObjectBatchDeleter is optional: a backend that deletes many keys in one request (S3 DeleteObjects).
+type ObjectBatchDeleter interface {
+	DeleteMany(context.Context, []string) error
+}
 type ObjectCopier interface {
 	Copy(context.Context, string, string) error
 }
@@ -277,6 +283,9 @@ type storageInstance struct {
 	versioningMu        sync.RWMutex
 	versioningSupported bool
 	versioningChecked   bool
+
+	// batchDeleteOff is set when the provider refused the batch delete once: later deletes go one by one.
+	batchDeleteOff atomic.Bool
 }
 
 func newStorageInstance(cfg bucketConfig, auth *sharedAuthentication, policy runtimePolicy, concurrency *storageConcurrency) (*storageInstance, error) {

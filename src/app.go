@@ -768,12 +768,12 @@ func copyOrMove(ctx context.Context, instance *storageInstance, source, target s
 		copied++
 	}
 	if move {
-		deleted := 0
-		for _, key := range keys {
-			if err := instance.Delete(ctx, instance.fullKey(key)); err != nil {
-				return copied, fmt.Errorf("all copies succeeded but deletion of %q failed after %d object(s): %w", key, deleted, err)
-			}
-			deleted++
+		fullKeys := make([]string, len(keys))
+		for index, key := range keys {
+			fullKeys[index] = instance.fullKey(key)
+		}
+		if err := instance.DeleteMany(ctx, fullKeys); err != nil {
+			return copied, fmt.Errorf("all copies succeeded but the deletion of the sources failed: %w", err)
 		}
 	}
 	return copied, nil

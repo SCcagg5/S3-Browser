@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 func (s *storageInstance) acquire(ctx context.Context) (func(), error) {
@@ -228,6 +229,82 @@ func (s *storageInstance) Delete(ctx context.Context, key string) error {
 	err = s.backend.Delete(ctx, key)
 	s.observePermission(permissionDelete, err)
 	return err
+}
+
+// DeleteMany deletes the keys, in batches of maximumS3DeleteBatch when the backend can. A key that XML cannot carry, a
+// backend without a batch delete, and a provider that refuses the batch request all go to the delete of one key.
+func (s *storageInstance) DeleteMany(ctx context.Context, keys []string) error {
+	batcher, canBatch := s.backend.(ObjectBatchDeleter)
+	if !canBatch || s.batchDeleteOff.Load() {
+		return s.deleteEach(ctx, keys)
+	}
+	batch := make([]string, 0, minInt(len(keys), maximumS3DeleteBatch))
+	flush := func() error {
+		if len(batch) == 0 {
+			return nil
+		}
+		defer func() { batch = batch[:0] }()
+		release, err := s.beginStorageRequest(ctx)
+		if err != nil {
+			return err
+		}
+		err = batcher.DeleteMany(ctx, batch)
+		release()
+		if err != nil && batchDeleteUnsupported(err) {
+			s.batchDeleteOff.Store(true)
+			return s.deleteEach(ctx, batch)
+		}
+		s.observePermission(permissionDelete, err)
+		return err
+	}
+	for _, key := range keys {
+		if !xmlSafeKey(key) {
+			if err := s.deleteEach(ctx, []string{key}); err != nil {
+				return err
+			}
+			continue
+		}
+		batch = append(batch, key)
+		if len(batch) == maximumS3DeleteBatch {
+			if err := flush(); err != nil {
+				return err
+			}
+		}
+	}
+	return flush()
+}
+
+func (s *storageInstance) deleteEach(ctx context.Context, keys []string) error {
+	for _, key := range keys {
+		if err := s.Delete(ctx, key); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// batchDeleteUnsupported reports a provider that does not know the DeleteObjects request.
+func batchDeleteUnsupported(err error) bool {
+	var upstream *upstreamError
+	if !errors.As(err, &upstream) {
+		return false
+	}
+	return upstream.StatusCode == http.StatusNotImplemented || upstream.StatusCode == http.StatusMethodNotAllowed ||
+		upstream.Code == "NotImplemented" || upstream.Code == "MethodNotAllowed"
+}
+
+// xmlSafeKey reports whether the key goes through an XML document unchanged: valid UTF-8 and no control character
+// that XML 1.0 forbids.
+func xmlSafeKey(key string) bool {
+	if !utf8.ValidString(key) {
+		return false
+	}
+	for _, r := range key {
+		if r < 0x20 && r != '\t' && r != '\n' && r != '\r' || r == 0xFFFE || r == 0xFFFF {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *storageInstance) Copy(ctx context.Context, source, destination string) error {

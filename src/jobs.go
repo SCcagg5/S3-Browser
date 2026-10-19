@@ -749,9 +749,7 @@ func (m *jobManager) execute(ctx context.Context, job *jobState) error {
 				return err
 			}
 		}
-		return m.runObjectJob(ctx, job, instance, func(ctx context.Context, object objectInfo, relative string) error {
-			return instance.Delete(ctx, instance.fullKey(relative))
-		})
+		return m.runDeleteJob(ctx, job, instance)
 	case jobTypeStatsPrefix:
 		if err := requirePermission(instance, permissionRead); err != nil {
 			return err
@@ -1169,6 +1167,69 @@ func (m *jobManager) runObjectJob(ctx context.Context, job *jobState, instance *
 		}
 	}
 	if job.Processed == 0 && processedThisRun == 0 && job.Type != jobTypeStatsPrefix {
+		return apiError{Status: http.StatusNotFound, Code: "empty_prefix", Message: "source prefix contains no objects"}
+	}
+	return nil
+}
+
+// runDeleteJob deletes the objects of a prefix in batches: one request for each listing page, up to
+// maximumS3DeleteBatch keys. The job counts and checkpoints a batch only after the provider deleted it, so a pause or
+// a stop between two batches resumes after the last deleted key.
+func (m *jobManager) runDeleteJob(ctx context.Context, job *jobState, instance *storageInstance) error {
+	prefix := job.Prefix
+	batch := make([]string, 0, maximumS3DeleteBatch)
+	processedThisRun := int64(0)
+	flush := func() error {
+		if len(batch) == 0 {
+			return nil
+		}
+		keys := make([]string, len(batch))
+		for index, relative := range batch {
+			keys[index] = instance.fullKey(relative)
+		}
+		if err := instance.DeleteMany(ctx, keys); err != nil {
+			return err
+		}
+		job.Processed += int64(len(batch))
+		processedThisRun += int64(len(batch))
+		job.LastKey = batch[len(batch)-1]
+		batch = batch[:0]
+		job.UpdatedAt = time.Now().UTC()
+		if latest, ok := m.get(job.ID); ok {
+			job.Status = latest.Status
+			job.EndedAt = cloneTimePointer(latest.EndedAt)
+			if job.Status == jobStatusQueued {
+				job.Status = jobStatusRunning
+			}
+		}
+		if err := m.put(*job); err != nil {
+			return err
+		}
+		switch job.Status {
+		case jobStatusPaused:
+			return errJobPaused
+		case jobStatusCanceled:
+			return errJobCanceled
+		}
+		return nil
+	}
+	err := forEachObjectAfter(ctx, instance, prefix, job.LastKey, func(_ objectInfo, relative string) error {
+		if err := m.controlState(job.ID); err != nil {
+			return err
+		}
+		batch = append(batch, relative)
+		if len(batch) >= maximumS3DeleteBatch {
+			return flush()
+		}
+		return nil
+	})
+	if err == nil {
+		err = flush()
+	}
+	if err != nil {
+		return err
+	}
+	if job.Processed == 0 && processedThisRun == 0 {
 		return apiError{Status: http.StatusNotFound, Code: "empty_prefix", Message: "source prefix contains no objects"}
 	}
 	return nil

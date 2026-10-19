@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"crypto/hmac"
+	"crypto/md5"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/xml"
 	"errors"
@@ -481,6 +483,75 @@ func (s *s3Backend) Delete(ctx context.Context, key string) error {
 		return s3ResponseError(resp)
 	}
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+	return nil
+}
+
+// maximumS3DeleteBatch is the limit of keys in one DeleteObjects request.
+const maximumS3DeleteBatch = 1000
+
+// DeleteMany removes up to maximumS3DeleteBatch keys with one DeleteObjects request. A key that the provider refuses
+// makes the call fail with the code and the message of the first refusal.
+func (s *s3Backend) DeleteMany(ctx context.Context, keys []string) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	if len(keys) > maximumS3DeleteBatch {
+		return fmt.Errorf("a batch delete takes at most %d keys, got %d", maximumS3DeleteBatch, len(keys))
+	}
+	type objectXML struct {
+		Key string `xml:"Key"`
+	}
+	payload := struct {
+		XMLName xml.Name    `xml:"Delete"`
+		Quiet   bool        `xml:"Quiet"`
+		Objects []objectXML `xml:"Object"`
+	}{Quiet: true, Objects: make([]objectXML, 0, len(keys))}
+	for _, key := range keys {
+		payload.Objects = append(payload.Objects, objectXML{Key: key})
+	}
+	body, err := xml.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("encode s3 batch delete request: %w", err)
+	}
+	sum := md5.Sum(body)
+	query := url.Values{}
+	query.Set("delete", "")
+	headers := make(http.Header)
+	headers.Set("Content-Type", "application/xml")
+	headers.Set("Content-MD5", base64.StdEncoding.EncodeToString(sum[:]))
+	resp, err := s.do(ctx, http.MethodPost, "", query, strings.NewReader(string(body)), int64(len(body)), headers)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return s3ResponseError(resp)
+	}
+	responseBody, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		return fmt.Errorf("read s3 batch delete response: %w", err)
+	}
+	var result struct {
+		XMLName xml.Name
+		Code    string `xml:"Code"`
+		Message string `xml:"Message"`
+		Errors  []struct {
+			Key     string `xml:"Key"`
+			Code    string `xml:"Code"`
+			Message string `xml:"Message"`
+		} `xml:"Error"`
+	}
+	if len(responseBody) == 0 || xml.Unmarshal(responseBody, &result) != nil {
+		return nil
+	}
+	// Some S3 implementations return HTTP 200 with an Error document, or with one Error for each key they refuse.
+	if result.XMLName.Local == "Error" {
+		return &upstreamError{StatusCode: http.StatusBadGateway, Code: result.Code, Message: result.Message}
+	}
+	if len(result.Errors) > 0 {
+		first := result.Errors[0]
+		return &upstreamError{StatusCode: http.StatusBadGateway, Code: first.Code, Message: fmt.Sprintf("%d of %d keys were not deleted: %s", len(result.Errors), len(keys), first.Message)}
+	}
 	return nil
 }
 
