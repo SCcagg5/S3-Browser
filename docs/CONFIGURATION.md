@@ -67,7 +67,7 @@ The server never creates a data directory. All sessions and jobs are memory-only
 The binary contains two browser interfaces. `frontend` selects one of them at start. The two interfaces use the same routes, the same API and the same security headers.
 
 - `default`: the standard interface (`src/public/`).
-- `portal`: a test interface (`src/frontends/portal/`). It has the shell of the portal and the dense tables of ClickHouse Dash. It has a System, Dark and Light theme control. The browser keeps the choice.
+- `portal`: a test interface (`src/frontends/portal/`). It has the header of ClickHouse Dash, the bucket selector of the default interface, the parts of the portal and the dense tables of ClickHouse Dash. Its theme selector has System, Dark and Light. The browser keeps the choice.
 
 The value must be one of these two names, as written. The server does not change the case and does not remove spaces. A different value or a value that is not a string stops the server at start. The error gives the line, the key, the permitted values and the value. The start log line gives the frontend that applies (`frontend=default`).
 

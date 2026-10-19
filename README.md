@@ -114,7 +114,7 @@ Keep the public trailing slash so browser-relative URLs resolve inside the proxy
 
 ## Alternative frontend (test)
 
-The binary also contains a test interface: `portal`. It has the shell of the portal (header, theme control, a tab for each bucket, parts) and the dense tables of ClickHouse Dash. The default interface does not change. To use the test interface, set this key:
+The binary also contains a test interface: `portal`. It has the header of ClickHouse Dash (name, version, theme selector), the bucket selector of the default interface, the parts of the portal and the dense tables of ClickHouse Dash. The default interface does not change. To use the test interface, set this key:
 
 ```hcl
 server {

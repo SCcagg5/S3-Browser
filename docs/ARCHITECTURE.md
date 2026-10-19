@@ -127,7 +127,7 @@ The server never writes a temporary archive or member to disk. Unsafe paths, sym
 The binary embeds two frontend trees. The HCL key `server.frontend` selects one tree at start (see [Configuration](CONFIGURATION.md#frontend-selection)). The server then gives only the files of that tree.
 
 - `default` is `src/public/`.
-- `portal` is `src/frontends/portal/`. It is a test of the s3-browser interface with the shell of the portal and the dense tables of ClickHouse Dash. The top of `assets/css/portal.css` gives the design rules as tokens.
+- `portal` is `src/frontends/portal/`. It is a test of the s3-browser interface: the header of ClickHouse Dash, the bucket selector of the default interface, the parts of the portal and the dense tables of ClickHouse Dash. The top of `assets/css/portal.css` gives the design rules as tokens.
 
 The `portal` tree contains its own pages and scripts:
 

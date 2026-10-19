@@ -52,7 +52,7 @@ The test frontend under `src/frontends/portal` follows the same rules. To use it
 
 ### Browser tests of the portal frontend
 
-`test/portal-frontend/run.sh` starts Garage and S3-Browser with `frontend = "portal"`. It uses Docker Compose with the project name `s3-portal-tests`. Then it puts test objects in the buckets and runs `browser-tests.js` in the Playwright container. The tests cover the theme control, the breadcrumb, the bulk upload and the access behaviour. At the end, the script stops the stack.
+`test/portal-frontend/run.sh` starts Garage and S3-Browser with `frontend = "portal"`. It uses Docker Compose with the project name `s3-portal-tests`. Then it puts test objects in the buckets and runs `browser-tests.js` in the Playwright container. The tests cover the theme selector, the header, the bucket selector, the breadcrumb and the toolbar row, the bulk upload and the access behaviour. At the end, the script stops the stack.
 
 ```sh
 ./test/portal-frontend/run.sh
