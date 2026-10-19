@@ -315,19 +315,12 @@
     return uploadTags.length ? uploadTags.map(tag => `${encodeURIComponent(tag.key)}=${encodeURIComponent(tag.value)}`).join('&') : '';
   }
 
-  async function editUploadTags() {
-    return openForm({
-      title: 'Tags of the new uploads',
-      intro: 'The next uploads of this browser carry these tags. Leave the field empty for no tag.',
-      applyLabel: 'Save',
-      fields: [{ name: 'tags', label: 'Tags', placeholder: 'team=data, retention=30d', value: uploadTags.map(formatTag).join(', '), multiline: true }],
-      async onSubmit(values) {
-        const parsed = parseTagText(values.tags);
-        if (parsed.error) return parsed.error;
-        setUploadTags(parsed.tags);
-        return '';
-      }
-    });
+  // The text of the tags of the new uploads, from the settings. It returns an error text, or '' when the tags are saved.
+  function saveUploadTagsText(text) {
+    const parsed = parseTagText(text);
+    if (parsed.error) return parsed.error;
+    setUploadTags(parsed.tags);
+    return '';
   }
 
   BB.tags = {
@@ -341,8 +334,9 @@
     lifecycleNotes,
     mountEditor,
     changeFolderTags,
-    editUploadTags,
+    saveUploadTagsText,
     uploadTags: () => uploadTags.map(tag => ({ ...tag })),
+    uploadTagsText: () => uploadTags.map(formatTag).join(', '),
     uploadTagsHeader,
     onUploadTagsChange(listener) { uploadListeners.add(listener); return () => uploadListeners.delete(listener); }
   };

@@ -71,7 +71,8 @@
             <span id="tagStatus" class="searchField__status" role="status" aria-live="polite"></span>
           </label>
           <span id="accessBadge" class="badge" hidden></span>
-          <button id="refreshButton" class="button button--icon" type="button" aria-label="Refresh" title="Refresh"><i class="ic ic-refresh" aria-hidden="true"></i></button>
+          <button id="settingsButton" class="iconButton" type="button" aria-label="Listing settings" title="Listing settings" aria-expanded="false" aria-controls="listSettings"><i class="ic ic-settings" aria-hidden="true"></i></button>
+          <button id="refreshButton" class="iconButton" type="button" aria-label="Refresh" title="Refresh"><i class="ic ic-refresh" aria-hidden="true"></i></button>
           <div class="menuWrap">
             <button id="actionsButton" class="button" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="actionsMenu">
               <i class="ic ic-dots-vertical" aria-hidden="true"></i><span class="button__label--wide">Actions</span><i class="ic ic-chevron-down button__chevron" aria-hidden="true"></i>
@@ -79,10 +80,7 @@
             <div id="actionsMenu" class="menu" role="menu" hidden>
               <button id="zipItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-file-zip" aria-hidden="true"></i>Download as ZIP</button>
               <button id="insightsItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-chart-bar" aria-hidden="true"></i><span>Storage insights</span></button>
-              <button id="tagsItem" class="menu__item" type="button" role="menuitem" aria-pressed="false"><i class="ic ic-tags" aria-hidden="true"></i><span>Show tags</span></button>
               <button id="folderTagsItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-tags" aria-hidden="true"></i><span>Tag the objects of this folder</span></button>
-              <div class="menu__sep" role="separator"></div>
-              <button id="accessItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-shield-check" aria-hidden="true"></i>Bucket permissions</button>
             </div>
           </div>
           <div id="uploadWrap" class="menuWrap">
@@ -92,9 +90,34 @@
             <div id="uploadMenu" class="menu" role="menu" hidden>
               <button id="uploadFilesItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-file-upload" aria-hidden="true"></i>Upload files</button>
               <button id="uploadFolderItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-folder-up" aria-hidden="true"></i>Upload a folder</button>
-              <button id="uploadTagsItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-tags" aria-hidden="true"></i><span>Tags of the new uploads</span></button>
               <p class="menu__hint">You can also drop files on the page.</p>
             </div>
+          </div>
+        </div>
+      </div>
+      <div id="listSettings" class="listSettings" aria-hidden="true">
+        <div class="listSettings__inner" inert>
+          <div class="listSettings__body">
+            <div class="listSettings__group" role="group" aria-label="Columns">
+              <span class="listSettings__title">Columns</span>
+              <label class="check"><input type="checkbox" checked disabled data-column="name" /><span>Name</span></label>
+              <label class="check"><input type="checkbox" data-column="tags" /><span>Tags</span></label>
+              <label class="check" id="versionsSetting"><input type="checkbox" data-column="versions" /><span>Versions</span></label>
+              <label class="check"><input type="checkbox" data-column="size" /><span>Size</span></label>
+              <label class="check"><input type="checkbox" data-column="modified" /><span>Modified</span></label>
+            </div>
+            <div class="listSettings__group" role="group" aria-label="Filters">
+              <span class="listSettings__title">Filters</span>
+              <label class="check" id="tagFilterSetting"><input type="checkbox" id="tagFilterToggle" /><span>Filter by tag</span></label>
+            </div>
+            <div class="listSettings__group listSettings__group--uploads" role="group" aria-label="New uploads">
+              <span class="listSettings__title">New uploads</span>
+              <label class="listSettings__field" id="uploadTagsSetting"><span>Tags</span>
+                <input id="uploadTagsInput" class="input" type="text" autocomplete="off" spellcheck="false" placeholder="team=data, retention=30d" />
+              </label>
+              <span id="uploadTagsMessage" class="listSettings__message" role="status"></span>
+            </div>
+            <button id="settingsReset" class="button button--small" type="button">Reset</button>
           </div>
         </div>
       </div>

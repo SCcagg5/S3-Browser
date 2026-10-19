@@ -452,24 +452,27 @@ test('tags: a provider without tags (501) has no tags section and no tag control
   assert.equal(await page.locator('[data-tags-section]').count(), 0);
   await page.click('.bb-modal-x');
   await page.waitForSelector('.bb-overlay', { state: 'detached' });
-  await page.click('#actionsButton');
-  await page.click('#tagsItem');
-  await until(page, () => document.querySelector('#tagsItem').hidden === true);
+  await page.click('#settingsButton');
+  await page.check('[data-column="tags"]');
+  await until(page, () => document.querySelector('[data-column="tags"]').closest('label').hidden === true);
+  assert.equal(await page.locator('#tagFilterToggle').isHidden(), true);
   assert.equal(await page.locator('#tagFilterWrap').isHidden(), true);
-  assert.equal(await page.locator('.dataTable.showTags').count(), 0);
+  assert.equal(await page.locator('th.col-tags').isVisible(), false);
   await page.context().close();
 });
 
-test('tags: the tag column and the tag filter of the listing', async () => {
+test('tags: the tag column and the tag filter come from the settings of the listing', async () => {
   const page = await newPage();
   await open(page, `${MAIN}config/`);
   assert.equal(await page.isHidden('#tagFilterWrap'), true);
   assert.equal(await page.locator('th.col-tags').isVisible(), false);
-  await page.click('#actionsButton');
-  await page.click('#tagsItem');
+  await page.click('#settingsButton');
+  await page.check('[data-column="tags"]');
   await page.waitForSelector('tr[data-name="ingest.json"] .tagChip');
   assert.equal(await page.locator('th.col-tags').isVisible(), true);
   assert.deepEqual(await page.locator('tr[data-name="ingest.json"] .tagChip').allInnerTexts().then(items => items.map(item => item.replace(/\s+/g, ' ').trim()).sort()), ['env prod', 'team data']);
+  assert.equal(await page.isHidden('#tagFilterWrap'), true);
+  await page.check('#tagFilterToggle');
   assert.equal(await page.isVisible('#tagFilterWrap'), true);
   await page.fill('#tagFilter', 'team=data');
   await until(page, () => document.querySelector('tr[data-name="app.yaml"]').hidden === true);
@@ -481,11 +484,16 @@ test('tags: the tag column and the tag filter of the listing', async () => {
   await until(page, () => document.querySelector('tr[data-name="ingest.json"]').hidden === true);
   await page.fill('#tagFilter', '');
   await until(page, () => document.querySelector('tr[data-name="app.yaml"]').hidden === false);
-  // Hide the tags: the column and the filter go.
-  await page.click('#actionsButton');
-  await page.click('#tagsItem');
+  // The filter works with no tag column: it reads the tags itself.
+  await page.uncheck('[data-column="tags"]');
   assert.equal(await page.locator('th.col-tags').isVisible(), false);
+  await page.fill('#tagFilter', 'team=data');
+  await until(page, () => document.querySelector('tr[data-name="app.yaml"]').hidden === true);
+  // Turn the filter off: the field goes and every row comes back.
+  await page.uncheck('#tagFilterToggle');
   assert.equal(await page.isHidden('#tagFilterWrap'), true);
+  await until(page, () => document.querySelector('tr[data-name="app.yaml"]').hidden === false);
+  await page.click('#settingsReset');
   assert.deepEqual(page.errors, []);
   await page.context().close();
 });
@@ -537,22 +545,25 @@ test('tags: a folder job sets and removes tags on every object, and keeps the ot
   await page.context().close();
 });
 
-test('tags: the uploads of the browser carry the tags that the person sets', async () => {
+test('tags: the uploads of the browser carry the tags that the person sets in the settings', async () => {
   const page = await newPage();
   await deletePrefix(page, 'seaweedfs-main', 'tagged/');
   await open(page, `${MAIN}tagged/`);
-  await page.click('#uploadButton');
-  await page.click('#uploadTagsItem');
-  await page.waitForSelector('[data-tag-form]');
-  await page.fill('[data-tag-form] textarea', 'team=up, bad&key');
-  await page.click('[data-tag-form] .bb-btn-primary');
-  assert.match(await page.textContent('[data-tag-form] .tagEditor__message'), /letters, digits/);
-  await page.fill('[data-tag-form] textarea', 'team=up, source=browser');
-  await page.click('[data-tag-form] .bb-btn-primary');
-  await until(page, () => !document.querySelector('[data-tag-form]'));
-  await page.click('#uploadButton');
-  assert.match(await page.textContent('#uploadTagsItem'), /\(2\)/);
-  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('#uploadTagsItem').count(), 0);
+  await page.click('#settingsButton');
+  await page.fill('#uploadTagsInput', 'team=up, bad&key');
+  await page.press('#uploadTagsInput', 'Enter');
+  assert.match(await page.textContent('#uploadTagsMessage'), /letters, digits/);
+  assert.equal(await page.getAttribute('#uploadTagsInput', 'aria-invalid'), 'true');
+  await page.fill('#uploadTagsInput', 'team=up, source=browser');
+  await page.press('#uploadTagsInput', 'Enter');
+  await until(page, () => document.querySelector('#uploadTagsMessage').textContent === 'The next uploads carry these tags.');
+  assert.equal(await page.inputValue('#uploadTagsInput'), 'team=up, source=browser');
+  // The choice stays after a reload.
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.waitForSelector('.dataTable, .empty');
+  await page.click('#settingsButton');
+  assert.equal(await page.inputValue('#uploadTagsInput'), 'team=up, source=browser');
   await page.setInputFiles('#fileInput', files(2, 'tagged'));
   await page.waitForSelector('.uploadDock[data-state="done"]', { timeout: 60000 });
   for (const key of ['tagged/tagged-0001.txt', 'tagged/tagged-0002.txt']) {
@@ -563,13 +574,105 @@ test('tags: the uploads of the browser carry the tags that the person sets', asy
   await page.waitForSelector('.uploadDock[data-state="done"]', { timeout: 120000 });
   assert.deepEqual((await apiTags(page, 'tagged/large-tagged.bin')).sort(), ['source=browser', 'team=up']);
   // No tag: the next uploads have none.
-  await page.click('#uploadButton');
-  await page.click('#uploadTagsItem');
-  await page.waitForSelector('[data-tag-form]');
-  await page.fill('[data-tag-form] textarea', '');
-  await page.click('[data-tag-form] .bb-btn-primary');
-  await until(page, () => !document.querySelector('[data-tag-form]'));
+  await page.fill('#uploadTagsInput', '');
+  await page.press('#uploadTagsInput', 'Enter');
+  await page.setInputFiles('#fileInput', files(1, 'plain'));
+  await page.waitForSelector('.uploadDock[data-state="done"]', { timeout: 60000 });
+  assert.deepEqual(await apiTags(page, 'tagged/plain-0001.txt'), []);
   await deletePrefix(page, 'seaweedfs-main', 'tagged/');
+  await page.context().close();
+});
+
+// ------------------------------------------------------------------------------------------------------------------
+// 2d. Listing: columns, settings, icon buttons
+// ------------------------------------------------------------------------------------------------------------------
+
+test('listing: the columns are Name, Tags, Versions, Size and Modified, with the clock at the left of Modified', async () => {
+  const page = await newPage();
+  await open(page, `${MAIN}config/`);
+  await page.click('#settingsButton');
+  await page.check('[data-column="tags"]');
+  await page.waitForSelector('tr[data-name="ingest.json"] .tagChip');
+  const heads = await page.locator('thead th').evaluateAll(nodes => nodes.filter(node => node.offsetParent !== null).map(node => node.textContent.replace(/\s+/g, ' ').trim()));
+  assert.deepEqual(heads.slice(0, 5), ['Name', 'Tags', 'Versions', 'Size', 'Modified']);
+  const boxes = await page.evaluate(() => {
+    const left = selector => document.querySelector(selector).getBoundingClientRect().left;
+    return { tags: left('th.col-tags'), versions: left('th.col-versions'), size: left('th.col-size'), modified: left('th.col-modified'),
+      clockRight: document.querySelector('.timeToggle').getBoundingClientRect().right, sortLeft: document.querySelector('th.col-modified .sortHead').getBoundingClientRect().left };
+  });
+  assert.ok(boxes.tags < boxes.versions && boxes.versions < boxes.size && boxes.size < boxes.modified, JSON.stringify(boxes));
+  assert.ok(boxes.clockRight <= boxes.sortLeft, `the clock at the left of Modified: ${JSON.stringify(boxes)}`);
+  // The column Versions has the count of versions of a file; a folder has none.
+  await until(page, () => /^\d+$/.test(document.querySelector('tr[data-name="ingest.json"] .col-versions')?.textContent.trim() || ''));
+  assert.equal((await page.textContent('tr[data-name="app.yaml"] .col-versions')).trim().length > 0, true);
+  assert.equal(await page.locator('tr[data-name="ingest.json"] .nameCell .versionCount').count(), 0);
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+test('listing: the settings and the reload are icons with no frame, and their colour changes under the pointer', async () => {
+  const page = await newPage();
+  await open(page, MAIN);
+  const order = await page.evaluate(() => ['#searchForm', '#settingsButton', '#refreshButton', '#actionsButton'].map(selector => document.querySelector(selector).getBoundingClientRect().left));
+  assert.deepEqual([...order].sort((a, b) => a - b), order, `search, settings, reload, Actions: ${order}`);
+  for (const selector of ['#settingsButton', '#refreshButton']) {
+    const look = () => page.locator(selector).evaluate(node => { const style = getComputedStyle(node); return { color: style.color, background: style.backgroundColor, border: style.borderTopWidth }; });
+    const rest = await look();
+    assert.equal(rest.background, 'rgba(0, 0, 0, 0)', selector);
+    assert.equal(rest.border, '0px', selector);
+    await page.hover(selector);
+    await until(page, (arg) => getComputedStyle(document.querySelector(arg.selector)).color !== arg.color, { selector, color: rest.color });
+    const hover = await look();
+    assert.equal(hover.background, 'rgba(0, 0, 0, 0)', selector);
+    assert.equal(hover.border, '0px', selector);
+    await page.mouse.move(5, 400);
+  }
+  await page.context().close();
+});
+
+test('listing: the settings unfold, choose the columns, stay in the browser and reset', async () => {
+  const page = await newPage();
+  await open(page, MAIN);
+  const height = () => page.locator('#listSettings').evaluate(node => node.getBoundingClientRect().height);
+  assert.equal(await height(), 0);
+  assert.equal(await page.getAttribute('#settingsButton', 'aria-expanded'), 'false');
+  await page.click('#settingsButton');
+  assert.equal(await page.getAttribute('#settingsButton', 'aria-expanded'), 'true');
+  await until(page, () => document.querySelector('#listSettings').getBoundingClientRect().height > 20);
+  assert.deepEqual(await page.locator('#listSettings [data-column]').evaluateAll(nodes => nodes.map(node => `${node.dataset.column}:${node.checked}:${node.disabled}`)),
+    ['name:true:true', 'tags:false:false', 'versions:true:false', 'size:true:false', 'modified:true:false']);
+  await page.uncheck('[data-column="size"]');
+  await page.uncheck('[data-column="modified"]');
+  assert.equal(await page.locator('th.col-size').isVisible(), false);
+  assert.equal(await page.locator('th.col-modified').isVisible(), false);
+  assert.equal(await page.locator('td.col-size').first().isVisible(), false);
+  // The choice stays after a reload.
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.waitForSelector('.dataTable');
+  assert.equal(await page.locator('th.col-size').isVisible(), false);
+  assert.equal(await page.locator('th.col-modified').isVisible(), false);
+  assert.equal(await height(), 0);
+  await page.click('#settingsButton');
+  assert.equal(await page.isChecked('[data-column="size"]'), false);
+  await page.click('#settingsReset');
+  assert.equal(await page.locator('th.col-size').isVisible(), true);
+  assert.equal(await page.locator('th.col-modified').isVisible(), true);
+  // The panel folds again.
+  await page.click('#settingsButton');
+  await until(page, () => document.querySelector('#listSettings').getBoundingClientRect().height === 0);
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+test('listing: the menu Actions has no item of bucket permissions (the button at the left of the selector has them)', async () => {
+  const page = await newPage();
+  await open(page, MAIN);
+  await page.click('#actionsButton');
+  const items = (await page.locator('#actionsMenu .menu__item').allInnerTexts()).map(item => item.trim());
+  assert.ok(items.length >= 2, `items: ${items}`);
+  assert.ok(!items.some(item => /permission/i.test(item)), `items: ${items}`);
+  assert.equal(await page.locator('#accessItem').count(), 0);
+  assert.equal(await page.locator('#tagsItem').count(), 0);
   await page.context().close();
 });
 

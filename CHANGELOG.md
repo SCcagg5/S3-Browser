@@ -31,8 +31,12 @@ This document uses ASD-STE100 Simplified Technical English.
 - The test interface `portal` shows the display name of a bucket only. The permissions of the bucket are in a button at
   the left of the selector. The crumbs start with the mark of the bucket and a slash.
 - The details of a file show its tags. The person can add, remove and save them. The details tell which lifecycle rules
-  apply to the object. The menu Actions has "Show tags": a tag column and a filter for the files of the page. A folder
-  has the action "Tag objects". The menu Upload has "Tags of the new uploads".
+  apply to the object. A folder has the action "Tag objects".
+- The listing has the columns Name, Tags, Versions, Size and Modified. The count of versions is a column now, not a badge
+  at the name. The clock that shows the exact times is at the left of Modified.
+- The gear at the right of the search field unfolds the settings of the listing: the columns to show, the filter by
+  tag and the tags of the new uploads. The browser keeps the choice. The reload is an icon with no frame, as the gear.
+- The menu Actions has no item "Bucket permissions" any more: the button at the left of the bucket selector has them.
 - A JSON file that fits in one page shows its totals at once and has no button to count lines and pages. The root of
   the JSON tree stays open.
 

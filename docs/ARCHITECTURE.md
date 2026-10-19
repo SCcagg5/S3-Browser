@@ -91,7 +91,7 @@ An upload can carry tags. A direct upload takes the header `X-Amz-Tagging` (a qu
 
 `GET /api/lifecycle` gives the lifecycle rules of the bucket in read-only form. A bucket without rules gives an empty list. The details of a file use the rules to tell what happens to the object, also for tags that the person did not save yet.
 
-The listing of the provider does not give tags, and S3 has no request that lists objects by tag. The tag column reads the tags of the files on the page. It reads 4 files at the same time and at most 100. The tag filter hides rows of this page only.
+The listing of the provider does not give tags, and S3 has no request that lists objects by tag. The tag column and the tag filter read the tags of the files on the page. They are in the settings of the listing, behind the gear. They read 4 files at the same time and at most 100. The tag filter hides rows of this page only.
 
 ## Background jobs
 
