@@ -6,6 +6,19 @@
   if (!BB.detect) throw new Error('BB.detect is required before BB.api');
 
   const RESUMABLE_UPLOAD_THRESHOLD = 32 * 1024 * 1024;
+
+  // SHA-256 of the bytes of an upload, in base64: the server sends it to the provider, which refuses other bytes.
+  // The browser has crypto.subtle only on a secure page (HTTPS or localhost): elsewhere the upload has no checksum.
+  function canChecksum() {
+    return typeof crypto !== 'undefined' && !!crypto.subtle && typeof Blob.prototype.arrayBuffer === 'function';
+  }
+
+  async function sha256Base64(blob) {
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()));
+    let binary = '';
+    for (const byte of digest) binary += String.fromCharCode(byte);
+    return btoa(binary);
+  }
   let instanceId = '';
   const instanceRoutes = new Map();
 
@@ -124,7 +137,8 @@
     headers = {},
     body = null,
     signal = null,
-    onUploadProgress = null
+    onUploadProgress = null,
+    onResponseHeaders = null
   } = {}) {
     return new Promise((resolve, reject) => {
       if (signal?.aborted) {
@@ -162,6 +176,7 @@
           fail(xhrFailure(xhr));
           return;
         }
+        if (typeof onResponseHeaders === 'function') onResponseHeaders(name => xhr.getResponseHeader(name));
         const text = String(xhr.responseText || '').trim();
         if (!text) {
           succeed(null);
@@ -609,11 +624,15 @@
       let speedBps = 0;
       let previousBytes = 0;
       let previousAt = startedAt;
+      const putHeaders = { 'Content-Type': mime || 'application/octet-stream' };
+      if (canChecksum()) putHeaders['X-Checksum-Sha256'] = await sha256Base64(blob);
+      let checksumVerified = false;
       await xhrRequest(this.urlForKey(key, options.instance), {
         method: 'PUT',
-        headers: { 'Content-Type': mime || 'application/octet-stream' },
+        headers: putHeaders,
         body: blob,
         signal,
+        onResponseHeaders(header) { checksumVerified = header('X-Checksum-Sha256-Verified') === 'true'; },
         onUploadProgress(event) {
           const now = Date.now();
           const uploadedBytes = Math.min(blob.size, Number(event.loaded || 0));
@@ -637,7 +656,7 @@
           });
         }
       });
-      const result = { status: 'completed', uploadedBytes: blob.size, totalSize: blob.size };
+      const result = { status: 'completed', uploadedBytes: blob.size, totalSize: blob.size, checksumVerified };
       onProgress({
         ...result,
         phase: 'completed',
@@ -659,7 +678,8 @@
           instance: targetInstance,
           key,
           size,
-          contentType: contentType || 'application/octet-stream'
+          contentType: contentType || 'application/octet-stream',
+          checksum: canChecksum() ? 'sha256' : ''
         }),
         signal: options.signal || null
       });
@@ -687,7 +707,8 @@
         headers: {
           'Content-Type': 'application/octet-stream',
           'Content-Range': `bytes ${start}-${end}/${total}`,
-          'X-S3-Browser-Resume-Token': resumeToken
+          'X-S3-Browser-Resume-Token': resumeToken,
+          ...(options.checksum ? { 'X-Checksum-Sha256': options.checksum } : {})
         },
         body: blob,
         signal: options.signal || null,
@@ -784,6 +805,8 @@
         selectedChunkSize = adaptiveUploadChunkSize(upload, selectedChunkSize, speedBps);
         const end = Math.min(blob.size, start + selectedChunkSize);
         const chunk = blob.slice(start, end);
+        const chunkChecksum = upload.checksum === 'sha256' && canChecksum() ? await sha256Base64(chunk) : '';
+        if (upload.checksum === 'sha256' && !chunkChecksum) throw new Error('This page cannot compute the SHA-256 checksum that the upload needs.');
         const chunkStartedAt = Date.now();
         let attempt = 0;
 
@@ -791,6 +814,7 @@
           try {
             upload = await this.uploadChunk(upload.resumeToken, chunk, start, blob.size, {
               signal,
+              checksum: chunkChecksum,
               onProgress: event => emit(start + Math.min(chunk.size, Number(event.loaded || 0)), { phase: 'uploading' })
             });
             storeUpload(storageKey, upload.resumeToken || storedToken || '');

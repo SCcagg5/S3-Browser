@@ -61,6 +61,24 @@ The process tracks at most four active upload sessions. Completed and canceled s
 
 The browser currently keeps active tokens in page memory. An API client may retain the opaque token outside the server and submit it to `/api/uploads/resume` after a server restart.
 
+## Upload checksums
+
+An S3 upload can carry a SHA-256 checksum. The GCS provider does not use it.
+
+The browser computes the SHA-256 digest of each chunk with `crypto.subtle`. A page that is not secure has no `crypto.subtle`. A page is secure with HTTPS or on `localhost`. Such a page sends no checksum.
+
+The request `POST /api/uploads` has the field `checksum`. The value is `""` or `"sha256"`. The answer shows the value that the server accepts. With `sha256`, the server starts the multipart upload with `x-amz-checksum-algorithm: SHA256`.
+
+Each chunk of such an upload needs the header `X-Checksum-Sha256`. The value is the base64 digest of the chunk. A chunk without this header gets `400 checksum_required`. A value that is not a 32-byte digest gets `400 invalid_checksum`.
+
+The server sends the digest to the provider in `x-amz-checksum-sha256`. The provider refuses a part with other bytes. At the end, the server sends the digest of each part in `CompleteMultipartUpload`.
+
+The answer has the field `checksumVerified`. It is `true` when the provider returned the digest of each part. The server also reads the checksum of the object. This checksum is the SHA-256 of the part digests. S3 writes it as `<digest>-<number of parts>`. Garage writes the digest only. A different value makes the upload fail.
+
+A direct upload (`PUT /s3`) accepts the same header. The browser uses it for a file under 32 MiB. The answer has `X-Checksum-Sha256-Verified: true` when the provider returned the same digest. A provider that does not store checksums gives no confirmation. The upload still succeeds.
+
+The resume token keeps the algorithm. After a restart, the server reads the digest of each part from the list of parts of the provider.
+
 ## Background jobs
 
 Jobs are memory-only and use two workers. The manager admits no more than four active or queued jobs. Terminal results are retained only up to `job_history_limit`.
@@ -75,6 +93,9 @@ Supported job types are limited to operations that can stream with bounded memor
 
 Insights uses a 100 ms synchronous fast path. A fresh completed result can be reused for 30 seconds. Longer work continues in memory and can be paused, resumed, or canceled while the process remains alive.
 
+A job that deletes a prefix deletes the objects in batches of 1000 keys. It uses `DeleteObjects` of S3. The same applies to the deletion of the sources in a move of a prefix. The job counts a batch only after the provider deleted it. After a pause or a stop, the job continues after the last deleted key.
+
+A provider that refuses `DeleteObjects` with `501` or `405` gets one request for each key. The server remembers this refusal. A key with a character that XML cannot carry always gets its own request. The GCS provider has no batch delete.
 
 ## Insights treemap normalization
 

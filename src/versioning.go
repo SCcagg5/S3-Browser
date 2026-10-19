@@ -33,9 +33,10 @@ type objectVersionPage struct {
 }
 
 type multipartPart struct {
-	PartNumber int
-	ETag       string
-	Size       int64
+	PartNumber     int
+	ETag           string
+	Size           int64
+	ChecksumSHA256 string
 }
 
 type ObjectVersionStore interface {

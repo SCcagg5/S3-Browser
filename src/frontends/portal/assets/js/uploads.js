@@ -138,6 +138,7 @@
         running: new Set(),
         failed: [],
         doneCount: 0,
+        checksumCount: 0,
         canceledCount: 0,
         totalBytes: 0,
         doneBytes: 0,
@@ -240,7 +241,7 @@
       current.running.add(entry);
       schedule();
       try {
-        await BB.api.uploadBlob(entry.key, entry.file, entry.file.type || 'application/octet-stream', {
+        const result = await BB.api.uploadBlob(entry.key, entry.file, entry.file.type || 'application/octet-stream', {
           instance: current.destination.instanceId,
           lastModified: entry.file.lastModified,
           signal: entry.controller.signal,
@@ -252,6 +253,7 @@
         });
         entry.status = 'done';
         entry.uploadedBytes = entry.size;
+        if (result?.checksumVerified === true) current.checksumCount += 1;
         current.doneCount += 1;
         current.doneBytes += entry.size;
         onFileDone(entry, current.destination);
@@ -616,6 +618,7 @@
       view.summary.hidden = !ended;
       if (ended) {
         const parts = [`${count(current.doneCount, 'file')} uploaded (${formatBytes(current.doneBytes)})`];
+        if (current.checksumCount) parts.push(`${current.checksumCount.toLocaleString('en-US')} checked with SHA-256`);
         if (current.failed.length) parts.push(`${current.failed.length.toLocaleString('en-US')} failed`);
         if (current.canceledCount) parts.push(`${current.canceledCount.toLocaleString('en-US')} canceled`);
         setText(view.summary, `${parts.join(', ')}.`);

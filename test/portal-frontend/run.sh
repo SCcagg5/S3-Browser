@@ -33,11 +33,13 @@ else
   install="[ -d /deps/node_modules/playwright ] || npm install --prefix /deps --no-save --no-audit --no-fund --loglevel=error playwright@$PLAYWRIGHT_VERSION >/dev/null"
 fi
 
+# The test container shares the network of the server: the page opens at localhost, a secure origin, so that the
+# browser has crypto.subtle (the SHA-256 checksum of the uploads).
 docker run --rm \
-  --network "${PROJECT}_default" \
+  --network "container:$(compose ps -q browser)" \
   -e HOME=/tmp \
   -e NODE_PATH=/deps/node_modules \
-  -e BASE=http://browser:8080/ \
+  -e BASE=http://localhost:8080/ \
   -e ONLY="${ONLY:-}" \
   -v "$DIR:/tests:ro" \
   -v "$modules" \

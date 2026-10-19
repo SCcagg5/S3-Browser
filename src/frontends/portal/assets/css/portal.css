@@ -567,9 +567,11 @@ html[data-theme-mode="light"] .themeSelect__current > .themeIcon--light {
   border-color: transparent;
   background: transparent;
   color: var(--muted);
+  transition: color var(--dur-quick) var(--ease);
 }
 
-.button.permButton:hover,
+.button.permButton:not(:disabled):hover,
+.button.permButton:not(:disabled):active,
 .button.permButton:focus-visible {
   border-color: transparent;
   background: transparent;

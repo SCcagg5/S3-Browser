@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -61,6 +62,10 @@ type uploadPartState struct {
 	PartNumber int    `json:"part_number"`
 	ETag       string `json:"etag"`
 	Size       int64  `json:"size"`
+	// ChecksumSHA256 is the base64 digest of the part, when the upload has the SHA-256 checksum.
+	ChecksumSHA256 string `json:"checksum_sha256,omitempty"`
+	// ChecksumStored is true when the provider answered with the same digest: it checked the bytes of the part.
+	ChecksumStored bool `json:"checksum_stored,omitempty"`
 }
 
 type uploadSession struct {
@@ -81,51 +86,59 @@ type uploadSession struct {
 	UpdatedAt        time.Time         `json:"updated_at"`
 	CompletedAt      *time.Time        `json:"completed_at,omitempty"`
 	Verified         bool              `json:"verified,omitempty"`
-	ResumeToken      string            `json:"-"`
+	// Checksum is "sha256" when each chunk of the upload carries its SHA-256 digest, and empty otherwise.
+	Checksum string `json:"checksum,omitempty"`
+	// ChecksumVerified is true when the provider confirmed the digest of every part.
+	ChecksumVerified bool   `json:"checksum_verified,omitempty"`
+	ResumeToken      string `json:"-"`
 	// lastActivity moves only on creation and real progress, so status polls
 	// cannot keep an abandoned session alive.
 	lastActivity time.Time
 }
 
 type publicUpload struct {
-	ID            string     `json:"id"`
-	Instance      string     `json:"instance"`
-	Key           string     `json:"key"`
-	Provider      string     `json:"provider"`
-	Status        string     `json:"status"`
-	ContentType   string     `json:"contentType"`
-	TotalSize     int64      `json:"totalSize"`
-	UploadedBytes int64      `json:"uploadedBytes"`
-	NextOffset    int64      `json:"nextOffset"`
-	ChunkSize     int64      `json:"chunkSize"`
-	PartCount     int        `json:"partCount,omitempty"`
-	Error         string     `json:"error,omitempty"`
-	CreatedAt     time.Time  `json:"createdAt"`
-	UpdatedAt     time.Time  `json:"updatedAt"`
-	CompletedAt   *time.Time `json:"completedAt,omitempty"`
-	Verified      bool       `json:"verified,omitempty"`
-	ResumeToken   string     `json:"resumeToken,omitempty"`
+	ID               string     `json:"id"`
+	Instance         string     `json:"instance"`
+	Key              string     `json:"key"`
+	Provider         string     `json:"provider"`
+	Status           string     `json:"status"`
+	ContentType      string     `json:"contentType"`
+	TotalSize        int64      `json:"totalSize"`
+	UploadedBytes    int64      `json:"uploadedBytes"`
+	NextOffset       int64      `json:"nextOffset"`
+	ChunkSize        int64      `json:"chunkSize"`
+	PartCount        int        `json:"partCount,omitempty"`
+	Error            string     `json:"error,omitempty"`
+	CreatedAt        time.Time  `json:"createdAt"`
+	UpdatedAt        time.Time  `json:"updatedAt"`
+	CompletedAt      *time.Time `json:"completedAt,omitempty"`
+	Verified         bool       `json:"verified,omitempty"`
+	Checksum         string     `json:"checksum,omitempty"`
+	ChecksumVerified bool       `json:"checksumVerified,omitempty"`
+	ResumeToken      string     `json:"resumeToken,omitempty"`
 }
 
 func (u uploadSession) public() publicUpload {
 	return publicUpload{
-		ID:            u.ID,
-		Instance:      u.Instance,
-		Key:           u.Key,
-		Provider:      u.Provider,
-		Status:        u.Status,
-		ContentType:   u.ContentType,
-		TotalSize:     u.TotalSize,
-		UploadedBytes: u.UploadedBytes,
-		NextOffset:    u.UploadedBytes,
-		ChunkSize:     u.ChunkSize,
-		PartCount:     len(u.Parts),
-		Error:         u.Error,
-		CreatedAt:     u.CreatedAt,
-		UpdatedAt:     u.UpdatedAt,
-		CompletedAt:   cloneTimePointer(u.CompletedAt),
-		Verified:      u.Verified,
-		ResumeToken:   u.ResumeToken,
+		ID:               u.ID,
+		Instance:         u.Instance,
+		Key:              u.Key,
+		Provider:         u.Provider,
+		Status:           u.Status,
+		ContentType:      u.ContentType,
+		TotalSize:        u.TotalSize,
+		UploadedBytes:    u.UploadedBytes,
+		NextOffset:       u.UploadedBytes,
+		ChunkSize:        u.ChunkSize,
+		PartCount:        len(u.Parts),
+		Error:            u.Error,
+		CreatedAt:        u.CreatedAt,
+		UpdatedAt:        u.UpdatedAt,
+		CompletedAt:      cloneTimePointer(u.CompletedAt),
+		Verified:         u.Verified,
+		Checksum:         u.Checksum,
+		ChecksumVerified: u.ChecksumVerified,
+		ResumeToken:      u.ResumeToken,
 	}
 }
 
@@ -332,6 +345,53 @@ type createUploadRequest struct {
 	Key         string `json:"key"`
 	Size        int64  `json:"size"`
 	ContentType string `json:"contentType"`
+	// Checksum is "" or "sha256". With "sha256" the client sends the SHA-256 digest of each chunk in X-Checksum-Sha256.
+	Checksum string `json:"checksum"`
+}
+
+const (
+	uploadChecksumSHA256 = "sha256"
+	checksumHeader       = "X-Checksum-Sha256"
+)
+
+// parseChecksumHeader reads the base64 SHA-256 digest of a request body. An empty header gives an empty value.
+func parseChecksumHeader(header http.Header) (string, error) {
+	value := strings.TrimSpace(header.Get(checksumHeader))
+	if value == "" {
+		return "", nil
+	}
+	raw, err := base64.StdEncoding.DecodeString(value)
+	if err != nil || len(raw) != sha256.Size {
+		return "", apiError{Status: http.StatusBadRequest, Code: "invalid_checksum", Message: checksumHeader + " must be the base64 encoding of a 32-byte SHA-256 digest"}
+	}
+	return value, nil
+}
+
+// compositeChecksum is the SHA-256 checksum that S3 reports for a multipart object: the SHA-256 of the part digests
+// (base64), and the number of parts.
+func compositeChecksum(parts []uploadPartState) (string, int, error) {
+	hash := sha256.New()
+	for _, part := range parts {
+		raw, err := base64.StdEncoding.DecodeString(part.ChecksumSHA256)
+		if err != nil || len(raw) != sha256.Size {
+			return "", 0, fmt.Errorf("part %d has no valid SHA-256 digest", part.PartNumber)
+		}
+		hash.Write(raw)
+	}
+	return base64.StdEncoding.EncodeToString(hash.Sum(nil)), len(parts), nil
+}
+
+// sameCompositeChecksum compares the checksum that the provider reports with the one of the parts. S3 writes it as
+// "<digest>-<number of parts>"; other providers write the digest only.
+func sameCompositeChecksum(reported, digest string, count int) bool {
+	reported = strings.TrimSpace(reported)
+	if dash := strings.LastIndexByte(reported, '-'); dash >= 0 {
+		if reported[dash+1:] != strconv.Itoa(count) {
+			return false
+		}
+		reported = reported[:dash]
+	}
+	return reported == digest
 }
 
 func (m *uploadManager) create(ctx context.Context, request createUploadRequest) (uploadSession, error) {
@@ -356,6 +416,9 @@ func (m *uploadManager) create(ctx context.Context, request createUploadRequest)
 	contentType := strings.TrimSpace(request.ContentType)
 	if contentType == "" {
 		contentType = "application/octet-stream"
+	}
+	if request.Checksum != "" && request.Checksum != uploadChecksumSHA256 {
+		return uploadSession{}, apiError{Status: http.StatusBadRequest, Code: "invalid_checksum", Message: `checksum must be "" or "sha256"`}
 	}
 	now := time.Now().UTC()
 	upload := uploadSession{
@@ -388,7 +451,12 @@ func (m *uploadManager) create(ctx context.Context, request createUploadRequest)
 
 	switch instance.cfg.Provider {
 	case "s3":
-		uploadID, err := instance.InitiateMultipart(ctx, fullKey, contentType)
+		initiate := ctx
+		if request.Checksum == uploadChecksumSHA256 {
+			initiate = withChecksumAlgorithm(ctx)
+			upload.Checksum = uploadChecksumSHA256
+		}
+		uploadID, err := instance.InitiateMultipart(initiate, fullKey, contentType)
 		if err != nil {
 			return uploadSession{}, err
 		}
@@ -441,6 +509,7 @@ func (m *uploadManager) resume(ctx context.Context, token string) (uploadSession
 		ID: id, Instance: descriptor.Instance, Key: descriptor.Key, Provider: descriptor.Provider,
 		Status: uploadStatusUploading, ContentType: descriptor.ContentType, TotalSize: descriptor.TotalSize,
 		ChunkSize: descriptor.ChunkSize, ProviderUploadID: descriptor.ProviderUploadID, SessionURL: descriptor.SessionURL,
+		Checksum:  descriptor.Checksum,
 		CreatedAt: time.Unix(descriptor.IssuedAt, 0).UTC(), UpdatedAt: now, ResumeToken: token,
 	}
 	if upload.ChunkSize <= 0 {
@@ -568,14 +637,32 @@ func (m *uploadManager) uploadChunk(ctx context.Context, id string, request *htt
 		if partNumber > maximumS3Parts {
 			return uploadSession{}, apiError{Status: http.StatusBadRequest, Code: "too_many_parts", Message: "S3 multipart uploads cannot exceed 10000 parts"}
 		}
-		etag, err := instance.UploadPart(ctx, instance.fullKey(upload.Key), upload.ProviderUploadID, partNumber, body, size)
+		partCtx := ctx
+		var transfer *checksumTransfer
+		if upload.Checksum == uploadChecksumSHA256 {
+			digest, err := parseChecksumHeader(request.Header)
+			if err != nil {
+				return uploadSession{}, err
+			}
+			if digest == "" {
+				return uploadSession{}, apiError{Status: http.StatusBadRequest, Code: "checksum_required", Message: checksumHeader + " is required for each chunk of this upload"}
+			}
+			transfer = &checksumTransfer{SHA256: digest}
+			partCtx = withChecksumTransfer(ctx, transfer)
+		}
+		etag, err := instance.UploadPart(partCtx, instance.fullKey(upload.Key), upload.ProviderUploadID, partNumber, body, size)
 		if err != nil {
 			upload.Error = publicStorageError(err)
 			upload.UpdatedAt = time.Now().UTC()
 			_ = m.put(upload)
 			return uploadSession{}, err
 		}
-		upload.Parts = append(upload.Parts, uploadPartState{PartNumber: partNumber, ETag: etag, Size: size})
+		part := uploadPartState{PartNumber: partNumber, ETag: etag, Size: size}
+		if transfer != nil {
+			part.ChecksumSHA256 = transfer.SHA256
+			part.ChecksumStored = transfer.Echoed == transfer.SHA256
+		}
+		upload.Parts = append(upload.Parts, part)
 		upload.UploadedBytes = end + 1
 		upload.UpdatedAt = time.Now().UTC()
 		if err := m.put(upload); err != nil {
@@ -619,7 +706,7 @@ func (m *uploadManager) uploadChunk(ctx context.Context, id string, request *htt
 func (m *uploadManager) completeS3(ctx context.Context, instance *storageInstance, upload *uploadSession) error {
 	parts := make([]s3CompletedPart, 0, len(upload.Parts))
 	for _, part := range upload.Parts {
-		parts = append(parts, s3CompletedPart{PartNumber: part.PartNumber, ETag: part.ETag})
+		parts = append(parts, s3CompletedPart{PartNumber: part.PartNumber, ETag: part.ETag, ChecksumSHA256: part.ChecksumSHA256})
 	}
 	if err := instance.CompleteMultipart(ctx, instance.fullKey(upload.Key), upload.ProviderUploadID, parts); err != nil {
 		upload.Error = publicStorageError(err)
@@ -652,7 +739,13 @@ func (m *uploadManager) synchronizeS3Parts(ctx context.Context, instance *storag
 		if part.PartNumber != index+1 || part.Size <= 0 || strings.TrimSpace(part.ETag) == "" {
 			return fmt.Errorf("s3 multipart upload contains a non-contiguous or invalid part sequence")
 		}
-		state = append(state, uploadPartState{PartNumber: part.PartNumber, ETag: part.ETag, Size: part.Size})
+		item := uploadPartState{PartNumber: part.PartNumber, ETag: part.ETag, Size: part.Size}
+		if upload.Checksum == uploadChecksumSHA256 {
+			// The provider lists the digest of each stored part: it is what it checked.
+			item.ChecksumSHA256 = part.ChecksumSHA256
+			item.ChecksumStored = part.ChecksumSHA256 != ""
+		}
+		state = append(state, item)
 		uploaded += part.Size
 	}
 	if uploaded > upload.TotalSize {
@@ -688,8 +781,41 @@ func (m *uploadManager) verifyCompletedObject(ctx context.Context, instance *sto
 		_ = m.put(*upload)
 		return fmt.Errorf("completed upload size verification failed")
 	}
+	if upload.Checksum == uploadChecksumSHA256 {
+		if err := verifyUploadChecksum(response.Header, upload); err != nil {
+			upload.Error = err.Error()
+			upload.Verified = false
+			upload.ChecksumVerified = false
+			upload.UpdatedAt = time.Now().UTC()
+			_ = m.put(*upload)
+			return err
+		}
+	}
 	upload.Verified = true
 	upload.Error = ""
+	return nil
+}
+
+// verifyUploadChecksum sets ChecksumVerified when the provider stored the digest of every part. When the provider also
+// reports the checksum of the whole object, it must be the one that the digests of the parts give.
+func verifyUploadChecksum(header http.Header, upload *uploadSession) error {
+	upload.ChecksumVerified = false
+	if len(upload.Parts) == 0 {
+		return nil
+	}
+	for _, part := range upload.Parts {
+		if !part.ChecksumStored {
+			return nil
+		}
+	}
+	digest, count, err := compositeChecksum(upload.Parts)
+	if err != nil {
+		return nil
+	}
+	if reported := strings.TrimSpace(header.Get("x-amz-checksum-sha256")); reported != "" && !sameCompositeChecksum(reported, digest, count) {
+		return fmt.Errorf("the upload completed but the SHA-256 checksum of the provider (%s) is not the one of the uploaded parts (%s-%d)", reported, digest, count)
+	}
+	upload.ChecksumVerified = true
 	return nil
 }
 

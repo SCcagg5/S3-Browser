@@ -470,6 +470,7 @@ test('selector: an icon button at the left of the selector opens the permissions
   assert.equal(rest.background, 'rgba(0, 0, 0, 0)');
   assert.equal(rest.border, 'rgba(0, 0, 0, 0)');
   await page.hover('#permButton');
+  await until(page, previous => getComputedStyle(document.querySelector('#permButton')).color !== previous, rest.color);
   const hover = await look();
   assert.notEqual(hover.color, rest.color);
   assert.equal(hover.background, 'rgba(0, 0, 0, 0)');
@@ -547,7 +548,7 @@ test('upload: 300 files, bounded concurrency and rendering, progress, summary', 
   await page.waitForSelector('.uploadDock[data-state="done"]', { timeout: 120000 });
   assert.ok(puts.max <= 4, `PUT requests at the same time: ${puts.max}`);
   assert.equal(puts.total, 300);
-  assert.match(await page.textContent('.uploadDock .summary'), /^300 files uploaded \([\d.]+ KB\)\.$/);
+  assert.match(await page.textContent('.uploadDock .summary'), /^300 files uploaded \([\d.]+ KB\), 300 checked with SHA-256\.$/);
   assert.equal(await page.textContent('[data-stat="files"]'), '300 / 300');
   assert.ok((await page.locator('.uploadDock li').count()) <= 4);
   assert.equal((await listKeys(page, 'garage-main', 'bulk/')).length, 300);
@@ -557,6 +558,35 @@ test('upload: 300 files, bounded concurrency and rendering, progress, summary', 
   assert.equal(await page.isHidden('#uploadDock'), true);
   assert.deepEqual(page.errors, []);
   await deletePrefix(page, 'garage-main', 'bulk/');
+  await page.context().close();
+});
+
+test('upload: a page without crypto.subtle uploads with no checksum', async () => {
+  const page = await newPage();
+  await page.addInitScript(() => { Object.defineProperty(window, 'crypto', { value: { getRandomValues: crypto.getRandomValues.bind(crypto), randomUUID: crypto.randomUUID?.bind(crypto) } }); });
+  await deletePrefix(page, 'garage-main', 'nosum/');
+  await open(page, `${MAIN}nosum/`);
+  await page.setInputFiles('#fileInput', files(3, 'nosum'));
+  await page.waitForSelector('.uploadDock[data-state="done"]', { timeout: 60000 });
+  assert.match(await page.textContent('.uploadDock .summary'), /^3 files uploaded \([\d.]+ KB\)\.$/);
+  assert.equal((await listKeys(page, 'garage-main', 'nosum/')).length, 3);
+  await deletePrefix(page, 'garage-main', 'nosum/');
+  await page.context().close();
+});
+
+test('upload: a large file goes in parts, each part carries its SHA-256, and the provider confirms them', async () => {
+  const page = await newPage();
+  await deletePrefix(page, 'garage-main', 'sum/');
+  await open(page, `${MAIN}sum/`);
+  const requests = [];
+  page.on('request', request => { if (request.method() === 'PUT' && request.url().includes('/api/uploads')) requests.push(request.headers()['x-checksum-sha256'] || ''); });
+  await page.setInputFiles('#fileInput', [{ name: 'large.bin', mimeType: 'application/octet-stream', buffer: Buffer.alloc(33 * 1024 * 1024, 7) }]);
+  await page.waitForSelector('.uploadDock[data-state="done"]', { timeout: 120000 });
+  assert.match(await page.textContent('.uploadDock .summary'), /^1 file uploaded \([\d.]+ MB\), 1 checked with SHA-256\.$/);
+  assert.ok(requests.length >= 2, `chunks: ${requests.length}`);
+  assert.ok(requests.every(value => /^[A-Za-z0-9+/]{43}=$/.test(value)), `every chunk has a digest: ${requests}`);
+  assert.equal((await listKeys(page, 'garage-main', 'sum/')).length, 1);
+  await deletePrefix(page, 'garage-main', 'sum/');
   await page.context().close();
 });
 
@@ -581,7 +611,7 @@ test('upload: failed files with their reasons, bounded list, then "Retry failed"
   assert.equal(await page.textContent('.fileList--failed li:first-child .fileList__reason'), 'Not allowed: objects.write (403).');
   const reasons = await page.locator('.fileList--failed .fileList__reason').allInnerTexts();
   assert.ok(reasons.every(reason => reason.length > 0));
-  assert.match(await page.textContent('.uploadDock .summary'), /^40 files uploaded \([\d.]+ KB\), 60 failed\.$/);
+  assert.match(await page.textContent('.uploadDock .summary'), /^40 files uploaded \([\d.]+ KB\), 40 checked with SHA-256, 60 failed\.$/);
   refuse = false;
   await page.click('.uploadDock .button >> text=Retry failed');
   await page.waitForSelector('.uploadDock[data-state="done"]', { timeout: 60000 });

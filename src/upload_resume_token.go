@@ -28,6 +28,7 @@ type uploadResumeDescriptor struct {
 	ChunkSize        int64  `json:"cs"`
 	ProviderUploadID string `json:"u,omitempty"`
 	SessionURL       string `json:"r,omitempty"`
+	Checksum         string `json:"ck,omitempty"`
 	IssuedAt         int64  `json:"iat"`
 	ExpiresAt        int64  `json:"exp"`
 }
@@ -65,7 +66,7 @@ func (a *application) sealUploadResumeToken(instance *storageInstance, upload up
 	descriptor := uploadResumeDescriptor{
 		Instance: instance.cfg.ID, Key: upload.Key, Provider: upload.Provider,
 		ContentType: upload.ContentType, TotalSize: upload.TotalSize, ChunkSize: upload.ChunkSize,
-		ProviderUploadID: upload.ProviderUploadID, SessionURL: upload.SessionURL,
+		ProviderUploadID: upload.ProviderUploadID, SessionURL: upload.SessionURL, Checksum: upload.Checksum,
 		IssuedAt: issuedAt.Unix(), ExpiresAt: issuedAt.Add(30 * 24 * time.Hour).Unix(),
 	}
 	plain, err := json.Marshal(descriptor)

@@ -20,6 +20,52 @@ import (
 	"time"
 )
 
+// checksumTransfer carries the SHA-256 that the client computed for a request body to the S3 backend, and brings back
+// what the provider answered. The context carries it, so the storage interfaces keep their signatures.
+type checksumTransfer struct {
+	// SHA256 is the base64 digest of the body. The backend sends it as x-amz-checksum-sha256: the provider refuses a body
+	// with another digest.
+	SHA256 string
+	// Echoed is x-amz-checksum-sha256 of the response. It stays empty when the provider does not store checksums.
+	Echoed string
+}
+
+type checksumTransferKey struct{}
+type checksumAlgorithmKey struct{}
+
+func withChecksumTransfer(ctx context.Context, transfer *checksumTransfer) context.Context {
+	return context.WithValue(ctx, checksumTransferKey{}, transfer)
+}
+
+func checksumTransferFrom(ctx context.Context) *checksumTransfer {
+	transfer, _ := ctx.Value(checksumTransferKey{}).(*checksumTransfer)
+	return transfer
+}
+
+// withChecksumAlgorithm asks the next multipart initiation for the SHA-256 checksum algorithm.
+func withChecksumAlgorithm(ctx context.Context) context.Context {
+	return context.WithValue(ctx, checksumAlgorithmKey{}, true)
+}
+
+func checksumAlgorithmFrom(ctx context.Context) bool {
+	requested, _ := ctx.Value(checksumAlgorithmKey{}).(bool)
+	return requested
+}
+
+// setChecksumRequest puts the checksum of the transfer in the request headers.
+func setChecksumRequest(ctx context.Context, headers http.Header) {
+	if transfer := checksumTransferFrom(ctx); transfer != nil && transfer.SHA256 != "" {
+		headers.Set("x-amz-checksum-sha256", transfer.SHA256)
+	}
+}
+
+// readChecksumResponse keeps the checksum that the provider reports for the object or the part.
+func readChecksumResponse(ctx context.Context, resp *http.Response) {
+	if transfer := checksumTransferFrom(ctx); transfer != nil {
+		transfer.Echoed = strings.TrimSpace(resp.Header.Get("x-amz-checksum-sha256"))
+	}
+}
+
 type s3Credentials struct {
 	AccessKeyID     string
 	SecretAccessKey string
@@ -289,11 +335,13 @@ func (s *s3Backend) put(ctx context.Context, key string, body io.Reader, size in
 	if ifAbsent {
 		headers.Set("If-None-Match", "*")
 	}
+	setChecksumRequest(ctx, headers)
 	resp, err := s.do(ctx, http.MethodPut, key, nil, body, size, headers)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
+	readChecksumResponse(ctx, resp)
 	if ifAbsent && (resp.StatusCode == http.StatusConflict || resp.StatusCode == http.StatusPreconditionFailed) {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 		return apiError{Status: http.StatusConflict, Code: "object_exists", Message: "an object already exists at the extraction destination"}
@@ -308,6 +356,8 @@ func (s *s3Backend) put(ctx context.Context, key string, body io.Reader, size in
 type s3CompletedPart struct {
 	PartNumber int
 	ETag       string
+	// ChecksumSHA256 is the base64 digest of the part. A multipart upload created with the SHA-256 algorithm needs it.
+	ChecksumSHA256 string
 }
 
 func (s *s3Backend) InitiateMultipart(ctx context.Context, key, contentType string) (string, error) {
@@ -316,6 +366,9 @@ func (s *s3Backend) InitiateMultipart(ctx context.Context, key, contentType stri
 	headers := make(http.Header)
 	if contentType != "" {
 		headers.Set("Content-Type", contentType)
+	}
+	if checksumAlgorithmFrom(ctx) {
+		headers.Set("x-amz-checksum-algorithm", "SHA256")
 	}
 	resp, err := s.do(ctx, http.MethodPost, key, query, nil, 0, headers)
 	if err != nil {
@@ -341,11 +394,17 @@ func (s *s3Backend) UploadPart(ctx context.Context, key, uploadID string, partNu
 	query := url.Values{}
 	query.Set("partNumber", strconv.Itoa(partNumber))
 	query.Set("uploadId", uploadID)
-	resp, err := s.do(ctx, http.MethodPut, key, query, body, size, nil)
+	var headers http.Header
+	if transfer := checksumTransferFrom(ctx); transfer != nil && transfer.SHA256 != "" {
+		headers = make(http.Header)
+		setChecksumRequest(ctx, headers)
+	}
+	resp, err := s.do(ctx, http.MethodPut, key, query, body, size, headers)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
+	readChecksumResponse(ctx, resp)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", s3ResponseError(resp)
 	}
@@ -362,15 +421,16 @@ func (s *s3Backend) CompleteMultipart(ctx context.Context, key, uploadID string,
 		return fmt.Errorf("cannot complete an s3 multipart upload without parts")
 	}
 	type partXML struct {
-		PartNumber int    `xml:"PartNumber"`
-		ETag       string `xml:"ETag"`
+		PartNumber     int    `xml:"PartNumber"`
+		ETag           string `xml:"ETag"`
+		ChecksumSHA256 string `xml:"ChecksumSHA256,omitempty"`
 	}
 	payload := struct {
 		XMLName xml.Name  `xml:"CompleteMultipartUpload"`
 		Parts   []partXML `xml:"Part"`
 	}{Parts: make([]partXML, 0, len(parts))}
 	for _, part := range parts {
-		payload.Parts = append(payload.Parts, partXML{PartNumber: part.PartNumber, ETag: `"` + strings.Trim(part.ETag, `"`) + `"`})
+		payload.Parts = append(payload.Parts, partXML{PartNumber: part.PartNumber, ETag: `"` + strings.Trim(part.ETag, `"`) + `"`, ChecksumSHA256: part.ChecksumSHA256})
 	}
 	body, err := xml.Marshal(payload)
 	if err != nil {
@@ -448,9 +508,10 @@ func (s *s3Backend) ListMultipartParts(ctx context.Context, key, uploadID string
 			IsTruncated          bool `xml:"IsTruncated"`
 			NextPartNumberMarker int  `xml:"NextPartNumberMarker"`
 			Parts                []struct {
-				PartNumber int    `xml:"PartNumber"`
-				ETag       string `xml:"ETag"`
-				Size       int64  `xml:"Size"`
+				PartNumber     int    `xml:"PartNumber"`
+				ETag           string `xml:"ETag"`
+				Size           int64  `xml:"Size"`
+				ChecksumSHA256 string `xml:"ChecksumSHA256"`
 			} `xml:"Part"`
 		}
 		err = xml.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&result)
@@ -459,7 +520,7 @@ func (s *s3Backend) ListMultipartParts(ctx context.Context, key, uploadID string
 			return nil, fmt.Errorf("decode s3 multipart parts response: %w", err)
 		}
 		for _, part := range result.Parts {
-			parts = append(parts, multipartPart{PartNumber: part.PartNumber, ETag: strings.Trim(part.ETag, `"`), Size: part.Size})
+			parts = append(parts, multipartPart{PartNumber: part.PartNumber, ETag: strings.Trim(part.ETag, `"`), Size: part.Size, ChecksumSHA256: part.ChecksumSHA256})
 		}
 		if !result.IsTruncated {
 			break

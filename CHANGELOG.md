@@ -2,6 +2,25 @@
 
 This document uses ASD-STE100 Simplified Technical English.
 
+## Unreleased
+
+### Uploads and deletes
+
+- An S3 upload can carry a SHA-256 checksum. The browser computes the digest of each chunk. The provider refuses a part
+  with other bytes. The answer has `checksumVerified`. Refer to the section "Upload checksums" of
+  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+- The request `POST /api/uploads` has the new field `checksum`. The header `X-Checksum-Sha256` of a chunk and of
+  `PUT /s3` is new. Without them, an upload works as before.
+- The delete of a prefix and the move of a prefix delete the objects in batches of 1000 keys (`DeleteObjects`). A
+  provider that refuses the batch request gets one request for each key.
+
+### Interface `portal`
+
+- The test interface `portal` shows the display name of a bucket only. The permissions of the bucket are in a button at
+  the left of the selector. The crumbs start with the mark of the bucket and a slash.
+- A JSON file that fits in one page shows its totals at once and has no button to count lines and pages. The root of
+  the JSON tree stays open.
+
 ## 2.0.0
 
 Version 2.0.0 is a major version: a configuration file of 1.0.x does not start without changes. Refer to

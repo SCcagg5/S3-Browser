@@ -1015,9 +1015,24 @@ func (a *application) handleObjectGateway(w http.ResponseWriter, r *http.Request
 			writeGatewayError(w, err)
 			return
 		}
-		if err := instance.Put(r.Context(), fullKey, r.Body, r.ContentLength, r.Header.Get("Content-Type")); err != nil {
+		digest, err := parseChecksumHeader(r.Header)
+		if err != nil {
 			writeGatewayError(w, err)
 			return
+		}
+		putCtx := r.Context()
+		var transfer *checksumTransfer
+		if digest != "" {
+			transfer = &checksumTransfer{SHA256: digest}
+			putCtx = withChecksumTransfer(putCtx, transfer)
+		}
+		if err := instance.Put(putCtx, fullKey, r.Body, r.ContentLength, r.Header.Get("Content-Type")); err != nil {
+			writeGatewayError(w, err)
+			return
+		}
+		if transfer != nil && transfer.Echoed == transfer.SHA256 {
+			// The provider answered with the digest that the client sent: it checked the bytes of the object.
+			w.Header().Set("X-Checksum-Sha256-Verified", "true")
 		}
 		w.WriteHeader(http.StatusNoContent)
 	case http.MethodDelete:
