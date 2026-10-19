@@ -1737,6 +1737,8 @@ a {
 
 .fileList {
   display: grid;
+  /* The rows keep their content height when the list scrolls (max-height of the failed list). */
+  grid-auto-rows: max-content;
   margin: 0;
   padding: 0;
   list-style: none;
