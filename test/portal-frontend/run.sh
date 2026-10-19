@@ -30,7 +30,7 @@ if [ -n "${PLAYWRIGHT_NODE_MODULES:-}" ]; then
   install=":"
 else
   modules="$PROJECT-playwright:/deps"
-  install="[ -d /deps/node_modules/playwright ] || npm install --prefix /deps --no-save --no-audit --no-fund playwright@$PLAYWRIGHT_VERSION >/dev/null"
+  install="[ -d /deps/node_modules/playwright ] || npm install --prefix /deps --no-save --no-audit --no-fund --loglevel=error playwright@$PLAYWRIGHT_VERSION >/dev/null"
 fi
 
 docker run --rm \
