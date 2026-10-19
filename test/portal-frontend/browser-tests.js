@@ -1,5 +1,6 @@
-// Browser tests of the "portal" interface (server.frontend = "portal"). They cover four parts:
-// 1 the theme control, 2 the breadcrumb, 3 the bulk upload, 4 the access behaviour of 2.0.0.
+// Browser tests of the "portal" interface (server.frontend = "portal"). They cover these parts:
+// 1 the theme selector, 2 the breadcrumb and the toolbar row, the header and the bucket selector, 3 the bulk upload,
+// 4 the access behaviour of 2.0.0.
 // run.sh starts S3-Browser and Garage, puts the test objects (seed.js) and runs this file in the Playwright container.
 // The tests change the answers of the server with page.route where a case needs it (403, 401, no answer, access).
 const { chromium } = require('playwright');
@@ -83,6 +84,12 @@ const visibleText = (page, text) => page.evaluate(value => Array.from(document.q
   .filter(node => Array.from(node.childNodes).some(child => child.nodeType === 3 && child.textContent.includes(value)))
   .filter(node => node.getClientRects().length && getComputedStyle(node).visibility !== 'hidden' && !node.closest('.visually-hidden')).length, text);
 
+// Chooses a theme with the theme selector of the header: the button, then the option of its menu.
+async function chooseTheme(page, value, scope = '') {
+  await page.click(`${scope} [data-theme-trigger]`.trim());
+  await page.click(`${scope} [data-theme-value="${value}"]`.trim());
+}
+
 const forbidden = action => ({ status: 403, json: { error: { code: 'forbidden', action, message: `The action ${action} is not allowed.` } } });
 
 // ------------------------------------------------------------------------------------------------------------------
@@ -94,7 +101,8 @@ test('theme: System follows the colour scheme of the OS', async () => {
     const page = await newPage({ colorScheme: scheme });
     await open(page, MAIN);
     assert.equal(await page.getAttribute('html', 'data-theme'), null);
-    assert.equal(await page.getAttribute('[data-theme-value="system"]', 'aria-pressed'), 'true');
+    assert.equal(await page.getAttribute('[data-theme-value="system"]', 'aria-selected'), 'true');
+    assert.equal(await page.getAttribute('[data-theme-trigger]', 'aria-label'), 'Theme: system');
     assert.equal(await page.evaluate(() => getComputedStyle(document.body).backgroundColor), background);
     await page.context().close();
   }
@@ -103,14 +111,24 @@ test('theme: System follows the colour scheme of the OS', async () => {
 test('theme: a choice is saved in the browser and applies again after a reload', async () => {
   const page = await newPage({ colorScheme: 'dark' });
   await open(page, MAIN);
+  // The selector of ClickHouse Dash: the menu opens under the button, and closes after a choice.
+  assert.equal(await page.isHidden('#themeMenu'), true);
+  await page.click('[data-theme-trigger]');
+  assert.equal(await page.isVisible('#themeMenu'), true);
+  assert.equal(await page.getAttribute('[data-theme-trigger]', 'aria-expanded'), 'true');
   await page.click('[data-theme-value="light"]');
+  assert.equal(await page.isHidden('#themeMenu'), true);
   assert.equal(await page.getAttribute('html', 'data-theme'), 'light');
   assert.equal(await page.evaluate(() => localStorage.getItem('portal.theme')), 'light');
-  assert.equal(await page.getAttribute('[data-theme-value="light"]', 'aria-pressed'), 'true');
+  assert.equal(await page.getAttribute('[data-theme-value="light"]', 'aria-selected'), 'true');
+  assert.equal(await page.getAttribute('[data-theme-trigger]', 'aria-label'), 'Theme: light');
+  // The button shows the icon of the current choice.
+  assert.equal(await page.isVisible('[data-theme-trigger] .themeIcon--light'), true);
+  assert.equal(await page.isHidden('[data-theme-trigger] .themeIcon--system'), true);
   assert.equal(await page.evaluate(() => getComputedStyle(document.body).backgroundColor), 'rgb(246, 247, 249)');
   await page.reload({ waitUntil: 'networkidle' });
   assert.equal(await page.getAttribute('html', 'data-theme'), 'light');
-  await page.click('[data-theme-value="system"]');
+  await chooseTheme(page, 'system');
   assert.equal(await page.evaluate(() => localStorage.getItem('portal.theme')), null);
   assert.equal(await page.getAttribute('html', 'data-theme'), null);
   await page.context().close();
@@ -139,10 +157,10 @@ test('theme: the saved theme is on <html> before the body exists (no flash)', as
 test('theme: the preview page and the 404 page share the choice', async () => {
   const page = await newPage({ colorScheme: 'light' });
   await open(page, MAIN);
-  await page.click('[data-theme-value="dark"]');
+  await chooseTheme(page, 'dark');
   await page.goto(`${BASE}${MAIN}reports/2026/q3/summary.md`, { waitUntil: 'networkidle' });
   assert.equal(await page.getAttribute('html', 'data-theme'), 'dark');
-  assert.equal(await page.getAttribute('.previewBar [data-theme-value="dark"]', 'aria-pressed'), 'true');
+  assert.equal(await page.getAttribute('.previewBar [data-theme-value="dark"]', 'aria-selected'), 'true');
   await page.goto(`${BASE}no-such-page`, { waitUntil: 'networkidle' });
   assert.equal(await page.getAttribute('html', 'data-theme'), 'dark');
   await page.context().close();
@@ -160,7 +178,10 @@ test('breadcrumb: at the root, the root crumb is the bucket display name and the
   assert.match(await root.innerText(), /Garage - primary\s*root/i);
   assert.equal(await root.getAttribute('aria-current'), 'page');
   assert.equal(await root.getAttribute('aria-label'), 'Garage - primary, bucket root');
-  assert.equal(await page.textContent('#folderTitle'), 'Garage - primary');
+  // No visible folder title: the crumbs are the title. A heading stays for screen readers.
+  assert.equal(await page.textContent('#folderTitle'), 'Garage - primary, bucket root');
+  assert.equal(await page.evaluate(() => document.getElementById('folderTitle').classList.contains('visually-hidden')), true);
+  assert.equal(await page.locator('.part__title').count(), 0);
   await page.context().close();
 });
 
@@ -176,7 +197,7 @@ test('breadcrumb: in a folder, the root crumb leads back to the bucket root', as
   await page.waitForSelector('tr[data-name="reports"]');
   assert.equal(await page.getAttribute('.crumb--root', 'aria-current'), 'page');
   await page.goBack();
-  await until(page, () => document.querySelector('#folderTitle').textContent === 'q3');
+  await until(page, () => document.querySelector('#folderTitle').textContent.startsWith('q3,'));
   await page.context().close();
 });
 
@@ -188,20 +209,111 @@ test('breadcrumb: a deep path keeps the root and puts the middle folders in a me
   await page.click('.crumb--more');
   assert.deepEqual(await page.locator('.crumbs .menu .menu__item').allInnerTexts(), ['archive', 'deep', 'level-3']);
   await page.click('.crumbs .menu .menu__item >> text=deep');
-  await until(page, () => document.querySelector('#folderTitle').textContent === 'deep');
+  await until(page, () => document.querySelector('#folderTitle').textContent.startsWith('deep,'));
   await page.context().close();
 });
 
-test('breadcrumb: another bucket tab gives its own root crumb, and the preview path starts at the bucket', async () => {
+test('breadcrumb: the crumbs and the toolbar share one row on a desktop, and the toolbar has its own row on a phone', async () => {
+  const rows = async page => page.evaluate(() => {
+    const crumbs = document.querySelector('#crumbs').getBoundingClientRect();
+    const toolbar = document.querySelector('.browserHead > .toolbar').getBoundingClientRect();
+    return { crumbsTop: crumbs.top, crumbsBottom: crumbs.bottom, toolbarTop: toolbar.top, crumbsRight: crumbs.right, toolbarLeft: toolbar.left,
+      overflow: document.scrollingElement.scrollWidth - window.innerWidth };
+  });
+  const desktop = await newPage({ viewport: { width: 1280, height: 860 } });
+  for (const path of [MAIN, `${MAIN}reports/2026/q3/`, `${MAIN}archive/deep/level-3/level-4/level-5/`]) {
+    await open(desktop, path);
+    const box = await rows(desktop);
+    assert.ok(Math.abs(box.toolbarTop - box.crumbsTop) < 12 || box.toolbarTop < box.crumbsBottom, `one row at ${path}: ${JSON.stringify(box)}`);
+    assert.ok(box.crumbsRight <= box.toolbarLeft + 1, `the crumbs come first at ${path}`);
+    assert.equal(box.overflow, 0);
+  }
+  await desktop.context().close();
+  const phone = await newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  for (const path of [MAIN, `${MAIN}reports/2026/q3/`]) {
+    await open(phone, path);
+    const box = await rows(phone);
+    assert.ok(box.toolbarTop >= box.crumbsBottom - 1, `the toolbar under the crumbs at ${path}: ${JSON.stringify(box)}`);
+    assert.ok(box.overflow <= 0, `no horizontal scroll at ${path}`);
+  }
+  await phone.context().close();
+});
+
+test('breadcrumb: another bucket gives its own root crumb, and the preview path starts at the bucket', async () => {
   const page = await newPage();
   await open(page, MAIN);
-  await page.click('.contentTabs__tab >> text=Garage - archive');
+  await page.click('.storageSwitcher__trigger');
+  await page.click('.storageBucket[data-instance="garage-archive"]');
   await until(page, () => document.querySelector('.crumb--root')?.textContent.includes('Garage - archive'));
-  assert.equal(await page.getAttribute('.contentTabs__tab[data-instance="garage-archive"]', 'aria-current'), 'page');
   await page.goto(`${BASE}${MAIN}reports/2026/q3/summary.md`, { waitUntil: 'networkidle' });
   assert.equal(await page.textContent('#instanceMeta'), 'Garage - primary');
   assert.equal((await page.textContent('#docPrefix')).trim(), '/ reports / 2026 / q3');
   assert.equal((await page.textContent('#backBtn')).trim(), 'q3');
+  await page.context().close();
+});
+
+test('header: the brand and the version of ClickHouse Dash, in the centred column of the page', async () => {
+  const page = await newPage({ viewport: { width: 1700, height: 900 } });
+  await open(page, MAIN);
+  const build = (await (await page.request.get(`${BASE}api/instances`)).json()).build;
+  assert.equal(await page.textContent('.appBrand__name'), 'S3 Browser');
+  const version = String(build.version || build.display);
+  assert.ok((await page.textContent('#versionBadge')).startsWith(version));
+  assert.match(await page.getAttribute('#versionBadge', 'title'), /^Server version\n/);
+  const box = await page.evaluate(() => {
+    const inner = document.querySelector('.appHeader__inner').getBoundingClientRect();
+    const main = document.querySelector('#browser').getBoundingClientRect();
+    const header = document.querySelector('.appHeader').getBoundingClientRect();
+    return { innerLeft: inner.left, innerRight: inner.right, mainLeft: main.left, mainRight: main.right, header: header.width };
+  });
+  assert.equal(box.header, 1700);
+  assert.ok(Math.abs(box.innerLeft - box.mainLeft) <= 25 && Math.abs(box.innerRight - box.mainRight) <= 25, JSON.stringify(box));
+  // The theme selector is at the right end of the column, after the bucket selector.
+  const order = await page.evaluate(() => {
+    const switcher = document.querySelector('#storageSwitcher').getBoundingClientRect();
+    const theme = document.querySelector('.themeSelect').getBoundingClientRect();
+    return switcher.right <= theme.left;
+  });
+  assert.equal(order, true);
+  // Without a path prefix, the page is the root of the site: no "Back to panel".
+  assert.equal(await page.isHidden('#backLink'), true);
+  await page.context().close();
+});
+
+test('selector: the bucket selector of the default interface, by host, with the permissions', async () => {
+  const page = await newPage();
+  await open(page, MAIN);
+  const trigger = page.locator('.storageSwitcher__trigger');
+  assert.match(await trigger.innerText(), /garage \/ garage-main/);
+  assert.match(await trigger.innerText(), /default · Garage - primary · S3/);
+  assert.equal(await trigger.locator('.permDot').count(), 3);
+  assert.equal(await page.isHidden('#storageSwitcherMenu'), true);
+  await trigger.click();
+  assert.equal(await trigger.getAttribute('aria-expanded'), 'true');
+  assert.match(await page.textContent('.storageHost__row'), /garage\s*S3 · 2 buckets/);
+  assert.equal(await page.getAttribute('.storageHost__row', 'aria-expanded'), 'true');
+  assert.deepEqual(await page.locator('.storageBucket strong').allInnerTexts(), ['garage-main', 'garage-archive']);
+  assert.equal(await page.getAttribute('.storageBucket[data-instance="garage-main"]', 'aria-selected'), 'true');
+  assert.equal(await page.locator('.storageBucket[data-instance="garage-main"] .storageBucket__check').count(), 1);
+  // A click on the host closes its list; Escape closes the menu.
+  await page.click('.storageHost__row');
+  assert.equal(await page.isHidden('.storageHost__buckets'), true);
+  await page.click('.storageHost__row');
+  await page.keyboard.press('Escape');
+  assert.equal(await page.isHidden('#storageSwitcherMenu'), true);
+  // The keyboard: ArrowDown opens the menu on the current bucket.
+  await trigger.focus();
+  await page.keyboard.press('ArrowDown');
+  assert.equal(await page.evaluate(() => document.activeElement.dataset.instance), 'garage-main');
+  await page.keyboard.press('ArrowDown');
+  assert.equal(await page.evaluate(() => document.activeElement.dataset.instance), 'garage-archive');
+  await page.keyboard.press('Enter');
+  await until(page, () => location.pathname.endsWith('/-/garage/garage-archive/'));
+  assert.match(await page.locator('.storageSwitcher__trigger').innerText(), /garage \/ garage-archive/);
+  // A click outside closes the menu.
+  await page.click('.storageSwitcher__trigger');
+  await page.click('#listing');
+  assert.equal(await page.isHidden('#storageSwitcherMenu'), true);
   await page.context().close();
 });
 
@@ -369,7 +481,7 @@ test('access: write without delete keeps the upload and the copy, and hides the 
   await page.context().close();
 });
 
-test('access: only the visible buckets have a tab; no visible bucket gives one message', async () => {
+test('access: the selector shows only the visible buckets; no visible bucket gives one message', async () => {
   const page = await newPage();
   await page.route(/\/api\/instances/, async route => {
     const response = await route.fetch();
@@ -379,7 +491,10 @@ test('access: only the visible buckets have a tab; no visible bucket gives one m
     await route.fulfill({ response, json: body });
   });
   await open(page, '');
-  assert.deepEqual(await page.locator('.contentTabs__tab').allInnerTexts(), ['Garage - archive']);
+  // One visible bucket: the selector is static (no menu), as in the default interface.
+  assert.equal(await page.locator('button.storageSwitcher__trigger').count(), 0);
+  assert.match(await page.textContent('.storageSwitcher__trigger'), /garage \/ garage-archive/);
+  assert.equal(await page.locator('#storageSwitcherMenu').count(), 0);
   assert.match(await page.textContent('.crumb--root'), /Garage - archive/);
   await page.unroute(/\/api\/instances/);
   await page.route(/\/api\/instances/, async route => {
@@ -390,11 +505,12 @@ test('access: only the visible buckets have a tab; no visible bucket gives one m
   await page.reload({ waitUntil: 'networkidle' });
   await page.waitForSelector('.empty');
   assert.match(await page.textContent('.empty'), /No bucket is available to you/);
-  assert.equal(await page.locator('.contentTabs__tab').count(), 0);
+  assert.match(await page.textContent('.storageSwitcher__trigger'), /No bucket/);
+  assert.equal(await page.locator('.storageBucket').count(), 0);
   await page.context().close();
 });
 
-test('access: a bucket that refuses write and delete shows a lock on its tab and no upload', async () => {
+test('access: a bucket that refuses write and delete shows it in the selector, and no upload', async () => {
   const page = await newPage();
   await page.route(/\/api\/instances/, async route => {
     const response = await route.fetch();
@@ -407,8 +523,11 @@ test('access: a bucket that refuses write and delete shows a lock on its tab and
     await route.fulfill({ response, json: body });
   });
   await open(page, '-/garage/garage-archive/');
-  assert.equal(await page.locator('.contentTabs__tab[data-instance="garage-archive"] .ic-lock').count(), 1);
-  assert.equal(await page.locator('.contentTabs__tab[data-instance="garage-main"] .ic-lock').count(), 0);
+  const states = await page.locator('.storageSwitcher__trigger .permDot').evaluateAll(nodes => nodes.map(node => `${node.dataset.permission}:${node.dataset.state}`));
+  assert.deepEqual(states.slice(1), ['write:denied', 'delete:denied']);
+  await page.click('.storageSwitcher__trigger');
+  const main = await page.locator('.storageBucket[data-instance="garage-main"] .permDot').evaluateAll(nodes => nodes.map(node => node.dataset.state));
+  assert.ok(!main.includes('denied'));
   assert.equal(await page.isHidden('#uploadWrap'), true);
   assert.match(await page.textContent('#accessBadge'), /Read only/);
   await page.context().close();
