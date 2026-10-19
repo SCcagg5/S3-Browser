@@ -438,6 +438,8 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
   // ---------------------------------------------------------------------------
 
   const state = {
+    // The decisions of the access policy for the listed folder (authzen mode only).
+    folderAccess: null,
     instances: [],
     build: {},
     defaultInstanceId: '',
@@ -496,7 +498,16 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
     return hosts;
   }
 
+  // The access policy can refuse a write or a delete in the listed folder only.
+  const folderAccessNeeds = {
+    upload: ['write'], overwrite: ['write'], createFolder: ['write'], copy: ['write'],
+    delete: ['delete'], rename: ['write', 'delete'], move: ['write', 'delete']
+  };
+
   function can(operation, instance = currentInstance()) {
+    const needs = folderAccessNeeds[operation];
+    if (needs && state.folderAccess && instance === currentInstance()
+      && needs.some(name => state.folderAccess[name] === false)) return false;
     if (BB.capabilities?.actionable) return BB.capabilities.actionable(instance, operation);
     const operationState = instance?.operations?.[operation];
     return operationState ? operationState.allowed !== false : true;
@@ -1563,6 +1574,7 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
       if (!canRead()) {
         state.rows = [];
         state.nextContinuationToken = '';
+        state.folderAccess = null;
         return;
       }
       const data = await BB.api.list({
@@ -1571,6 +1583,7 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
         continuationToken: state.continuationToken
       });
       state.nextContinuationToken = data.nextContinuationToken || '';
+      state.folderAccess = data.access && typeof data.access === 'object' ? data.access : null;
       state.scanComplete = data.scanComplete === true;
       state.navigationSortAvailable = data.sortAvailable === true;
       if (!state.navigationSortAvailable) {
@@ -1600,6 +1613,7 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
       state.localPage = Math.max(0, Math.min(state.localPage, Math.max(0, Math.ceil(rows.length / state.pageSize) - 1)));
     } catch (error) {
       state.rows = [];
+      state.folderAccess = null;
       BB.ui.toast(String(error.message || error));
     } finally {
       state.isRefreshing = false;
