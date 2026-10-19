@@ -6,7 +6,7 @@ Core properties:
 
 - one statically linked Go binary;
 - HCL configuration only;
-- no application configuration or provider credentials from environment variables;
+- no application configuration or provider credentials from environment variables, except a variable that the HCL file names with an `_env` attribute;
 - no local database, cache directory, temporary file, or persisted job state;
 - no hidden control objects, indexes, or checkpoints in connected buckets;
 - compatible with a read-only root filesystem;
@@ -14,7 +14,8 @@ Core properties:
 - exact byte-range readers for large-object previews and inspection;
 - bounded provider requests, transferred bytes, concurrency, cache size, and in-memory job history;
 - frontend URLs resolved relative to `document.baseURI` for deployment behind a path-stripping reverse proxy;
-- no runtime CDN or third-party asset requests.
+- no runtime CDN or third-party asset requests;
+- optional access of humans with an identity token and an AuthZEN PDP, on each bucket and each top-level folder ([Access of humans](docs/ACCESS.md)).
 
 ## Quick start
 
@@ -25,7 +26,7 @@ CGO_ENABLED=0 go build -trimpath -o s3-browser .
 ./s3-browser -c ../config.hcl
 ```
 
-The configuration must contain at least one `auth` block and one `bucket` block.
+The configuration must contain at least one `auth` block, one `bucket` block and the `access` block (see [Access of humans](docs/ACCESS.md)).
 
 ## Shared authentication and bucket-specific policy
 
@@ -127,6 +128,9 @@ The application never downloads these files at runtime.
 ## Documentation
 
 - [Configuration](docs/CONFIGURATION.md)
+- [Configuration reference](docs/configuration-reference.md) (generated)
+- [Access of humans](docs/ACCESS.md)
+- [Changes](CHANGELOG.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Preview and metadata behavior](docs/PREVIEWS.md)
 - [Security model](docs/SECURITY.md)

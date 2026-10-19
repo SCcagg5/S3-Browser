@@ -23,6 +23,21 @@ go vet ./...
 CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /tmp/s3-browser-check .
 ```
 
+## Configuration reference
+
+`docs/configuration-reference.md` is generated from the table of keys in `src/config_keys.go`. After a change of the table, make it again:
+
+```sh
+cd src
+go run . config-reference > ../docs/configuration-reference.md
+```
+
+The test `TestConfigurationReferenceIsCurrent` fails when the file and the table do not agree.
+
+## Access tests
+
+The tests of the access of humans (`src/access_*_test.go`) start the server in the `authzen` mode with a fake AuthZEN PDP and identity tokens that the tests sign. They need no network and no container. Refer to [ACCESS.md](ACCESS.md#tests).
+
 ## Frontend
 
 The frontend under `src/public` is plain HTML, CSS and JavaScript embedded into the binary. It has no build step and no
@@ -81,6 +96,6 @@ The test builds the scratch image, checks the numeric user and static binary ide
 
 ## Release validation
 
-CI checks formatting, race tests, vet, all JavaScript contracts, shell syntax, absence of process-environment configuration, absence of local runtime write APIs, absence of external frontend assets, static linking, and the read-only scratch runtime.
+CI checks formatting, race tests, vet, all JavaScript contracts, shell syntax, absence of process-environment configuration (only `src/config_env.go` may read a variable that an `_env` attribute names), absence of local runtime write APIs, absence of external frontend assets, static linking, and the read-only scratch runtime.
 
 Before distributing an archive, extract that exact archive into a clean directory and repeat the full validation suite there.

@@ -16,6 +16,10 @@ The supplied scratch image runs with a read-only root filesystem and no data vol
 
 Provider audit systems can still record every network request. The application cannot make reads or writes invisible to S3, GCS, Garage, or an intermediary proxy.
 
+## Access of humans
+
+With `access.mode = "authzen"`, each request needs a signed identity token of the access gateway, and an AuthZEN PDP decides each action on each bucket and each top-level folder. The server fails closed when the PDP does not answer. A hidden bucket and an unknown bucket get the same answer. [ACCESS.md](ACCESS.md) gives the rules. With `access.mode = "open"`, the server checks no identity: put it only on a closed network.
+
 ## Permission enforcement
 
 The frontend adapts to known capabilities, but every backend handler independently validates its required bucket permissions.
@@ -23,6 +27,7 @@ The frontend adapts to known capabilities, but every backend handler independent
 Effective access is the intersection of:
 
 - implemented operation;
+- the decision of the PDP for the human (authzen mode);
 - bucket permission ceiling;
 - provider credential policy;
 - object retention, encryption, and provider policy;

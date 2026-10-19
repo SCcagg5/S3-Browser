@@ -1,12 +1,15 @@
 # Configuration
 
-The application accepts one HCL file through `-c <path>` or `-config <path>`. Runtime settings and provider credentials are not read from environment variables.
+The application accepts one HCL file through `-c <path>` or `-config <path>`. Runtime settings and provider credentials come from this file only. An attribute with an `_env` form reads the environment variable that the file names, and no other variable.
+
+[configuration-reference.md](configuration-reference.md) is the generated list of every key, with its default, its range and its forms. `s3-browser print-config -c <path>` (or `s3-browser -c <path> --print-config`) checks the file, writes the value and the source of each key, and exits. The server writes the same values in its log at start. Secrets are hidden.
 
 Supported top-level blocks:
 
 - zero or one `server` block;
 - one or more `auth "id"` blocks;
-- one or more `bucket "id"` blocks.
+- one or more `bucket "id"` blocks;
+- exactly one `access` block (since 1.1.0). It is mandatory.
 
 Unknown blocks, attributes, nested blocks, and wrong value types are rejected. The HCL file is limited to 4 MiB. Individual secret files are limited to 1 MiB; a GCS service-account file is bounded separately by the provider parser.
 
@@ -77,7 +80,7 @@ S3 modes:
 - `access_key`: requires `access_key_id` or `access_key_id_file` and `secret_access_key` or `secret_access_key_file`; `session_token` is optional.
 - `anonymous`: rejects access-key fields.
 
-Every secret can be supplied directly or through its `_file` form, never both. File paths relative to the HCL file are resolved from the HCL directory.
+Every secret can be supplied directly, through its `_env` form (the name of an environment variable) or through its `_file` form. Give one form only. File paths relative to the HCL file are resolved from the HCL directory. The value in clear text is deprecated: the server writes a warning at start for it. Use `_env` or `_file`.
 
 The endpoint must use HTTP or HTTPS and may not contain credentials, a query string, or a fragment. Redirects and process environment proxies are disabled.
 
@@ -121,6 +124,33 @@ bucket "archive" {
 | `max_scan_pages` | `1` | Maximum 1,000-entry provider listing pages combined in navigation. `0` means no page-count limit. |
 
 `read` permits list, preview, details, inspection, version listing, and download. `write` permits upload and destination-side object creation. `delete` permits deletion and the source side of move/rename. Provider policy and retention rules still apply.
+
+## Access block
+
+```hcl
+# No access check: the behavior of 1.0.13. Use it only on a closed network.
+access {
+  mode = "open"
+}
+```
+
+```hcl
+# An access gateway gives an identity token, and an AuthZEN PDP decides each action.
+access {
+  mode = "authzen"
+  identity {
+    issuer           = "portal.home"
+    audience         = "infra-s3"
+    public_keys_file = "/run/secrets/s3_browser_identity_keys"
+  }
+  pdp {
+    url        = "http://portal-pdp.edge.svc.cluster.local:4182"
+    token_file = "/run/secrets/s3_browser_pdp_token"
+  }
+}
+```
+
+A file without the `access` block stops the start. [ACCESS.md](ACCESS.md) gives the keys, the resources, the actions and the rules. The `access` block is not related to `server.access_mode`: `force_read_only` still refuses each write, also when the PDP permits it.
 
 ## Version capability probe
 
