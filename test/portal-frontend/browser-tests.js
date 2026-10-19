@@ -189,6 +189,28 @@ test('breadcrumb: at the root, the bucket mark and a slash, with no frame and no
   await page.context().close();
 });
 
+test('breadcrumb: the pointer changes the colour of a crumb and draws no frame or background', async () => {
+  const page = await newPage();
+  await open(page, `${MAIN}reports/2026/`);
+  const look = selector => page.locator(selector).evaluate(node => {
+    const style = getComputedStyle(node);
+    return { color: style.color, background: style.backgroundColor, border: style.borderTopWidth, icon: getComputedStyle(node.querySelector('.ic') || node).color };
+  });
+  const folder = '.crumbs .crumb:not(.crumb--root):not([aria-current])';
+  const before = await look(folder);
+  await page.hover(folder);
+  const after = await look(folder);
+  assert.notEqual(after.color, before.color);
+  assert.equal(after.background, 'rgba(0, 0, 0, 0)');
+  assert.equal(after.border, '0px');
+  const rootBefore = await look('.crumb--root');
+  await page.hover('.crumb--root');
+  const rootAfter = await look('.crumb--root');
+  assert.notEqual(rootAfter.icon, rootBefore.icon);
+  assert.equal(rootAfter.background, 'rgba(0, 0, 0, 0)');
+  await page.context().close();
+});
+
 test('breadcrumb: in a folder, the mark leads back to the bucket root', async () => {
   const page = await newPage();
   await open(page, `${MAIN}reports/2026/q3/`);

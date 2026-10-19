@@ -1376,9 +1376,9 @@ button.storageSwitcher__trigger:hover {
   text-overflow: ellipsis;
 }
 
-.crumb:hover {
-  background: var(--row-hover);
-  color: var(--text);
+.crumb:hover,
+.crumb:focus-visible {
+  color: var(--accent-text);
 }
 
 .crumb[aria-current="page"] {
@@ -1388,7 +1388,7 @@ button.storageSwitcher__trigger:hover {
 }
 
 .crumb[aria-current="page"]:hover {
-  background: none;
+  color: var(--text);
 }
 
 /* The root crumb: the bucket mark with no frame; the slash after it starts the path. */
@@ -1399,6 +1399,11 @@ button.storageSwitcher__trigger:hover {
 .crumb--root > .ic {
   --icon-size: 16px;
   color: var(--accent-text);
+}
+
+.crumb--root:hover > .ic,
+.crumb--root:focus-visible > .ic {
+  color: var(--text);
 }
 
 .crumb--more {
