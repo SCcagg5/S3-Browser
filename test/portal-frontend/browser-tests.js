@@ -167,31 +167,41 @@ test('theme: the preview page and the 404 page share the choice', async () => {
 });
 
 // ------------------------------------------------------------------------------------------------------------------
-// 2. Breadcrumb: in a folder, the display name of the bucket is the root crumb, with a root marker; no crumb at the root
+// 2. Breadcrumb: the bucket mark and a slash, with no frame, then the folders
 // ------------------------------------------------------------------------------------------------------------------
 
-test('breadcrumb: at the root, no crumb shows (the selector names the bucket); the heading stays for screen readers', async () => {
+test('breadcrumb: at the root, the bucket mark and a slash, with no frame and no text', async () => {
   const page = await newPage();
   await open(page, MAIN);
-  assert.equal(await page.locator('.crumbs .crumb').count(), 0);
-  assert.equal(await page.locator('.crumb--root').count(), 0);
+  const root = page.locator('.crumb--root');
+  assert.equal(await page.locator('.crumbs .crumb').count(), 1);
+  assert.equal((await root.innerText()).trim(), '');
+  assert.equal(await root.locator('.ic').count(), 1);
+  assert.equal((await page.textContent('.crumbs .crumbs__sep')).trim(), '/');
+  assert.equal(await root.getAttribute('aria-current'), 'page');
+  assert.equal(await root.getAttribute('aria-label'), 'Garage - primary, bucket root');
+  const frame = await root.evaluate(node => { const style = getComputedStyle(node); return [style.borderTopWidth, style.backgroundColor]; });
+  assert.deepEqual(frame, ['0px', 'rgba(0, 0, 0, 0)']);
+  // No visible folder title: the heading stays for screen readers.
   assert.equal(await page.textContent('#folderTitle'), 'Garage - primary, bucket root');
   assert.equal(await page.evaluate(() => document.getElementById('folderTitle').classList.contains('visually-hidden')), true);
   assert.equal(await page.locator('.part__title').count(), 0);
   await page.context().close();
 });
 
-test('breadcrumb: in a folder, the root crumb leads back to the bucket root', async () => {
+test('breadcrumb: in a folder, the mark leads back to the bucket root', async () => {
   const page = await newPage();
   await open(page, `${MAIN}reports/2026/q3/`);
   const names = await page.locator('.crumbs .crumb').allInnerTexts();
-  assert.deepEqual(names.map(name => name.replace(/\s+/g, ' ').trim()), ['Garage - primary ROOT', 'reports', '2026', 'q3'].map(n => n.replace('ROOT', (names[0].match(/root/i) || ['root'])[0])));
+  assert.deepEqual(names.map(name => name.trim()), ['', 'reports', '2026', 'q3']);
+  assert.deepEqual(await page.locator('.crumbs .crumbs__sep').allInnerTexts(), ['/', '/', '/']);
   assert.equal(await page.getAttribute('.crumb--root', 'aria-current'), null);
-  assert.equal(await page.getAttribute('.crumbs .crumb:last-child', 'aria-current'), 'page');
+  assert.equal(await page.getAttribute('.crumbs .crumb:last-of-type', 'aria-current'), 'page');
   await page.click('.crumb--root');
   await until(page, () => location.pathname.endsWith('/-/garage/garage-main/'));
   await page.waitForSelector('tr[data-name="reports"]');
-  assert.equal(await page.locator('.crumbs .crumb').count(), 0);
+  assert.equal(await page.getAttribute('.crumb--root', 'aria-current'), 'page');
+  assert.equal(await page.locator('.crumbs .crumb').count(), 1);
   await page.goBack();
   await until(page, () => document.querySelector('#folderTitle').textContent.startsWith('q3,'));
   await page.context().close();
@@ -241,7 +251,7 @@ test('breadcrumb: another bucket gives its own root crumb, and the preview path 
   await page.click('.storageSwitcher__trigger');
   await page.click('.storageBucket[data-instance="garage-archive"]');
   await until(page, () => document.querySelector('.storageSwitcher__trigger strong')?.textContent === 'Garage - archive');
-  assert.equal(await page.locator('.crumbs .crumb').count(), 0);
+  assert.equal(await page.getAttribute('.crumb--root', 'aria-label'), 'Garage - archive, bucket root');
   await page.goto(`${BASE}${MAIN}reports/2026/q3/summary.md`, { waitUntil: 'networkidle' });
   assert.equal(await page.textContent('#instanceMeta'), 'Garage - primary');
   assert.equal((await page.textContent('#docPrefix')).trim(), '/ reports / 2026 / q3');
@@ -303,6 +313,19 @@ test('selector: the bucket selector of the default interface, by host, with the 
   assert.deepEqual(await page.locator('.storageBucket strong').allInnerTexts(), ['Garage - primary', 'Garage - archive']);
   assert.equal(await page.getAttribute('.storageBucket[data-instance="garage-main"]', 'aria-selected'), 'true');
   assert.equal(await page.locator('.storageBucket[data-instance="garage-main"] .storageBucket__check').count(), 1);
+  const columns = await page.evaluate(() => {
+    const box = selector => document.querySelector(selector).getBoundingClientRect();
+    const rows = Array.from(document.querySelectorAll('.storageBucket'));
+    return {
+      checkRight: box('.storageBucket[data-instance="garage-main"] .storageBucket__check').right,
+      folderLeft: box('.storageBucket[data-instance="garage-main"] .ic-folder').left,
+      folders: rows.map(row => Math.round(row.querySelector('.ic-folder').getBoundingClientRect().left)),
+      dots: rows.map(row => Math.round(row.querySelector('.permDots').getBoundingClientRect().right))
+    };
+  });
+  assert.ok(columns.checkRight <= columns.folderLeft, `the check before the folder icon: ${JSON.stringify(columns)}`);
+  assert.equal(new Set(columns.folders).size, 1, `the folder icons in one column: ${JSON.stringify(columns)}`);
+  assert.equal(new Set(columns.dots).size, 1, `the permission dots in one column: ${JSON.stringify(columns)}`);
   // A click on the host closes its list; Escape closes the menu.
   await page.click('.storageHost__row');
   assert.equal(await page.isHidden('.storageHost__buckets'), true);
@@ -503,7 +526,7 @@ test('access: the selector shows only the visible buckets; no visible bucket giv
   assert.equal(await page.locator('button.storageSwitcher__trigger').count(), 0);
   assert.match(await page.textContent('.storageSwitcher__trigger'), /Garage - archive/);
   assert.equal(await page.locator('#storageSwitcherMenu').count(), 0);
-  assert.equal(await page.locator('.crumb--root').count(), 0);
+  assert.equal(await page.getAttribute('.crumb--root', 'aria-label'), 'Garage - archive, bucket root');
   await page.unroute(/\/api\/instances/);
   await page.route(/\/api\/instances/, async route => {
     const response = await route.fetch();

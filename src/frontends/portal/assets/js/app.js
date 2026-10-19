@@ -432,11 +432,11 @@ BB.cfg = config;
               title: storageDetails(entry),
               onclick: () => { closeSwitcher(true); selectInstance(entry.id); }
             },
+            h('span', { class: 'storageBucket__mark' }, entry.id === state.instanceId ? ic('check', 'storageBucket__check') : null),
             ic('folder'),
             h('span', { class: 'storageBucket__copy' },
               h('span', { class: 'storageBucket__titleRow' }, h('strong', {}, storageName(entry)), permissionDots(entry)),
-              entry.rootPrefix ? h('small', {}, `/${entry.rootPrefix}`) : null),
-            entry.id === state.instanceId ? ic('check', 'storageBucket__check') : null)));
+              entry.rootPrefix ? h('small', {}, `/${entry.rootPrefix}`) : null))));
           const row = h('button', {
             type: 'button', class: 'storageHost__row', 'aria-expanded': expanded ? 'true' : 'false', 'data-host': host.id,
             onclick: () => {
@@ -504,7 +504,7 @@ BB.cfg = config;
   }
 
   // ---------------------------------------------------------------------------------------------------------------
-  // Crumbs: in a folder, the display name of the bucket is the root crumb, with a "root" tag; at the root, no crumb
+  // Crumbs: the bucket mark and a slash, then the folders
   // ---------------------------------------------------------------------------------------------------------------
 
   const CRUMB_EDGE = 2;
@@ -520,27 +520,23 @@ BB.cfg = config;
       return;
     }
     const atRoot = !list.length;
-    // At the root the selector already names the bucket: the crumbs show nothing.
-    if (atRoot) {
-      ui.crumbs.replaceChildren();
-      return;
-    }
     const where = instance.rootPrefix ? `${instance.bucket}/${instance.rootPrefix}` : instance.bucket;
+    const separator = () => h('span', { class: 'crumbs__sep', 'aria-hidden': 'true' }, '/');
+    // The root is the bucket mark and a slash, with no button around: the selector names the bucket.
     const nodes = [h('button', {
       type: 'button',
       class: 'crumb crumb--root',
+      'aria-current': atRoot ? 'page' : null,
       'aria-label': `${instance.name}, bucket root`,
       title: `Root of ${instance.name} (${where})`,
       'data-crumb': 'root',
-      onclick: () => goToPrefix('')
-    }, ic('database'), h('span', {}, instance.name), h('span', { class: 'crumb__tag', 'aria-hidden': 'true' }, 'root'))];
-    const separator = () => h('span', { class: 'crumbs__sep', 'aria-hidden': 'true' }, ic('chevron-right'));
+      onclick: () => { if (!atRoot) goToPrefix(''); }
+    }, ic('database')), separator()];
 
     // A deep path keeps the root, a menu for the hidden parents, and the last CRUMB_EDGE folders.
     const hidden = list.length > CRUMB_EDGE + 1 ? list.slice(0, list.length - CRUMB_EDGE) : [];
     const shown = hidden.length ? list.slice(list.length - CRUMB_EDGE) : list;
     if (hidden.length) {
-      nodes.push(separator());
       const menu = h('div', { class: 'menu', role: 'menu', hidden: true },
         hidden.map(crumb => h('button', { type: 'button', class: 'menu__item', role: 'menuitem', title: crumb.prefix, onclick: () => goToPrefix(crumb.prefix) },
           ic('folder'), crumb.name)));
@@ -548,11 +544,10 @@ BB.cfg = config;
         type: 'button', class: 'crumb crumb--more', 'aria-haspopup': 'menu', 'aria-expanded': 'false',
         'aria-label': `Show ${plural(hidden.length, 'parent folder')}`, title: hidden.map(crumb => crumb.name).join(' / ')
       }, h('span', {}, '…'));
-      nodes.push(h('span', { class: 'menuWrap' }, trigger, menu));
+      nodes.push(h('span', { class: 'menuWrap' }, trigger, menu), separator());
       bindMenu(trigger, menu);
     }
     shown.forEach((crumb, index) => {
-      nodes.push(separator());
       const last = index === shown.length - 1;
       nodes.push(h('button', {
         type: 'button',
@@ -561,6 +556,7 @@ BB.cfg = config;
         title: crumb.prefix,
         onclick: () => { if (!last) goToPrefix(crumb.prefix); }
       }, h('span', {}, crumb.name)));
+      if (!last) nodes.push(separator());
     });
     ui.crumbs.replaceChildren(...nodes);
   }

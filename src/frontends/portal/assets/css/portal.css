@@ -4,7 +4,7 @@
    1. Header of ClickHouse Dash in the 1400 px column of the page: the mark, the name and the version at the left (with
       "Back to panel" behind a path prefix), the bucket selector of the default interface and the theme selector at
       the right. The page is made of parts of the portal: 14 px corners, on --panel with a hairline edge. In the part
-      of the browser, the crumbs and the toolbar share one row when they fit; the crumbs show a folder path and show nothing at the root.
+      of the browser, the crumbs and the toolbar share one row when they fit; the crumbs are the bucket mark, a slash and the folders.
    2. Data of ClickHouse Dash. Tables are dense: 32 px rows (26 px compact), 13 px text, 12 px semibold muted heads,
       hairline dividers, a blue tint under the pointer. Measures (sizes, counts, times) use the sans face with
       tabular figures. Mono is only for what a person reads character by character: keys, paths, ids.
@@ -804,6 +804,14 @@ button.storageSwitcher__trigger:hover {
   background: var(--selected-bg);
 }
 
+.storageBucket__mark {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+}
+
 .storageBucket__check {
   --icon-size: 16px;
   color: var(--accent-text);
@@ -1339,12 +1347,11 @@ button.storageSwitcher__trigger:hover {
 
 .crumbs__sep {
   flex: none;
+  min-width: 14px;
+  justify-content: center;
   color: var(--muted);
-  opacity: 0.7;
-}
-
-.crumbs__sep .ic {
-  --icon-size: 14px;
+  text-align: center;
+  user-select: none;
 }
 
 .crumb {
@@ -1384,47 +1391,14 @@ button.storageSwitcher__trigger:hover {
   background: none;
 }
 
-/* The root crumb: the display name of the bucket, with the bucket mark and a "root" tag. */
+/* The root crumb: the bucket mark with no frame; the slash after it starts the path. */
 .crumb--root {
-  gap: 7px;
-  height: 28px;
-  max-width: 34ch;
-  padding: 0 8px 0 6px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  background: var(--raised);
-  color: var(--text);
-  font-weight: var(--fw-semibold);
+  padding: 0 6px;
 }
 
 .crumb--root > .ic {
-  --icon-size: 15px;
+  --icon-size: 16px;
   color: var(--accent-text);
-}
-
-.crumb--root:hover {
-  border-color: var(--border-strong);
-  background: var(--button-bg-hover);
-}
-
-.crumb--root[aria-current="page"] {
-  border-color: color-mix(in srgb, var(--accent-fill) 55%, var(--border));
-  background: var(--accent-tint);
-}
-
-.crumb--root[aria-current="page"]:hover {
-  background: var(--accent-tint);
-}
-
-.crumb__tag {
-  padding: 1px 6px;
-  border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--accent-text) 14%, transparent);
-  color: var(--accent-text);
-  font-size: var(--fs-xs);
-  font-weight: var(--fw-semibold);
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
 }
 
 .crumb--more {
@@ -2589,10 +2563,6 @@ button.storageSwitcher__trigger:hover {
   }
 
   .crumb {
-    height: 36px;
-  }
-
-  .crumb--root {
     height: 36px;
   }
 
