@@ -492,13 +492,14 @@
       const customSection = customMetadata
         ? `<section class="bb-details-section"><div class="bb-details-section-title"><i class="mdi mdi-tag-multiple-outline"></i> Custom metadata</div><div class="bb-kv">${customMetadata}</div></section>`
         : '';
+      const tagsSection = BB.tags ? '<section class="bb-details-section" data-tags-section></section>' : '';
       const fileSection = fileRows
         ? `<section class="bb-details-section"><div class="bb-details-section-title"><i class="mdi mdi-file-search-outline"></i> File metadata</div><div class="bb-kv">${fileRows}</div></section>`
         : '';
       const countSection = countAction
         ? `<section class="bb-details-section bb-details-count-section"><div class="bb-details-section-title"><i class="mdi mdi-${escapeHTML(countAction.icon)}"></i> Document dimensions</div><div class="bb-details-count-result" data-document-count-result><span>Not calculated. This operation reads the complete document.</span></div><button type="button" class="bb-btn bb-details-count-button" data-document-count>${escapeHTML(countAction.label)}</button></section>`
         : '';
-      const overviewSections = `${storageSection}${customSection}${fileSection}${countSection}`;
+      const overviewSections = `${storageSection}${customSection}${tagsSection}${fileSection}${countSection}`;
       const advancedPanel = `<section class="bb-details-advanced">
         <article class="bb-details-tool-card is-idle" data-details-tool-card="integrity" aria-busy="false">
           <div class="bb-details-tool-card-head"><div class="bb-details-tool-heading"><span class="bb-details-tool-icon"><i class="mdi mdi-shield-key-outline"></i></span><div><strong>Verify integrity</strong><span>Calculate checksums for the complete object and compare them with values exposed by the provider.</span></div></div><button type="button" class="bb-btn bb-details-tool-run" data-details-integrity><i class="mdi mdi-play"></i><span>Run check</span></button></div>
@@ -581,6 +582,18 @@
           inspectButton?.addEventListener('click', () => {
             void renderDetailsInspection(key, selectedVersion, selectedInstance, inspectionCard, inspectButton, inspectionStatusHost, inspectionResultHost);
           });
+
+          const tagsHost = overlay.querySelector('[data-tags-section]');
+          if (tagsHost) {
+            void BB.tags.mountEditor(tagsHost, {
+              key,
+              size: Number(result.size || 0),
+              instance: selectedInstance,
+              version: selectedVersion,
+              canWrite: allowed('write'),
+              rootPrefix: BB.cfg?.rootPrefix || ''
+            });
+          }
 
           const versionSelect = overlay.querySelector('[data-details-version]');
           versionSelect?.addEventListener('change', () => {
@@ -1391,6 +1404,25 @@
     }
   }
 
+  // The tags of every object under a folder: a form, then a background job.
+  async function tagPrefix(prefix) {
+    if (!(await requirePermissions(['write']))) return false;
+    const source = ensurePrefix(prefix);
+    return BB.tags.changeFolderTags({
+      prefix: source,
+      async start(change) {
+        try {
+          const created = await BB.api.tagPrefix(source, change);
+          const result = await waitForJob(created, 'Tagging folder');
+          return result.status === 'completed';
+        } catch (error) {
+          showTaskFailure('Tagging folder', error);
+          return false;
+        }
+      }
+    });
+  }
+
   async function deletePrefix(prefix) {
     if (!(await requirePermissions(['delete']))) return false;
     const source = ensurePrefix(prefix);
@@ -1748,6 +1780,7 @@
 
   BB.actions = {
     showMetadata,
+    tagPrefix,
     showFileDetails: showMetadata,
     showPrefixInsights,
     showPrefixDetails,

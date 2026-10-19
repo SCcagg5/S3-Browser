@@ -368,6 +368,34 @@
       return response.json();
     },
 
+    async tags(key, { version = '', instance = null } = {}) {
+      const response = await request(withInstance('/api/tags', { key, version }, instance));
+      return response.json();
+    },
+
+    async putTags(key, tags, { version = '', instance = null } = {}) {
+      const response = await request('/api/tags', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instance: instance === null ? selectedInstance() : String(instance || ''), key, version, tags })
+      });
+      return response.json();
+    },
+
+    async tagPrefix(prefix, { add = [], remove = [], instance = null } = {}) {
+      const response = await request('/api/tags/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instance: instance === null ? selectedInstance() : String(instance || ''), prefix, add, remove })
+      });
+      return response.json();
+    },
+
+    async lifecycle(instance = null) {
+      const response = await request(withInstance('/api/lifecycle', {}, instance));
+      return response.json();
+    },
+
     async inspect(key, { version = '', instance = null } = {}) {
       const response = await request(withInstance('/api/inspect', { key, version }, instance));
       return response.json();
@@ -625,6 +653,8 @@
       let previousBytes = 0;
       let previousAt = startedAt;
       const putHeaders = { 'Content-Type': mime || 'application/octet-stream' };
+      const taggingHeader = BB.tags?.uploadTagsHeader?.() || '';
+      if (taggingHeader) putHeaders['X-Amz-Tagging'] = taggingHeader;
       if (canChecksum()) putHeaders['X-Checksum-Sha256'] = await sha256Base64(blob);
       let checksumVerified = false;
       await xhrRequest(this.urlForKey(key, options.instance), {
@@ -679,7 +709,8 @@
           key,
           size,
           contentType: contentType || 'application/octet-stream',
-          checksum: canChecksum() ? 'sha256' : ''
+          checksum: canChecksum() ? 'sha256' : '',
+          tags: BB.tags?.uploadTags?.() || []
         }),
         signal: options.signal || null
       });

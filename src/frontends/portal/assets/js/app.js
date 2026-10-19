@@ -158,7 +158,13 @@ BB.cfg = config;
     dragDepth: 0,
     isDragActive: false,
     versionCountRequest: 0,
-    refreshRequest: 0
+    refreshRequest: 0,
+    // The tag column and the tag filter. A provider without tags (501) turns the tag controls off.
+    showTags: false,
+    tagFilter: '',
+    tagRequest: 0,
+    tagSignature: '',
+    tagsUnsupported: false
   };
 
   const ui = {};
@@ -671,6 +677,15 @@ BB.cfg = config;
     ui.insightsItem.disabled = !read || Boolean(state.listError);
     ui.insightsItem.querySelector('span').textContent = state.pathPrefix ? 'Folder insights' : 'Bucket insights';
     ui.uploadWrap.hidden = !instance || !canWrite() || Boolean(state.listError);
+    ui.tagsItem.hidden = state.tagsUnsupported;
+    ui.tagsItem.disabled = !read || Boolean(state.listError);
+    ui.tagsItem.setAttribute('aria-pressed', state.showTags ? 'true' : 'false');
+    ui.tagsItem.querySelector('span').textContent = state.showTags ? 'Hide tags' : 'Show tags';
+    ui.folderTagsItem.hidden = state.tagsUnsupported;
+    ui.folderTagsItem.disabled = !read || !canWrite() || Boolean(state.listError);
+    ui.tagFilterWrap.hidden = !state.showTags || state.tagsUnsupported;
+    const uploadTagCount = BB.tags.uploadTags().length;
+    ui.uploadTagsItem.querySelector('span').textContent = uploadTagCount ? `Tags of the new uploads (${uploadTagCount})` : 'Tags of the new uploads';
     const badge = accessBadge();
     ui.accessBadge.hidden = !badge;
     if (badge) {
@@ -789,6 +804,7 @@ BB.cfg = config;
           h('th', { scope: 'col' }, sorts.name.node),
           h('th', { scope: 'col', class: 'num col-size' }, sorts.size.node),
           h('th', { scope: 'col', class: 'col-modified' }, h('span', { class: 'headTools' }, sorts.dateModified.node, timeToggle)),
+          h('th', { scope: 'col', class: 'col-tags' }, 'Tags'),
           h('th', { scope: 'col', class: 'col-menu' }, h('span', { class: 'visually-hidden' }, 'Actions')))),
         tbody));
     const range = h('span', { class: 'tableFoot__range' });
@@ -838,7 +854,10 @@ BB.cfg = config;
     t.timeToggle.setAttribute('aria-label', t.timeToggle.title);
     t.box.classList.toggle('is-busy', state.isRefreshing);
 
+    t.box.querySelector('table').classList.toggle('showTags', state.showTags && !state.tagsUnsupported);
     t.tbody.replaceChildren(...visibleRows().map(buildRow));
+    applyTagFilter();
+    refreshVisibleTags();
     const total = state.nextContinuationToken ? `${rangeEnd().toLocaleString('en-US')}+` : (state.scanOffset + state.rows.length).toLocaleString('en-US');
     t.range.textContent = `${rangeStart().toLocaleString('en-US')} to ${rangeEnd().toLocaleString('en-US')} of ${total}`;
     t.pageSize.value = String(state.pageSize);
@@ -865,6 +884,7 @@ BB.cfg = config;
       : [
         canRead() && menuItem('Insights', 'chart-box-outline', () => onPrefixInsights(row)),
         canRead() && menuItem('Download as ZIP', 'folder-download-outline', () => onPrefixDownload(row)),
+        canWrite() && !state.tagsUnsupported && menuItem('Tag objects', 'tag-multiple-outline', () => tagFolder(row.prefix)),
         canCopy() && menuItem('Copy', 'content-copy', () => onPrefixCopy(row)),
         canRename() && menuItem('Rename', 'rename-outline', () => onPrefixRename(row)),
         canDelete() && menuItem('Delete', 'delete-outline', () => onPrefixDelete(row), { danger: true })
@@ -899,6 +919,7 @@ BB.cfg = config;
       h('td', {}, name),
       h('td', { class: 'num col-size' }, size),
       h('td', { class: 'col-modified' }, modified),
+      h('td', { class: 'col-tags' }, tagCell(row)),
       h('td', { class: 'col-menu' }, rowMenu(row)));
     row.element = tr;
     return tr;
@@ -997,6 +1018,7 @@ BB.cfg = config;
     config.capabilities = instance.capabilities || {};
     config.operations = instance.operations || {};
     config.versioningSupported = instance.versioningSupported === true;
+    config.rootPrefix = instance.rootPrefix || '';
   }
 
   function resetPagination() {
@@ -1208,6 +1230,107 @@ BB.cfg = config;
     } catch (error) {
       if (Number(error?.status || 0) !== 501) console.warn('Unable to load object version counts', error);
     }
+  }
+
+  // ---------------------------------------------------------------------------------------------------------------
+  // Tags: the column, the filter, the folder action
+  // ---------------------------------------------------------------------------------------------------------------
+
+  function tagCell(row) {
+    if (row.type !== 'content') return null;
+    if (row.tags === undefined) return h('span', { class: 'tagChips__state' }, state.showTags ? 'Reading…' : '');
+    if (row.tags === null) return h('span', { class: 'tagChips__state', title: 'The tags of this object cannot be read' }, '—');
+    return h('span', { class: 'tagChips' }, BB.tags.chips(row.tags));
+  }
+
+  function updateTagCell(row) {
+    const cell = row.element?.querySelector('.col-tags');
+    if (cell) cell.replaceChildren(...[tagCell(row)].filter(Boolean));
+  }
+
+  // A row that is not a file stays. A file stays when its tags match the filter; a file whose tags are not read yet waits.
+  function applyTagFilter() {
+    const filter = state.showTags ? state.tagFilter.trim() : '';
+    const rows = visibleRows().filter(row => row.type === 'content');
+    let shown = 0;
+    let pending = 0;
+    for (const row of rows) {
+      if (!row.element) continue;
+      let matches = true;
+      if (filter) {
+        if (row.tags === undefined) { matches = false; pending += 1; } else matches = Array.isArray(row.tags) && BB.tags.matchesFilter(row.tags, filter);
+      }
+      row.element.hidden = !matches;
+      if (matches) shown += 1;
+    }
+    if (!state.showTags) ui.tagStatus.textContent = '';
+    else if (pending) ui.tagStatus.textContent = `Reading ${pending} of ${rows.length}`;
+    else ui.tagStatus.textContent = filter ? `${shown} of ${rows.length}` : '';
+  }
+
+  function forgetTags(key) {
+    for (const row of state.rows) {
+      if (row.type === 'content' && (!key || row.key === key)) row.tags = undefined;
+    }
+    state.tagSignature = '';
+    for (const row of visibleRows()) if (row.type === 'content') updateTagCell(row);
+    refreshVisibleTags();
+  }
+
+  function toggleTags() {
+    if (state.tagsUnsupported) return;
+    state.showTags = !state.showTags;
+    if (!state.showTags) state.tagFilter = '';
+    ui.tagFilter.value = state.tagFilter;
+    closeMenu();
+    state.tagSignature = '';
+    update();
+    if (state.showTags) ui.tagFilter.focus();
+  }
+
+  // Reads the tags of the files on the page, 4 at the same time, at most 100.
+  async function refreshVisibleTags() {
+    if (!state.showTags || state.tagsUnsupported || !canRead() || state.listError) return;
+    const instanceId = state.instanceId;
+    const rows = visibleRows().filter(row => row.type === 'content' && row.key).slice(0, 100);
+    const signature = `${instanceId}|${rows.map(row => row.key).join('\n')}`;
+    if (signature === state.tagSignature && rows.every(row => row.tags !== undefined || row.tagsLoading)) return;
+    state.tagSignature = signature;
+    const request = ++state.tagRequest;
+    const waiting = rows.filter(row => row.tags === undefined && !row.tagsLoading);
+    let next = 0;
+    const worker = async () => {
+      while (next < waiting.length) {
+        const row = waiting[next];
+        next += 1;
+        if (request !== state.tagRequest || instanceId !== state.instanceId) return;
+        row.tagsLoading = true;
+        try {
+          row.tags = (await BB.api.tags(row.key, { instance: instanceId })).tags || [];
+        } catch (error) {
+          if (Number(error?.status || 0) === 501 || error?.code === 'tagging_unsupported') {
+            state.tagsUnsupported = true;
+            state.showTags = false;
+            BB.ui.toast('This storage provider does not support object tags.', { status: 'error', duration: 6000 });
+            update();
+            return;
+          }
+          row.tags = null;
+        } finally {
+          row.tagsLoading = false;
+        }
+        updateTagCell(row);
+        applyTagFilter();
+      }
+    };
+    await Promise.all([worker(), worker(), worker(), worker()]);
+    applyTagFilter();
+  }
+
+  async function tagFolder(prefix) {
+    if (!canWrite() || state.tagsUnsupported) return;
+    const done = await BB.actions.tagPrefix(prefix);
+    if (done) forgetTags('');
   }
 
   function fileIcon(row) {
@@ -1445,7 +1568,8 @@ BB.cfg = config;
       refreshButton: 'refreshButton', actionsButton: 'actionsButton', actionsMenu: 'actionsMenu', zipItem: 'zipItem',
       insightsItem: 'insightsItem', accessItem: 'accessItem', accessBadge: 'accessBadge', uploadWrap: 'uploadWrap',
       uploadButton: 'uploadButton', uploadMenu: 'uploadMenu', uploadFilesItem: 'uploadFilesItem',
-      uploadFolderItem: 'uploadFolderItem', listing: 'listing', dropOverlay: 'dropOverlay', dropTarget: 'dropTarget',
+      uploadFolderItem: 'uploadFolderItem', uploadTagsItem: 'uploadTagsItem', tagsItem: 'tagsItem', folderTagsItem: 'folderTagsItem',
+      tagFilterWrap: 'tagFilterWrap', tagFilter: 'tagFilter', tagStatus: 'tagStatus', listing: 'listing', dropOverlay: 'dropOverlay', dropTarget: 'dropTarget',
       uploadDock: 'uploadDock', fileInput: 'fileInput', dirInput: 'dirInput'
     })) ui[name] = byId(id);
     ui.searchLabel = document.querySelector('label[for="searchInput"]');
@@ -1465,6 +1589,12 @@ BB.cfg = config;
     ui.permButton.addEventListener('click', () => { closeSwitcher(false); showPermissions(); });
     ui.uploadFilesItem.addEventListener('click', triggerUploadFiles);
     ui.uploadFolderItem.addEventListener('click', triggerUploadFolder);
+    ui.uploadTagsItem.addEventListener('click', () => { void BB.tags.editUploadTags(); });
+    ui.tagsItem.addEventListener('click', toggleTags);
+    ui.folderTagsItem.addEventListener('click', () => { if (canWrite()) void tagFolder(state.pathPrefix); });
+    ui.tagFilter.addEventListener('input', () => { state.tagFilter = ui.tagFilter.value; applyTagFilter(); });
+    BB.tags.onUploadTagsChange(() => renderToolbar());
+    document.addEventListener('bb:tags-changed', event => forgetTags(event.detail?.key));
     ui.fileInput.addEventListener('change', onFileInput);
     ui.dirInput.addEventListener('change', onDirInput);
     window.addEventListener('popstate', updateFromLocation);

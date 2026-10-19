@@ -355,6 +355,224 @@ test('json: the root of the tree stays open and cannot be closed', async () => {
   await page.context().close();
 });
 
+// ------------------------------------------------------------------------------------------------------------------
+// 2c. Tags: details, lifecycle, column and filter, folder job, tags of the uploads
+// ------------------------------------------------------------------------------------------------------------------
+
+async function apiTags(page, key, instance = 'seaweedfs-main') {
+  const response = await page.request.get(`${BASE}api/tags?instance=${instance}&key=${encodeURIComponent(key)}`);
+  assert.equal(response.status(), 200, await response.text());
+  return (await response.json()).tags.map(tag => `${tag.key}=${tag.value}`);
+}
+
+async function setApiTags(page, key, tags, instance = 'seaweedfs-main') {
+  const response = await page.request.put(`${BASE}api/tags`, { data: { instance, key, tags } });
+  assert.equal(response.status(), 200, await response.text());
+}
+
+async function openDetails(page, name) {
+  await page.click(`tr[data-name="${name}"] .bb-kebab`);
+  await page.click(`tr[data-name="${name}"] .bb-menu-item >> text=Details`);
+  await page.waitForSelector('.bb-details--file');
+}
+
+test('tags: the details of a file show its tags, add, remove and save', async () => {
+  const page = await newPage();
+  await open(page, `${MAIN}config/`);
+  await openDetails(page, 'ingest.json');
+  await page.waitForSelector('[data-tags-section] .tagChip');
+  assert.deepEqual(await page.locator('[data-tags-section] .tagChip').allInnerTexts().then(items => items.map(item => item.replace(/\s+/g, ' ').trim()).sort()), ['env prod', 'team data']);
+  assert.equal(await page.isDisabled('[data-tag-save]'), true);
+  // A wrong tag is refused with a reason, a good tag joins the list.
+  await page.fill('[data-tags-section] input[aria-label="Tag key"]', 'aws:reserved');
+  await page.click('[data-tag-add]');
+  assert.match(await page.textContent('.tagEditor__message'), /reserved/);
+  await page.fill('[data-tags-section] input[aria-label="Tag key"]', 'owner');
+  await page.fill('[data-tags-section] input[aria-label="Tag value"]', 'ada');
+  await page.click('[data-tag-add]');
+  assert.equal(await page.locator('[data-tags-section] .tagChip').count(), 3);
+  assert.equal(await page.isDisabled('[data-tag-save]'), false);
+  await page.click('[data-tag-save]');
+  await until(page, () => document.querySelector('.tagEditor__message')?.textContent === 'The tags are saved.');
+  assert.deepEqual((await apiTags(page, 'config/ingest.json')).sort(), ['env=prod', 'owner=ada', 'team=data']);
+  // Remove one and save again; Revert undoes an edit that is not saved.
+  await page.click('[data-tags-section] .tagChip:has-text("owner") .tagChip__remove');
+  await page.click('[data-tag-revert]');
+  assert.equal(await page.locator('[data-tags-section] .tagChip').count(), 3);
+  await page.click('[data-tags-section] .tagChip:has-text("owner") .tagChip__remove');
+  await page.click('[data-tag-save]');
+  await until(page, () => document.querySelector('.tagEditor__message')?.textContent === 'The tags are saved.');
+  assert.deepEqual((await apiTags(page, 'config/ingest.json')).sort(), ['env=prod', 'team=data']);
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+test('tags: the limit of ten tags and the characters of S3 are checked in the page', async () => {
+  const page = await newPage();
+  await open(page, `${MAIN}config/`);
+  await openDetails(page, 'app.yaml');
+  await page.waitForSelector('[data-tags-section] .tagEditor__form');
+  for (let index = 0; index < 10; index += 1) {
+    await page.fill('[data-tags-section] input[aria-label="Tag key"]', `k${index}`);
+    await page.click('[data-tag-add]');
+  }
+  assert.equal(await page.locator('[data-tags-section] .tagChip').count(), 10);
+  assert.equal(await page.isDisabled('[data-tag-add]'), true);
+  assert.match(await page.textContent('.tagEditor__count'), /10 of 10/);
+  await page.click('[data-tag-revert]');
+  await page.fill('[data-tags-section] input[aria-label="Tag value"]', 'a&b');
+  await page.fill('[data-tags-section] input[aria-label="Tag key"]', 'bad');
+  await page.click('[data-tag-add]');
+  assert.match(await page.textContent('.tagEditor__message'), /letters, digits/);
+  assert.deepEqual(await apiTags(page, 'config/app.yaml'), []);
+  await page.context().close();
+});
+
+test('tags: the details show what the lifecycle rules do to the object, before the save', async () => {
+  const page = await newPage();
+  await open(page, `${MAIN}logs/`);
+  await openDetails(page, '2026-10-18.log');
+  await page.waitForSelector('[data-tags-section] .tagEditor__form');
+  assert.equal(await page.locator('.tagEditor__notes').isVisible(), false);
+  await page.fill('[data-tags-section] input[aria-label="Tag key"]', 'retention');
+  await page.fill('[data-tags-section] input[aria-label="Tag value"]', '30d');
+  await page.click('[data-tag-add]');
+  assert.match(await page.textContent('.tagEditor__notes'), /Rule expire-logs \(prefix logs\/, tag retention=30d\): the object expires 30 days after its creation\./);
+  await page.click('[data-tags-section] .tagChip:has-text("retention") .tagChip__remove');
+  assert.equal(await page.locator('.tagEditor__notes').isVisible(), false);
+  await page.context().close();
+});
+
+test('tags: a provider without tags (501) has no tags section and no tag control', async () => {
+  const page = await newPage();
+  await page.route(/\/api\/tags/, route => route.fulfill({ status: 501, contentType: 'application/json', body: JSON.stringify({ error: { code: 'tagging_unsupported', message: 'no tags' } }) }));
+  await open(page, `${MAIN}config/`);
+  await openDetails(page, 'ingest.json');
+  await sleep(500);
+  assert.equal(await page.locator('[data-tags-section]').count(), 0);
+  await page.click('.bb-modal-x');
+  await page.waitForSelector('.bb-overlay', { state: 'detached' });
+  await page.click('#actionsButton');
+  await page.click('#tagsItem');
+  await until(page, () => document.querySelector('#tagsItem').hidden === true);
+  assert.equal(await page.locator('#tagFilterWrap').isHidden(), true);
+  assert.equal(await page.locator('.dataTable.showTags').count(), 0);
+  await page.context().close();
+});
+
+test('tags: the tag column and the tag filter of the listing', async () => {
+  const page = await newPage();
+  await open(page, `${MAIN}config/`);
+  assert.equal(await page.isHidden('#tagFilterWrap'), true);
+  assert.equal(await page.locator('th.col-tags').isVisible(), false);
+  await page.click('#actionsButton');
+  await page.click('#tagsItem');
+  await page.waitForSelector('tr[data-name="ingest.json"] .tagChip');
+  assert.equal(await page.locator('th.col-tags').isVisible(), true);
+  assert.deepEqual(await page.locator('tr[data-name="ingest.json"] .tagChip').allInnerTexts().then(items => items.map(item => item.replace(/\s+/g, ' ').trim()).sort()), ['env prod', 'team data']);
+  assert.equal(await page.isVisible('#tagFilterWrap'), true);
+  await page.fill('#tagFilter', 'team=data');
+  await until(page, () => document.querySelector('tr[data-name="app.yaml"]').hidden === true);
+  assert.equal(await page.isVisible('tr[data-name="ingest.json"]'), true);
+  assert.equal((await page.textContent('#tagStatus')).trim(), '1 of 2');
+  await page.fill('#tagFilter', 'env');
+  await until(page, () => document.querySelector('tr[data-name="ingest.json"]').hidden === false);
+  await page.fill('#tagFilter', 'team=finance');
+  await until(page, () => document.querySelector('tr[data-name="ingest.json"]').hidden === true);
+  await page.fill('#tagFilter', '');
+  await until(page, () => document.querySelector('tr[data-name="app.yaml"]').hidden === false);
+  // Hide the tags: the column and the filter go.
+  await page.click('#actionsButton');
+  await page.click('#tagsItem');
+  assert.equal(await page.locator('th.col-tags').isVisible(), false);
+  assert.equal(await page.isHidden('#tagFilterWrap'), true);
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+test('tags: a folder job sets and removes tags on every object, and keeps the other tags', async () => {
+  const page = await newPage();
+  await open(page, `${MAIN}reports/2026/`);
+  const keys = ['reports/2026/q1/summary.md', 'reports/2026/q2/summary.md', 'reports/2026/q3/summary.md', 'reports/2026/q3/orders.csv'];
+  await open(page, `${MAIN}reports/`);
+  await page.click('tr[data-name="2026"] .bb-kebab');
+  await page.click('tr[data-name="2026"] .bb-menu-item >> text=Tag objects');
+  await page.waitForSelector('[data-tag-form]');
+  await page.fill('[data-tag-form] textarea', 'batch=yes, bad&key');
+  await page.click('[data-tag-form] .bb-btn-primary');
+  assert.match(await page.textContent('[data-tag-form] .tagEditor__message'), /letters, digits/);
+  await page.fill('[data-tag-form] textarea', 'batch=yes, stage=one');
+  await page.click('[data-tag-form] .bb-btn-primary');
+  await until(page, () => !document.querySelector('[data-tag-form]'));
+  await until(page, async () => true);
+  for (const key of keys) {
+    const deadline = Date.now() + 30000;
+    for (;;) {
+      const tags = await apiTags(page, key);
+      if (tags.includes('batch=yes')) break;
+      assert.ok(Date.now() < deadline, `${key} was not tagged: ${tags}`);
+      await sleep(300);
+    }
+    assert.ok((await apiTags(page, key)).includes('stage=one'));
+  }
+  assert.deepEqual((await apiTags(page, 'reports/2026/q3/summary.md')).sort(), ['batch=yes', 'stage=one', 'team=finance']);
+  // Remove the two keys with a second job.
+  await page.click('tr[data-name="2026"] .bb-kebab');
+  await page.click('tr[data-name="2026"] .bb-menu-item >> text=Tag objects');
+  await page.waitForSelector('[data-tag-form]');
+  await page.fill('[data-tag-form] input', 'batch, stage');
+  await page.click('[data-tag-form] .bb-btn-primary');
+  await until(page, () => !document.querySelector('[data-tag-form]'));
+  for (const key of keys) {
+    const deadline = Date.now() + 30000;
+    for (;;) {
+      const tags = await apiTags(page, key);
+      if (!tags.includes('batch=yes') && !tags.includes('stage=one')) break;
+      assert.ok(Date.now() < deadline, `${key} kept its tags: ${tags}`);
+      await sleep(300);
+    }
+  }
+  assert.deepEqual(await apiTags(page, 'reports/2026/q3/summary.md'), ['team=finance']);
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+test('tags: the uploads of the browser carry the tags that the person sets', async () => {
+  const page = await newPage();
+  await deletePrefix(page, 'seaweedfs-main', 'tagged/');
+  await open(page, `${MAIN}tagged/`);
+  await page.click('#uploadButton');
+  await page.click('#uploadTagsItem');
+  await page.waitForSelector('[data-tag-form]');
+  await page.fill('[data-tag-form] textarea', 'team=up, bad&key');
+  await page.click('[data-tag-form] .bb-btn-primary');
+  assert.match(await page.textContent('[data-tag-form] .tagEditor__message'), /letters, digits/);
+  await page.fill('[data-tag-form] textarea', 'team=up, source=browser');
+  await page.click('[data-tag-form] .bb-btn-primary');
+  await until(page, () => !document.querySelector('[data-tag-form]'));
+  await page.click('#uploadButton');
+  assert.match(await page.textContent('#uploadTagsItem'), /\(2\)/);
+  await page.keyboard.press('Escape');
+  await page.setInputFiles('#fileInput', files(2, 'tagged'));
+  await page.waitForSelector('.uploadDock[data-state="done"]', { timeout: 60000 });
+  for (const key of ['tagged/tagged-0001.txt', 'tagged/tagged-0002.txt']) {
+    assert.deepEqual((await apiTags(page, key)).sort(), ['source=browser', 'team=up']);
+  }
+  // A multipart upload carries them too.
+  await page.setInputFiles('#fileInput', [{ name: 'large-tagged.bin', mimeType: 'application/octet-stream', buffer: Buffer.alloc(33 * 1024 * 1024, 3) }]);
+  await page.waitForSelector('.uploadDock[data-state="done"]', { timeout: 120000 });
+  assert.deepEqual((await apiTags(page, 'tagged/large-tagged.bin')).sort(), ['source=browser', 'team=up']);
+  // No tag: the next uploads have none.
+  await page.click('#uploadButton');
+  await page.click('#uploadTagsItem');
+  await page.waitForSelector('[data-tag-form]');
+  await page.fill('[data-tag-form] textarea', '');
+  await page.click('[data-tag-form] .bb-btn-primary');
+  await until(page, () => !document.querySelector('[data-tag-form]'));
+  await deletePrefix(page, 'seaweedfs-main', 'tagged/');
+  await page.context().close();
+});
+
 test('header: the brand and the version of ClickHouse Dash, in the centred column of the page', async () => {
   const page = await newPage({ viewport: { width: 1700, height: 900 } });
   await open(page, MAIN);

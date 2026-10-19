@@ -42,6 +42,7 @@ docker run --rm \
   -e BASE=http://localhost:8080/ \
   -e ONLY="${ONLY:-}" \
   -v "$DIR:/tests:ro" \
+  -v "$DIR/../secrets:/secrets:ro" \
   -v "$modules" \
   "$PLAYWRIGHT_IMAGE" \
   sh -c "$install && node /tests/seed.js && node /tests/browser-tests.js"

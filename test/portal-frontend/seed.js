@@ -1,6 +1,43 @@
 // Puts the test objects in the two SeaweedFS buckets through the API of S3-Browser (PUT /s3).
+const crypto = require('crypto');
+const fs = require('fs');
 const { request } = require('playwright');
 const BASE = process.env.BASE;
+const S3_HOST = 'seaweedfs:8333';
+const ACCESS_KEY = 'GK0123456789abcdef01234567';
+
+// The tags of some test objects: the header X-Amz-Tagging of the upload.
+const TAGGED = {
+  'config/ingest.json': 'team=data&env=prod',
+  'reports/2026/q3/summary.md': 'team=finance',
+};
+
+// A request to the S3 API of SeaweedFS, signed with SigV4 (the lifecycle has no route in S3-Browser).
+async function s3(method, path, query, body) {
+  const secret = fs.readFileSync('/secrets/s3_secret_access_key', 'utf8').trim();
+  const hmac = (key, text) => crypto.createHmac('sha256', key).update(text).digest();
+  const now = new Date().toISOString().replace(/[:-]|\.\d{3}/g, '');
+  const day = now.slice(0, 8);
+  const payloadHash = crypto.createHash('sha256').update(body).digest('hex');
+  const headers = {
+    host: S3_HOST,
+    'content-md5': crypto.createHash('md5').update(body).digest('base64'),
+    'x-amz-content-sha256': payloadHash,
+    'x-amz-date': now,
+  };
+  const names = Object.keys(headers).sort();
+  const canonical = [method, path, query, names.map(name => `${name}:${headers[name]}\n`).join(''), names.join(';'), payloadHash].join('\n');
+  const scope = `${day}/us-east-1/s3/aws4_request`;
+  const toSign = ['AWS4-HMAC-SHA256', now, scope, crypto.createHash('sha256').update(canonical).digest('hex')].join('\n');
+  const signingKey = hmac(hmac(hmac(hmac(`AWS4${secret}`, day), 'us-east-1'), 's3'), 'aws4_request');
+  headers.authorization = `AWS4-HMAC-SHA256 Credential=${ACCESS_KEY}/${scope},SignedHeaders=${names.join(';')},Signature=${hmac(signingKey, toSign).toString('hex')}`;
+  const response = await fetch(`http://${S3_HOST}${path}?${query}`, { method, headers, body });
+  if (!response.ok) throw new Error(`${method} ${path}?${query}: ${response.status} ${await response.text()}`);
+}
+
+// The lifecycle of the bucket "default": the objects of logs/ with the tag retention=30d expire after 30 days.
+const LIFECYCLE = '<LifecycleConfiguration><Rule><ID>expire-logs</ID><Status>Enabled</Status><Filter><And><Prefix>logs/</Prefix>' +
+  '<Tag><Key>retention</Key><Value>30d</Value></Tag></And></Filter><Expiration><Days>30</Days></Expiration></Rule></LifecycleConfiguration>';
 
 const md = `# Quarterly report\n\nThe numbers of **Q3 2026**, by region.\n\n| Region | Orders | Revenue |\n| --- | ---: | ---: |\n| North | 1,204 | 48,310 |\n| South | 987 | 39,072 |\n\n\`\`\`sql\nSELECT region, count() FROM orders GROUP BY region;\n\`\`\`\n\n> Figures are provisional.\n`;
 const csv = 'date,region,orders,revenue\n' + Array.from({ length: 120 }, (_, i) => `2026-09-${String(1 + (i % 30)).padStart(2, '0')},${['North', 'South', 'East', 'West'][i % 4]},${100 + (i * 37) % 400},${(4000 + (i * 911) % 9000).toFixed(2)}`).join('\n') + '\n';
@@ -38,10 +75,13 @@ const objects = {
   for (const [instance, files] of Object.entries(objects)) {
     for (const [key, body] of Object.entries(files)) {
       const type = key.endsWith('.svg') ? 'image/svg+xml' : key.endsWith('.json') ? 'application/json' : key.endsWith('.md') ? 'text/markdown' : key.endsWith('.csv') ? 'text/csv' : 'application/octet-stream';
-      const res = await api.put(`s3?instance=${encodeURIComponent(instance)}&key=${encodeURIComponent(key)}`, { data: Buffer.from(body), headers: { 'Content-Type': type } });
+      const headers = { 'Content-Type': type };
+      if (instance === 'seaweedfs-main' && TAGGED[key]) headers['X-Amz-Tagging'] = TAGGED[key];
+      const res = await api.put(`s3?instance=${encodeURIComponent(instance)}&key=${encodeURIComponent(key)}`, { data: Buffer.from(body), headers });
       if (!res.ok()) throw new Error(`${instance}/${key}: ${res.status()} ${await res.text()}`);
     }
   }
+  await s3('PUT', '/default', 'lifecycle=', Buffer.from(LIFECYCLE));
   console.log('seeded');
   await api.dispose();
 })().catch(e => { console.error(e); process.exit(1); });

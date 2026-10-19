@@ -64,6 +64,12 @@
             <input id="searchInput" class="input" type="search" autocomplete="off" spellcheck="false" placeholder="Open a prefix in this folder" />
             <kbd aria-hidden="true">Enter</kbd>
           </form>
+          <label id="tagFilterWrap" class="searchField searchField--tags" hidden>
+            <i class="ic ic-tags" aria-hidden="true"></i>
+            <span class="visually-hidden">Filter the rows by tag</span>
+            <input id="tagFilter" class="input" type="text" autocomplete="off" spellcheck="false" placeholder="Filter by tag: key or key=value" />
+            <span id="tagStatus" class="searchField__status" role="status" aria-live="polite"></span>
+          </label>
           <span id="accessBadge" class="badge" hidden></span>
           <button id="refreshButton" class="button button--icon" type="button" aria-label="Refresh" title="Refresh"><i class="ic ic-refresh" aria-hidden="true"></i></button>
           <div class="menuWrap">
@@ -73,8 +79,10 @@
             <div id="actionsMenu" class="menu" role="menu" hidden>
               <button id="zipItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-file-zip" aria-hidden="true"></i>Download as ZIP</button>
               <button id="insightsItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-chart-bar" aria-hidden="true"></i><span>Storage insights</span></button>
+              <button id="tagsItem" class="menu__item" type="button" role="menuitem" aria-pressed="false"><i class="ic ic-tags" aria-hidden="true"></i><span>Show tags</span></button>
+              <button id="folderTagsItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-tags" aria-hidden="true"></i><span>Tag the objects of this folder</span></button>
               <div class="menu__sep" role="separator"></div>
-              <button id="accessItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-lock" aria-hidden="true"></i>Bucket permissions</button>
+              <button id="accessItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-shield-check" aria-hidden="true"></i>Bucket permissions</button>
             </div>
           </div>
           <div id="uploadWrap" class="menuWrap">
@@ -84,6 +92,7 @@
             <div id="uploadMenu" class="menu" role="menu" hidden>
               <button id="uploadFilesItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-file-upload" aria-hidden="true"></i>Upload files</button>
               <button id="uploadFolderItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-folder-up" aria-hidden="true"></i>Upload a folder</button>
+              <button id="uploadTagsItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-tags" aria-hidden="true"></i><span>Tags of the new uploads</span></button>
               <p class="menu__hint">You can also drop files on the page.</p>
             </div>
           </div>
@@ -114,6 +123,7 @@
   <script src="assets/js/common/download-manager.js"></script>
   <script src="assets/js/common/actions.js"></script>
   <script src="assets/js/common/menu.js"></script>
+  <script src="assets/js/tags.js"></script>
   <script src="assets/js/uploads.js"></script>
   <script src="assets/js/app.js"></script>
 </body>
