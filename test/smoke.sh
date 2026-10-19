@@ -17,6 +17,24 @@ request() {
   fi
 }
 
+# request_either accepts one of two statuses, for example 200 (done inline) or 202 (a background job).
+request_either() {
+  first="$1"
+  second="$2"
+  output="$3"
+  shift 3
+  status="$(curl -sS -o "$output" -w '%{http_code}' "$@")"
+  if [ "$status" != "$first" ] && [ "$status" != "$second" ]; then
+    echo "Received HTTP $status; expected HTTP $first or $second for: curl $*" >&2
+    cat "$output" >&2 || true
+    exit 1
+  fi
+}
+
+json_string() {
+  sed -n "s/.*\"$2\":\"\([^\"]*\)\".*/\1/p" "$1" | head -n 1
+}
+
 json_id() {
   sed -n 's/.*"id":"\([^"]*\)".*/\1/p' "$1" | head -n 1
 }
@@ -94,27 +112,31 @@ request 201 "$TMP_DIR/upload-create.json" -X POST \
   -H 'Content-Type: application/json' \
   --data '{"instance":"garage-main","key":"smoke/large.bin","size":17825792,"contentType":"application/octet-stream"}' \
   "$BASE_URL/api/uploads"
-upload_id="$(json_id "$TMP_DIR/upload-create.json")"
-[ -n "$upload_id" ]
+# The upload API keeps no server state that the client must name: each chunk
+# carries the resume token of the session in X-S3-Browser-Resume-Token.
+resume_token="$(json_string "$TMP_DIR/upload-create.json" resumeToken)"
+[ -n "$resume_token" ]
 dd if="$TMP_DIR/large.bin" of="$TMP_DIR/part-1.bin" bs=1048576 count=16 2>/dev/null
 dd if="$TMP_DIR/large.bin" of="$TMP_DIR/part-2.bin" bs=1048576 skip=16 count=1 2>/dev/null
 request 200 "$TMP_DIR/upload-part-1.json" -X PUT \
   -H 'Content-Type: application/octet-stream' \
   -H 'Content-Range: bytes 0-16777215/17825792' \
+  -H "X-S3-Browser-Resume-Token: $resume_token" \
   --data-binary "@$TMP_DIR/part-1.bin" \
-  "$BASE_URL/api/uploads/$upload_id"
+  "$BASE_URL/api/uploads"
 grep -q '"uploadedBytes":16777216' "$TMP_DIR/upload-part-1.json"
 request 200 "$TMP_DIR/upload-part-2.json" -X PUT \
   -H 'Content-Type: application/octet-stream' \
   -H 'Content-Range: bytes 16777216-17825791/17825792' \
+  -H "X-S3-Browser-Resume-Token: $resume_token" \
   --data-binary "@$TMP_DIR/part-2.bin" \
-  "$BASE_URL/api/uploads/$upload_id"
+  "$BASE_URL/api/uploads"
 grep -q '"status":"completed"' "$TMP_DIR/upload-part-2.json"
 request 200 "$TMP_DIR/large-head.txt" -I \
   "$BASE_URL/s3?instance=garage-main&key=smoke%2Flarge.bin"
 grep -qi 'content-length: 17825792' "$TMP_DIR/large-head.txt"
 
-request 202 "$TMP_DIR/stats-created.json" \
+request_either 200 202 "$TMP_DIR/stats-created.json" \
   "$BASE_URL/api/stats?instance=garage-main&prefix=smoke%2F"
 wait_job "$TMP_DIR/stats-created.json" "$TMP_DIR/stats.json"
 grep -q '"count":3' "$TMP_DIR/stats.json"
