@@ -479,9 +479,9 @@ func (a *application) navigationFilter(r *http.Request, instance *storageInstanc
 func (a *application) jobRequirements(job jobState) ([]accessRequirement, bool) {
 	source := a.instances[job.Instance]
 	switch job.Type {
-	case jobTypeCopyPrefix:
+	case jobTypeCopyPrefix, jobTypeCopyObject:
 		return []accessRequirement{{permissionRead, source, job.Source}, {permissionWrite, source, job.Target}}, true
-	case jobTypeMovePrefix:
+	case jobTypeMovePrefix, jobTypeMoveObject:
 		return []accessRequirement{{permissionRead, source, job.Source}, {permissionDelete, source, job.Source}, {permissionWrite, source, job.Target}}, true
 	case jobTypeDeletePrefix:
 		return []accessRequirement{{permissionRead, source, job.Prefix}, {permissionDelete, source, job.Prefix}}, true

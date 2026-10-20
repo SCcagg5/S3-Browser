@@ -33,6 +33,10 @@ services:
       context: ../..
       dockerfile: test/browser/Dockerfile
       target: runtime
+      # A copy from 8 KiB up goes in parts of 5 MiB (the S3 minimum), so the tests copy in parts with small objects.
+      args:
+        MULTIPART_COPY_THRESHOLD: "8192"
+        MULTIPART_COPY_PART_SIZE: "5242880"
     command: ["-c", "/config/config.hcl"]
     read_only: true
     volumes:

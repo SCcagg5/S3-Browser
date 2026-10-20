@@ -1,6 +1,7 @@
 // Browser tests of the "portal" interface (server.frontend = "portal"). They cover these parts:
 // 1 the theme selector, 2 the breadcrumb and the toolbar row, the header and the bucket selector, 3 the bulk upload,
-// 4 the access behaviour of 2.0.0, 5 one smoke test on each S3 provider (SeaweedFS, MinIO and Garage).
+// 4 the access behaviour of 2.0.0, 5 one smoke test on each S3 provider (SeaweedFS, MinIO and Garage), 6 the copy in
+// parts on each provider.
 // run.sh starts S3-Browser and the three providers, puts the test objects (seed.js) and runs this file in the
 // Playwright container. The tests of parts 1 to 4 use SeaweedFS.
 // The tests change the answers of the server with page.route where a case needs it (403, 401, no answer, access).
@@ -1836,6 +1837,88 @@ for (const [instance, provider] of Object.entries(PROVIDERS)) {
     await page.waitForSelector('tr[data-name="upload.txt"]', { state: 'detached' });
     assert.ok(!(await listKeys(page, instance, 'smoke/')).includes('smoke/upload.txt'));
     assert.deepEqual(page.errors, []);
+    await page.context().close();
+  });
+}
+
+// ------------------------------------------------------------------------------------------------------------------
+// 6. Copy in parts (UploadPartCopy): the test image copies in parts from 8 KiB up, in parts of 5 MiB
+// ------------------------------------------------------------------------------------------------------------------
+
+const sha256 = buffer => require('crypto').createHash('sha256').update(buffer).digest('hex');
+
+async function getObject(page, instance, key) {
+  const response = await page.request.get(`${BASE}s3?instance=${instance}&key=${encodeURIComponent(key)}`);
+  assert.equal(response.status(), 200, `${key}: ${response.status()}`);
+  return { body: await response.body(), headers: response.headers() };
+}
+
+// Opens the menu of a row, chooses an action, and gives a new name in the prompt.
+async function rowActionWithName(page, name, action, value) {
+  await page.click(`tr[data-name="${name}"] .bb-kebab`);
+  await page.click(`.bb-menu.is-open .bb-menu-item >> text=${action}`);
+  await page.fill('.bb-overlay .bb-input', value);
+  await page.click('.bb-overlay .bb-btn-primary');
+}
+
+for (const [instance, provider] of Object.entries(PROVIDERS)) {
+  test(`copy in parts: ${provider.name} copies and renames a large file as a job, with its bytes, headers, metadata and tags`, async () => {
+    const page = await newPage();
+    const info = (await (await page.request.get(`${BASE}api/instances`)).json()).instances.find(item => item.id === instance);
+    const source = await getObject(page, instance, 'copy/source.bin');
+    assert.equal(source.body.length, 11 * 1024 * 1024 + 123);
+    const jobs = [];
+    page.on('response', async response => {
+      if (/\/api\/(copy|rename|jobs\/)/.test(response.url())) jobs.push(await response.json().catch(() => ({})));
+    });
+    await open(page, `-/${info.host}/${instance}/copy/`);
+    // The copy: the server answers with a job, and the job counts the copied bytes.
+    await rowActionWithName(page, 'source.bin', 'Copy', 'copied.bin');
+    await page.waitForSelector('tr[data-name="copied.bin"]', { timeout: 60000 });
+    const copyJob = jobs.find(job => job.type === 'copy_object' && job.status === 'completed');
+    assert.ok(copyJob, JSON.stringify(jobs));
+    assert.equal(copyJob.totalBytes, source.body.length);
+    assert.equal(copyJob.copiedBytes, source.body.length);
+    const copied = await getObject(page, instance, 'copy/copied.bin');
+    assert.equal(sha256(copied.body), sha256(source.body));
+    // The copy is a multipart object of three parts.
+    assert.match(copied.headers.etag, /-3"?$/);
+    for (const name of ['content-type', 'cache-control', 'content-disposition', 'x-amz-meta-origin']) {
+      assert.equal(copied.headers[name], source.headers[name], name);
+    }
+    assert.equal(copied.headers['content-type'], 'application/x-copy-test');
+    assert.equal(copied.headers['x-amz-meta-origin'], 'seed');
+    if (provider.tags) assert.deepEqual(await apiTags(page, 'copy/copied.bin', instance), ['team=copy']);
+    // The rename: a move job, the source goes away.
+    await rowActionWithName(page, 'copied.bin', 'Rename', 'moved.bin');
+    await page.waitForSelector('tr[data-name="moved.bin"]', { timeout: 60000 });
+    await page.waitForSelector('tr[data-name="copied.bin"]', { state: 'detached' });
+    assert.ok(jobs.some(job => job.type === 'move_object' && job.status === 'completed'));
+    const moved = await getObject(page, instance, 'copy/moved.bin');
+    assert.equal(sha256(moved.body), sha256(source.body));
+    // The gateway adds "private, no-store" to Cache-Control: the value of the provider follows it.
+    assert.equal(moved.headers['cache-control'], source.headers['cache-control']);
+    assert.match(moved.headers['cache-control'], /max-age=600$/);
+    if (provider.tags) assert.deepEqual(await apiTags(page, 'copy/moved.bin', instance), ['team=copy']);
+    assert.ok(!(await listKeys(page, instance, 'copy/')).includes('copy/copied.bin'));
+    await page.request.delete(`${BASE}s3?instance=${instance}&key=${encodeURIComponent('copy/moved.bin')}`);
+    assert.deepEqual(page.errors, []);
+    await page.context().close();
+  });
+}
+
+for (const [instance, provider] of Object.entries(PROVIDERS).filter(([, item]) => item.versioning)) {
+  test(`copy in parts: ${provider.name} restores an older version above the threshold from that version`, async () => {
+    const page = await newPage();
+    const key = 'copy/versioned.bin';
+    const list = await (await page.request.get(`${BASE}api/versions?instance=${instance}&key=${key}`)).json();
+    const older = list.versions.find(version => !version.isCurrent && !version.deleteMarker);
+    assert.ok(older, JSON.stringify(list));
+    const response = await page.request.post(`${BASE}api/versions/restore`, { data: { instance, key, version: older.version } });
+    assert.equal(response.status(), 200, await response.text());
+    const restored = await getObject(page, instance, key);
+    assert.equal(sha256(restored.body), sha256(Buffer.alloc(20000, 'a')));
+    assert.match(restored.headers.etag, /-1"?$/);
     await page.context().close();
   });
 }

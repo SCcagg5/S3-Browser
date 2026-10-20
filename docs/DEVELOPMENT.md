@@ -52,7 +52,7 @@ The test frontend under `src/frontends/portal` follows the same rules. To use it
 
 ### Browser tests of the portal frontend
 
-`test/portal-frontend/run.sh` starts three S3 providers (SeaweedFS, MinIO and Garage) and S3-Browser with `frontend = "portal"`. It uses Docker Compose with the project name `s3-portal-tests`. Then it puts test objects in the buckets and runs `browser-tests.js` in the Playwright container. The tests cover the theme selector, the header, the bucket selector, the breadcrumb and the toolbar row, the bulk upload and the access behaviour on SeaweedFS. A smoke test runs on each provider. At the end, the script stops the stack.
+`test/portal-frontend/run.sh` starts three S3 providers (SeaweedFS, MinIO and Garage) and S3-Browser with `frontend = "portal"`. It uses Docker Compose with the project name `s3-portal-tests`. Then it puts test objects in the buckets and runs `browser-tests.js` in the Playwright container. The tests cover the theme selector, the header, the bucket selector, the breadcrumb and the toolbar row, the bulk upload and the access behaviour on SeaweedFS. A smoke test and a test of the copy in parts run on each provider. The image of this stack copies in parts from 8 KiB up: refer to the section "Copy in parts" of [ARCHITECTURE.md](ARCHITECTURE.md). At the end, the script stops the stack.
 
 `test/portal-frontend/providers.js` tells which provider has versions and tags. Refer to [test/README.md](../test/README.md) for the functions of each provider. Two runs at the same time on one machine need two project names: set `PORTAL_TEST_PROJECT`.
 

@@ -137,6 +137,12 @@
     if (job.status === 'queued') return `${label}: queued...`;
     if (job.status === 'paused') return `${label}: paused after ${processed} object(s).`;
     if (job.status === 'completed') return jobCompletionMessage(job, label);
+    const copiedBytes = Number(job.copiedBytes || 0);
+    const totalBytes = Number(job.totalBytes || 0);
+    if (totalBytes > 0) return `${label}: ${formatBytes(copiedBytes)} of ${formatBytes(totalBytes)} copied...`;
+    if (copiedBytes > 0 && Number(job.processed || 0) > 0) {
+      return `${label}: ${processed} object(s) processed, ${formatBytes(copiedBytes)} copied...`;
+    }
     return Number(job.processed || 0) > 0
       ? `${label}: ${processed} object(s) processed...`
       : `${label}...`;
@@ -149,6 +155,8 @@
       const subject = String(label || 'Insights').replace(/^Computing\s+/i, '').trim() || 'insights';
       return `${subject.charAt(0).toUpperCase()}${subject.slice(1)} ready: ${count} object(s), ${formatBytes(job.stats.totalBytes || 0)}.`;
     }
+    const totalBytes = Number(job.totalBytes || 0);
+    if (totalBytes > 0) return `${label} completed: ${formatBytes(totalBytes)} copied.`;
     return `${label} completed: ${processed.toLocaleString()} object(s) processed.`;
   }
 
@@ -167,12 +175,15 @@
           if (message === lastMessage) return;
           lastMessage = message;
           const processed = Number(current.processed || 0).toLocaleString();
+          const totalBytes = Number(current.totalBytes || 0);
+          const sized = totalBytes > 0 && current.status !== 'paused';
+          const copiedBytes = Number(current.copiedBytes || 0);
           notification.update(message, {
             persistent: current.status !== 'paused',
             status: current.status === 'paused' ? 'paused' : 'loading',
-            indeterminate: current.status !== 'paused',
-            progress: current.status === 'paused' ? null : undefined,
-            detail: `${processed} object(s) checkpointed`,
+            indeterminate: current.status !== 'paused' && !sized,
+            progress: current.status === 'paused' ? null : (sized ? Math.min(1, copiedBytes / totalBytes) : undefined),
+            detail: sized ? `${formatBytes(copiedBytes)} of ${formatBytes(totalBytes)}` : `${processed} object(s) checkpointed`,
             duration: 5000
           });
         }
@@ -1262,7 +1273,13 @@
       detail: target
     });
     try {
-      await BB.api.copy({ src: key, dst: target });
+      const result = await BB.api.copy({ src: key, dst: target });
+      if (result && result.id && result.status) {
+        // A large object runs as a background job. The job toast replaces this toast.
+        notification.close();
+        const job = await waitForJob(result, 'Copying file');
+        return job.status === 'completed' ? target : false;
+      }
       notification.update('Copy completed.', {
         persistent: false,
         status: 'success',
@@ -1273,6 +1290,7 @@
       });
       return target;
     } catch (error) {
+      if (error?.taskNotificationShown) return false;
       notification.update(`Copy failed: ${String(error.message || error)}`, {
         persistent: false,
         status: 'error',
@@ -1298,7 +1316,13 @@
       detail: target
     });
     try {
-      await BB.api.rename({ src: key, dst: target });
+      const result = await BB.api.rename({ src: key, dst: target });
+      if (result && result.id && result.status) {
+        // A large object runs as a background job. The job toast replaces this toast.
+        notification.close();
+        const job = await waitForJob(result, 'Moving file');
+        return job.status === 'completed' ? target : false;
+      }
       notification.update('File renamed.', {
         persistent: false,
         status: 'success',
@@ -1309,6 +1333,7 @@
       });
       return target;
     } catch (error) {
+      if (error?.taskNotificationShown) return false;
       notification.update(`Rename failed: ${String(error.message || error)}`, {
         persistent: false,
         status: 'error',

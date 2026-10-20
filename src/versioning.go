@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -160,6 +161,16 @@ func (s *storageInstance) RestoreVersion(ctx context.Context, key, version strin
 	store, err := s.versionStore()
 	if err != nil {
 		return err
+	}
+	// A version from multipartCopyThreshold up is too large for CopyObject: it goes in parts. When the HEAD fails, the
+	// plain restore below gives the error of the provider.
+	if _, inParts := s.backend.(ObjectMultipartCopier); inParts {
+		if response, headErr := s.HeadVersion(ctx, key, version); headErr == nil {
+			closeObjectResponse(response)
+			if size, sizeErr := strconv.ParseInt(strings.TrimSpace(response.Header.Get("Content-Length")), 10, 64); sizeErr == nil && s.copiesInParts(size) {
+				return s.CopyMultipart(ctx, key, key, multipartCopyOptions{SourceVersion: version})
+			}
+		}
 	}
 	release, err := s.beginStorageRequest(ctx)
 	if err != nil {

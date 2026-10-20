@@ -616,6 +616,14 @@ func (a *application) handleCopy(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusAccepted, job.public())
 		return
 	}
+	if job, started, err := a.startLargeCopy(r.Context(), instance, request.Source, request.Target, false); err != nil || started {
+		if err != nil {
+			writeAPIError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusAccepted, job.public())
+		return
+	}
 	count, err := copyOrMove(r.Context(), instance, request.Source, request.Target, false, false)
 	if err != nil {
 		writeAPIError(w, err)
@@ -661,6 +669,14 @@ func (a *application) handleRename(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		job, err := a.jobs.create(jobState{Type: jobTypeMovePrefix, Instance: instance.cfg.ID, Source: source, Target: target})
+		if err != nil {
+			writeAPIError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusAccepted, job.public())
+		return
+	}
+	if job, started, err := a.startLargeCopy(r.Context(), instance, request.Source, request.Target, true); err != nil || started {
 		if err != nil {
 			writeAPIError(w, err)
 			return
@@ -722,6 +738,36 @@ func (a *application) handleDeletePrefix(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusAccepted, job.public())
 }
 
+// startLargeCopy starts a job for the copy or the move of one object from multipartCopyThreshold up. Such a copy goes
+// in parts and can take minutes: the job shows the copied bytes and can stop it. It gives false for a smaller object,
+// and for a backend that copies any size in one request.
+func (a *application) startLargeCopy(ctx context.Context, instance *storageInstance, source, target string, move bool) (jobState, bool, error) {
+	if _, ok := instance.backend.(ObjectMultipartCopier); !ok {
+		return jobState{}, false, nil
+	}
+	source, target = cleanRelativeKey(source), cleanRelativeKey(target)
+	if source == "" || target == "" || source == target {
+		// copyOrMove gives the error.
+		return jobState{}, false, nil
+	}
+	// The copy names no version: the HEAD reads the current version, as the copy does.
+	response, err := instance.Head(context.WithValue(ctx, objectVersionContextKey{}, ""), instance.fullKey(source))
+	if err != nil {
+		return jobState{}, false, err
+	}
+	closeObjectResponse(response)
+	size, err := strconv.ParseInt(strings.TrimSpace(response.Header.Get("Content-Length")), 10, 64)
+	if err != nil || !instance.copiesInParts(size) {
+		return jobState{}, false, nil
+	}
+	jobType := jobTypeCopyObject
+	if move {
+		jobType = jobTypeMoveObject
+	}
+	job, err := a.jobs.create(jobState{Type: jobType, Instance: instance.cfg.ID, Source: source, Target: target, TotalBytes: size})
+	return job, err == nil, err
+}
+
 func copyOrMove(ctx context.Context, instance *storageInstance, source, target string, isPrefix, move bool) (int, error) {
 	source = cleanRelativeKey(source)
 	target = cleanRelativeKey(target)
@@ -754,7 +800,13 @@ func copyOrMove(ctx context.Context, instance *storageInstance, source, target s
 		return 1, nil
 	}
 
-	keys, err := collectObjectKeys(ctx, instance, source)
+	keys := make([]string, 0)
+	sizes := make([]int64, 0)
+	err := forEachObject(ctx, instance, source, func(object objectInfo, relative string) error {
+		keys = append(keys, relative)
+		sizes = append(sizes, object.Size)
+		return nil
+	})
 	if err != nil {
 		return 0, err
 	}
@@ -762,10 +814,10 @@ func copyOrMove(ctx context.Context, instance *storageInstance, source, target s
 		return 0, apiError{Status: http.StatusNotFound, Code: "empty_prefix", Message: "source prefix contains no objects"}
 	}
 	copied := 0
-	for _, key := range keys {
+	for index, key := range keys {
 		relativeSuffix := strings.TrimPrefix(key, source)
 		destination := target + relativeSuffix
-		if err := instance.Copy(ctx, instance.fullKey(key), instance.fullKey(destination)); err != nil {
+		if err := instance.CopySized(ctx, instance.fullKey(key), instance.fullKey(destination), sizes[index], nil); err != nil {
 			return copied, fmt.Errorf("copy %q to %q after %d object(s): %w", key, destination, copied, err)
 		}
 		copied++
@@ -780,15 +832,6 @@ func copyOrMove(ctx context.Context, instance *storageInstance, source, target s
 		}
 	}
 	return copied, nil
-}
-
-func collectObjectKeys(ctx context.Context, instance *storageInstance, prefix string) ([]string, error) {
-	keys := make([]string, 0)
-	err := forEachObject(ctx, instance, prefix, func(_ objectInfo, relative string) error {
-		keys = append(keys, relative)
-		return nil
-	})
-	return keys, err
 }
 
 func forEachObject(ctx context.Context, instance *storageInstance, prefix string, fn func(objectInfo, string) error) error {

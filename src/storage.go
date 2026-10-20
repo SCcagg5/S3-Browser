@@ -253,6 +253,12 @@ type ObjectDeleter interface {
 type ObjectBatchDeleter interface {
 	DeleteMany(context.Context, []string) error
 }
+
+// ObjectMultipartCopier is optional: a backend that copies an object in parts on the provider (S3 UploadPartCopy). It
+// copies a source above the CopyObject limit of 5 GiB.
+type ObjectMultipartCopier interface {
+	CopyMultipart(context.Context, string, string, multipartCopyOptions) error
+}
 type ObjectCopier interface {
 	Copy(context.Context, string, string) error
 }

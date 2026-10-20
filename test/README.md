@@ -46,6 +46,8 @@ Each provider reads the first `access_key_id` and the first `secret_access_key_f
 
 The seed (`portal-frontend/seed.js`) enables the versioning of the bucket `default` on SeaweedFS and MinIO. It puts the same objects in `smoke/` on each provider: one file with tags where the provider has tags, and one file with two versions. On SeaweedFS, the seed also puts the data of the other tests: files with several versions in `versions/`, tags, a lifecycle rule, and a JSON file, a CSV file and a binary file for the comparison. The other browser tests use SeaweedFS only.
 
+The image of S3-Browser in this stack copies in parts from 8 KiB up, in parts of 5 MiB (the build arguments `MULTIPART_COPY_THRESHOLD` and `MULTIPART_COPY_PART_SIZE` of `browser/Dockerfile`). The seed puts `copy/source.bin` (11 MiB, three parts) with standard headers, a user metadata and tags on each provider. On SeaweedFS and MinIO, it also puts `copy/versioned.bin` with two versions. The tests of the copy in parts copy and rename `source.bin` through the page and compare the SHA-256, the headers and the tags. They also restore the older version of `versioned.bin`.
+
 The smoke test of each provider lists `smoke/`, uploads a file with its SHA-256 checksum, downloads it and deletes it. It checks the versions and the tags where the provider has them. Where the provider does not have them, it checks that the page hides them. `portal-frontend/providers.js` has the flags of each provider.
 
 ## Functions of each provider
@@ -66,6 +68,9 @@ These facts come from S3 requests to the three providers of the portal test stac
 | ListParts, AbortMultipartUpload | Yes. ListParts of an aborted upload gives 200 with no part | Yes | Yes |
 | UploadPartCopy with `x-amz-copy-source-range` | Yes | Yes | Yes |
 | UploadPartCopy or CopyObject of an older version | Yes | Yes | 404 NoSuchKey |
+| `x-amz-copy-source-if-match` on UploadPartCopy, with the ETag of the source | Yes | Yes | Yes |
+| Header `x-amz-tagging` on CreateMultipartUpload | Yes | Yes | No tags (not tested) |
+| ETag of a copy in 3 parts | `<digest>-3` | `<digest>-3` | `<digest>-3` |
 | CopyObject onto itself with `MetadataDirective=REPLACE` | Yes. The tags stay, the date changes, a new version comes | Yes. The tags stay, the date changes, a new version comes. The ETag of a multipart object changes | Yes. The date changes |
 | Lifecycle: expiration after N days, with a prefix | Yes | Yes | Yes |
 | Lifecycle: abort of incomplete multipart uploads | Yes | 400 InvalidArgument. With an expiration in the same rule: dropped | Yes |

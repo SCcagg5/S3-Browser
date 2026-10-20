@@ -5,6 +5,10 @@ FROM golang:${GO_VERSION}-alpine AS builder
 ARG VERSION=dev
 ARG COMMIT=unknown
 ARG BUILD_DATE=
+# Test stacks only: a lower size from which a copy goes in parts, and a lower part size (in bytes). Empty keeps the
+# values of the release build.
+ARG MULTIPART_COPY_THRESHOLD=
+ARG MULTIPART_COPY_PART_SIZE=
 WORKDIR /src
 
 RUN apk add --no-cache ca-certificates && update-ca-certificates
@@ -22,7 +26,7 @@ RUN set -eux; \
       go build \
         -tags=netgo,osusergo \
         -trimpath \
-        -ldflags="-s -w -buildid= -X main.buildVersion=${VERSION} -X main.buildCommit=${COMMIT} -X main.buildDate=${BUILD_DATE}" \
+        -ldflags="-s -w -buildid= -X main.buildVersion=${VERSION} -X main.buildCommit=${COMMIT} -X main.buildDate=${BUILD_DATE} -X main.multipartCopyThresholdBuild=${MULTIPART_COPY_THRESHOLD} -X main.multipartCopyPartSizeBuild=${MULTIPART_COPY_PART_SIZE}" \
         -o /out/rootfs/s3-browser .; \
     mkdir -p /out/rootfs/config /out/rootfs/etc/ssl/certs; \
     cp /etc/ssl/certs/ca-certificates.crt /out/rootfs/etc/ssl/certs/ca-certificates.crt

@@ -101,6 +101,8 @@ func addLargestStatsEntry(entries *[]statsEntry, entry statsEntry) {
 const (
 	jobTypeCopyPrefix            = "copy_prefix"
 	jobTypeMovePrefix            = "move_prefix"
+	jobTypeCopyObject            = "copy_object"
+	jobTypeMoveObject            = "move_object"
 	jobTypeDeletePrefix          = "delete_prefix"
 	jobTypeStatsPrefix           = "stats_prefix"
 	jobTypeIntegrity             = "integrity"
@@ -134,6 +136,9 @@ var (
 	errJobCanceled = errors.New("job canceled")
 )
 
+// jobState is a job in the memory of the process. In a copy job, CopiedBytes counts the bytes of the copied objects.
+// CopyingBytes counts the copied parts of the object in progress: a pause or an error drops them. TotalBytes is the size
+// of the source of a copy_object or a move_object job.
 type jobState struct {
 	ID                           string                        `json:"id"`
 	Type                         string                        `json:"type"`
@@ -148,6 +153,9 @@ type jobState struct {
 	Processed                    int64                         `json:"processed"`
 	StorageRequests              int64                         `json:"storage_requests,omitempty"`
 	StorageBytes                 int64                         `json:"storage_bytes,omitempty"`
+	CopiedBytes                  int64                         `json:"copied_bytes,omitempty"`
+	CopyingBytes                 int64                         `json:"copying_bytes,omitempty"`
+	TotalBytes                   int64                         `json:"total_bytes,omitempty"`
 	LastKey                      string                        `json:"last_key,omitempty"`
 	Stats                        *statsResponse                `json:"stats,omitempty"`
 	IntegrityRequest             *integrityRequest             `json:"integrity_request,omitempty"`
@@ -177,6 +185,8 @@ type publicJob struct {
 	Processed             int64                        `json:"processed"`
 	StorageRequests       int64                        `json:"storageRequests,omitempty"`
 	StorageBytes          int64                        `json:"storageBytes,omitempty"`
+	CopiedBytes           int64                        `json:"copiedBytes,omitempty"`
+	TotalBytes            int64                        `json:"totalBytes,omitempty"`
 	LastKey               string                       `json:"lastKey,omitempty"`
 	Stats                 *statsResponse               `json:"stats,omitempty"`
 	Integrity             *integrityResult             `json:"integrity,omitempty"`
@@ -204,6 +214,8 @@ func (j jobState) public() publicJob {
 		Processed:       j.Processed,
 		StorageRequests: j.StorageRequests,
 		StorageBytes:    j.StorageBytes,
+		CopiedBytes:     j.CopiedBytes + j.CopyingBytes,
+		TotalBytes:      j.TotalBytes,
 		LastKey:         j.LastKey,
 		Stats:           cloneStatsForPublic(j.Stats),
 		Error:           j.Error,
@@ -646,7 +658,8 @@ func (m *jobManager) run(id string) {
 	}
 
 	budget := newResourceBudget(m.app.config.Runtime)
-	if job.Type == jobTypeIntegrity || job.Type == jobTypeExtractArchive || job.Type == jobTypeArchiveEntryIntegrity {
+	if job.Type == jobTypeIntegrity || job.Type == jobTypeExtractArchive || job.Type == jobTypeArchiveEntryIntegrity ||
+		job.Type == jobTypeCopyObject || job.Type == jobTypeMoveObject {
 		budget = newBackgroundResourceBudget(m.app.config.Runtime)
 	}
 	runContext, runCancel := context.WithCancel(m.ctx)
@@ -735,7 +748,7 @@ func (m *jobManager) execute(ctx context.Context, job *jobState) error {
 		}
 		return m.runObjectJob(ctx, job, instance, func(ctx context.Context, object objectInfo, relative string) error {
 			destination := job.Target + strings.TrimPrefix(relative, job.Source)
-			return instance.Copy(ctx, instance.fullKey(relative), instance.fullKey(destination))
+			return m.copyCounted(ctx, job, instance, relative, destination, object.Size)
 		})
 	case jobTypeMovePrefix:
 		for _, permission := range []string{permissionRead, permissionWrite, permissionDelete} {
@@ -745,11 +758,22 @@ func (m *jobManager) execute(ctx context.Context, job *jobState) error {
 		}
 		return m.runObjectJob(ctx, job, instance, func(ctx context.Context, object objectInfo, relative string) error {
 			destination := job.Target + strings.TrimPrefix(relative, job.Source)
-			if err := instance.Copy(ctx, instance.fullKey(relative), instance.fullKey(destination)); err != nil {
+			if err := m.copyCounted(ctx, job, instance, relative, destination, object.Size); err != nil {
 				return err
 			}
 			return instance.Delete(ctx, instance.fullKey(relative))
 		})
+	case jobTypeCopyObject, jobTypeMoveObject:
+		permissions := []string{permissionRead, permissionWrite}
+		if job.Type == jobTypeMoveObject {
+			permissions = append(permissions, permissionDelete)
+		}
+		for _, permission := range permissions {
+			if err := requirePermission(instance, permission); err != nil {
+				return err
+			}
+		}
+		return m.runObjectCopyJob(ctx, job, instance)
 	case jobTypeDeletePrefix:
 		for _, permission := range []string{permissionRead, permissionDelete} {
 			if err := requirePermission(instance, permission); err != nil {
@@ -1184,6 +1208,61 @@ func (m *jobManager) runObjectJob(ctx context.Context, job *jobState, instance *
 		return apiError{Status: http.StatusNotFound, Code: "empty_prefix", Message: "source prefix contains no objects"}
 	}
 	return nil
+}
+
+// copyCounted copies one object of a copy job and adds its size to the copied bytes of the job. During a copy in parts,
+// the stored job shows the copied parts, so a poll of the job sees the progress.
+func (m *jobManager) copyCounted(ctx context.Context, job *jobState, instance *storageInstance, source, destination string, size int64) error {
+	job.CopyingBytes = 0
+	copying := int64(0)
+	err := instance.CopySized(ctx, instance.fullKey(source), instance.fullKey(destination), size, func(part int64) {
+		copying += part
+		m.setCopyingBytes(job.ID, copying)
+	})
+	if err != nil {
+		m.setCopyingBytes(job.ID, 0)
+		return err
+	}
+	job.CopiedBytes += size
+	return nil
+}
+
+// setCopyingBytes changes only the copied parts of the stored job. The job loop keeps the other fields.
+func (m *jobManager) setCopyingBytes(id string, bytes int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if job := m.jobs[id]; job != nil && !terminalJobStatus(job.Status) {
+		job.CopyingBytes = bytes
+		job.UpdatedAt = time.Now().UTC()
+	}
+}
+
+// runObjectCopyJob copies or moves one large object. A pause or a cancel aborts the copy in parts; a resume starts it
+// again from the first part.
+func (m *jobManager) runObjectCopyJob(ctx context.Context, job *jobState, instance *storageInstance) error {
+	if err := m.controlState(job.ID); err != nil {
+		return err
+	}
+	job.CopiedBytes = 0
+	if err := m.copyCounted(ctx, job, instance, job.Source, job.Target, job.TotalBytes); err != nil {
+		return err
+	}
+	if job.Type == jobTypeMoveObject {
+		if err := instance.Delete(ctx, instance.fullKey(job.Source)); err != nil {
+			return fmt.Errorf("copy succeeded but source deletion failed: %w", err)
+		}
+	}
+	job.Processed = 1
+	job.LastKey = job.Source
+	job.UpdatedAt = time.Now().UTC()
+	if latest, ok := m.get(job.ID); ok {
+		job.Status = latest.Status
+		job.EndedAt = cloneTimePointer(latest.EndedAt)
+		if job.Status == jobStatusQueued {
+			job.Status = jobStatusRunning
+		}
+	}
+	return m.put(*job)
 }
 
 // runDeleteJob deletes the objects of a prefix in batches: one request for each listing page, up to

@@ -326,6 +326,40 @@ func (s *storageInstance) Copy(ctx context.Context, source, destination string) 
 	return err
 }
 
+// CopySized copies one object whose size the caller knows. From multipartCopyThreshold up, a backend that copies in
+// parts gets a copy in parts. Other copies are one CopyObject request. Progress receives the size of each copied part.
+func (s *storageInstance) CopySized(ctx context.Context, source, destination string, size int64, progress func(int64)) error {
+	if s.copiesInParts(size) {
+		return s.CopyMultipart(ctx, source, destination, multipartCopyOptions{Progress: progress})
+	}
+	return s.Copy(ctx, source, destination)
+}
+
+// copiesInParts reports whether a copy of size bytes goes in parts.
+func (s *storageInstance) copiesInParts(size int64) bool {
+	_, ok := s.backend.(ObjectMultipartCopier)
+	return ok && size >= multipartCopyThreshold
+}
+
+// CopyMultipart copies an object in parts. Each request of the copy takes a slot of the gates of the instance, so the
+// limits of concurrent requests apply. A request waits for its slot without time limit: a copy in parts is long.
+func (s *storageInstance) CopyMultipart(ctx context.Context, source, destination string, options multipartCopyOptions) error {
+	copier, ok := s.backend.(ObjectMultipartCopier)
+	if !ok {
+		return apiError{Status: http.StatusNotImplemented, Code: "multipart_copy_unsupported", Message: "this storage provider does not copy objects in parts"}
+	}
+	options.gate = s.beginStorageRequest
+	err := copier.CopyMultipart(withUnboundedGateWait(ctx), source, destination, options)
+	if err == nil {
+		s.observePermission(permissionRead, nil)
+		s.observePermission(permissionWrite, nil)
+	} else {
+		// As for CopyObject: keep read tentable and learn the conservative write denial only.
+		s.observePermission(permissionWrite, err)
+	}
+	return err
+}
+
 func (s *storageInstance) discoverCapabilities(ctx context.Context) (discoveredCapabilities, error) {
 	release, err := s.beginStorageRequest(ctx)
 	if err != nil {

@@ -44,8 +44,8 @@ const VERSION_TAGS = {
 };
 
 // A request to the S3 API of the provider of an instance, signed with SigV4 (the versioning and the lifecycle of a
-// bucket have no route in S3-Browser).
-async function s3(instance, method, path, query, body) {
+// bucket have no route in S3-Browser). The extra headers are signed too.
+async function s3(instance, method, path, query, body, extra = {}) {
   const { host, region } = PROVIDERS[instance];
   const secret = fs.readFileSync('/secrets/s3_secret_access_key', 'utf8').trim();
   const hmac = (key, text) => crypto.createHmac('sha256', key).update(text).digest();
@@ -58,6 +58,7 @@ async function s3(instance, method, path, query, body) {
     'x-amz-content-sha256': payloadHash,
     'x-amz-date': now,
   };
+  for (const [name, value] of Object.entries(extra)) headers[name.toLowerCase()] = value;
   const names = Object.keys(headers).sort();
   const canonical = [method, path, query, names.map(name => `${name}:${headers[name]}\n`).join(''), names.join(';'), payloadHash].join('\n');
   const scope = `${day}/${region}/s3/aws4_request`;
@@ -111,6 +112,13 @@ const SMOKE = instance => ({
   'smoke/versioned.txt': ['versioned.txt version 1\n', 'versioned.txt version 2\n'],
 });
 
+// The objects of the test of the copy in parts (copy/). The test image copies in parts from 8 KiB up, in parts of
+// 5 MiB: source.bin gives three parts. It has the standard headers, a user metadata and, where the provider has them,
+// tags. versioned.bin has two versions where the provider keeps them.
+const COPY_SOURCE = Buffer.alloc(11 * 1024 * 1024 + 123);
+for (let i = 0; i < COPY_SOURCE.length; i += 1) COPY_SOURCE[i] = (i * 31 + (i >> 9)) & 255;
+const COPY_HEADERS = { 'content-type': 'application/x-copy-test', 'cache-control': 'max-age=600', 'content-disposition': 'attachment; filename="source.bin"', 'x-amz-meta-origin': 'seed' };
+
 (async () => {
   const api = await request.newContext({ baseURL: BASE });
   const put = async (instance, key, body, headers) => {
@@ -131,6 +139,14 @@ const SMOKE = instance => ({
         if (version + 1 < bodies.length) await new Promise(resolve => setTimeout(resolve, 1100));
       }
     }
+  }));
+  for (const [instance, provider] of Object.entries(PROVIDERS)) {
+    await s3(instance, 'PUT', '/default/copy/source.bin', '', COPY_SOURCE, { ...COPY_HEADERS, ...(provider.tags ? { 'x-amz-tagging': 'team=copy' } : {}) });
+  }
+  await Promise.all(Object.entries(PROVIDERS).filter(([, provider]) => provider.versioning).map(async ([instance]) => {
+    await put(instance, 'copy/versioned.bin', Buffer.alloc(20000, 'a'), { 'Content-Type': 'application/octet-stream' });
+    await new Promise(resolve => setTimeout(resolve, 1100));
+    await put(instance, 'copy/versioned.bin', Buffer.alloc(20000, 'b'), { 'Content-Type': 'application/octet-stream' });
   }));
   for (const [instance, files] of Object.entries(objects)) {
     for (const [key, body] of Object.entries(files)) {

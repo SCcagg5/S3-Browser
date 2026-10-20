@@ -60,6 +60,13 @@ func main() {
 	for _, setting := range effectiveConfiguration(cfg) {
 		log.Printf("config.effective %s = %s  # %s", setting.Name, setting.Value, setting.Source)
 	}
+	buildNotes, err := applyMultipartCopyBuildSettings()
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, note := range buildNotes {
+		log.Print(note)
+	}
 	if cfg.Runtime.MemoryLimitBytes > 0 {
 		debug.SetMemoryLimit(cfg.Runtime.MemoryLimitBytes)
 	}

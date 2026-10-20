@@ -4,6 +4,18 @@ This document uses ASD-STE100 Simplified Technical English.
 
 ## Unreleased
 
+### Copy, move and rename
+
+- A copy, a move or a rename of an object from 5 GiB minus 256 MiB up goes in parts (`UploadPartCopy`). `CopyObject`
+  refuses a source above 5 GiB. The copy keeps the standard headers, the user metadata and the tags of the source.
+  Refer to the section "Copy in parts" of [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+- `POST /api/copy` and `POST /api/rename` of such an object answer `202` with a job `copy_object` or `move_object`.
+  The job shows `copiedBytes` and `totalBytes`. A cancel aborts the multipart upload. A smaller object gets `200` as
+  before.
+- The prefix jobs count the copied bytes in `copiedBytes`.
+- The restore of a large version copies that version in parts.
+- The interfaces show the copied bytes of a copy job, with a progress bar for one object.
+
 ### Uploads and deletes
 
 - An S3 upload can carry a SHA-256 checksum. The browser computes the digest of each chunk. The provider refuses a part
@@ -23,6 +35,9 @@ This document uses ASD-STE100 Simplified Technical English.
   from source) and Garage v2.4.1. A smoke test lists, uploads, downloads and deletes on each provider. It also checks
   that the page shows versions and tags only where the provider has them.
 - `test/README.md` has a table of the S3 functions of each provider, from S3 requests to the test stack.
+- The test image takes the build arguments `MULTIPART_COPY_THRESHOLD` and `MULTIPART_COPY_PART_SIZE`. The portal test
+  stack copies in parts from 8 KiB up, in parts of 5 MiB. A browser test copies and renames a file of 11 MiB on each
+  provider and compares the SHA-256 of the result. A second test restores a large version on SeaweedFS and MinIO.
 
 ### Tags
 

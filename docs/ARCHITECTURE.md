@@ -125,6 +125,7 @@ Jobs are memory-only and use two workers. The manager admits no more than four a
 Supported job types are limited to operations that can stream with bounded memory:
 
 - prefix copy, move, and delete;
+- copy or move of one object in parts (`copy_object`, `move_object`);
 - Insights statistics;
 - per-object integrity verification;
 - selected archive-entry extraction;
@@ -135,6 +136,32 @@ Insights uses a 100 ms synchronous fast path. A fresh completed result can be re
 A job that deletes a prefix deletes the objects in batches of 1000 keys. It uses `DeleteObjects` of S3. The same applies to the deletion of the sources in a move of a prefix. The job counts a batch only after the provider deleted it. After a pause or a stop, the job continues after the last deleted key.
 
 A provider that refuses `DeleteObjects` with `501` or `405` gets one request for each key. The server remembers this refusal. A key with a character that XML cannot carry always gets its own request. The GCS provider has no batch delete.
+
+## Copy in parts
+
+`CopyObject` of S3 refuses a source above 5 GiB. Thus a copy, a move, a rename and the restore of a version use a copy in parts from a threshold up. The threshold is 5 GiB minus 256 MiB. The engine is in the S3 backend (`src/s3_copy.go`), behind the optional interface `ObjectMultipartCopier`. The GCS backend does not have it: its copy has no such limit.
+
+The engine does these steps:
+
+1. It reads the source with `HEAD`, with `versionId` when the copy names a version. It gets the size, the ETag and the headers.
+2. It reads the tags of the source. A source with `x-amz-tagging-count: 0` needs no request. A provider without tags (`501` or `405`) gives no tag.
+3. It sends `CreateMultipartUpload` with `Content-Type`, `Cache-Control`, `Content-Disposition`, `Content-Encoding`, `Content-Language`, `Expires`, the `x-amz-meta-*` headers and `x-amz-tagging`.
+4. It sends one `UploadPartCopy` for each part of 256 MiB, with `x-amz-copy-source-range`. Four parts go at the same time. Above 10000 parts, the parts become larger.
+5. It sends `CompleteMultipartUpload`.
+
+Each part has `x-amz-copy-source-if-match` with the ETag of the source. A source that changes during the copy makes the copy fail. On an error or a cancel, the engine sends `AbortMultipartUpload`. The abort has its own time limit of 30 seconds, because the context of the copy can be canceled. No byte of the object goes through S3-Browser.
+
+Each request of the engine takes a slot of the concurrency gates of the bucket. Thus the limits `max_concurrent_requests_per_storage` and `max_concurrent_storage_requests` apply. A request of the engine waits for its slot with no time limit.
+
+The engine has an options structure: the source version, new metadata, new tags, and a progress function. The metadata edit uses the same engine with new metadata.
+
+`POST /api/copy` and `POST /api/rename` of one object first read its size with `HEAD`. Under the threshold, the copy stays one synchronous `CopyObject` request, and the answer is `200`. From the threshold up, the answer is `202` with a job `copy_object` or `move_object`. The job has `totalBytes`, the size of the source, and `copiedBytes`, which grows after each copied part. A move deletes the source after the copy. A pause or a cancel aborts the multipart upload. A resume starts the copy again from the first part. The jobs of one object use the background request budget (`max_background_storage_requests`).
+
+A prefix copy and a prefix move use the size of each object in the listing. An object from the threshold up goes in parts. The job counts `copiedBytes`, with the parts of the object in progress.
+
+The restore of a version from the threshold up uses the engine with the version as the source. It is a synchronous request, as before.
+
+The threshold and the part size are unexported variables. Go tests set them. The test image sets them at build with `-ldflags -X main.multipartCopyThresholdBuild=<bytes> -X main.multipartCopyPartSizeBuild=<bytes>` (Docker build arguments `MULTIPART_COPY_THRESHOLD` and `MULTIPART_COPY_PART_SIZE` of `test/browser/Dockerfile`). These are not configuration keys. A release build leaves them empty. A value that is not an integer in its range stops the program at start. The log shows each value that the build changed.
 
 ## Insights treemap normalization
 

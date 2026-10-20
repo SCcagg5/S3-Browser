@@ -362,8 +362,6 @@ type s3CompletedPart struct {
 }
 
 func (s *s3Backend) InitiateMultipart(ctx context.Context, key, contentType string) (string, error) {
-	query := url.Values{}
-	query.Set("uploads", "")
 	headers := make(http.Header)
 	if contentType != "" {
 		headers.Set("Content-Type", contentType)
@@ -372,6 +370,13 @@ func (s *s3Backend) InitiateMultipart(ctx context.Context, key, contentType stri
 		headers.Set("x-amz-checksum-algorithm", "SHA256")
 	}
 	setUploadTagsRequest(ctx, headers)
+	return s.initiateMultipart(ctx, key, headers)
+}
+
+// initiateMultipart sends CreateMultipartUpload with the headers of the new object and gives the upload id.
+func (s *s3Backend) initiateMultipart(ctx context.Context, key string, headers http.Header) (string, error) {
+	query := url.Values{}
+	query.Set("uploads", "")
 	resp, err := s.do(ctx, http.MethodPost, key, query, nil, 0, headers)
 	if err != nil {
 		return "", err
@@ -635,8 +640,7 @@ func (s *s3Backend) DeleteObjectVersion(ctx context.Context, key, version string
 
 func (s *s3Backend) RestoreObjectVersion(ctx context.Context, key, version string) error {
 	headers := make(http.Header)
-	copySource := "/" + awsURIEncode(s.cfg.Bucket, true) + "/" + awsURIEncode(key, false) + "?versionId=" + url.QueryEscape(version)
-	headers.Set("x-amz-copy-source", copySource)
+	headers.Set("x-amz-copy-source", s.copySourceHeader(key, version))
 	resp, err := s.do(ctx, http.MethodPut, key, nil, nil, 0, headers)
 	if err != nil {
 		return err
@@ -662,7 +666,7 @@ func (s *s3Backend) RestoreObjectVersion(ctx context.Context, key, version strin
 
 func (s *s3Backend) Copy(ctx context.Context, sourceKey, destinationKey string) error {
 	headers := make(http.Header)
-	headers.Set("x-amz-copy-source", "/"+awsURIEncode(s.cfg.Bucket, true)+"/"+awsURIEncode(sourceKey, false))
+	headers.Set("x-amz-copy-source", s.copySourceHeader(sourceKey, ""))
 	resp, err := s.do(ctx, http.MethodPut, destinationKey, nil, nil, 0, headers)
 	if err != nil {
 		return err
