@@ -220,20 +220,27 @@ func (s *storageInstance) PutIfAbsent(ctx context.Context, key string, body io.R
 	return s.Put(ctx, key, body, size, contentType)
 }
 
+// Delete deletes the key. A refusal that an active Object Lock explains gives the error object_locked.
 func (s *storageInstance) Delete(ctx context.Context, key string) error {
 	release, err := s.beginStorageRequest(ctx)
 	if err != nil {
 		return err
 	}
-	defer release()
 	err = s.backend.Delete(ctx, key)
+	release()
+	if err = s.explainLockRefusal(ctx, key, "", err); isObjectLocked(err) {
+		return err
+	}
 	s.observePermission(permissionDelete, err)
 	return err
 }
 
 // DeleteMany deletes the keys, in batches of maximumS3DeleteBatch when the backend can. A key that XML cannot carry, a
-// backend without a batch delete, and a provider that refuses the batch request all go to the delete of one key.
-func (s *storageInstance) DeleteMany(ctx context.Context, keys []string) error {
+// backend without a batch delete, and a provider that refuses the batch request all go to the delete of one key. A key
+// that an active Object Lock keeps does not stop the delete: it goes to locked, with its full key. The error is the
+// first other failure.
+func (s *storageInstance) DeleteMany(ctx context.Context, keys []string) ([]string, error) {
+	var locked []string
 	batcher, canBatch := s.backend.(ObjectBatchDeleter)
 	if !canBatch || s.batchDeleteOff.Load() {
 		return s.deleteEach(ctx, keys)
@@ -252,35 +259,75 @@ func (s *storageInstance) DeleteMany(ctx context.Context, keys []string) error {
 		release()
 		if err != nil && batchDeleteUnsupported(err) {
 			s.batchDeleteOff.Store(true)
-			return s.deleteEach(ctx, batch)
+			each, err := s.deleteEach(ctx, batch)
+			locked = append(locked, each...)
+			return err
+		}
+		var refused *batchDeleteError
+		if errors.As(err, &refused) {
+			var kept []string
+			kept, err = s.lockedKeys(ctx, refused)
+			locked = append(locked, kept...)
+			if err == nil && len(kept) == len(batch) {
+				// The lock kept every key: the batch says nothing about the delete permission.
+				return nil
+			}
 		}
 		s.observePermission(permissionDelete, err)
 		return err
 	}
 	for _, key := range keys {
 		if !xmlSafeKey(key) {
-			if err := s.deleteEach(ctx, []string{key}); err != nil {
-				return err
+			each, err := s.deleteEach(ctx, []string{key})
+			locked = append(locked, each...)
+			if err != nil {
+				return locked, err
 			}
 			continue
 		}
 		batch = append(batch, key)
 		if len(batch) == maximumS3DeleteBatch {
 			if err := flush(); err != nil {
-				return err
+				return locked, err
 			}
 		}
 	}
-	return flush()
+	return locked, flush()
 }
 
-func (s *storageInstance) deleteEach(ctx context.Context, keys []string) error {
+// lockedKeys reads the lock of the refused keys of a batch delete, for up to maxLockChecks keys. It gives the keys
+// that an active lock keeps, and a batchDeleteError with the other refused keys, or nil when the lock explains each
+// refusal.
+func (s *storageInstance) lockedKeys(ctx context.Context, refused *batchDeleteError) ([]string, error) {
+	var locked []string
+	others := &batchDeleteError{Total: refused.Total}
+	for index, failure := range refused.Failures {
+		candidate := &upstreamError{StatusCode: http.StatusBadGateway, Code: failure.Code, Message: failure.Message}
+		if index < maxLockChecks && isObjectLocked(s.explainLockRefusal(ctx, failure.Key, "", candidate)) {
+			locked = append(locked, failure.Key)
+			continue
+		}
+		others.Failures = append(others.Failures, failure)
+	}
+	if len(others.Failures) == 0 {
+		return locked, nil
+	}
+	return locked, others
+}
+
+// deleteEach deletes the keys one by one. A key that an active Object Lock keeps goes to locked, and the delete goes on.
+func (s *storageInstance) deleteEach(ctx context.Context, keys []string) ([]string, error) {
+	var locked []string
 	for _, key := range keys {
 		if err := s.Delete(ctx, key); err != nil {
-			return err
+			if isObjectLocked(err) {
+				locked = append(locked, key)
+				continue
+			}
+			return locked, err
 		}
 	}
-	return nil
+	return locked, nil
 }
 
 // batchDeleteUnsupported reports a provider that does not know the DeleteObjects request.

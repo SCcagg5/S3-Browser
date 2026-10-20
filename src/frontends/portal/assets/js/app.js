@@ -17,7 +17,8 @@ const config = {
   tagsSupported: true,
   metadataEditSupported: true,
   multipartUploadsSupported: true,
-  lifecycleSupported: true
+  lifecycleSupported: true,
+  objectLockSupported: false
 };
 window.BB = window.BB || {};
 BB.cfg = config;
@@ -1056,6 +1057,8 @@ BB.cfg = config;
     config.multipartUploadsSupported = instance.multipartUploadsSupported !== false;
     // The server probes the lifecycle rules at start: the menu hides the item for an instance without them (GCS).
     config.lifecycleSupported = instance.lifecycleSupported !== false;
+    // The server probes the Object Lock of the bucket at start: the details show the retention only for a bucket with it.
+    config.objectLockSupported = instance.objectLockSupported === true;
     config.rootPrefix = instance.rootPrefix || '';
   }
 

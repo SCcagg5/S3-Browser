@@ -2,7 +2,7 @@
   'use strict';
 
   const BB = (window.BB = window.BB || {});
-  const config = { instanceId: '', capabilities: {}, operations: {}, runtime: {}, versioningSupported: false, metadataEditSupported: true };
+  const config = { instanceId: '', capabilities: {}, operations: {}, runtime: {}, versioningSupported: false, metadataEditSupported: true, objectLockSupported: false };
   const MAX_TEXT_PREVIEW = 8 * 1024 * 1024;
   const TEXT_SNIFF_LIMIT = 128 * 1024;
   const PDFJS_VERSION = '4.10.38';
@@ -1481,6 +1481,7 @@
       config.operations = currentInstance.operations || {};
       config.versioningSupported = currentInstance.versioningSupported === true;
       config.metadataEditSupported = currentInstance.metadataEditSupported !== false;
+      config.objectLockSupported = currentInstance.objectLockSupported === true;
       BB.api.setInstance(currentInstance);
       replacePreviewLocation(currentKey());
       applyCapabilities();

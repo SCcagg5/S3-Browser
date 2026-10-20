@@ -140,6 +140,8 @@ A job that deletes a prefix deletes the objects in batches of 1000 keys. It uses
 
 A provider that refuses `DeleteObjects` with `501` or `405` gets one request for each key. The server remembers this refusal. A key with a character that XML cannot carry always gets its own request. The GCS provider has no batch delete.
 
+A key that an active Object Lock keeps does not stop a delete job or a move job. The job counts it in `locked`, keeps the first 20 keys in `lockedKeys`, and continues. Such a key is not in `processed` for a delete. The source of a move stays, and its copy exists. Refer to [Object Lock](#object-lock).
+
 ## Copy in parts
 
 `CopyObject` of S3 refuses a source above 5 GiB. Thus a copy, a move, a rename and the restore of a version use a copy in parts from a threshold up. The threshold is 5 GiB minus 256 MiB. The engine is in the S3 backend (`src/s3_copy.go`), behind the optional interface `ObjectMultipartCopier`. The GCS backend does not have it: its copy has no such limit.
@@ -328,6 +330,79 @@ The window is read only, with the reason, when `writable` is false or when the p
 The note of the window "Incomplete uploads" has a button. Where the provider keeps the abort of incomplete uploads, the button "Add a lifecycle rule" opens the window with a new rule. This rule `abort-incomplete-uploads` aborts the uploads under the folder 7 days after their start. The person checks it and saves. On MinIO, the note gives the reason, and the button "Lifecycle rules" opens the window without a new rule.
 
 `GET /api/lifecycle` needs `objects.read` on the bucket. `PUT /api/lifecycle` needs the read and write permissions of the instance and `objects.read` on the bucket. It needs `objects.write` on the node of the prefix of each rule that the save adds, changes or removes. A rule deletes objects. Thus a new or changed enabled rule that deletes objects, noncurrent versions or delete markers also needs the delete permission of the instance and `objects.delete` on its prefix. The abort of incomplete uploads needs `objects.write` only, as in the window "Incomplete uploads". Refer to [ACCESS.md](ACCESS.md).
+
+## Object Lock
+
+Object Lock keeps one version of an object: a legal hold, or a retention until a date. The code is in `src/objectlock.go`, behind the optional interface `ObjectLockManager` of the S3 backend. A bucket gets Object Lock only at its creation, and such a bucket always keeps versions. Each lock applies to one version.
+
+### Detection
+
+At start, the server reads `GetObjectLockConfiguration` of each instance with the read permission. The request is a read. Only the answer `ObjectLockEnabled: Enabled` gives `objectLockSupported: true` in `/api/instances`. These answers give `false`, and the page shows nothing of Object Lock:
+
+- a bucket without Object Lock: `404 ObjectLockConfigurationNotFoundError` on SeaweedFS and MinIO;
+- a provider without Object Lock: `501 NotImplemented` on Garage, or `405`;
+- any other failure, for example a refusal or a timeout. The instance then hides the feature until the next start.
+
+The GCS backend has no Object Lock: the routes answer `501 object_lock_unsupported`.
+
+### Read
+
+`GET /api/object-lock?key=&version=` gives the lock of one version. An empty `version` reads the current version: a HEAD request gives its id. The server reads `GetObjectRetention`, `GetObjectLegalHold` and `GetObjectLockConfiguration`. The answer has these fields:
+
+| Field | Value |
+| --- | --- |
+| `version` | The version that the lock applies to. A change names it. |
+| `retention` | `null`, or `mode` (`GOVERNANCE` or `COMPLIANCE`), `retainUntil` (RFC 3339, UTC) and `active` (`false` for a date in the past). |
+| `legalHold` | `true` when the legal hold is on. |
+| `bucketDefault` | `null`, or the default retention of the bucket: `mode` and `days` or `years`. |
+| `now` | The date of the server. |
+| `maxRetentionDays` | 36500, the latest date that S3-Browser sets, in days from now. |
+
+The providers give "no lock" with different answers. SeaweedFS gives `404 ObjectLockConfigurationNotFoundError` for a version without a retention, and `404 NoSuchObjectLegalHold` without a legal hold. MinIO gives `400 NoSuchObjectLockConfiguration` for both, and AWS S3 gives `404 NoSuchObjectLockConfiguration`. The server reads each of these codes as "no lock". `NoSuchKey` stays an error.
+
+### Change
+
+`PUT /api/object-lock` changes the lock of one version. The body has `key`, `version` (required), and `legalHold`, `retention` (`mode` and `retainUntil`) or both. The server checks the body before a request to the provider:
+
+- `mode` is `GOVERNANCE` or `COMPLIANCE`, in uppercase. No other value is accepted.
+- `retainUntil` is an RFC 3339 date in the future and at most 36500 days from now. S3-Browser sends it with a precision of one second.
+- `version` has 1 to 1024 printable ASCII characters.
+
+A wrong value gives `400 invalid_object_lock`. The server then reads the lock of the version and applies these rules:
+
+| Current retention | Change | Result |
+| --- | --- | --- |
+| None, or a date in the past | Any mode, a date in the future | Sent |
+| Governance | A later date, or the same date, in Governance | Sent |
+| Governance | An earlier date, or the mode Compliance | Needs `bypassGovernance: true` in the body. The server then sends `x-amz-bypass-governance-retention: true`. Without it: `409 governance_bypass_required` |
+| Compliance | A later date, or the same date, in Compliance | Sent |
+| Compliance | An earlier date, or the mode Governance | `409 compliance_retention`. Nobody can shorten a Compliance retention, not even the owner of the bucket |
+
+The comparison of the dates uses the seconds: SeaweedFS keeps the seconds, and MinIO keeps the milliseconds. The server sends the retention first and then the legal hold. It does not send a part that does not change. A provider that refuses a change gives `409 object_lock_refused` with the status and the code of the provider. The answer of a save is the new state. The server writes one log line for each change. The line has the key, the version, the change, the use of the bypass and the subject of the request.
+
+The read needs `objects.read`, and a change needs `objects.write` on the node of the key. No new right exists. The bypass also needs the bypass permission of the provider for the credentials of the instance (on AWS S3, `s3:BypassGovernanceRetention`). Refer to [ACCESS.md](ACCESS.md). S3-Browser does not set a retention at upload, and does not change the default retention of a bucket.
+
+### Deletes that a lock refuses
+
+The providers refuse the delete of a locked version with different answers. SeaweedFS gives `403 AccessDenied`. MinIO gives `400 InvalidRequest` with the message "Object is WORM protected and cannot be overwritten". `DeleteObjects` gives the same codes for each refused key, in the XML body of a `200` answer. The status alone does not tell a lock from a missing permission. Thus, after a refusal with one of these codes, the server reads the lock of the version. Only a legal hold or an active retention makes the error `409 object_locked`. Its message names the lock and tells what the person can do. Any other refusal stays the error of the provider.
+
+A refusal for a lock does not change the delete permission that the instance reports. A delete without a version id is not refused on SeaweedFS and MinIO: the provider writes a delete marker, and the locked version stays. The code also covers a provider that refuses such a delete:
+
+| Operation | Effect of a lock |
+| --- | --- |
+| Delete of a version (`DELETE /api/versions`, `DELETE /s3` with `version`) | `409 object_locked` |
+| Delete of an object (`DELETE /s3`) | `409 object_locked` |
+| Delete of a folder (job `delete_prefix`) | The job counts the key in `locked` and continues |
+| Move of a folder (job `move_prefix`) | The copy exists, the source stays. The job counts it in `locked` |
+| Rename or move of one object (`POST /api/rename`, job `move_object`) | `409 object_locked`: "The copy is made, but the source stays." |
+
+For a batch delete, the server reads the lock of up to 100 refused keys of each batch. The other refused keys stay a failure of the job.
+
+### The section "Retention"
+
+When `objectLockSupported` is true, the details of a file have the section "Retention". It shows the mode, the retain-until date, the legal hold and the default retention of the bucket, for the version of the details. A frameless "Edit" button opens the form in the same window, with Save and Revert, as the sections "Metadata" and "Tags". A person without the write permission sees no button.
+
+The form refuses an earlier date for an active Compliance retention, and says why, with no request. A change that needs the bypass of a Governance retention opens a confirmation first. It tells what the bypass does. A delete that a lock refuses shows the message of the server. A folder job with locked keys tells how many keys stay, and why.
 
 ## Insights treemap normalization
 

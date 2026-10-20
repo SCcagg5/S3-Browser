@@ -1,6 +1,6 @@
 // Puts the test objects in the buckets of the three providers through the API of S3-Browser (PUT /s3).
 const { request } = require('playwright');
-const { PROVIDERS } = require('./providers');
+const { PROVIDERS, LOCKED } = require('./providers');
 const { s3, SEED_LIFECYCLE } = require('./s3');
 const BASE = process.env.BASE;
 
@@ -168,6 +168,11 @@ async function seedIncompleteUploads(instance) {
   for (const instance of Object.keys(PROVIDERS)) {
     await put(instance, 'mpu/readme.txt', 'The incomplete uploads of this folder are test data.\n', { 'Content-Type': 'text/plain' });
     await seedIncompleteUploads(instance);
+  }
+  // The buckets "locked" have Object Lock from their creation. Each test of Object Lock makes its own objects: the seed
+  // only gives the folder lock/ an object, so that the page opens it.
+  for (const instance of Object.keys(LOCKED)) {
+    await put(instance, 'lock/readme.txt', 'The tests of Object Lock make their objects in this folder.\n', { 'Content-Type': 'text/plain' });
   }
   await s3('seaweedfs-main', 'PUT', '/default', 'lifecycle=', Buffer.from(SEED_LIFECYCLE));
   console.log('seeded');

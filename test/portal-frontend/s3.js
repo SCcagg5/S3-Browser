@@ -2,13 +2,14 @@
 // them for what has no route in S3-Browser, or to check the result of a page action on the provider.
 const crypto = require('crypto');
 const fs = require('fs');
-const { PROVIDERS } = require('./providers');
+const { PROVIDERS, LOCKED } = require('./providers');
 const ACCESS_KEY = 'GK0123456789abcdef01234567';
 
 // A request to the provider of an instance (the versioning and the lifecycle of a bucket have no route in
-// S3-Browser). The extra headers are signed too. It gives the text of the answer, and fails on an error status.
+// S3-Browser). The instance is a key of PROVIDERS or of LOCKED. The extra headers are signed too. It gives the text of
+// the answer, and fails on an error status.
 async function s3(instance, method, path, query, body = Buffer.alloc(0), extra = {}) {
-  const { host, region } = PROVIDERS[instance];
+  const { host, region } = PROVIDERS[instance] || LOCKED[instance];
   const secret = fs.readFileSync('/secrets/s3_secret_access_key', 'utf8').trim();
   const hmac = (key, text) => crypto.createHmac('sha256', key).update(text).digest();
   const now = new Date().toISOString().replace(/[:-]|\.\d{3}/g, '');

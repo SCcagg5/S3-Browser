@@ -112,7 +112,7 @@ func TestInstanceDeleteManySplitsInBatchesOfAThousand(t *testing.T) {
 	for index := range keys {
 		keys[index] = fmt.Sprintf("k/%05d", index)
 	}
-	if err := instance.DeleteMany(context.Background(), keys); err != nil {
+	if _, err := instance.DeleteMany(context.Background(), keys); err != nil {
 		t.Fatal(err)
 	}
 	if fmt.Sprint(backend.batches) != "[1000 1000 500]" || backend.singles != 0 {
@@ -124,7 +124,7 @@ func TestInstanceDeleteManyKeepsKeysXMLCannotCarryOutOfTheBatch(t *testing.T) {
 	_, _, memory := testApplication(t)
 	backend := &batchBackend{memoryBackend: memory}
 	instance := &storageInstance{cfg: bucketConfig{ID: "rw"}, backend: backend, caps: initialCapabilities(bucketConfig{ID: "rw"})}
-	if err := instance.DeleteMany(context.Background(), []string{"a", "bad\x01key", "c", "bad\xffutf8"}); err != nil {
+	if _, err := instance.DeleteMany(context.Background(), []string{"a", "bad\x01key", "c", "bad\xffutf8"}); err != nil {
 		t.Fatal(err)
 	}
 	if fmt.Sprint(backend.batches) != "[2]" || backend.singles != 2 {
@@ -136,13 +136,13 @@ func TestInstanceDeleteManyFallsBackWhenTheProviderRefusesTheBatchRequest(t *tes
 	_, _, memory := testApplication(t)
 	backend := &batchBackend{memoryBackend: memory, refuse: &upstreamError{StatusCode: http.StatusNotImplemented, Code: "NotImplemented"}}
 	instance := &storageInstance{cfg: bucketConfig{ID: "rw"}, backend: backend, caps: initialCapabilities(bucketConfig{ID: "rw"})}
-	if err := instance.DeleteMany(context.Background(), []string{"a", "b", "c"}); err != nil {
+	if _, err := instance.DeleteMany(context.Background(), []string{"a", "b", "c"}); err != nil {
 		t.Fatal(err)
 	}
 	if backend.singles != 3 || len(backend.batches) != 0 || !instance.batchDeleteOff.Load() {
 		t.Fatalf("singles = %d, batches = %v, off = %v", backend.singles, backend.batches, instance.batchDeleteOff.Load())
 	}
-	if err := instance.DeleteMany(context.Background(), []string{"d"}); err != nil || backend.singles != 4 {
+	if _, err := instance.DeleteMany(context.Background(), []string{"d"}); err != nil || backend.singles != 4 {
 		t.Fatalf("later delete: singles = %d, err = %v", backend.singles, err)
 	}
 }
@@ -151,7 +151,7 @@ func TestInstanceDeleteManyKeepsOtherProviderErrors(t *testing.T) {
 	_, _, memory := testApplication(t)
 	backend := &batchBackend{memoryBackend: memory, refuse: &upstreamError{StatusCode: http.StatusForbidden, Code: "AccessDenied"}}
 	instance := &storageInstance{cfg: bucketConfig{ID: "rw"}, backend: backend, caps: initialCapabilities(bucketConfig{ID: "rw"})}
-	if err := instance.DeleteMany(context.Background(), []string{"a"}); err == nil || backend.singles != 0 || instance.batchDeleteOff.Load() {
+	if _, err := instance.DeleteMany(context.Background(), []string{"a"}); err == nil || backend.singles != 0 || instance.batchDeleteOff.Load() {
 		t.Fatalf("err = %v, singles = %d", err, backend.singles)
 	}
 }

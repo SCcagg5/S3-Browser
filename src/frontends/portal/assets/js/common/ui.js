@@ -282,8 +282,8 @@
     }
 
     function setStatus(nextStatus) {
-      currentStatus = ['loading', 'success', 'error', 'paused'].includes(nextStatus) ? nextStatus : '';
-      t.classList.remove('is-loading', 'is-success', 'is-error', 'is-paused');
+      currentStatus = ['loading', 'success', 'error', 'paused', 'warning'].includes(nextStatus) ? nextStatus : '';
+      t.classList.remove('is-loading', 'is-success', 'is-error', 'is-paused', 'is-warning');
       icon.className = 'mdi bb-toast-icon';
       icon.hidden = false;
 
@@ -299,6 +299,9 @@
       } else if (currentStatus === 'paused') {
         t.classList.add('is-paused');
         icon.classList.add('mdi-pause-circle-outline');
+      } else if (currentStatus === 'warning') {
+        t.classList.add('is-warning');
+        icon.classList.add('mdi-alert-circle-outline');
       } else {
         icon.hidden = true;
       }

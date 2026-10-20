@@ -37,6 +37,15 @@ bucket "seaweedfs-archive" {
   max_scan_pages = 15
 }
 
+# The bucket "locked" has Object Lock (test/seaweedfs/scripts/entrypoint.sh). The tests of Object Lock use it.
+bucket "seaweedfs-locked" {
+  name           = "SeaweedFS - locked"
+  auth           = "seaweedfs"
+  bucket         = "locked"
+  permissions    = ["read", "write", "delete"]
+  max_scan_pages = 15
+}
+
 auth "minio" {
   provider               = "s3"
   mode                   = "access_key"
@@ -50,6 +59,15 @@ bucket "minio-main" {
   name           = "MinIO - primary"
   auth           = "minio"
   bucket         = "default"
+  permissions    = ["read", "write", "delete"]
+  max_scan_pages = 15
+}
+
+# The bucket "locked" has Object Lock (test/minio/scripts/entrypoint.sh). The tests of Object Lock use it.
+bucket "minio-locked" {
+  name           = "MinIO - locked"
+  auth           = "minio"
+  bucket         = "locked"
   permissions    = ["read", "write", "delete"]
   max_scan_pages = 15
 }

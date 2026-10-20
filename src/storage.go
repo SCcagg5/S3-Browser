@@ -302,6 +302,9 @@ type storageInstance struct {
 	// lifecycle is the state of the lifecycle editor: the provider, the refusals and the dropped fields.
 	lifecycle lifecycleCapability
 
+	// objectLock is the state of Object Lock: set when the probe found a bucket with Object Lock.
+	objectLock objectLockCapability
+
 	// batchDeleteOff is set when the provider refused the batch delete once: later deletes go one by one.
 	batchDeleteOff atomic.Bool
 }
@@ -513,6 +516,7 @@ func (s *storageInstance) publicInfo() instanceInfo {
 		MetadataEditable:    s.metadataEditAvailable(),
 		MultipartUploads:    s.multipartUploadsAvailable(),
 		Lifecycle:           s.lifecycleAvailable(),
+		ObjectLock:          s.objectLockAvailable(),
 		Capabilities:        s.capabilities(),
 		Operations:          s.operationCapabilities(),
 	}
@@ -531,6 +535,7 @@ type instanceInfo struct {
 	MetadataEditable    bool                       `json:"metadataEditSupported"`
 	MultipartUploads    bool                       `json:"multipartUploadsSupported"`
 	Lifecycle           bool                       `json:"lifecycleSupported"`
+	ObjectLock          bool                       `json:"objectLockSupported"`
 	Capabilities        capabilities               `json:"capabilities"`
 	Operations          map[string]capabilityState `json:"operations"`
 }

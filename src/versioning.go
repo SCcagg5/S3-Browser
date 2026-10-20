@@ -136,6 +136,7 @@ func (s *storageInstance) GetVersion(ctx context.Context, key, version string, h
 	return response, nil
 }
 
+// DeleteVersion deletes one version. A refusal that an active Object Lock explains gives the error object_locked.
 func (s *storageInstance) DeleteVersion(ctx context.Context, key, version string) error {
 	if strings.TrimSpace(version) == "" {
 		return apiError{Status: http.StatusBadRequest, Code: "version_required", Message: "version is required"}
@@ -148,8 +149,12 @@ func (s *storageInstance) DeleteVersion(ctx context.Context, key, version string
 	if err != nil {
 		return err
 	}
-	defer release()
 	err = store.DeleteObjectVersion(ctx, key, version)
+	release()
+	// SeaweedFS refuses the delete of a locked version with 403: that refusal says nothing about the delete permission.
+	if err = s.explainLockRefusal(ctx, key, version, err); isObjectLocked(err) {
+		return err
+	}
 	s.observePermission(permissionDelete, err)
 	return err
 }

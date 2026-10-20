@@ -1,10 +1,13 @@
 #!/bin/sh
 set -eu
 
-# One SeaweedFS process for the tests: master, volume, filer and S3 API. The identity and the buckets come from the
-# HCL file of the browser, as for the browser itself.
+# One SeaweedFS process for the tests: master, volume, filer and S3 API. The identity comes from the HCL file of the
+# browser, as for the browser itself. The script creates the buckets, and then writes the ready file. The buckets of
+# LOCKED_BUCKETS have Object Lock (and so versioning): a bucket gets Object Lock only at its creation.
 CONFIG_FILE="/config/config.hcl"
 BUCKETS="default archive"
+LOCKED_BUCKETS="locked"
+READY_FILE="/tmp/ready"
 
 if [ ! -r "$CONFIG_FILE" ]; then
   echo "Browser HCL config is not readable: $CONFIG_FILE" >&2
@@ -28,6 +31,7 @@ if [ -z "$KEY_ID" ] || [ -z "$KEY_SECRET" ]; then
   exit 1
 fi
 
+rm -f "$READY_FILE"
 mkdir -p /data /etc/seaweedfs
 cat > /etc/seaweedfs/s3.json <<EOF_IDENTITY
 {
@@ -47,7 +51,8 @@ SERVER_PID=$!
 trap 'kill "$SERVER_PID" 2>/dev/null || true; wait "$SERVER_PID" 2>/dev/null || true; exit 0' TERM INT
 
 attempt=0
-until /bin/sh /bin/healthcheck.sh >/dev/null 2>&1; do
+# The healthcheck waits for the ready file, which this script writes after the buckets: wait for the S3 port here.
+until wget -S -q -O /dev/null -T 2 "http://127.0.0.1:8333/" 2>&1 | grep -Eq "HTTP/1\.[01] [0-9]{3}"; do
   attempt=$((attempt + 1))
   if [ "$attempt" -gt 60 ] || ! kill -0 "$SERVER_PID" 2>/dev/null; then
     cat /tmp/seaweedfs.log >&2 || true
@@ -57,9 +62,11 @@ until /bin/sh /bin/healthcheck.sh >/dev/null 2>&1; do
   sleep 1
 done
 
-for bucket in $BUCKETS; do
+create_bucket() {
+  bucket="$1"
+  options="$2"
   attempt=0
-  until printf 's3.bucket.create -name %s\n' "$bucket" | weed shell -master=127.0.0.1:9333 >/tmp/bucket-"$bucket".log 2>&1 \
+  until printf 's3.bucket.create -name %s %s\n' "$bucket" "$options" | weed shell -master=127.0.0.1:9333 >/tmp/bucket-"$bucket".log 2>&1 \
       && ! grep -qi "error\|fail" /tmp/bucket-"$bucket".log; do
     attempt=$((attempt + 1))
     if [ "$attempt" -gt 20 ]; then
@@ -69,6 +76,14 @@ for bucket in $BUCKETS; do
     fi
     sleep 1
   done
+}
+
+for bucket in $BUCKETS; do
+  create_bucket "$bucket" ""
 done
+for bucket in $LOCKED_BUCKETS; do
+  create_bucket "$bucket" "-withLock"
+done
+touch "$READY_FILE"
 
 wait "$SERVER_PID"

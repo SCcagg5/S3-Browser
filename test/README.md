@@ -2,7 +2,7 @@
 
 This directory contains an isolated SeaweedFS object-storage service and the browser configuration used by smoke tests.
 
-The SeaweedFS service is one process: it has the master, the volume server, the filer and the S3 API. `seaweedfs/Dockerfile` downloads the release 4.41 and checks its SHA-256 checksum. This version is the one of the Home repository. `seaweedfs/scripts/entrypoint.sh` creates the identity and the buckets `default` and `archive` from `config.hcl`.
+The SeaweedFS service is one process: it has the master, the volume server, the filer and the S3 API. `seaweedfs/Dockerfile` downloads the release 4.41 and checks its SHA-256 checksum. This version is the one of the Home repository. `seaweedfs/scripts/entrypoint.sh` creates the identity and the buckets `default` and `archive` from `config.hcl`. It also creates the bucket `locked` with Object Lock (`s3.bucket.create -withLock`), and then writes a ready file for the health check.
 
 `config.hcl` defines one S3 authentication shared by two buckets. Each bucket has its own permission ceiling and navigation scan limit.
 
@@ -36,13 +36,13 @@ The fixed credentials in `config.hcl` and `secrets/` belong only to the isolated
 
 | Provider | Image | Instance | Endpoint |
 | --- | --- | --- | --- |
-| SeaweedFS 4.41 | `seaweedfs/Dockerfile`: the release archive, with its SHA-256 checksum | `seaweedfs-main`, `seaweedfs-archive` | `http://seaweedfs:8333` |
-| MinIO RELEASE.2025-10-15T17-29-55Z | `minio/Dockerfile`: a build from the Git tag, with a check of its commit | `minio-main` | `http://minio:9000` |
+| SeaweedFS 4.41 | `seaweedfs/Dockerfile`: the release archive, with its SHA-256 checksum | `seaweedfs-main`, `seaweedfs-archive`, `seaweedfs-locked` | `http://seaweedfs:8333` |
+| MinIO RELEASE.2025-10-15T17-29-55Z | `minio/Dockerfile`: a build from the Git tag, with a check of its commit | `minio-main`, `minio-locked` | `http://minio:9000` |
 | Garage v2.4.1 | `garage/Dockerfile`: the binary of `dxflrs/garage:v2.4.1`, pinned by its digest | `garage-main` | `http://garage:3900` |
 
 The MinIO project does not publish a server image or a server binary now, and its repository is archived. Thus `minio/Dockerfile` builds the last release from source. The build takes about one minute, one time. Docker keeps the image in its cache.
 
-Each provider reads the first `access_key_id` and the first `secret_access_key_file` of `portal-frontend/config.hcl`. Thus the three `auth` blocks use the same key. Garage needs this format: `GK` and 24 hexadecimal characters for the key ID, 64 hexadecimal characters for the secret. Each entrypoint creates the bucket `default` and then writes a ready file. The health check of each provider reads this file, so the browser starts after the buckets exist. The Garage region is `garage`.
+Each provider reads the first `access_key_id` and the first `secret_access_key_file` of `portal-frontend/config.hcl`. Thus the three `auth` blocks use the same key. Garage needs this format: `GK` and 24 hexadecimal characters for the key ID, 64 hexadecimal characters for the secret. Each entrypoint creates the bucket `default` and then writes a ready file. The entrypoints of SeaweedFS and MinIO also create the bucket `locked` with Object Lock. A bucket gets Object Lock only at its creation (`x-amz-bucket-object-lock-enabled: true`). Object Lock turns on its versioning. Garage cannot make a bucket with Object Lock. The instances `seaweedfs-locked` and `minio-locked` of `portal-frontend/config.hcl` use these buckets, and `portal-frontend/providers.js` lists them in `LOCKED`. The health check of each provider reads this file, so the browser starts after the buckets exist. The Garage region is `garage`.
 
 The seed (`portal-frontend/seed.js`) enables the versioning of the bucket `default` on SeaweedFS and MinIO. It puts the same objects in `smoke/` on each provider: one file with tags where the provider has tags, and one file with two versions. On SeaweedFS, the seed also puts the data of the other tests: files with several versions in `versions/`, tags, a lifecycle rule, and a JSON file, a CSV file and a binary file for the comparison. The other browser tests use SeaweedFS only.
 
@@ -53,6 +53,8 @@ The seed also puts the objects of the metadata tests in `meta/` on each provider
 The seed also puts four incomplete multipart uploads in `mpu/` on each provider, with S3 requests: `one-part.bin` (one part of 1 KiB), `no-part.bin`, and two uploads of `twice.bin`. The folder has `readme.txt`, so the page can open it. The test of each provider opens the window "Incomplete uploads" of the folder. It checks the parts, the age ("unknown" on SeaweedFS) and "Abort everything older than 1 day", which aborts nothing. It then aborts one upload of `twice.bin` with "Abort selected" and `one-part.bin` with the button of its row. The test aborts the last two uploads through the API. A second test starts a resumable upload through the API and checks that the window and the server do not abort it. Refer to the section "Cleanup of incomplete multipart uploads" of [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md).
 
 The tests of the lifecycle editor write the rules of the bucket `default` through the S3 API of each provider first (`portal-frontend/s3.js`). At the end, each test writes the rule of the seed again on SeaweedFS and deletes the rules on MinIO and Garage: the tests of the tags read the rule of SeaweedFS. The test of each provider adds a rule through the window, with the confirmation of the deletion. It checks that the rule with a date stays byte for byte, and that the window offers only the fields that the provider keeps. A second test opens the window from the window "Incomplete uploads" with the rule that aborts the uploads, where the provider keeps it. Other tests check a change of the rules while the window is open, the changes of the provider after a save, a read-only editor, and the hidden item.
+
+The tests of Object Lock use the instances `seaweedfs-locked` and `minio-locked`. Each test makes its own object with a unique key. The first test makes two versions, because the page opens the window of the versions only for a file with two versions or more. It sets a legal hold on the current version through the details, and tries to delete this version in the window of the versions. It reads the message that names the lock, removes the hold and deletes the version. A second test extends a Governance retention, and shortens it with the confirmation of the bypass. A third test checks that the page and the server refuse to shorten a Compliance retention. The retentions end after a few seconds, and each test then deletes its version: a run leaves no locked version. `run.sh` also removes the volumes of the stack after each run. A last test checks that the section is hidden on `garage-main` and on the buckets without Object Lock. Refer to the section "Object Lock" of [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md).
 
 The smoke test of each provider lists `smoke/`, uploads a file with its SHA-256 checksum, downloads it and deletes it. It checks the versions and the tags where the provider has them. Where the provider does not have them, it checks that the page hides them. `portal-frontend/providers.js` has the flags of each provider.
 
@@ -102,7 +104,24 @@ These facts come from S3 requests to the three providers of the portal test stac
 | Effect of the lifecycle rules | A lifecycle worker in a daily pass. The TTL at write is off by default, and an object written after a rule has no TTL | Not measured | Not measured |
 | Header `Server` | `SeaweedFS 30GB 4.41` | `MinIO` | None. No request id. The error document has `Region` and no `RequestId` |
 | Object Lock: bucket with lock, legal hold, retention | Yes. A refusal gives 403 AccessDenied | Yes. A refusal gives 400 InvalidRequest | 501 NotImplemented |
+| Creation of a bucket with Object Lock | `s3.bucket.create -withLock` in `weed shell`. It turns on the versioning | `x-amz-bucket-object-lock-enabled: true` at CreateBucket. It turns on the versioning | 403 AccessDenied: the key cannot make buckets |
 | GetObjectLockConfiguration on a bucket with no lock | 404 ObjectLockConfigurationNotFoundError | 404 ObjectLockConfigurationNotFoundError | 501 NotImplemented |
+| GetObjectLockConfiguration on a bucket with lock | 200, `ObjectLockEnabled` Enabled, and the default retention when it has one | 200, the same | 501 NotImplemented |
+| GetObjectRetention of a version with no retention | 404 ObjectLockConfigurationNotFoundError | 400 NoSuchObjectLockConfiguration | 501 NotImplemented |
+| GetObjectLegalHold of a version with no legal hold | 404 NoSuchObjectLegalHold. After a legal hold OFF: 200 with OFF | 400 NoSuchObjectLockConfiguration. After a legal hold OFF: 200 with OFF | 501 NotImplemented |
+| `RetainUntilDate` of GetObjectRetention | Seconds (`2026-10-20T15:56:32Z`) | Milliseconds (`2026-10-20T15:56:31.000Z`) | - |
+| Lock headers of HEAD | `x-amz-object-lock-mode`, `x-amz-object-lock-retain-until-date`, `x-amz-object-lock-legal-hold` (also OFF) | The same. `x-amz-object-lock-legal-hold` only when it is ON | - |
+| Delete of a version with a legal hold or an active retention | 403 AccessDenied, also with `x-amz-bypass-governance-retention` for a legal hold | 400 InvalidRequest, "Object is WORM protected and cannot be overwritten" | - |
+| DeleteObjects of a locked version | 200 with an `Error` for the key: AccessDenied | 200 with an `Error` for the key: InvalidRequest | - |
+| Delete with no `versionId` of a locked object (DELETE and DeleteObjects) | Yes: a delete marker. The locked version stays | Yes: a delete marker. The locked version stays | - |
+| PutObjectRetention: a later date in the same mode | Yes | Yes | - |
+| PutObjectRetention: an earlier Governance date | 403 AccessDenied. With the bypass header: yes | 400 InvalidRequest. With the bypass header: yes | - |
+| PutObjectRetention: Governance to Compliance with a later date | 403 AccessDenied. With the bypass header: yes | 400 InvalidRequest. With the bypass header: yes | - |
+| PutObjectRetention: an earlier Compliance date, or Compliance to Governance | 403 AccessDenied, also with the bypass header | 400 InvalidRequest, also with the bypass header | - |
+| PutObjectRetention: a date in the past | 400 InvalidRequest | 400 MalformedXML | - |
+| PutObjectRetention with an empty `Retention` (removal) | 400 InvalidRequest, also with the bypass header | Yes with the bypass header for Governance. Without it: 400 InvalidRequest | - |
+| Delete of a version after the end of its Compliance retention | Yes | Yes | - |
+| PutObjectLegalHold, GetObjectRetention on a bucket with no lock | 400 InvalidRequest | 400 InvalidRequest, "Bucket is missing ObjectLockConfiguration" | 501 NotImplemented |
 | SSE-S3 (`x-amz-server-side-encryption: AES256`) in this stack | 500 InternalError, no object | 501 NotImplemented: no KMS in this stack | Dropped: no encryption header comes back |
 | GetBucketEncryption on `default` | 404 ServerSideEncryptionConfigurationNotFoundError | 404 ServerSideEncryptionConfigurationNotFoundError | 501 NotImplemented |
 
@@ -116,5 +135,6 @@ Notes for the code:
 - Delete the lifecycle configuration with `DeleteBucketLifecycle`: MinIO and Garage refuse a configuration with no rule.
 - Send `Content-MD5` or an `x-amz-checksum-*` header with DeleteObjects: MinIO refuses the request without one.
 - On MinIO, list the multipart uploads with no prefix. Then S3-Browser filters the keys.
-- The lock refusal codes are different: 403 AccessDenied on SeaweedFS, 400 InvalidRequest on MinIO. The bypass header does not remove a legal hold or a Compliance retention.
+- The lock refusal codes are different: 403 AccessDenied on SeaweedFS, 400 InvalidRequest on MinIO. The bypass header does not remove a legal hold or a Compliance retention. After such a refusal, read the lock of the version: the code alone does not tell a lock from a missing permission.
+- A delete with no `versionId` in a bucket with Object Lock writes a delete marker. Only the delete of a version can meet a lock.
 - SSE-S3 needs a key service. The MinIO of this stack has no `MINIO_KMS_SECRET_KEY`, and SeaweedFS has no encryption configuration.

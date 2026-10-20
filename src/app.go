@@ -135,6 +135,11 @@ func (a *application) probeVersioningSupport() {
 			defer wg.Done()
 			instance.probeLifecycle(ctx)
 		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			instance.probeObjectLock(ctx)
+		}()
 	}
 	wg.Wait()
 }
@@ -177,6 +182,7 @@ func (a *application) routes() http.Handler {
 	mux.HandleFunc("/api/tags/bulk", a.handleTagsBulk)
 	mux.HandleFunc("/api/metadata", a.handleMetadata)
 	mux.HandleFunc("/api/lifecycle", a.handleLifecycle)
+	mux.HandleFunc("/api/object-lock", a.handleObjectLock)
 	mux.HandleFunc("/api/multiparts", a.handleMultiparts)
 	mux.HandleFunc("/api/multiparts/abort", a.handleMultipartAbort)
 	mux.HandleFunc("/api/jobs", http.NotFound)
@@ -817,7 +823,7 @@ func copyOrMove(ctx context.Context, instance *storageInstance, source, target s
 		}
 		if move {
 			if err := instance.Delete(ctx, instance.fullKey(source)); err != nil {
-				return 0, fmt.Errorf("copy succeeded but source deletion failed: %w", err)
+				return 0, sourceDeletionError(err)
 			}
 		}
 		return 1, nil
@@ -850,8 +856,14 @@ func copyOrMove(ctx context.Context, instance *storageInstance, source, target s
 		for index, key := range keys {
 			fullKeys[index] = instance.fullKey(key)
 		}
-		if err := instance.DeleteMany(ctx, fullKeys); err != nil {
+		locked, err := instance.DeleteMany(ctx, fullKeys)
+		if err != nil {
 			return copied, fmt.Errorf("all copies succeeded but the deletion of the sources failed: %w", err)
+		}
+		if len(locked) > 0 {
+			first, _ := instance.relativeKey(locked[0])
+			return copied, apiError{Status: http.StatusConflict, Code: "object_locked", Message: fmt.Sprintf(
+				"All copies are made, but %d source(s) stay: Object Lock keeps them (the first is %q).", len(locked), first)}
 		}
 	}
 	return copied, nil

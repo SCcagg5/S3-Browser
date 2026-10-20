@@ -617,11 +617,37 @@ func (s *s3Backend) DeleteMany(ctx context.Context, keys []string) error {
 		return &upstreamError{StatusCode: http.StatusBadGateway, Code: result.Code, Message: result.Message}
 	}
 	if len(result.Errors) > 0 {
-		first := result.Errors[0]
-		return &upstreamError{StatusCode: http.StatusBadGateway, Code: first.Code, Message: fmt.Sprintf("%d of %d keys were not deleted: %s", len(result.Errors), len(keys), first.Message)}
+		refused := &batchDeleteError{Total: len(keys), Failures: make([]batchDeleteFailure, 0, len(result.Errors))}
+		for _, failure := range result.Errors {
+			refused.Failures = append(refused.Failures, batchDeleteFailure{Key: failure.Key, Code: failure.Code, Message: failure.Message})
+		}
+		return refused
 	}
 	return nil
 }
+
+// batchDeleteFailure is one key that a DeleteObjects answer refuses, with the S3 error code and message.
+type batchDeleteFailure struct {
+	Key     string
+	Code    string
+	Message string
+}
+
+// batchDeleteError is a DeleteObjects answer with status 200 that refuses some keys. Unwrap gives the first refusal as
+// an upstreamError: a caller that knows only upstreamError sees the code and the message of the first refusal.
+type batchDeleteError struct {
+	Failures []batchDeleteFailure
+	Total    int
+}
+
+func (e *batchDeleteError) upstream() *upstreamError {
+	first := e.Failures[0]
+	return &upstreamError{StatusCode: http.StatusBadGateway, Code: first.Code, Message: fmt.Sprintf("%d of %d keys were not deleted: %s", len(e.Failures), e.Total, first.Message)}
+}
+
+func (e *batchDeleteError) Error() string { return e.upstream().Error() }
+
+func (e *batchDeleteError) Unwrap() error { return e.upstream() }
 
 func (s *s3Backend) DeleteObjectVersion(ctx context.Context, key, version string) error {
 	query := url.Values{}

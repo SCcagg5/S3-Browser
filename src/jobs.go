@@ -166,6 +166,8 @@ type jobState struct {
 	TagChange                    *tagChange                    `json:"tag_change,omitempty"`
 	MultipartAbort               *multipartAbortJob            `json:"multipart_abort,omitempty"`
 	MultipartResult              *multipartAbortResult         `json:"multipart_result,omitempty"`
+	Locked                       int64                         `json:"locked,omitempty"`
+	LockedKeys                   []string                      `json:"locked_keys,omitempty"`
 	Error                        string                        `json:"error,omitempty"`
 	CreatedAt                    time.Time                     `json:"created_at"`
 	UpdatedAt                    time.Time                     `json:"updated_at"`
@@ -196,6 +198,8 @@ type publicJob struct {
 	ArchiveEntryIntegrity *archiveEntryIntegrityResult `json:"archiveEntryIntegrity,omitempty"`
 	OlderThanDays         int                          `json:"olderThanDays,omitempty"`
 	MultipartAbort        *multipartAbortResult        `json:"multipartAbort,omitempty"`
+	Locked                int64                        `json:"locked,omitempty"`
+	LockedKeys            []string                     `json:"lockedKeys,omitempty"`
 	Error                 string                       `json:"error,omitempty"`
 	CreatedAt             time.Time                    `json:"createdAt"`
 	UpdatedAt             time.Time                    `json:"updatedAt"`
@@ -222,6 +226,8 @@ func (j jobState) public() publicJob {
 		TotalBytes:      j.TotalBytes,
 		LastKey:         j.LastKey,
 		Stats:           cloneStatsForPublic(j.Stats),
+		Locked:          j.Locked,
+		LockedKeys:      append([]string(nil), j.LockedKeys...),
 		Error:           j.Error,
 		CreatedAt:       j.CreatedAt,
 		UpdatedAt:       j.UpdatedAt,
@@ -780,7 +786,14 @@ func (m *jobManager) execute(ctx context.Context, job *jobState) error {
 			if err := m.copyCounted(ctx, job, instance, relative, destination, object.Size); err != nil {
 				return err
 			}
-			return instance.Delete(ctx, instance.fullKey(relative))
+			// A source that Object Lock keeps stays: the job counts it and goes on.
+			if err := instance.Delete(ctx, instance.fullKey(relative)); err != nil {
+				if !isObjectLocked(err) {
+					return err
+				}
+				job.addLocked(relative)
+			}
+			return nil
 		})
 	case jobTypeCopyObject, jobTypeMoveObject:
 		permissions := []string{permissionRead, permissionWrite}
@@ -1275,7 +1288,7 @@ func (m *jobManager) runObjectCopyJob(ctx context.Context, job *jobState, instan
 	}
 	if job.Type == jobTypeMoveObject {
 		if err := instance.Delete(ctx, instance.fullKey(job.Source)); err != nil {
-			return fmt.Errorf("copy succeeded but source deletion failed: %w", err)
+			return sourceDeletionError(err)
 		}
 	}
 	job.Processed = 1
@@ -1306,10 +1319,16 @@ func (m *jobManager) runDeleteJob(ctx context.Context, job *jobState, instance *
 		for index, relative := range batch {
 			keys[index] = instance.fullKey(relative)
 		}
-		if err := instance.DeleteMany(ctx, keys); err != nil {
+		locked, err := instance.DeleteMany(ctx, keys)
+		if err != nil {
 			return err
 		}
-		job.Processed += int64(len(batch))
+		// A key that Object Lock keeps stays in the bucket: the job counts it as locked, not as deleted.
+		for _, full := range locked {
+			relative, _ := instance.relativeKey(full)
+			job.addLocked(relative)
+		}
+		job.Processed += int64(len(batch) - len(locked))
 		processedThisRun += int64(len(batch))
 		job.LastKey = batch[len(batch)-1]
 		batch = batch[:0]
@@ -1348,10 +1367,26 @@ func (m *jobManager) runDeleteJob(ctx context.Context, job *jobState, instance *
 	if err != nil {
 		return err
 	}
-	if job.Processed == 0 && processedThisRun == 0 {
+	if job.Processed == 0 && job.Locked == 0 && processedThisRun == 0 {
 		return apiError{Status: http.StatusNotFound, Code: "empty_prefix", Message: "source prefix contains no objects"}
 	}
 	return nil
+}
+
+// addLocked counts a key that Object Lock kept, and keeps the first maxLockedKeys keys to show them.
+func (j *jobState) addLocked(key string) {
+	j.Locked++
+	if len(j.LockedKeys) < maxLockedKeys {
+		j.LockedKeys = append(j.LockedKeys, key)
+	}
+}
+
+// sourceDeletionError is the error of a move whose copy is made and whose source stays.
+func sourceDeletionError(err error) error {
+	if isObjectLocked(err) {
+		return apiError{Status: http.StatusConflict, Code: "object_locked", Message: "The copy is made, but the source stays. " + err.Error()}
+	}
+	return fmt.Errorf("copy succeeded but source deletion failed: %w", err)
 }
 
 func (m *jobManager) controlState(id string) error {

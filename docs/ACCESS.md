@@ -161,8 +161,8 @@ on its top-level folder.
 
 | Action | Resource types | What it permits |
 |---|---|---|
-| `objects.read` | `service`, `bucket`, `prefix` | List, preview, inspect and download objects. See the versions, the Insights and the archive entries. Check the integrity of an object. |
-| `objects.write` | `service`, `bucket`, `prefix` | Upload objects, make folders and restore a version. Change the tags and the metadata of an object. Abort an incomplete multipart upload. Change the lifecycle rules of a prefix. Be the destination of a copy, a move or an archive extraction. |
+| `objects.read` | `service`, `bucket`, `prefix` | List, preview, inspect and download objects. See the versions, the Insights and the archive entries. See the retention and the legal hold of a version. Check the integrity of an object. |
+| `objects.write` | `service`, `bucket`, `prefix` | Upload objects, make folders and restore a version. Change the tags and the metadata of an object. Set or remove the legal hold of a version, and set or extend its retention. Shorten a Governance retention with the bypass. Abort an incomplete multipart upload. Change the lifecycle rules of a prefix. Be the destination of a copy, a move or an archive extraction. |
 | `objects.delete` | `service`, `bucket`, `prefix` | Delete objects, versions and folders. Be the source of a move or a rename. Make or change a lifecycle rule that deletes objects. |
 
 S3-Browser has no administration of a bucket (no creation, no policy). Thus it has no action for it. A change of the
@@ -212,6 +212,8 @@ top-level folder, else the bucket.
 | `POST /api/tags/bulk` | `objects.read` and `objects.write` | The node of `prefix`. The root of the bucket is the bucket. |
 | `GET /api/metadata` | `objects.read` | The node of `key`. |
 | `PUT /api/metadata` | `objects.write` | The node of `key`. |
+| `GET /api/object-lock` | `objects.read` | The node of `key`. |
+| `PUT /api/object-lock` | `objects.write` | The node of `key`. The bypass of a Governance retention needs no other action. The credentials of the instance need the bypass permission of the provider (on AWS S3, `s3:BypassGovernanceRetention`). |
 | `GET /api/multiparts` | `objects.read` | The node of `prefix`. The root of the bucket is the bucket. |
 | `POST /api/multiparts/abort` with `uploads` | `objects.write` | The node of each `key`. |
 | `POST /api/multiparts/abort` with `olderThanDays` | `objects.read` and `objects.write` | The node of `prefix`. The root of the bucket is the bucket. |

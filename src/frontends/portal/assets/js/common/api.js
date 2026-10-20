@@ -398,6 +398,28 @@
       return response.json();
     },
 
+    // The lock of one version: the retention, the legal hold and the default retention of the bucket. Without a version
+    // the answer is for the current version, and it names that version.
+    async objectLock(key, { version = '', instance = null } = {}) {
+      const response = await request(withInstance('/api/object-lock', { key, version }, instance));
+      return response.json();
+    },
+
+    // Changes the legal hold, the retention or both for the version that the previous read named. bypassGovernance
+    // is true only after the person confirmed a change that needs the bypass of a Governance retention.
+    async putObjectLock(key, { version, instance = null, legalHold, retention, bypassGovernance = false } = {}) {
+      const body = { instance: instance === null ? selectedInstance() : String(instance || ''), key, version };
+      if (legalHold !== undefined) body.legalHold = legalHold;
+      if (retention) body.retention = retention;
+      if (bypassGovernance) body.bypassGovernance = true;
+      const response = await request('/api/object-lock', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      return response.json();
+    },
+
     // One page of the incomplete multipart uploads under a prefix. The token comes from the previous page.
     async multiparts({ prefix = '', token = '', instance = null } = {}) {
       const response = await request(withInstance('/api/multiparts', { prefix, token: token || null }, instance));

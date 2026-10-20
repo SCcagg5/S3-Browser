@@ -2,9 +2,11 @@
 set -eu
 
 # One MinIO server with one drive for the tests. The identity comes from the HCL file of the browser, as for the
-# browser itself. The script creates the buckets through the S3 API and then writes the ready file.
+# browser itself. The script creates the buckets through the S3 API and then writes the ready file. The buckets of
+# LOCKED_BUCKETS have Object Lock (and so versioning): a bucket gets Object Lock only at its creation.
 CONFIG_FILE="/config/config.hcl"
 BUCKETS="default"
+LOCKED_BUCKETS="locked"
 READY_FILE="/tmp/ready"
 
 if [ ! -r "$CONFIG_FILE" ]; then
@@ -48,12 +50,22 @@ until curl -fs -o /dev/null "http://127.0.0.1:9000/minio/health/ready"; do
 done
 
 # curl signs the request with SigV4. The credentials go on the standard input, not on the command line.
-for bucket in $BUCKETS; do
+create_bucket() {
+  bucket="$1"
+  lock="$2"
   printf 'user = "%s:%s"\n' "$KEY_ID" "$KEY_SECRET" \
-    | curl -fsS -K - --aws-sigv4 "aws:amz:us-east-1:s3" -X PUT -o /dev/null "http://127.0.0.1:9000/$bucket" || {
+    | curl -fsS -K - --aws-sigv4 "aws:amz:us-east-1:s3" -X PUT -H "x-amz-bucket-object-lock-enabled: $lock" \
+      -o /dev/null "http://127.0.0.1:9000/$bucket" || {
       echo "Cannot create the bucket $bucket" >&2
       exit 1
     }
+}
+
+for bucket in $BUCKETS; do
+  create_bucket "$bucket" false
+done
+for bucket in $LOCKED_BUCKETS; do
+  create_bucket "$bucket" true
 done
 touch "$READY_FILE"
 

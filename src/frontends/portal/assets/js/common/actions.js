@@ -199,6 +199,21 @@
         });
         return completed;
       }
+      // A key that Object Lock keeps stays in the bucket: the job completes, and the toast says which keys stay.
+      const locked = Number(completed.locked || 0);
+      if (locked > 0) {
+        const keys = (completed.lockedKeys || []).slice(0, 3);
+        const more = locked - keys.length;
+        notification.update(`${label} completed: ${Number(completed.processed || 0).toLocaleString()} object(s) processed. ${locked.toLocaleString()} object(s) stay: Object Lock keeps them (legal hold or retention).`, {
+          persistent: false,
+          status: 'warning',
+          progress: null,
+          indeterminate: false,
+          detail: `${keys.join(', ')}${more > 0 ? ` and ${more.toLocaleString()} more` : ''}`,
+          duration: 12000
+        });
+        return completed;
+      }
       notification.update(jobCompletionMessage(completed, label), {
         persistent: false,
         status: 'success',
@@ -508,13 +523,14 @@
         ? `<section class="bb-details-section" data-metadata-fallback${metadataEditable ? ' hidden' : ''}><div class="bb-details-section-title"><i class="mdi mdi-tag-multiple-outline"></i> Custom metadata</div><div class="bb-kv">${customMetadata}</div></section>`
         : '';
       const tagsSection = BB.tags ? '<section class="bb-details-section" data-tags-section></section>' : '';
+      const lockSection = BB.objectLock && BB.cfg?.objectLockSupported === true ? '<section class="bb-details-section" data-lock-section></section>' : '';
       const fileSection = fileRows
         ? `<section class="bb-details-section"><div class="bb-details-section-title"><i class="mdi mdi-file-search-outline"></i> File metadata</div><div class="bb-kv">${fileRows}</div></section>`
         : '';
       const countSection = countAction
         ? `<section class="bb-details-section bb-details-count-section"><div class="bb-details-section-title"><i class="mdi mdi-${escapeHTML(countAction.icon)}"></i> Document dimensions</div><div class="bb-details-count-result" data-document-count-result><span>Not calculated. This operation reads the complete document.</span></div><button type="button" class="bb-btn bb-details-count-button" data-document-count>${escapeHTML(countAction.label)}</button></section>`
         : '';
-      const overviewSections = `${storageSection}${metadataSection}${customSection}${tagsSection}${fileSection}${countSection}`;
+      const overviewSections = `${storageSection}${metadataSection}${customSection}${tagsSection}${lockSection}${fileSection}${countSection}`;
       const advancedPanel = `<section class="bb-details-advanced">
         <article class="bb-details-tool-card is-idle" data-details-tool-card="integrity" aria-busy="false">
           <div class="bb-details-tool-card-head"><div class="bb-details-tool-heading"><span class="bb-details-tool-icon"><i class="mdi mdi-shield-key-outline"></i></span><div><strong>Verify integrity</strong><span>Calculate checksums for the complete object and compare them with values exposed by the provider.</span></div></div><button type="button" class="bb-btn bb-details-tool-run" data-details-integrity><i class="mdi mdi-play"></i><span>Run check</span></button></div>
@@ -611,6 +627,16 @@
               version: selectedVersion,
               canWrite: allowed('write'),
               rootPrefix: BB.cfg?.rootPrefix || ''
+            });
+          }
+
+          const lockHost = overlay.querySelector('[data-lock-section]');
+          if (lockHost) {
+            void BB.objectLock.mountSection(lockHost, {
+              key,
+              instance: selectedInstance,
+              version: selectedVersion,
+              canWrite: allowed('write')
             });
           }
 
@@ -1321,7 +1347,7 @@
         progress: null,
         indeterminate: false,
         detail: target,
-        duration: 6500
+        duration: error?.code === 'object_locked' ? 9000 : 6500
       });
       return false;
     }
@@ -1398,7 +1424,7 @@
         progress: null,
         indeterminate: false,
         detail: key,
-        duration: 6500
+        duration: error?.code === 'object_locked' ? 9000 : 6500
       });
       return false;
     }
@@ -1805,7 +1831,8 @@
                 await reload();
               }
             } catch (error) {
-              ui().toast(`Version action failed: ${String(error?.message || error)}`, { status: 'error', duration: 6000 });
+              // The text of an Object Lock refusal is long and says what to do: it stays longer on the screen.
+              ui().toast(`Version action failed: ${String(error?.message || error)}`, { status: 'error', duration: error?.code === 'object_locked' ? 9000 : 6000 });
             }
           });
           updateFooter();

@@ -70,6 +70,30 @@ This document uses ASD-STE100 Simplified Technical English.
   objects, versions or delete markers also needs `objects.delete` on its prefix. The server probes the lifecycle rules
   of each instance at start and gives `lifecycleSupported` in `/api/instances`. The GCS backend answers `501`.
 
+### Object Lock
+
+- New section "Retention" in the details of a file, for a bucket with Object Lock. It shows the mode (Governance or
+  Compliance), the retain-until date and the legal hold of the version of the details. It also shows the default
+  retention of the bucket. Refer to the section "Object Lock" of [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+- New routes: `GET /api/object-lock` and `PUT /api/object-lock`. A change names the version. It sets or removes the
+  legal hold, sets a first retention, or extends a retention. A shorter Governance retention, or a change from
+  Governance to Compliance, needs `bypassGovernance: true`. The server then sends
+  `x-amz-bypass-governance-retention: true`. Before such a change, the page asks for a confirmation that tells what the
+  bypass does.
+- Nobody can shorten a Compliance retention or change it to Governance: the form refuses and says why, and the server
+  answers `409 compliance_retention`.
+- Before a request to the provider, the server checks the mode (a closed set), the version and the date. The date is
+  RFC 3339, in the future, and at most 36500 days from now. It writes one log line for each change, with the use of the bypass.
+- A delete that a lock refuses gives `409 object_locked` with a message that names the lock. The server reads the lock
+  of the version after a refusal: SeaweedFS refuses with `403 AccessDenied` and MinIO with `400 InvalidRequest`. Such
+  a refusal does not change the delete permission that the page shows.
+- A folder delete or a folder move counts the keys that a lock keeps in `locked` and `lockedKeys` of the job, and
+  continues. The page tells how many keys stay. A rename of one locked object tells that the copy is made and that the
+  source stays.
+- The read needs `objects.read`, and a change needs `objects.write`. The server reads the Object Lock configuration of
+  each instance at start and gives `objectLockSupported` in `/api/instances`. A bucket without Object Lock, Garage
+  (`501`) and the GCS backend hide the section.
+
 ### Uploads and deletes
 
 - An S3 upload can carry a SHA-256 checksum. The browser computes the digest of each chunk. The provider refuses a part
@@ -98,6 +122,10 @@ This document uses ASD-STE100 Simplified Technical English.
 - The lifecycle tests add a rule on each provider through the window, and check the confirmation, the rule that the
   editor keeps byte for byte, and the fields of each provider. Each test restores the rules of the seed. The signed S3
   requests of the tests are in `test/portal-frontend/s3.js`.
+- The entrypoints of SeaweedFS and MinIO create a bucket `locked` with Object Lock, with the instances
+  `seaweedfs-locked` and `minio-locked`. The health check of SeaweedFS waits for its buckets. On both providers, the Object Lock tests set
+  and remove a legal hold, and try to delete a locked version. They extend and shorten a Governance retention, and
+  check that a Compliance retention cannot be shortened. A test checks that Garage hides the section.
 - The test image takes the build arguments `MULTIPART_COPY_THRESHOLD` and `MULTIPART_COPY_PART_SIZE`. The portal test
   stack copies in parts from 8 KiB up, in parts of 5 MiB. A browser test copies and renames a file of 11 MiB on each
   provider and compares the SHA-256 of the result. A second test restores a large version on SeaweedFS and MinIO.

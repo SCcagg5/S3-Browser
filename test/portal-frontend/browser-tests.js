@@ -2,14 +2,15 @@
 // 1 the theme selector, 2 the breadcrumb and the toolbar row, the header and the bucket selector, 3 the bulk upload,
 // 4 the access behaviour of 2.0.0, 5 one smoke test on each S3 provider (SeaweedFS, MinIO and Garage), 6 the copy in
 // parts on each provider, 7 the edit of the metadata on each provider, 8 the cleanup of the incomplete multipart
-// uploads on each provider, 9 the editor of the lifecycle rules on each provider.
+// uploads on each provider, 9 the editor of the lifecycle rules on each provider, 10 Object Lock (retention and legal
+// hold) on the providers with a bucket with Object Lock.
 // run.sh starts S3-Browser and the three providers, puts the test objects (seed.js) and runs this file in the
 // Playwright container. The tests of parts 1 to 4 use SeaweedFS.
 // The tests change the answers of the server with page.route where a case needs it (403, 401, no answer, access).
 const { chromium } = require('playwright');
 const assert = require('assert/strict');
-const { PROVIDERS } = require('./providers');
-const { readLifecycle, writeLifecycle, restoreLifecycle } = require('./s3');
+const { PROVIDERS, LOCKED } = require('./providers');
+const { s3, readLifecycle, writeLifecycle, restoreLifecycle } = require('./s3');
 const BASE = process.env.BASE;
 const MAIN = '-/seaweedfs/seaweedfs-main/';
 const ONLY = process.env.ONLY || '';
@@ -1416,9 +1417,9 @@ test('selector: the bucket selector of the default interface, by host, with the 
   assert.equal(await trigger.getAttribute('aria-expanded'), 'true');
   // One host for each provider of the test stack; the host of the current bucket is open.
   assert.deepEqual(await page.locator('.storageHost__row').evaluateAll(rows => rows.map(row => row.dataset.host)), ['seaweedfs', 'minio', 'garage']);
-  assert.match(await page.textContent('.storageHost__row'), /seaweedfs\s*S3 · 2 buckets/);
+  assert.match(await page.textContent('.storageHost__row'), /seaweedfs\s*S3 · 3 buckets/);
   assert.equal(await page.getAttribute('.storageHost__row', 'aria-expanded'), 'true');
-  assert.deepEqual(await page.locator('.storageHost[data-host="seaweedfs"] .storageBucket strong').allInnerTexts(), ['SeaweedFS - primary', 'SeaweedFS - archive']);
+  assert.deepEqual(await page.locator('.storageHost[data-host="seaweedfs"] .storageBucket strong').allInnerTexts(), ['SeaweedFS - primary', 'SeaweedFS - archive', 'SeaweedFS - locked']);
   assert.equal(await page.getAttribute('.storageBucket[data-instance="seaweedfs-main"]', 'aria-selected'), 'true');
   assert.equal(await page.locator('.storageBucket[data-instance="seaweedfs-main"] .storageBucket__check').count(), 1);
   const columns = await page.evaluate(() => {
@@ -2507,6 +2508,272 @@ test('lifecycle: the item is hidden for an instance without lifecycle rules', as
   await page.click('#actionsButton');
   assert.equal(await page.isHidden('#lifecycleItem'), true);
   assert.equal(await page.isVisible('#multipartsItem'), true);
+  await page.context().close();
+});
+
+// ------------------------------------------------------------------------------------------------------------------
+// 10. Object Lock: the section "Retention" of the details (the legal hold and the retention of one version), and the
+// refusal of the delete of a locked version. The buckets "locked" of SeaweedFS and MinIO have Object Lock. Each test
+// makes its own objects with a unique key, and deletes them at the end: the retention dates are a few seconds ahead.
+// The pages open with the time zone UTC, so that the fields of a date have the UTC time.
+// ------------------------------------------------------------------------------------------------------------------
+
+// Makes an object of the locked bucket with one or two versions (the versions need one second between them).
+async function makeLockedObject(instance, key, versions = 1) {
+  for (let number = 1; number <= versions; number += 1) {
+    await s3(instance, 'PUT', `/locked/${key}`, '', Buffer.from(`${key} version ${number}\n`), { 'content-type': 'text/plain' });
+    if (number < versions) await sleep(1100);
+  }
+}
+
+const lockUrl = (instance, key, version = '') => `${BASE}api/object-lock?instance=${instance}&key=${encodeURIComponent(key)}&version=${encodeURIComponent(version)}`;
+
+async function apiLock(page, instance, key, version = '') {
+  const response = await page.request.get(lockUrl(instance, key, version));
+  assert.equal(response.status(), 200, await response.text());
+  return response.json();
+}
+
+async function putLock(page, instance, key, version, change) {
+  return page.request.put(`${BASE}api/object-lock`, { data: { instance, key, version, ...change } });
+}
+
+async function apiVersions(page, instance, key) {
+  return (await (await page.request.get(`${BASE}api/versions?instance=${instance}&key=${encodeURIComponent(key)}`)).json()).versions || [];
+}
+
+// A date for the field "Retain until": the UTC time, some seconds from now.
+// Chromium gives the value of a "datetime-local" input without ":00" for the second 0, and page.fill then fails: the
+// date never has the second 0.
+const lockField = seconds => {
+  const date = new Date(Date.now() + seconds * 1000);
+  if (date.getUTCSeconds() === 0) date.setUTCSeconds(1);
+  return date.toISOString().slice(0, 19);
+};
+
+const lockText = (page, field) => page.textContent(`[data-lock-section] [data-lock-field="${field}"]`).then(text => text.trim());
+
+async function closeWindow(page) {
+  await page.click('.bb-modal-x');
+  await page.waitForSelector('.bb-overlay', { state: 'detached' });
+}
+
+// Opens the details of the file and waits for the section Retention.
+async function openLockDetails(page, name) {
+  await openDetails(page, name);
+  await page.waitForSelector('[data-lock-section] [data-lock-field="legalHold"]');
+}
+
+// Clicks Save and waits for the message of the section. The form closes.
+async function saveLock(page) {
+  await page.click('[data-lock-save]');
+  await until(page, () => document.querySelector('[data-lock-message]')?.textContent === 'The retention is saved.');
+  assert.equal(await page.isHidden('[data-lock-section] .lockEditor__form'), true);
+}
+
+// The small window of a confirmation, over the large window.
+const confirmWindow = '.bb-overlay:not(.bb-overlay--large)';
+
+const lockedHostOf = async (page, instance) => (await (await page.request.get(`${BASE}api/instances`)).json()).instances.find(item => item.id === instance);
+
+for (const [instance, provider] of Object.entries(LOCKED)) {
+  test(`object lock: ${provider.name} sets a legal hold, refuses the delete of the version with a clear message, and deletes it after the hold goes`, async () => {
+    const page = await newPage({ timezoneId: 'UTC' });
+    const info = await lockedHostOf(page, instance);
+    assert.equal(info.objectLockSupported, true);
+    const key = `lock/hold-${Date.now()}.txt`;
+    const name = key.split('/').pop();
+    await makeLockedObject(instance, key, 2);
+    const held = (await apiVersions(page, instance, key)).find(version => version.isCurrent);
+    const index = (await apiVersions(page, instance, key)).findIndex(version => version.version === held.version);
+    await open(page, `-/${info.host}/${instance}/lock/`);
+    await openLockDetails(page, name);
+    assert.equal(await lockText(page, 'mode'), 'No retention');
+    assert.equal(await lockText(page, 'legalHold'), 'Off');
+    assert.equal(await lockText(page, 'default'), 'None');
+    assert.equal(await page.isHidden('[data-lock-section] .lockEditor__form'), true);
+    await page.click('[data-lock-edit]');
+    await page.waitForSelector('[data-lock-legal-hold]', { state: 'visible' });
+    assert.equal(await page.isDisabled('[data-lock-save]'), true);
+    await page.check('[data-lock-legal-hold]');
+    await saveLock(page);
+    assert.equal(await lockText(page, 'legalHold'), 'On');
+    const state = await apiLock(page, instance, key);
+    assert.equal(state.legalHold, true);
+    assert.equal(state.version, held.version);
+    assert.equal(state.retention, null);
+    await closeWindow(page);
+    // The versions: the delete of the locked version fails, and the toast says why.
+    await page.click(`tr[data-name="${name}"] .versionCount`);
+    await page.waitForSelector(`[data-version-delete="${index}"]`);
+    await page.click(`[data-version-delete="${index}"]`);
+    await page.click(`${confirmWindow} .bb-btn-primary`);
+    await page.waitForSelector('.bb-toast.is-error');
+    const toast = await page.textContent('.bb-toast.is-error');
+    assert.match(toast, /Object Lock/);
+    assert.match(toast, /legal hold/);
+    assert.equal(await versionCount(page, instance, key), 2);
+    assert.equal(await page.locator(`[data-version-delete="${index}"]`).count(), 1);
+    await closeWindow(page);
+    // The hold goes off in the details, and then the delete works.
+    await openLockDetails(page, name);
+    await page.click('[data-lock-edit]');
+    await page.uncheck('[data-lock-legal-hold]');
+    await saveLock(page);
+    assert.equal(await lockText(page, 'legalHold'), 'Off');
+    assert.equal((await apiLock(page, instance, key)).legalHold, false);
+    await closeWindow(page);
+    await page.click(`tr[data-name="${name}"] .versionCount`);
+    await page.waitForSelector(`[data-version-delete="${index}"]`);
+    await page.click(`[data-version-delete="${index}"]`);
+    await page.click(`${confirmWindow} .bb-btn-primary`);
+    await page.waitForSelector('.bb-toast >> text=Version deleted.');
+    await until(page, () => document.querySelectorAll('[data-version-delete]').length === 1);
+    assert.equal(await versionCount(page, instance, key), 1);
+    // The other version has no lock: the delete works, and the object is gone.
+    const rest = (await apiVersions(page, instance, key)).find(version => !version.deleteMarker);
+    const removed = await page.request.delete(`${BASE}api/versions?instance=${instance}&key=${encodeURIComponent(key)}&version=${encodeURIComponent(rest.version)}`);
+    assert.equal(removed.status(), 204);
+    assert.equal(await versionCount(page, instance, key), 0);
+    assert.deepEqual(page.errors, []);
+    await page.context().close();
+  });
+
+  test(`object lock: ${provider.name} extends a Governance retention, needs the bypass to shorten it, and the bypass works`, async () => {
+    const page = await newPage({ timezoneId: 'UTC' });
+    const info = await lockedHostOf(page, instance);
+    const key = `lock/governance-${Date.now()}.txt`;
+    const name = key.split('/').pop();
+    await makeLockedObject(instance, key);
+    await open(page, `-/${info.host}/${instance}/lock/`);
+    await openLockDetails(page, name);
+    // A first retention of one minute.
+    await page.click('[data-lock-edit]');
+    await page.waitForSelector('[data-lock-until]', { state: 'visible' });
+    assert.equal(await page.inputValue('[data-lock-until]'), '');
+    assert.equal(await page.inputValue('[data-lock-mode]'), 'GOVERNANCE');
+    await page.fill('[data-lock-until]', lockField(60));
+    await saveLock(page);
+    assert.equal(await lockText(page, 'mode'), 'Governance');
+    assert.match(await lockText(page, 'until'), /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC$/);
+    assert.match(await page.textContent('[data-lock-note]'), /Users with the bypass right can shorten or remove it\./);
+    let state = await apiLock(page, instance, key);
+    assert.equal(state.retention.mode, 'GOVERNANCE');
+    assert.equal(state.retention.active, true);
+    const first = state.retention.retainUntil;
+    // A later date: no confirmation.
+    await page.click('[data-lock-edit]');
+    await page.fill('[data-lock-until]', lockField(120));
+    await saveLock(page);
+    assert.equal(await page.locator(confirmWindow).count(), 0);
+    state = await apiLock(page, instance, key);
+    assert.ok(Date.parse(state.retention.retainUntil) > Date.parse(first) + 30000, `${state.retention.retainUntil} after ${first}`);
+    const extended = state.retention.retainUntil;
+    // An earlier date: the page asks first and names the bypass. Cancel changes nothing.
+    await page.click('[data-lock-edit]');
+    const shorter = lockField(10);
+    await page.fill('[data-lock-until]', shorter);
+    await page.click('[data-lock-save]');
+    await page.waitForSelector(confirmWindow);
+    const dialog = await page.textContent(confirmWindow);
+    assert.match(dialog, /Bypass the Governance retention/);
+    assert.match(dialog, /x-amz-bypass-governance-retention/);
+    assert.match(dialog, /shortens the Governance retention/);
+    await page.click(`${confirmWindow} button:has-text("Cancel")`);
+    await page.waitForSelector(confirmWindow, { state: 'detached' });
+    assert.equal((await apiLock(page, instance, key)).retention.retainUntil, extended);
+    assert.equal(await page.isVisible('[data-lock-section] .lockEditor__form'), true);
+    // The same change, confirmed: the bypass goes with the request.
+    await page.click('[data-lock-save]');
+    await page.waitForSelector(confirmWindow);
+    await page.click(`${confirmWindow} .bb-btn-primary`);
+    await until(page, () => document.querySelector('[data-lock-message]')?.textContent === 'The retention is saved.');
+    state = await apiLock(page, instance, key);
+    assert.equal(state.retention.retainUntil, `${shorter}Z`);
+    assert.equal(state.retention.mode, 'GOVERNANCE');
+    assert.equal(await lockText(page, 'until'), `${shorter.replace('T', ' ')} UTC`);
+    // The retention ends, and then the version goes.
+    const end = Date.now() + 25000;
+    while ((await apiLock(page, instance, key)).retention?.active && Date.now() < end) await sleep(500);
+    assert.equal((await apiLock(page, instance, key)).retention.active, false);
+    const removed = await page.request.delete(`${BASE}api/versions?instance=${instance}&key=${encodeURIComponent(key)}&version=${encodeURIComponent(state.version)}`);
+    assert.equal(removed.status(), 204, await removed.text());
+    assert.deepEqual(page.errors, []);
+    await page.context().close();
+  });
+
+  test(`object lock: ${provider.name} never shortens a Compliance retention`, async () => {
+    const page = await newPage({ timezoneId: 'UTC' });
+    const info = await lockedHostOf(page, instance);
+    const key = `lock/compliance-${Date.now()}.txt`;
+    const name = key.split('/').pop();
+    await makeLockedObject(instance, key);
+    await open(page, `-/${info.host}/${instance}/lock/`);
+    await openLockDetails(page, name);
+    await page.click('[data-lock-edit]');
+    await page.selectOption('[data-lock-mode]', 'COMPLIANCE');
+    await page.fill('[data-lock-until]', lockField(25));
+    await saveLock(page);
+    assert.equal(await lockText(page, 'mode'), 'Compliance');
+    assert.match(await page.textContent('[data-lock-note]'), /Nobody can shorten or remove it before this date, not even the owner of the bucket\./);
+    const state = await apiLock(page, instance, key);
+    assert.equal(state.retention.mode, 'COMPLIANCE');
+    // An earlier date: the page refuses it and sends no request.
+    const puts = [];
+    page.on('request', request => { if (request.method() === 'PUT' && request.url().includes('/api/object-lock')) puts.push(request.url()); });
+    await page.click('[data-lock-edit]');
+    assert.equal(await page.isDisabled('[data-lock-mode]'), true);
+    await page.fill('[data-lock-until]', lockField(10));
+    await page.click('[data-lock-save]');
+    const refusal = await page.textContent('[data-lock-message]');
+    assert.match(refusal, /A Compliance retention cannot be shortened/);
+    assert.match(refusal, /nobody can shorten or remove it before \d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC, not even the owner of the bucket\./);
+    assert.equal(await page.getAttribute('[data-lock-message]', 'data-tone'), 'error');
+    assert.equal(await page.locator(confirmWindow).count(), 0);
+    await sleep(300);
+    assert.deepEqual(puts, []);
+    assert.equal((await apiLock(page, instance, key)).retention.retainUntil, state.retention.retainUntil);
+    // The server has the same rule.
+    const earlier = await putLock(page, instance, key, state.version, { retention: { mode: 'COMPLIANCE', retainUntil: `${lockField(10)}Z` } });
+    assert.equal(earlier.status(), 409);
+    assert.equal((await earlier.json()).error.code, 'compliance_retention');
+    const governance = await putLock(page, instance, key, state.version, { retention: { mode: 'GOVERNANCE', retainUntil: `${lockField(40)}Z` }, bypassGovernance: true });
+    assert.equal(governance.status(), 409);
+    assert.equal((await governance.json()).error.code, 'compliance_retention');
+    // A later date works.
+    const later = await putLock(page, instance, key, state.version, { retention: { mode: 'COMPLIANCE', retainUntil: `${lockField(35)}Z` } });
+    assert.equal(later.status(), 200, await later.text());
+    assert.ok(Date.parse((await later.json()).retention.retainUntil) > Date.parse(state.retention.retainUntil));
+    // The retention ends, and then the version goes.
+    const end = Date.now() + 45000;
+    while ((await apiLock(page, instance, key)).retention?.active && Date.now() < end) await sleep(500);
+    assert.equal((await apiLock(page, instance, key)).retention.active, false);
+    const removed = await page.request.delete(`${BASE}api/versions?instance=${instance}&key=${encodeURIComponent(key)}&version=${encodeURIComponent(state.version)}`);
+    assert.equal(removed.status(), 204, await removed.text());
+    assert.deepEqual(page.errors, []);
+    await page.context().close();
+  });
+}
+
+test('object lock: the Retention section is hidden on Garage and on a bucket without Object Lock', async () => {
+  const page = await newPage();
+  const instances = (await (await page.request.get(`${BASE}api/instances`)).json()).instances;
+  const flags = Object.fromEntries(instances.map(item => [item.id, item.objectLockSupported]));
+  for (const instance of ['garage-main', 'seaweedfs-main', 'minio-main']) assert.equal(flags[instance], false, instance);
+  for (const instance of Object.keys(LOCKED)) assert.equal(flags[instance], true, instance);
+  for (const instance of ['garage-main', 'seaweedfs-main']) {
+    const info = instances.find(item => item.id === instance);
+    await open(page, `-/${info.host}/${instance}/smoke/`);
+    await openDetails(page, 'hello.txt');
+    await page.waitForSelector('[data-details-tool-card="integrity"]');
+    await page.waitForSelector('[data-metadata-section] .metaEditor__view');
+    assert.equal(await page.locator('[data-lock-section]').count(), 0, instance);
+    assert.equal(await visibleText(page, 'Retention'), 0, instance);
+    const response = await page.request.get(lockUrl(instance, 'smoke/hello.txt'));
+    assert.equal(response.status(), 501, instance);
+    assert.equal((await response.json()).error.code, 'object_lock_unsupported');
+  }
+  assert.deepEqual(page.errors, []);
   await page.context().close();
 });
 
