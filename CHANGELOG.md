@@ -52,7 +52,9 @@ This document uses ASD-STE100 Simplified Technical English.
   text that they can show. The relative time and the exact time give the same width to Modified, so the columns stay in
   place when the mode changes.
 - The comparison of two versions is a part of the preview page, not a dialog. The address has the parameter `compare`.
-  The browser back button and the button "Back to the preview" return to the preview.
+  The two selects of the versions are in a bar above the content, with a button that closes the comparison. The browser
+  back button returns to the preview. A JSON file has the modes Raw, Beautify and Tree, as the preview. A changed line
+  with marked words showed the text `[object HTMLElement]`: this is fixed.
 - The details, the folder insights, the table of versions and the comparison of bytes use one window (`bb-modal--large`).
   The window is wide, fixed at the top, and has the same height for each tab. A dialog asks for it with `large: true`.
 - The values and the titles of the columns Size and Modified are at the right of the column.

@@ -247,6 +247,21 @@
     }
   }
 
+  // The text of a JSON document with two spaces of indent, with the keys in the order of the document or sorted.
+  function prettyJSON(text, { sort = false } = {}) {
+    try {
+      const value = JSON.parse(text);
+      return JSON.stringify(sort ? sortKeys(value) : value, null, 2);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // One text for a value, whatever the order of the keys: two values are equal when their canonical texts are equal.
+  function canonicalJSON(value) {
+    return JSON.stringify(sortKeys(value));
+  }
+
   const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 
   function pathKey(parent, key) {
@@ -395,7 +410,7 @@
     return { rows, columns, truncated, stats: { added: count('add'), removed: count('del'), modified: count('mod') } };
   }
 
-  const api = { diffArrays, splitLines, linesWithEol, diffLines, hunks, unifiedPatch, statsOf, wordDiff, tokens, normalizeJSON, jsonChanges, diffJSON, parseDelimited, delimiterOf, diffDelimited };
+  const api = { diffArrays, splitLines, linesWithEol, diffLines, hunks, unifiedPatch, statsOf, wordDiff, tokens, normalizeJSON, prettyJSON, canonicalJSON, jsonChanges, diffJSON, parseDelimited, delimiterOf, diffDelimited };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else {
     const BB = (root.BB = root.BB || {});

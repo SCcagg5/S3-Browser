@@ -86,6 +86,7 @@
   function cleanupPreviewResources() {
     activeCompare?.destroy();
     activeCompare = null;
+    showCompareBar(false);
     activeDocumentSearch = null;
     activeDocumentSearchLabel = '';
     activeSearchController?.abort();
@@ -208,7 +209,7 @@
   function mountVersionPicker() {
     const control = byId('previewVersionControl');
     if (!control) return;
-    if (previewVersions.length < 2 || !BB.versions) { control.hidden = true; return; }
+    if (previewVersions.length < 2 || !BB.versions || (currentCompare() && !currentArchiveEntry())) { control.hidden = true; return; }
     BB.versions.mountPicker(control, {
       versions: previewVersions,
       selected: currentVersion(),
@@ -255,35 +256,27 @@
     void render();
   }
 
+  // The two selects of the versions are in the bar above the preview, with a button that closes the comparison.
+  function showCompareBar(visible) {
+    byId('compareBar').hidden = !visible;
+    if (!visible) byId('compareBarHost').replaceChildren();
+  }
+
   function renderCompare(key) {
     const container = byId('viewer');
     setPreviewMode('compare');
     container.className = 'versionComparePage';
     container.replaceChildren();
-    const bar = document.createElement('div');
-    bar.className = 'versionComparePage__bar';
-    const back = document.createElement('button');
-    back.type = 'button';
-    back.className = 'button versionComparePage__back';
-    const arrow = document.createElement('i');
-    arrow.className = 'ic ic-chevron-left';
-    arrow.setAttribute('aria-hidden', 'true');
-    const label = document.createElement('span');
-    label.textContent = 'Back to the preview';
-    back.append(arrow, label);
-    back.addEventListener('click', leaveCompare);
-    const title = document.createElement('h2');
-    title.className = 'versionComparePage__title';
-    title.textContent = 'Compare versions';
-    bar.append(back, title);
     const host = document.createElement('div');
     host.className = 'versionComparePage__host';
-    container.append(bar, host);
+    container.append(host);
     const shown = previewVersions.find(version => version.version === (currentVersion() || previewVersions.find(item => item.isCurrent)?.version));
     setDocMeta(key, shown ? Number(shown.size) : NaN, '');
     updateBackLink(key);
+    showCompareBar(true);
     activeCompare = BB.versions.mountCompare(host, {
       key, instance: config.instanceId, versions: previewVersions, from: currentCompare(), to: currentVersion(),
+      pickHost: byId('compareBarHost'),
       onBytes: (left, right) => BB.actions.compareVersions?.(key, left.version, right.version, { instance: config.instanceId }),
       onChange({ from, to }) {
         const url = new URL(location.href);
@@ -1526,6 +1519,7 @@
     event.preventDefault();
     void openDocumentSearch();
   });
+  byId('compareClose').addEventListener('click', leaveCompare);
   window.addEventListener('popstate', () => {
     applyCapabilities();
     mountVersionPicker();

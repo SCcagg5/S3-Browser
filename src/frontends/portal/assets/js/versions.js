@@ -21,7 +21,7 @@
       else if (name.startsWith('on') && typeof value === 'function') node.addEventListener(name.slice(2), value);
       else node.setAttribute(name, value === true ? '' : String(value));
     }
-    for (const child of children.flat()) {
+    for (const child of children.flat(Infinity)) {
       if (child === null || child === undefined || child === false) continue;
       node.append(child instanceof Node ? child : document.createTextNode(String(child)));
     }
@@ -313,23 +313,93 @@
     return h('div', { class: 'diff__scroll' }, h('table', { class: ['diff__table', mode === 'split' && 'is-split'] }, head, body), more);
   }
 
-  function renderJSONChanges(result) {
-    const verbs = { added: 'Added', removed: 'Removed', changed: 'Changed' };
-    const marks = { added: '+', removed: '−', changed: '~' };
-    const compact = value => {
-      const text = JSON.stringify(value);
-      return text.length > 140 ? `${text.slice(0, 137)}…` : text;
+  // The tree of two JSON documents: every path with its state (added, removed, changed, the same). A branch with a change
+  // is open. The branches without change are closed, and a click opens them.
+  const TREE_LIMIT = 500;
+
+  function jsonTree(before, after) {
+    const container = value => value !== null && typeof value === 'object';
+    const entries = value => (Array.isArray(value) ? value.map((item, index) => [`[${index}]`, item]) : Object.entries(value));
+    const node = (label, a, b, hasA, hasB) => {
+      if (!hasB) return { label, status: 'removed', a };
+      if (!hasA) return { label, status: 'added', b };
+      if (container(a) && container(b) && Array.isArray(a) === Array.isArray(b)) {
+        const children = [];
+        if (Array.isArray(a)) {
+          for (let index = 0; index < Math.max(a.length, b.length); index += 1) children.push(node(`[${index}]`, a[index], b[index], index < a.length, index < b.length));
+        } else {
+          for (const key of Object.keys(a)) children.push(node(key, a[key], b[key], true, key in b));
+          for (const key of Object.keys(b)) if (!(key in a)) children.push(node(key, undefined, b[key], false, true));
+        }
+        return { label, status: children.some(child => child.status !== 'same') ? 'changed' : 'same', a, b, children };
+      }
+      return { label, status: BB.diff.canonicalJSON(a) === BB.diff.canonicalJSON(b) ? 'same' : 'changed', a, b };
     };
-    const rows = result.changes.map(change => h('li', { class: `jsonChange jsonChange--${change.type}` },
-      h('span', { class: 'jsonChange__mark', 'aria-hidden': 'true' }, marks[change.type]),
-      h('span', { class: 'jsonChange__verb' }, verbs[change.type]),
-      h('code', { class: 'jsonChange__path' }, change.path),
-      change.type === 'changed'
-        ? h('span', { class: 'jsonChange__values' }, h('code', { class: 'is-del' }, compact(change.before)), icon('arrow-right'), h('span', { class: 'visually-hidden' }, ' to '), h('code', { class: 'is-add' }, compact(change.after)))
-        : h('span', { class: 'jsonChange__values' }, h('code', { class: change.type === 'added' ? 'is-add' : 'is-del' }, compact(change.type === 'added' ? change.after : change.before)))));
-    return h('div', { class: 'diff__scroll' },
-      rows.length ? h('ul', { class: 'jsonChanges' }, rows) : h('p', { class: 'diff__empty' }, 'The two documents have the same content. Only the format or the order of the keys changed.'),
-      result.overflow ? h('p', { class: 'diff__note' }, `The list stops at ${result.changes.length} changes. Open the text view for the rest.`) : null);
+    return { node: node('$', before, after, true, true), container, entries };
+  }
+
+  function renderJSONTree(aText, bText, { whole }) {
+    let tree;
+    try { tree = jsonTree(JSON.parse(aText), JSON.parse(bText)); } catch (error) { return h('p', { class: 'diff__empty is-error' }, String(error?.message || error)); }
+    const { container, entries } = tree;
+    const marks = { added: '+', removed: '−', changed: '~', same: '' };
+    const summary = value => {
+      if (Array.isArray(value)) return `[…] ${value.length} item${value.length === 1 ? '' : 's'}`;
+      if (container(value)) { const count = Object.keys(value).length; return `{…} ${count} key${count === 1 ? '' : 's'}`; }
+      const text = JSON.stringify(value);
+      return text.length > 120 ? `${text.slice(0, 117)}…` : text;
+    };
+    const childrenOf = item => {
+      if (item.children) return item.children;
+      if (item.status === 'added' && container(item.b)) return entries(item.b).map(([label, value]) => ({ label, status: 'added', b: value }));
+      if (item.status === 'removed' && container(item.a)) return entries(item.a).map(([label, value]) => ({ label, status: 'removed', a: value }));
+      return [];
+    };
+    const valueOf = item => {
+      if (item.status === 'added') return h('code', { class: 'jsonTree__value is-add' }, summary(item.b));
+      if (item.status === 'removed') return h('code', { class: 'jsonTree__value is-del' }, summary(item.a));
+      if (item.status === 'same') return h('code', { class: 'jsonTree__value' }, summary(item.a));
+      if (container(item.a) && container(item.b) && Array.isArray(item.a) === Array.isArray(item.b)) return h('code', { class: 'jsonTree__value' }, summary(item.b));
+      return h('span', { class: 'jsonTree__change' }, h('code', { class: 'jsonTree__value is-del' }, summary(item.a)), icon('arrow-right'), h('span', { class: 'visually-hidden' }, ' to '), h('code', { class: 'jsonTree__value is-add' }, summary(item.b)));
+    };
+    const list = (items, showSame) => {
+      const ul = h('ul', { class: 'jsonTree__list', role: 'group' });
+      const shown = showSame ? items : items.filter(child => child.status !== 'same');
+      shown.slice(0, TREE_LIMIT).forEach(child => ul.append(row(child)));
+      if (shown.length > TREE_LIMIT) ul.append(h('li', { class: 'jsonTree__more' }, `${(shown.length - TREE_LIMIT).toLocaleString('en-US')} more`));
+      const hidden = items.length - shown.length;
+      if (hidden > 0) {
+        const button = h('button', { type: 'button', class: 'jsonTree__same', onclick: () => ul.replaceWith(list(items, true)) }, `${hidden.toLocaleString('en-US')} unchanged`);
+        ul.append(h('li', {}, button));
+      }
+      return ul;
+    };
+    const row = (item, open = false) => {
+      const kids = childrenOf(item);
+      const expandable = kids.length > 0;
+      const li = h('li', { class: `jsonTree__node jsonTree__node--${item.status}`, role: 'treeitem' });
+      const toggle = expandable
+        ? h('button', { type: 'button', class: 'jsonTree__toggle', 'aria-expanded': 'false', 'aria-label': `Open ${item.label}` }, icon('chevron-down'))
+        : h('span', { class: 'jsonTree__toggle jsonTree__toggle--leaf' });
+      li.append(h('div', { class: 'jsonTree__row' }, toggle,
+        h('span', { class: 'jsonTree__mark', 'aria-hidden': 'true' }, marks[item.status]),
+        h('code', { class: 'jsonTree__label' }, item.label), valueOf(item)));
+      if (expandable) {
+        let body = null;
+        const set = expanded => {
+          toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+          toggle.classList.toggle('is-open', expanded);
+          if (expanded && !body) { body = list(kids, whole || item.status !== 'changed'); li.append(body); }
+          if (body) body.hidden = !expanded;
+        };
+        toggle.addEventListener('click', () => set(toggle.getAttribute('aria-expanded') !== 'true'));
+        set(open || item.status === 'changed');
+      }
+      return li;
+    };
+    const root = tree.node;
+    if (root.status === 'same') return h('p', { class: 'diff__empty' }, 'The two documents have the same content. Only the format or the order of the keys changed.');
+    return h('div', { class: 'diff__scroll' }, h('ul', { class: 'jsonTree', role: 'tree' }, row(root, true)));
   }
 
   function renderCSV(result, { whole }) {
@@ -460,8 +530,8 @@
   }
 
   // Draws the comparison of two versions in the element host. The result has destroy(), which stops the reads.
-  // onChange({ from, to }) runs when the person chooses other versions.
-  function mountCompare(host, { key, instance = null, versions, from = '', to = '', onBytes = null, onChange = null }) {
+  // onChange({ from, to }) runs when the person chooses other versions. The two selects of the versions go in pickHost, when it is given.
+  function mountCompare(host, { key, instance = null, versions, from = '', to = '', onBytes = null, onChange = null, pickHost = null }) {
     const list = listVersions(versions);
     const find = id => list.find(version => version.version === id) || null;
     let right = find(to) || list.find(version => version.isCurrent) || list[0];
@@ -469,7 +539,7 @@
     if (!left || !right) return null;
     const cache = new Map();
     const controller = new AbortController();
-    const state = { view: 'split', whole: false, sortKeys: true, expanded: new Set(), run: 0 };
+    const state = { view: 'split', mode: 'beautify', whole: false, sortKeys: true, expanded: new Set(), run: 0 };
     const kind = kindOf(key);
 
     host.classList.add('versionDiff');
@@ -486,11 +556,14 @@
     const summary = h('div', { class: 'versionDiff__summary', role: 'status', 'aria-live': 'polite' });
     const options = h('div', { class: 'versionDiff__options' });
     const view = h('div', { class: 'versionDiff__view' });
-    root.replaceChildren(
-      h('p', { class: 'versionDiff__file' }, icon('source-commit'), h('code', {}, key)),
-      h('div', { class: 'versionDiff__pick' },
-        h('label', {}, h('span', {}, 'From'), fromSelect), swap, h('label', {}, h('span', {}, 'To'), toSelect)),
-      summary, options, view);
+    const pick = h('div', { class: 'versionDiff__pick' },
+      h('label', {}, h('span', {}, 'From'), fromSelect), swap, h('label', {}, h('span', {}, 'To'), toSelect));
+    if (pickHost) {
+      pickHost.replaceChildren(pick);
+      root.replaceChildren(summary, options, view);
+    } else {
+      root.replaceChildren(pick, summary, options, view);
+    }
 
     const segmented = (name, choices, current, onPick) => h('div', { class: 'segmented', role: 'group', 'aria-label': name },
       choices.map(([value, text, iconName]) => h('button', { type: 'button', class: ['segmented__item', value === current && 'is-active'], 'aria-pressed': value === current ? 'true' : 'false', 'data-value': value, onclick: () => onPick(value) }, iconName ? icon(iconName) : null, text)));
@@ -548,13 +621,19 @@
         let aText = a.text;
         let bText = b.text;
         let json = null;
+        // A JSON document has the modes of the preview: Raw (the text as stored), Beautify (indented) and Tree (the paths).
         if (kind === 'json') {
           json = BB.diff.diffJSON(a.text, b.text);
-          if (json.valid && state.sortKeys) { aText = BB.diff.normalizeJSON(a.text); bText = BB.diff.normalizeJSON(b.text); }
+          if (json.valid && state.mode !== 'raw') {
+            const sort = state.sortKeys || state.mode === 'tree';
+            aText = BB.diff.prettyJSON(a.text, { sort });
+            bText = BB.diff.prettyJSON(b.text, { sort });
+          }
         }
+        const tree = Boolean(json?.valid) && state.mode === 'tree';
         const views = kind === 'csv'
           ? [['split', 'Side by side', 'layout-columns'], ['table', 'Table', 'layout-rows'], ['git', 'Git patch', 'git-compare']]
-          : [['split', 'Side by side', 'layout-columns'], ['unified', 'Unified', 'layout-rows'], ['git', 'Git patch', 'git-compare'], ...(json?.valid ? [['changes', 'Changes', 'source-commit']] : [])];
+          : [['split', 'Side by side', 'layout-columns'], ['unified', 'Unified', 'layout-rows'], ['git', 'Git patch', 'git-compare']];
         if (!views.some(([value]) => value === state.view)) state.view = 'split';
         const lines = BB.diff.diffLines(aText, bText);
         const patch = () => BB.diff.unifiedPatch(lines, { aPath: key, aId: blobId(left), bId: blobId(right) });
@@ -573,16 +652,17 @@
           h('button', { type: 'button', class: 'bb-btn', 'data-diff-copy': '', onclick: async () => { const done = await copyText(patch()); BB.ui.toast(done ? 'The patch is in the clipboard.' : 'The browser refused to copy the patch.', { status: done ? 'success' : 'error', duration: 2500 }); } }, icon('git-compare'), h('span', {}, 'Copy patch')),
           h('button', { type: 'button', class: 'bb-btn', 'data-diff-download': '', onclick: () => download(`${key.split('/').pop() || 'file'}.patch`, patch()) }, icon('arrow-down'), h('span', {}, 'Download .patch')));
         fill(options,
-          segmented('View', views, state.view, value => { state.view = value; draw(); }),
+          json?.valid ? segmented('Format', [['raw', 'Raw'], ['beautify', 'Beautify'], ['tree', 'Tree']], state.mode, value => { state.mode = value; draw(); }) : null,
+          tree ? null : segmented('View', views, state.view, value => { state.view = value; draw(); }),
           json && !json.valid ? note('A version is not valid JSON: the text shows as it is.') : null,
-          json?.valid && state.view !== 'changes' ? h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: state.sortKeys, 'data-diff-sort': '', onchange: event => { state.sortKeys = event.target.checked; draw(); } }), h('span', {}, 'Sort the keys')) : null,
-          state.view === 'split' || state.view === 'unified' || state.view === 'table'
-            ? h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: state.whole, 'data-diff-whole': '', onchange: event => { state.whole = event.target.checked; draw(); } }), h('span', {}, csv ? 'Show the unchanged rows' : 'Show the unchanged lines'))
+          json?.valid && state.mode === 'beautify' ? h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: state.sortKeys, 'data-diff-sort': '', onchange: event => { state.sortKeys = event.target.checked; draw(); } }), h('span', {}, 'Sort the keys')) : null,
+          tree || state.view === 'split' || state.view === 'unified' || state.view === 'table'
+            ? h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: state.whole, 'data-diff-whole': '', onchange: event => { state.whole = event.target.checked; draw(); } }), h('span', {}, tree ? 'Show the unchanged values' : csv ? 'Show the unchanged rows' : 'Show the unchanged lines'))
             : null,
-          actions);
+          tree ? null : actions);
 
-        if (state.view === 'git') view.replaceChildren(renderPatch(patch()));
-        else if (state.view === 'changes') view.replaceChildren(renderJSONChanges(json));
+        if (tree) view.replaceChildren(renderJSONTree(aText, bText, { whole: state.whole }));
+        else if (state.view === 'git') view.replaceChildren(renderPatch(patch()));
         else if (csv && state.view === 'table') view.replaceChildren(renderCSV(csv, { whole: state.whole }));
         else if (csv) view.replaceChildren(renderCSVSplit(csv, { whole: state.whole }));
         else view.replaceChildren(renderText(lines, { mode: state.view === 'unified' ? 'unified' : 'split', whole: state.whole, expanded: state.expanded }));
@@ -596,7 +676,7 @@
     toSelect.addEventListener('change', render);
     swap.addEventListener('click', () => { const keep = fromSelect.value; fromSelect.value = toSelect.value; toSelect.value = keep; render(); });
     render();
-    return { destroy() { controller.abort(); state.run += 1; host.replaceChildren(); } };
+    return { destroy() { controller.abort(); state.run += 1; host.replaceChildren(); pickHost?.replaceChildren(); } };
   }
 
   BB.versions = { listVersions, mountPicker, mountCompare, compareURL, kindOf, formatBytes, formatDate };

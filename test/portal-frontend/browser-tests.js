@@ -936,32 +936,49 @@ test('versions: the comparison of two text versions, unified and side by side, w
   await page.context().close();
 });
 
-test('versions: the comparison of two JSON versions lists the changed paths, and has a text view with sorted keys', async () => {
+test('versions: the comparison of two JSON versions has the modes Raw, Beautify and Tree, as the preview', async () => {
   const page = await newPage();
   await open(page, `${MAIN}versions/`);
   await openCompareFromDetails(page, 'config.json');
+  // Beautify is the first mode: the two documents are indented and side by side.
   await page.waitForSelector('.diff__table.is-split');
-  await page.click('.segmented__item[data-value="changes"]');
-  await page.waitForSelector('.jsonChanges');
-  // v2 -> v3: replicas 3 to 4; the other differences are the format and the order of the keys.
-  assert.deepEqual(cleanText(await page.locator('.jsonChange').allInnerTexts()), ['~ Changed $.replicas 3 to 4']);
-  // v1 -> v3.
+  assert.deepEqual(cleanText(await page.locator('[aria-label="Format"] .segmented__item').allInnerTexts()), ['Raw', 'Beautify', 'Tree']);
+  assert.equal(await page.getAttribute('.segmented__item[data-value="beautify"]', 'aria-pressed'), 'true');
+  const nodes = () => page.evaluate(() => Array.from(document.querySelectorAll('.jsonTree__node')).map(node => `${node.className.match(/--(added|removed|changed|same)/)[1]} ${node.querySelector('.jsonTree__label').textContent}`));
+  // Tree: v2 -> v3 has one change, replicas 3 to 4. The format and the order of the keys are not changes.
+  await page.click('.segmented__item[data-value="tree"]');
+  await page.waitForSelector('.jsonTree');
+  { const got = await nodes(); assert.equal(JSON.stringify(got), JSON.stringify(['changed $', 'changed replicas']), JSON.stringify(got)); }
+  assert.match(cleanText(await page.locator('.jsonTree__node--changed .jsonTree__change').allInnerTexts())[0], /3 to 4/);
+  assert.match(cleanText(await page.locator('.jsonTree__same').allInnerTexts())[0], /^\d+ unchanged$/);
+  assert.equal(await page.locator('.versionDiff__actions').count(), 0);
+  // The unchanged values show with the option.
+  await page.check('[data-diff-whole]');
+  assert.ok((await nodes()).includes('same service'));
+  await page.uncheck('[data-diff-whole]');
+  // v1 -> v3. The keys are in alphabetical order.
   await page.selectOption('select[aria-label="From version"]', { index: 2 });
-  await page.waitForSelector('.jsonChange >> nth=3');
-  const changes = cleanText(await page.locator('.jsonChange').allInnerTexts());
-  assert.deepEqual(changes, [
-    '− Removed $.legacy true',
-    '+ Added $.limits.memory "1Gi"',
-    '+ Added $.regions[1] "us-east"',
-    '~ Changed $.replicas 2 to 4',
-  ].map(item => item));
+  await until(page, () => document.querySelectorAll('.jsonTree__node').length >= 7);
+  { const got = await nodes(); assert.equal(JSON.stringify(got), JSON.stringify(['changed $', 'removed legacy', 'changed limits', 'added memory', 'changed regions', 'added [1]', 'changed replicas']), JSON.stringify(got)); }
   assert.deepEqual(cleanText(await page.locator('.diffStat').allInnerTexts()).slice(0, 1), ['4 paths changed']);
+  // A branch closes and opens.
+  await page.click('.jsonTree__node--changed:has(> .jsonTree__row .jsonTree__label:text-is("limits")) > .jsonTree__row .jsonTree__toggle');
+  assert.equal(await page.locator('.jsonTree__label:text-is("memory")').isVisible(), false);
+  // Raw: the text as it is stored. Beautify: indented. Both have the views of the text.
+  await page.click('.segmented__item[data-value="raw"]');
+  await page.waitForSelector('.diff__table.is-split');
+  assert.equal(await page.locator('[data-diff-sort]').count(), 0);
+  assert.match(await page.textContent('.diff__table.is-split'), /\{"service":"ingest"/);
+  // A changed line with marked words has no text of an object in it.
+  assert.doesNotMatch(await page.textContent('.versionDiff__view'), /\[object /);
+  assert.ok(await page.locator('.diff__table.is-split mark').count() >= 1);
+  await page.click('.segmented__item[data-value="beautify"]');
+  await page.waitForSelector('.diff__table.is-split');
+  assert.equal(await page.locator('[data-diff-sort]').count(), 1);
+  assert.match(await page.textContent('.diff__table.is-split'), /"service": "ingest"/);
   await page.click('.segmented__item[data-value="unified"]');
   await page.waitForSelector('.diff__table:not(.is-split)');
   assert.equal(await page.locator('.diff__row--add').count() > 0, true);
-  // The keys are sorted in the text view: the order of the keys in v3 does not show as a change.
-  await page.selectOption('select[aria-label="From version"]', { index: 1 });
-  await until(page, () => document.querySelectorAll('.diff__row--add, .diff__row--del').length > 0 || document.querySelector('.jsonChanges, .diff__empty'));
   assert.deepEqual(page.errors, []);
   await page.context().close();
 });
@@ -1057,7 +1074,13 @@ test('versions: the preview page has the same picker, with no select and no sepa
   await page.waitForSelector('.versionComparePage .diff__table');
   assert.equal(await page.locator('.bb-overlay').count(), 0);
   assert.match(page.url(), /compare=/);
-  assert.equal(await page.locator('.versionComparePage .versionDiff__select').count(), 2);
+  assert.equal(await page.locator('.versionDiff__select').count(), 2);
+  // No back button, no title and no line of the path in the page. The two versions are in the bar above the content.
+  assert.equal(await page.locator('.versionComparePage__back, .versionComparePage__title, .versionDiff__file').count(), 0);
+  const place = await page.evaluate(() => ({ select: document.querySelector('.versionDiff__select').getBoundingClientRect().bottom, content: document.querySelector('main.viewer').getBoundingClientRect().top, inBar: Boolean(document.querySelector('#compareBar .versionDiff__select')), picker: document.querySelector('#previewVersionControl').hidden }));
+  assert.equal(place.inBar, true);
+  assert.ok(place.select <= place.content + 1, JSON.stringify(place));
+  assert.equal(place.picker, true);
   // The comparison is in the page: the browser back button returns to the preview, and so does the button of the page.
   await page.goBack();
   await until(page, () => !document.querySelector('.versionComparePage') && document.querySelector('#viewer')?.textContent.includes('Status'));
@@ -1065,7 +1088,7 @@ test('versions: the preview page has the same picker, with no select and no sepa
   await page.click('.versionPicker__button');
   await page.click('.versionPicker__compare');
   await page.waitForSelector('.versionComparePage .diff__table');
-  await page.click('.versionComparePage__back');
+  await page.click('#compareClose');
   await until(page, () => !document.querySelector('.versionComparePage') && document.querySelector('#viewer')?.textContent.includes('Status'));
   assert.doesNotMatch(page.url(), /compare=/);
   // The table of all the versions opens from the picker.

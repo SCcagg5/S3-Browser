@@ -3466,18 +3466,6 @@ button.versionCount:focus-visible {
   padding: 4px 0 24px;
 }
 
-.versionComparePage__bar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.versionComparePage__title {
-  margin: 0;
-  font-size: var(--fs-xl);
-  font-weight: var(--fw-semibold);
-}
-
 .versionComparePage .diff__scroll {
   max-height: calc(100vh - 330px);
   min-height: 260px;
@@ -3775,70 +3763,6 @@ button.versionCount:focus-visible {
   color: var(--muted);
 }
 
-.jsonChanges {
-  display: grid;
-  margin: 0;
-  padding: 6px;
-  list-style: none;
-}
-
-.jsonChange {
-  display: grid;
-  grid-template-columns: 22px 70px minmax(160px, 320px) minmax(0, 1fr);
-  align-items: baseline;
-  gap: 8px;
-  padding: 6px 10px;
-  border-radius: var(--radius-control);
-}
-
-.jsonChange:hover {
-  background: var(--row-hover);
-}
-
-.jsonChange__mark {
-  font-family: var(--font-mono, monospace);
-  font-weight: var(--fw-semibold);
-  text-align: center;
-}
-
-.jsonChange--added .jsonChange__mark,
-.jsonChange--added .jsonChange__verb {
-  color: var(--success);
-}
-
-.jsonChange--removed .jsonChange__mark,
-.jsonChange--removed .jsonChange__verb {
-  color: var(--danger);
-}
-
-.jsonChange--changed .jsonChange__mark,
-.jsonChange--changed .jsonChange__verb {
-  color: var(--accent-text);
-}
-
-.jsonChange__path {
-  overflow-wrap: anywhere;
-}
-
-.jsonChange__values {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.jsonChange__values code {
-  overflow-wrap: anywhere;
-}
-
-.jsonChange__values .is-add {
-  color: var(--success);
-}
-
-.jsonChange__values .is-del {
-  color: var(--danger);
-}
 
 @media (max-width: 760px) {
   .versionPicker__menu {
@@ -3854,9 +3778,6 @@ button.versionCount:focus-visible {
     display: none;
   }
 
-  .jsonChange {
-    grid-template-columns: 22px minmax(0, 1fr);
-  }
 }
 
 /* Comparison: the patch of git, the empty side of a pair, the tables of CSV side by side ------------------------------------ */
@@ -3952,4 +3873,148 @@ button.versionCount:focus-visible {
   margin-top: 14px;
   padding-top: 14px;
   border-top: 1px solid var(--border);
+}
+
+
+/* Bar of the comparison, above the preview: the two versions. ------------------------------------------------------------- */
+
+.compareBar__inner {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  width: 100%;
+  max-width: var(--preview-max);
+  margin: 0 auto;
+  padding: 0 var(--gutter) 10px;
+}
+
+.compareBar__host {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.compareBar__close {
+  flex: none;
+  margin-bottom: 4px;
+}
+
+/* Tree of two JSON documents. ---------------------------------------------------------------------------------------------- */
+
+.jsonTree,
+.jsonTree__list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.jsonTree {
+  padding: 8px;
+}
+
+.jsonTree__list {
+  margin-left: 14px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+}
+
+.jsonTree__list[hidden] {
+  display: none;
+}
+
+.jsonTree__row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  padding: 3px 8px 3px 2px;
+  border-radius: var(--radius-control);
+}
+
+.jsonTree__row:hover {
+  background: var(--row-hover);
+}
+
+.jsonTree__toggle {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  align-self: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.jsonTree__toggle:hover {
+  color: var(--text);
+}
+
+.jsonTree__toggle .mdi {
+  transform: rotate(-90deg);
+  transition: transform var(--dur-fast, 120ms) var(--ease);
+}
+
+.jsonTree__toggle.is-open .mdi {
+  transform: none;
+}
+
+.jsonTree__mark {
+  flex: none;
+  width: 1.2ch;
+  font-family: var(--font-mono);
+  font-weight: var(--fw-semibold);
+}
+
+.jsonTree__node--added > .jsonTree__row .jsonTree__mark { color: var(--success); }
+.jsonTree__node--removed > .jsonTree__row .jsonTree__mark { color: var(--danger); }
+.jsonTree__node--changed > .jsonTree__row .jsonTree__mark { color: var(--accent-text); }
+
+.jsonTree__label {
+  flex: none;
+  font-weight: var(--fw-semibold);
+}
+
+.jsonTree__value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+}
+
+.jsonTree__value.is-add {
+  color: var(--success);
+}
+
+.jsonTree__value.is-del {
+  color: var(--danger);
+  text-decoration: line-through;
+}
+
+.jsonTree__change {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.jsonTree__same,
+.jsonTree__more {
+  margin: 2px 0 2px 24px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--fs-sm);
+}
+
+.jsonTree__same {
+  cursor: pointer;
+}
+
+.jsonTree__same:hover {
+  color: var(--text);
 }
