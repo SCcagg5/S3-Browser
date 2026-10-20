@@ -2,7 +2,7 @@
 
 This directory contains an isolated SeaweedFS object-storage service and the browser configuration used by smoke tests.
 
-The SeaweedFS service is one process: it has the master, the volume server, the filer and the S3 API. `seaweedfs/Dockerfile` downloads the release 4.41 and checks its SHA-256 checksum. This version is the one of the Home repository. `seaweedfs/scripts/entrypoint.sh` creates the identity and the buckets `default` and `archive` from `config.hcl`. SeaweedFS supports object tags and the lifecycle, so the tests of these functions use it. Garage returns HTTP 501 for them.
+The SeaweedFS service is one process: it has the master, the volume server, the filer and the S3 API. `seaweedfs/Dockerfile` downloads the release 4.41 and checks its SHA-256 checksum. This version is the one of the Home repository. `seaweedfs/scripts/entrypoint.sh` creates the identity and the buckets `default` and `archive` from `config.hcl`. SeaweedFS supports object tags and the lifecycle, so the tests of these functions use it. Garage returns HTTP 501 for them. The seed of the browser tests enables the versioning of the bucket `default` and puts files with several versions in `versions/`.
 
 `config.hcl` defines one S3 authentication shared by two buckets. Each bucket has its own permission ceiling and navigation scan limit.
 

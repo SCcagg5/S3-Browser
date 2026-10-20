@@ -180,7 +180,6 @@ BB.cfg = config;
     // The tag column and the tag filter. A provider without tags (501) turns the tag controls off.
     columns: loadListing().columns,
     tagFilterOn: loadListing().tagFilterOn,
-    settingsOpen: false,
     tagFilter: '',
     tagRequest: 0,
     tagSignature: '',
@@ -641,7 +640,8 @@ BB.cfg = config;
     menu.classList.add(fitsEnd && (!fitsStart || wrap.left + wrap.width / 2 > window.innerWidth / 2) ? 'menu--end' : 'menu--start');
   }
 
-  function bindMenu(trigger, menu) {
+  // stayOnTab: the menu has fields, so Tab moves between them and does not close the menu.
+  function bindMenu(trigger, menu, { stayOnTab = false } = {}) {
     const items = () => Array.from(menu.querySelectorAll('.menu__item:not(:disabled)'));
     trigger.addEventListener('click', event => {
       event.stopPropagation();
@@ -671,7 +671,7 @@ BB.cfg = config;
       if (event.key === 'ArrowDown') { event.preventDefault(); list[Math.min(list.length - 1, index + 1)]?.focus(); }
       else if (event.key === 'ArrowUp') { event.preventDefault(); list[Math.max(0, index - 1)]?.focus(); }
       else if (event.key === 'Escape') { event.stopPropagation(); closeMenu({ focus: true }); }
-      else if (event.key === 'Tab') closeMenu();
+      else if (event.key === 'Tab' && !stayOnTab) closeMenu();
     });
   }
 
@@ -818,7 +818,7 @@ BB.cfg = config;
         h('thead', {}, h('tr', {},
           h('th', { scope: 'col' }, sorts.name.node),
           h('th', { scope: 'col', class: 'col-tags' }, 'Tags'),
-          h('th', { scope: 'col', class: 'num col-versions' }, 'Versions'),
+          h('th', { scope: 'col', class: 'col-versions' }, h('span', { class: 'visually-hidden' }, 'Versions')),
           h('th', { scope: 'col', class: 'num col-size' }, sorts.size.node),
           h('th', { scope: 'col', class: 'col-modified' }, h('span', { class: 'headTools' }, timeToggle, sorts.dateModified.node)),
           h('th', { scope: 'col', class: 'col-menu' }, h('span', { class: 'visually-hidden' }, 'Actions')))),
@@ -914,10 +914,10 @@ BB.cfg = config;
       h('div', { class: 'bb-menu-popover', role: 'menu' }, h('div', { class: 'bb-menu-list' }, items)));
   }
 
-  // The count of versions of a file: a number in the column Versions.
+  // The versions of a file: the icon and the count, only when the file has more than one version.
   function versionCell(row) {
-    if (row.type !== 'content' || !versioningSupported() || !Number.isInteger(row.versionCount)) return null;
-    return h('span', { class: 'versionCount', title: plural(row.versionCount, 'version') }, row.versionCount.toLocaleString('en-US'));
+    if (row.type !== 'content' || !versioningSupported() || !Number.isInteger(row.versionCount) || row.versionCount < 2) return null;
+    return h('span', { class: 'badge versionCount', title: plural(row.versionCount, 'version') }, ic('git-commit'), row.versionCount.toLocaleString('en-US'));
   }
 
   function buildRow(row) {
@@ -938,7 +938,7 @@ BB.cfg = config;
     const tr = h('tr', { 'data-name': row.name, 'data-type': row.type },
       h('td', {}, name),
       h('td', { class: 'col-tags' }, tagCell(row)),
-      h('td', { class: 'num col-versions' }, versionCell(row)),
+      h('td', { class: 'col-versions' }, versionCell(row)),
       h('td', { class: 'num col-size' }, size),
       h('td', { class: 'col-modified' }, modified),
       h('td', { class: 'col-menu' }, rowMenu(row)));
@@ -1298,29 +1298,18 @@ BB.cfg = config;
   // The tags are read when the column or the filter needs them.
   const tagsNeeded = () => (state.columns.tags || state.tagFilterOn) && !state.tagsUnsupported;
 
-  function toggleSettings() {
-    state.settingsOpen = !state.settingsOpen;
-    renderSettings();
-  }
-
   function renderSettings() {
-    const open = state.settingsOpen;
-    ui.settingsButton.setAttribute('aria-expanded', open ? 'true' : 'false');
-    ui.settingsButton.classList.toggle('is-open', open);
-    ui.listSettings.classList.toggle('is-open', open);
-    ui.listSettings.setAttribute('aria-hidden', open ? 'false' : 'true');
-    ui.listSettings.querySelector('.listSettings__inner').inert = !open;
-    for (const input of ui.listSettings.querySelectorAll('[data-column]')) {
+    for (const input of ui.settingsMenu.querySelectorAll('[data-column]')) {
       const name = input.dataset.column;
       if (name !== 'name') input.checked = state.columns[name] === true;
     }
     ui.tagFilterToggle.checked = state.tagFilterOn;
     if (document.activeElement !== ui.uploadTagsInput && ui.uploadTagsInput.getAttribute('aria-invalid') !== 'true') ui.uploadTagsInput.value = BB.tags.uploadTagsText();
-    ui.listSettings.querySelector('#uploadTagsSetting').closest('.listSettings__group').hidden = state.tagsUnsupported;
-    const versions = ui.listSettings.querySelector('#versionsSetting');
-    versions.hidden = !versioningSupported();
-    for (const id of ['tagFilterSetting']) ui.listSettings.querySelector(`#${id}`).hidden = state.tagsUnsupported;
-    ui.listSettings.querySelector('[data-column="tags"]').closest('label').hidden = state.tagsUnsupported;
+    ui.settingsMenu.querySelector('#versionsSetting').hidden = !versioningSupported();
+    ui.settingsMenu.querySelector('#tagFilterSetting').hidden = state.tagsUnsupported;
+    ui.settingsMenu.querySelector('[data-column="tags"]').closest('label').hidden = state.tagsUnsupported;
+    ui.settingsMenu.querySelector('#uploadTagsSetting').hidden = state.tagsUnsupported;
+    ui.settingsMenu.querySelector('#uploadTagsSeparator').hidden = state.tagsUnsupported;
   }
 
   // The tags of the new uploads: saved when the field changes, with the reason when a tag is wrong.
@@ -1638,7 +1627,7 @@ BB.cfg = config;
       insightsItem: 'insightsItem', accessBadge: 'accessBadge', uploadWrap: 'uploadWrap',
       uploadButton: 'uploadButton', uploadMenu: 'uploadMenu', uploadFilesItem: 'uploadFilesItem',
       uploadFolderItem: 'uploadFolderItem', uploadTagsInput: 'uploadTagsInput', uploadTagsMessage: 'uploadTagsMessage', folderTagsItem: 'folderTagsItem',
-      tagFilterWrap: 'tagFilterWrap', settingsButton: 'settingsButton', listSettings: 'listSettings', settingsReset: 'settingsReset',
+      tagFilterWrap: 'tagFilterWrap', settingsButton: 'settingsButton', settingsMenu: 'settingsMenu', settingsReset: 'settingsReset',
       tagFilterToggle: 'tagFilterToggle', tagFilter: 'tagFilter', tagStatus: 'tagStatus', listing: 'listing', dropOverlay: 'dropOverlay', dropTarget: 'dropTarget',
       uploadDock: 'uploadDock', fileInput: 'fileInput', dirInput: 'dirInput'
     })) ui[name] = byId(id);
@@ -1660,9 +1649,9 @@ BB.cfg = config;
     ui.uploadFolderItem.addEventListener('click', triggerUploadFolder);
     ui.uploadTagsInput.addEventListener('change', saveUploadTags);
     ui.uploadTagsInput.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); saveUploadTags(); } });
-    ui.settingsButton.addEventListener('click', toggleSettings);
+    bindMenu(ui.settingsButton, ui.settingsMenu, { stayOnTab: true });
     ui.settingsReset.addEventListener('click', resetSettings);
-    ui.listSettings.addEventListener('change', onSettingsChange);
+    ui.settingsMenu.addEventListener('change', onSettingsChange);
     ui.folderTagsItem.addEventListener('click', () => { if (canWrite()) void tagFolder(state.pathPrefix); });
     ui.tagFilter.addEventListener('input', () => { state.tagFilter = ui.tagFilter.value; applyTagFilter(); });
     document.addEventListener('bb:tags-changed', event => forgetTags(event.detail?.key));

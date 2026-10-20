@@ -592,6 +592,7 @@ test('listing: the columns are Name, Tags, Versions, Size and Modified, with the
   await open(page, `${MAIN}config/`);
   await page.click('#settingsButton');
   await page.check('[data-column="tags"]');
+  await page.keyboard.press('Escape');
   await page.waitForSelector('tr[data-name="ingest.json"] .tagChip');
   const heads = await page.locator('thead th').evaluateAll(nodes => nodes.filter(node => node.offsetParent !== null).map(node => node.textContent.replace(/\s+/g, ' ').trim()));
   assert.deepEqual(heads.slice(0, 5), ['Name', 'Tags', 'Versions', 'Size', 'Modified']);
@@ -602,10 +603,21 @@ test('listing: the columns are Name, Tags, Versions, Size and Modified, with the
   });
   assert.ok(boxes.tags < boxes.versions && boxes.versions < boxes.size && boxes.size < boxes.modified, JSON.stringify(boxes));
   assert.ok(boxes.clockRight <= boxes.sortLeft, `the clock at the left of Modified: ${JSON.stringify(boxes)}`);
-  // The column Versions has the count of versions of a file; a folder has none.
-  await until(page, () => /^\d+$/.test(document.querySelector('tr[data-name="ingest.json"] .col-versions')?.textContent.trim() || ''));
-  assert.equal((await page.textContent('tr[data-name="app.yaml"] .col-versions')).trim().length > 0, true);
+  // A file with one version has nothing in the column Versions: the icon and the count show for several versions.
+  assert.equal(await page.locator('tr[data-name="ingest.json"] .versionCount').count(), 0);
   assert.equal(await page.locator('tr[data-name="ingest.json"] .nameCell .versionCount').count(), 0);
+  await page.keyboard.press('Escape');
+  await open(page, `${MAIN}versions/`);
+  await page.waitForSelector('tr[data-name="report.txt"] .versionCount');
+  assert.equal((await page.textContent('tr[data-name="report.txt"] .versionCount')).trim(), '3');
+  assert.equal(await page.getAttribute('tr[data-name="report.txt"] .versionCount', 'title'), '3 versions');
+  assert.equal(await page.locator('tr[data-name="report.txt"] .versionCount .ic-git-commit').count(), 1);
+  assert.equal((await page.textContent('tr[data-name="notes.txt"] .versionCount')).trim(), '2');
+  assert.equal(await page.locator('th.col-versions .visually-hidden').count(), 1);
+  // The Details of the file list the three versions.
+  await openDetails(page, 'report.txt');
+  await page.waitForSelector('[data-details-version]');
+  assert.match(await page.getAttribute('[data-details-version]', 'title') || await page.textContent('.bb-details-version-control span'), /3/);
   assert.deepEqual(page.errors, []);
   await page.context().close();
 });
@@ -615,6 +627,8 @@ test('listing: the settings and the reload are icons with no frame, and their co
   await open(page, MAIN);
   const order = await page.evaluate(() => ['#searchForm', '#settingsButton', '#refreshButton', '#actionsButton'].map(selector => document.querySelector(selector).getBoundingClientRect().left));
   assert.deepEqual([...order].sort((a, b) => a - b), order, `search, settings, reload, Actions: ${order}`);
+  const gap = await page.evaluate(() => document.querySelector('#refreshButton').getBoundingClientRect().left - document.querySelector('#settingsButton').getBoundingClientRect().right);
+  assert.ok(gap <= 8, `the gear and the reload are close: ${gap}px`);
   for (const selector of ['#settingsButton', '#refreshButton']) {
     const look = () => page.locator(selector).evaluate(node => { const style = getComputedStyle(node); return { color: style.color, background: style.backgroundColor, border: style.borderTopWidth }; });
     const rest = await look();
@@ -630,36 +644,47 @@ test('listing: the settings and the reload are icons with no frame, and their co
   await page.context().close();
 });
 
-test('listing: the settings unfold, choose the columns, stay in the browser and reset', async () => {
+test('listing: the settings are a menu under the gear, choose the columns, stay in the browser and reset', async () => {
   const page = await newPage();
   await open(page, MAIN);
-  const height = () => page.locator('#listSettings').evaluate(node => node.getBoundingClientRect().height);
-  assert.equal(await height(), 0);
+  assert.equal(await page.isHidden('#settingsMenu'), true);
   assert.equal(await page.getAttribute('#settingsButton', 'aria-expanded'), 'false');
   await page.click('#settingsButton');
+  assert.equal(await page.isVisible('#settingsMenu'), true);
   assert.equal(await page.getAttribute('#settingsButton', 'aria-expanded'), 'true');
-  await until(page, () => document.querySelector('#listSettings').getBoundingClientRect().height > 20);
-  assert.deepEqual(await page.locator('#listSettings [data-column]').evaluateAll(nodes => nodes.map(node => `${node.dataset.column}:${node.checked}:${node.disabled}`)),
+  const place = await page.evaluate(() => {
+    const gear = document.querySelector('#settingsButton').getBoundingClientRect();
+    const menu = document.querySelector('#settingsMenu').getBoundingClientRect();
+    return { gearBottom: gear.bottom, menuTop: menu.top, gearRight: gear.right, menuRight: menu.right, width: window.innerWidth };
+  });
+  assert.ok(place.menuTop >= place.gearBottom, `the menu under the gear: ${JSON.stringify(place)}`);
+  assert.ok(place.menuRight <= place.width, `the menu in the window: ${JSON.stringify(place)}`);
+  assert.deepEqual(await page.locator('#settingsMenu [data-column]').evaluateAll(nodes => nodes.map(node => `${node.dataset.column}:${node.checked}:${node.disabled}`)),
     ['name:true:true', 'tags:false:false', 'versions:true:false', 'size:true:false', 'modified:true:false']);
+  // A click on a column keeps the menu open, like the fields of a form.
   await page.uncheck('[data-column="size"]');
   await page.uncheck('[data-column="modified"]');
+  assert.equal(await page.isVisible('#settingsMenu'), true);
   assert.equal(await page.locator('th.col-size').isVisible(), false);
   assert.equal(await page.locator('th.col-modified').isVisible(), false);
   assert.equal(await page.locator('td.col-size').first().isVisible(), false);
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('#settingsMenu', { state: 'hidden' });
   // The choice stays after a reload.
   await page.reload({ waitUntil: 'networkidle' });
   await page.waitForSelector('.dataTable');
   assert.equal(await page.locator('th.col-size').isVisible(), false);
   assert.equal(await page.locator('th.col-modified').isVisible(), false);
-  assert.equal(await height(), 0);
   await page.click('#settingsButton');
   assert.equal(await page.isChecked('[data-column="size"]'), false);
+  // A click outside closes the menu.
+  await page.click('#crumbs', { force: true });
+  await page.waitForSelector('#settingsMenu', { state: 'hidden' });
+  await page.click('#settingsButton');
   await page.click('#settingsReset');
+  await page.waitForSelector('#settingsMenu', { state: 'hidden' });
   assert.equal(await page.locator('th.col-size').isVisible(), true);
   assert.equal(await page.locator('th.col-modified').isVisible(), true);
-  // The panel folds again.
-  await page.click('#settingsButton');
-  await until(page, () => document.querySelector('#listSettings').getBoundingClientRect().height === 0);
   assert.deepEqual(page.errors, []);
   await page.context().close();
 });

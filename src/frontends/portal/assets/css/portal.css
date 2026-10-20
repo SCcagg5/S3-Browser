@@ -1640,8 +1640,7 @@ button.storageSwitcher__trigger:hover {
 }
 
 .versionCount {
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
+  flex: none;
 }
 
 .sizeCell {
@@ -2751,7 +2750,7 @@ button.storageSwitcher__trigger:hover {
 }
 
 .dataTable .col-versions {
-  width: 96px;
+  width: 64px;
 }
 
 .tagChips {
@@ -2932,7 +2931,7 @@ button.storageSwitcher__trigger:hover {
   display: inline-grid;
   flex: none;
   place-items: center;
-  width: 36px;
+  width: 30px;
   height: 36px;
   padding: 0;
   border: 0;
@@ -2958,39 +2957,19 @@ button.storageSwitcher__trigger:hover {
   opacity: 0.45;
 }
 
-/* Settings of the listing: the panel unfolds under the toolbar ---------------------------------------------------------- */
+/* Settings of the listing: a menu under the gear, as the menu Actions ---------------------------------------------------- */
 
-.listSettings {
-  display: grid;
-  grid-template-rows: 0fr;
-  transition: grid-template-rows var(--dur-base) var(--ease);
+.menuWrap--tight {
+  margin-right: -6px;
 }
 
-.listSettings.is-open {
-  grid-template-rows: 1fr;
+.menu--settings {
+  min-width: 300px;
+  padding: 6px;
 }
 
-.listSettings__inner {
-  min-height: 0;
-  overflow: hidden;
-}
-
-.listSettings__body {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px 32px;
-  padding: 4px 2px 6px;
-}
-
-.listSettings__group {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 18px;
-}
-
-.listSettings__title {
+.menu__title {
+  margin: 6px 10px 4px;
   color: var(--muted);
   font-size: var(--fs-sm);
   font-weight: var(--fw-semibold);
@@ -2998,19 +2977,42 @@ button.storageSwitcher__trigger:hover {
   text-transform: uppercase;
 }
 
-.check {
-  display: inline-flex;
+.menu__check {
+  display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: var(--radius-control);
   cursor: pointer;
 }
 
-.check input {
+.menu__check:hover {
+  background: var(--row-hover);
+}
+
+.menu__check input {
   accent-color: var(--accent-fill);
 }
 
-.check input:disabled + span {
+.menu__check input:disabled + span {
   color: var(--muted);
+}
+
+.menu--settings .input {
+  width: calc(100% - 20px);
+  margin: 0 10px;
+}
+
+.menu__message {
+  min-height: 1.2em;
+  margin: 4px 10px 2px;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.menu__message[data-tone="error"] {
+  color: var(--danger);
 }
 
 @media (max-width: 640px) {
@@ -3020,27 +3022,3 @@ button.storageSwitcher__trigger:hover {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .listSettings {
-    transition: none;
-  }
-}
-
-.listSettings__field {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.listSettings__field .input {
-  width: min(320px, 60vw);
-}
-
-.listSettings__message {
-  color: var(--muted);
-  font-size: var(--fs-sm);
-}
-
-.listSettings__message[data-tone="error"] {
-  color: var(--danger);
-}

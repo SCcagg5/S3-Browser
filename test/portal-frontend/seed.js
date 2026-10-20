@@ -72,6 +72,8 @@ const objects = {
 
 (async () => {
   const api = await request.newContext({ baseURL: BASE });
+  // The bucket "default" keeps the versions of an object: the files of versions/ have several.
+  await s3('PUT', '/default', 'versioning=', Buffer.from('<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>'));
   for (const [instance, files] of Object.entries(objects)) {
     for (const [key, body] of Object.entries(files)) {
       const type = key.endsWith('.svg') ? 'image/svg+xml' : key.endsWith('.json') ? 'application/json' : key.endsWith('.md') ? 'text/markdown' : key.endsWith('.csv') ? 'text/csv' : 'application/octet-stream';
@@ -79,6 +81,13 @@ const objects = {
       if (instance === 'seaweedfs-main' && TAGGED[key]) headers['X-Amz-Tagging'] = TAGGED[key];
       const res = await api.put(`s3?instance=${encodeURIComponent(instance)}&key=${encodeURIComponent(key)}`, { data: Buffer.from(body), headers });
       if (!res.ok()) throw new Error(`${instance}/${key}: ${res.status()} ${await res.text()}`);
+    }
+  }
+  for (const [key, count] of [['versions/report.txt', 3], ['versions/notes.txt', 2]]) {
+    for (let version = 1; version <= count; version += 1) {
+      const res = await api.put(`s3?instance=seaweedfs-main&key=${encodeURIComponent(key)}`, { data: Buffer.from(`${key} version ${version}`), headers: { 'Content-Type': 'text/plain' } });
+      if (!res.ok()) throw new Error(`${key}: ${res.status()} ${await res.text()}`);
+      await new Promise(resolve => setTimeout(resolve, 1100));
     }
   }
   await s3('PUT', '/default', 'lifecycle=', Buffer.from(LIFECYCLE));
