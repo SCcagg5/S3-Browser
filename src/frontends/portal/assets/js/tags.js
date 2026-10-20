@@ -71,23 +71,69 @@
 
   const formatTag = tag => (tag.value === '' ? tag.key : `${tag.key}=${tag.value}`);
 
-  // A filter is words: "key" keeps the objects that have this key, "key=value" the objects that have this tag.
-  function matchesFilter(tags, filter) {
-    const terms = String(filter || '').trim().split(/\s+/).filter(Boolean);
-    return terms.every(term => {
-      const equals = term.indexOf('=');
-      if (equals < 0) return tags.some(tag => tag.key === term);
-      const key = term.slice(0, equals);
-      const value = term.slice(equals + 1);
-      return tags.some(tag => tag.key === key && tag.value === value);
+  // The colour of a tag: one of 18 slots, from the key (FNV-1a), as ClickHouse Dash does for a service. The same key has
+  // the same colour on every page and in every browser.
+  function slotOf(key) {
+    let hash = 0x811c9dc5;
+    const text = String(key || '');
+    for (let index = 0; index < text.length; index += 1) {
+      hash ^= text.charCodeAt(index);
+      hash = Math.imul(hash, 0x01000193) >>> 0;
+    }
+    return (hash % 18) + 1;
+  }
+
+  // A filter is words that must all match: "key" keeps the objects that have this key, "key=value" the objects that
+  // have this tag. A value with spaces has quotes: key="a b".
+  function filterTerms(filter) {
+    const words = String(filter || '').match(/(?:[^\s"]|"[^"]*")+/g) || [];
+    return words.map(word => {
+      const equals = word.indexOf('=');
+      const unquote = text => text.replace(/^"(.*)"$/s, '$1');
+      return equals < 0 ? { key: unquote(word), value: null, text: word } : { key: unquote(word.slice(0, equals)), value: unquote(word.slice(equals + 1)), text: word };
     });
   }
 
-  function chips(tags, { onRemove = null } = {}) {
-    return tags.map(tag => h('span', { class: 'tagChip', title: formatTag(tag) },
-      h('span', { class: 'tagChip__key' }, tag.key),
-      tag.value === '' ? null : h('span', { class: 'tagChip__value' }, tag.value),
-      onRemove ? h('button', { type: 'button', class: 'tagChip__remove', 'aria-label': `Remove the tag ${tag.key}`, onclick: () => onRemove(tag) }, icon('close')) : null));
+  function matchesFilter(tags, filter) {
+    return filterTerms(filter).every(term => tags.some(tag => tag.key === term.key && (term.value === null || tag.value === term.value)));
+  }
+
+  // The word of the filter for a tag: key=value, with quotes when the value has spaces. A tag with no value is the key.
+  function filterWord(tag) {
+    if (tag.value === '') return /[\s"]/.test(tag.key) ? `"${tag.key}"` : tag.key;
+    const value = /[\s"]/.test(tag.value) ? `"${tag.value.replace(/"/g, '')}"` : tag.value;
+    return `${/[\s"=]/.test(tag.key) ? `"${tag.key.replace(/"/g, '')}"` : tag.key}=${value}`;
+  }
+
+  function isActive(tag, filter) {
+    return filterTerms(filter).some(term => term.key === tag.key && (term.value === null ? tag.value === '' : term.value === tag.value));
+  }
+
+  // The filter after a click on a tag. A click gives this tag only, and a second click clears it. With `add` the tag
+  // joins the other words of the filter, or leaves them.
+  function toggleFilterWord(filter, tag, add = false) {
+    const word = filterWord(tag);
+    const words = filterTerms(filter).map(term => term.text);
+    const index = words.indexOf(word);
+    if (add) {
+      if (index >= 0) words.splice(index, 1); else words.push(word);
+      return words.join(' ');
+    }
+    return words.length === 1 && index === 0 ? '' : word;
+  }
+
+  // The badges of some tags. onPick makes each badge a button, onRemove adds a button that removes the tag.
+  function chips(tags, { onRemove = null, onPick = null, filter = '' } = {}) {
+    return tags.map(tag => {
+      const body = [h('i', { class: 'tagSwatch', 'aria-hidden': 'true' }), h('span', { class: 'tagChip__key' }, tag.key),
+        tag.value === '' ? null : h('span', { class: 'tagChip__value' }, tag.value)];
+      const label = formatTag(tag);
+      return h('span', { class: ['tagChip', onPick && isActive(tag, filter) && 'is-active'], style: `--tag-color: var(--tag-color-${slotOf(tag.key)})`, 'data-tag': filterWord(tag), title: onPick ? `Filter by ${label}` : label },
+        onPick
+          ? h('button', { type: 'button', class: 'tagChip__pick', 'aria-label': `Filter by the tag ${label}`, onclick: event => onPick(tag, event) }, body)
+          : body,
+        onRemove ? h('button', { type: 'button', class: 'tagChip__remove', 'aria-label': `Remove the tag ${tag.key}`, onclick: () => onRemove(tag) }, icon('close')) : null);
+    });
   }
 
   // ---------------------------------------------------------------------------------------------------------------
@@ -329,6 +375,10 @@
     parseTagText,
     formatTag,
     matchesFilter,
+    toggleFilterWord,
+    isActive,
+    filterWord,
+    slotOf,
     chips,
     lifecycleRules,
     lifecycleNotes,

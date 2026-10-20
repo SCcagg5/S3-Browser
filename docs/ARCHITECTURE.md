@@ -95,6 +95,24 @@ In a bucket with versioning, a tag request names the version of the object. The 
 
 The listing of the provider does not give tags, and S3 has no request that lists objects by tag. The tag column and the tag filter read the tags of the files on the page. They are in the settings of the listing, behind the gear. They read 4 files at the same time and at most 100. The tag filter hides rows of this page only.
 
+## Versions in the interface
+
+The details of a file have a picker of versions. It shows each version with its number (v1 is the oldest), its date, its size and the change of size since the version before. A choice opens the details of that version. The tags of an older version are read only.
+
+The comparison of two versions runs in the browser. The page reads each version with `GET /s3?key=&version=`. A version larger than 2 MiB is not read. A version with a NUL byte or with a text that is not UTF-8 is not text: the page says so, and offers the comparison of the bytes.
+
+The page picks the view from the extension of the key:
+
+- Text: a diff of lines (Myers), with 3 lines of context. The changed words show in a changed line. The view is a unified list or two columns. A fold hides the unchanged lines, and a click shows them.
+- JSON: the list of the paths that were added, removed or changed, and a text view with sorted keys. The format and the order of the keys are not changes. A version that is not JSON gets the text view.
+- CSV, TSV and PSV: the rows that were added, removed or modified, with the cells that changed. A removed row and an added row that have the same first cell, or most cells equal, are one modified row.
+
+A diff that needs more than 2500 edits shows as a replacement of the lines. The algorithms are in `assets/js/diff.js`. They have no DOM, and `test/portal-frontend/diff-tests.js` tests them in Node.
+
+## Tags in the listing
+
+A tag badge has a swatch. The colour comes from the key: one of 18 colours, chosen with the hash FNV-1a. This is the way ClickHouse Dash colours a service. A click on a badge filters the page by this tag. A second click clears the filter. Ctrl, Cmd or Shift adds the tag to the other words of the filter. A row shows three badges and a count for the other tags.
+
 ## Background jobs
 
 Jobs are memory-only and use two workers. The manager admits no more than four active or queued jobs. Terminal results are retained only up to `job_history_limit`.

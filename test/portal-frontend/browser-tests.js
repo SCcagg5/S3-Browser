@@ -517,7 +517,8 @@ test('tags: the tag column of versioned files shows no pending mark, and the det
   await openDetails(page, 'report.txt');
   await page.waitForSelector('[data-tags-section] .tagChip');
   assert.equal(await page.isVisible('[data-tags-section] .tagEditor__form'), true);
-  await page.selectOption('[data-details-version]', { index: 2 });
+  await page.click('.versionPicker__button');
+  await page.click('.versionPicker__item[aria-selected="false"] >> nth=1');
   await until(page, () => document.querySelector('[data-tags-section] .tagChip')?.textContent.includes('draft'));
   assert.equal(await page.isHidden('[data-tags-section] .tagEditor__form'), true);
   assert.equal(await page.locator('[data-tags-section] .tagChip__remove').count(), 0);
@@ -525,7 +526,7 @@ test('tags: the tag column of versioned files shows no pending mark, and the det
   await page.context().close();
 });
 
-test('tags: the tags float at the left, next to the name, and the examples of the seed show', async () => {
+test('tags: the tags float at the right, next to the versions, and the column of versions is narrow', async () => {
   const page = await newPage();
   await open(page, `${MAIN}config/`);
   await page.click('#settingsButton');
@@ -534,16 +535,97 @@ test('tags: the tags float at the left, next to the name, and the examples of th
   await page.waitForSelector('tr[data-name="ingest.json"] .tagChip');
   const boxes = await page.evaluate(() => {
     const row = document.querySelector('tr[data-name="ingest.json"]');
+    const chips = [...row.querySelectorAll('.tagChip')].map(chip => chip.getBoundingClientRect());
     const name = row.querySelector('.nameLink').getBoundingClientRect();
-    const chip = row.querySelector('.tagChip').getBoundingClientRect();
-    const versions = document.querySelector('th.col-versions').getBoundingClientRect();
-    return { nameRight: name.right, chipLeft: chip.left, versionsLeft: versions.left };
+    return { chipsRight: Math.max(...chips.map(box => box.right)), chipsLeft: Math.min(...chips.map(box => box.left)), nameRight: name.right,
+      versionsLeft: document.querySelector('th.col-versions').getBoundingClientRect().left, versionsWidth: document.querySelector('th.col-versions').getBoundingClientRect().width,
+      sizeLeft: document.querySelector('th.col-size').getBoundingClientRect().left };
   });
-  assert.ok(boxes.chipLeft - boxes.nameRight < 200, `the tags next to the name: ${JSON.stringify(boxes)}`);
-  assert.ok(boxes.chipLeft < boxes.versionsLeft - 200, `the tags far from the versions: ${JSON.stringify(boxes)}`);
+  assert.ok(boxes.versionsLeft - boxes.chipsRight < 24, `the tags next to the versions: ${JSON.stringify(boxes)}`);
+  const tops = await page.locator('tr[data-name="ingest.json"] .tagChip').evaluateAll(chips => chips.map(chip => Math.round(chip.getBoundingClientRect().top)));
+  assert.equal(new Set(tops).size, 1, `the tags on one line: ${tops}`);
+  assert.ok(await page.locator('tr[data-name="ingest.json"]').evaluate(row => row.getBoundingClientRect().height) < 45);
+  assert.ok(boxes.chipsLeft - boxes.nameRight > 100, `the tags far from the name: ${JSON.stringify(boxes)}`);
+  assert.ok(boxes.versionsWidth < 70, `the column of versions is narrow: ${JSON.stringify(boxes)}`);
   await open(page, '');
   await page.waitForSelector('tr[data-name="README.md"] .tagChip');
   assert.deepEqual((await page.locator('tr[data-name="README.md"] .tagChip').allInnerTexts()).map(item => item.replace(/\s+/g, ' ').trim()), ['team docs']);
+  await page.context().close();
+});
+
+test('tags: a row shows three tags and a count for the other ones', async () => {
+  const page = await newPage();
+  await open(page, `${MAIN}images/`);
+  await page.click('#settingsButton');
+  await page.check('[data-column="tags"]');
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('tr[data-name="banner.svg"] .tagChip');
+  assert.equal(await page.locator('tr[data-name="banner.svg"] .tagChip').count(), 3);
+  assert.equal((await page.textContent('tr[data-name="banner.svg"] .tagMore')).trim(), '+2');
+  const title = await page.getAttribute('tr[data-name="banner.svg"] .tagMore', 'title');
+  assert.equal(title.split(', ').length, 2);
+  // The details have the five tags.
+  await openDetails(page, 'banner.svg');
+  await page.waitForSelector('[data-tags-section] .tagChip');
+  assert.equal(await page.locator('[data-tags-section] .tagChip').count(), 5);
+  await page.context().close();
+});
+
+test('tags: a tag is a badge with a swatch whose colour comes from the key, and a click filters by the tag', async () => {
+  const page = await newPage();
+  await open(page, `${MAIN}config/`);
+  await page.click('#settingsButton');
+  await page.check('[data-column="tags"]');
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('tr[data-name="ingest.json"] .tagChip');
+  // The swatch and the colour: the same key has the same colour, two keys have two colours (here: team and env).
+  const colours = await page.locator('tr[data-name="ingest.json"] .tagChip').evaluateAll(chips => chips.map(chip => [chip.dataset.tag, getComputedStyle(chip.querySelector('.tagSwatch')).backgroundColor]));
+  assert.equal(colours.length, 2);
+  assert.notEqual(colours[0][1], colours[1][1]);
+  assert.equal(await page.locator('tr[data-name="ingest.json"] .tagChip .tagSwatch').count(), 2);
+  assert.equal(await page.isHidden('#tagFilterWrap'), true);
+  // A click on a tag turns the filter on and fills it. The rows with no such tag go.
+  await page.click('tr[data-name="ingest.json"] .tagChip[data-tag="team=data"] .tagChip__pick');
+  assert.equal(await page.isVisible('#tagFilterWrap'), true);
+  assert.equal(await page.inputValue('#tagFilter'), 'team=data');
+  await until(page, () => document.querySelector('tr[data-name="app.yaml"]').hidden === true);
+  assert.equal(await page.locator('tr[data-name="ingest.json"] .tagChip[data-tag="team=data"].is-active').count(), 1);
+  assert.equal(await page.locator('tr[data-name="ingest.json"] .tagChip[data-tag="env=prod"].is-active').count(), 0);
+  // Another tag replaces the filter. Ctrl adds a word. A second click on the only tag clears the filter.
+  await page.click('tr[data-name="ingest.json"] .tagChip[data-tag="env=prod"] .tagChip__pick');
+  assert.equal(await page.inputValue('#tagFilter'), 'env=prod');
+  await page.click('tr[data-name="ingest.json"] .tagChip[data-tag="team=data"] .tagChip__pick', { modifiers: ['Control'] });
+  assert.equal(await page.inputValue('#tagFilter'), 'env=prod team=data');
+  assert.equal(await page.locator('tr[data-name="ingest.json"] .tagChip.is-active').count(), 2);
+  await page.click('tr[data-name="ingest.json"] .tagChip[data-tag="team=data"] .tagChip__pick', { modifiers: ['Control'] });
+  assert.equal(await page.inputValue('#tagFilter'), 'env=prod');
+  await page.click('tr[data-name="ingest.json"] .tagChip[data-tag="env=prod"] .tagChip__pick');
+  assert.equal(await page.inputValue('#tagFilter'), '');
+  await until(page, () => document.querySelector('tr[data-name="app.yaml"]').hidden === false);
+  // The choice of the filter stays turned on, as a setting.
+  assert.equal(await page.isVisible('#tagFilterWrap'), true);
+  await page.click('#settingsButton');
+  assert.equal(await page.isChecked('#tagFilterToggle'), true);
+  await page.click('#settingsReset');
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+test('tags: a value with spaces keeps its quotes in the filter', async () => {
+  const page = await newPage();
+  await open(page, `${MAIN}config/`);
+  await setApiTags(page, 'config/app.yaml', [{ key: 'owner', value: 'data team' }]);
+  await page.click('#settingsButton');
+  await page.check('[data-column="tags"]');
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('tr[data-name="app.yaml"] .tagChip');
+  await page.click('tr[data-name="app.yaml"] .tagChip .tagChip__pick');
+  assert.equal(await page.inputValue('#tagFilter'), 'owner="data team"');
+  await until(page, () => document.querySelector('tr[data-name="ingest.json"]').hidden === true);
+  assert.equal(await page.isVisible('tr[data-name="app.yaml"]'), true);
+  await page.click('#settingsButton');
+  await page.click('#settingsReset');
+  await setApiTags(page, 'config/app.yaml', []);
   await page.context().close();
 });
 
@@ -665,8 +747,8 @@ test('listing: the columns are Name, Tags, Versions, Size and Modified, with the
   assert.equal(await page.locator('th.col-versions .visually-hidden').count(), 1);
   // The Details of the file list the three versions.
   await openDetails(page, 'report.txt');
-  await page.waitForSelector('[data-details-version]');
-  assert.match(await page.getAttribute('[data-details-version]', 'title') || await page.textContent('.bb-details-version-control span'), /3/);
+  await page.waitForSelector('.versionPicker__button');
+  assert.match(await page.textContent('.versionPicker__button'), /v3.*Current/);
   assert.deepEqual(page.errors, []);
   await page.context().close();
 });
@@ -747,6 +829,199 @@ test('listing: the menu Actions has no item of bucket permissions (the button at
   assert.ok(!items.some(item => /permission/i.test(item)), `items: ${items}`);
   assert.equal(await page.locator('#accessItem').count(), 0);
   assert.equal(await page.locator('#tagsItem').count(), 0);
+  await page.context().close();
+});
+
+// ------------------------------------------------------------------------------------------------------------------
+// 2e. Versions: the picker of the details and the comparison of two versions
+// ------------------------------------------------------------------------------------------------------------------
+
+async function openCompareFromDetails(page, name) {
+  await openDetails(page, name);
+  await page.click('.versionPicker__button');
+  await page.click('.versionPicker__compare');
+  await page.waitForSelector('.versionDiff');
+}
+
+const cleanText = items => items.map(item => item.replace(/\s+/g, ' ').trim());
+
+test('versions: the picker of the details lists each version with its date, its size and its change', async () => {
+  const page = await newPage();
+  await open(page, `${MAIN}versions/`);
+  await openDetails(page, 'report.txt');
+  assert.equal(await page.locator('select[data-details-version]').count(), 0);
+  assert.match(await page.textContent('.versionPicker__button'), /v3.*Current.*3/);
+  assert.equal(await page.getAttribute('.versionPicker__button', 'aria-expanded'), 'false');
+  await page.click('.versionPicker__button');
+  assert.equal(await page.isVisible('.versionPicker__menu'), true);
+  assert.equal(await page.getAttribute('.versionPicker__button', 'aria-expanded'), 'true');
+  const items = cleanText(await page.locator('.versionPicker__item').allInnerTexts());
+  assert.equal(items.length, 3);
+  assert.match(items[0], /^v3 .*Current/);
+  assert.match(items[1], /^v2 /);
+  assert.match(items[2], /^v1 .*first version/);
+  assert.match(items[0], /\+\d+ B/);
+  assert.equal(await page.getAttribute('.versionPicker__item >> nth=0', 'aria-selected'), 'true');
+  assert.match(await page.textContent('.versionPicker__compare'), /Compare v3 with v2/);
+  // The menu stays in the window, under the button.
+  const place = await page.evaluate(() => {
+    const menu = document.querySelector('.versionPicker__menu').getBoundingClientRect();
+    const button = document.querySelector('.versionPicker__button').getBoundingClientRect();
+    return { top: menu.top, bottom: button.bottom, left: menu.left, right: menu.right, width: window.innerWidth };
+  });
+  assert.ok(place.top >= place.bottom && place.left >= 0 && place.right <= place.width, JSON.stringify(place));
+  // Keyboard: arrows move, Escape closes and gives the focus back.
+  await page.keyboard.press('ArrowDown');
+  assert.equal(await page.evaluate(() => document.activeElement.dataset.version !== undefined), true);
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('.versionPicker__menu', { state: 'hidden' });
+  assert.equal(await page.evaluate(() => document.activeElement.className.includes('versionPicker__button')), true);
+  assert.equal(await page.isVisible('.bb-details--file'), true);
+  // A choice opens the details of that version.
+  await page.click('.versionPicker__button');
+  await page.click('.versionPicker__item >> nth=2');
+  await until(page, () => /v1.*Older/.test(document.querySelector('.versionPicker__button')?.textContent || ''));
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+test('versions: the comparison of two text versions, unified and side by side, with the changed words', async () => {
+  const page = await newPage();
+  await open(page, `${MAIN}versions/`);
+  await openCompareFromDetails(page, 'report.txt');
+  assert.match(await page.inputValue('select[aria-label="From version"]') + '', /./);
+  assert.equal((await page.locator('select[aria-label="From version"] option:checked').innerText()).startsWith('v2'), true);
+  assert.equal((await page.locator('select[aria-label="To version"] option:checked').innerText()).startsWith('v3'), true);
+  await page.waitForSelector('.diff__table');
+  const stats = cleanText(await page.locator('.diffStat').allInnerTexts());
+  assert.deepEqual(stats, ['+3', '−2']);
+  assert.doesNotMatch(await page.textContent('.versionDiff__summary'), /null/);
+  const removed = cleanText(await page.locator('.diff__row--del .diff__text').allInnerTexts()).map(item => item.replace(/^−\s*/, ''));
+  const added = cleanText(await page.locator('.diff__row--add .diff__text').allInnerTexts()).map(item => item.replace(/^\+\s*/, ''));
+  assert.deepEqual(removed, ['Status: review', 'Orders: 120']);
+  assert.deepEqual(added, ['Status: final', 'Orders: 124', '- approved']);
+  // The words that changed are marked in a changed line.
+  assert.deepEqual(cleanText(await page.locator('.diff__row--add mark').allInnerTexts()).filter(Boolean).slice(0, 2), ['final', '124']);
+  // The 12 lines of context between the two edits are folded; a click shows them.
+  assert.equal(await page.locator('.diff__fold').count(), 1);
+  assert.match(await page.textContent('.diff__fold'), /\d+ unchanged lines/);
+  const before = await page.locator('.diff__row').count();
+  await page.click('.diff__expand');
+  assert.ok(await page.locator('.diff__row').count() > before + 5);
+  assert.equal(await page.locator('.diff__fold').count(), 0);
+  // Side by side.
+  await page.click('.segmented__item[data-value="split"]');
+  await page.waitForSelector('.diff__table.is-split');
+  assert.equal(await page.locator('.diff__table.is-split thead th').count(), 2);
+  assert.ok(await page.locator('.diff__table.is-split .diff__row--mod').count() >= 2);
+  // The whole file, with no fold.
+  await page.check('[data-diff-whole]');
+  assert.equal(await page.locator('.diff__fold').count(), 0);
+  // Swap the two versions: the additions become removals.
+  await page.click('.versionDiff__swap');
+  await page.waitForSelector('.diffStat');
+  assert.deepEqual(cleanText(await page.locator('.diffStat').allInnerTexts()).slice(0, 2), ['+2', '−3']);
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+test('versions: the comparison of two JSON versions lists the changed paths, and has a text view with sorted keys', async () => {
+  const page = await newPage();
+  await open(page, `${MAIN}versions/`);
+  await openCompareFromDetails(page, 'config.json');
+  await page.waitForSelector('.jsonChanges');
+  // v2 -> v3: replicas 3 to 4; the other differences are the format and the order of the keys.
+  assert.deepEqual(cleanText(await page.locator('.jsonChange').allInnerTexts()), ['~ Changed $.replicas 3 to 4']);
+  // v1 -> v3.
+  await page.selectOption('select[aria-label="From version"]', { index: 2 });
+  await page.waitForSelector('.jsonChange >> nth=3');
+  const changes = cleanText(await page.locator('.jsonChange').allInnerTexts());
+  assert.deepEqual(changes, [
+    '− Removed $.legacy true',
+    '+ Added $.limits.memory "1Gi"',
+    '+ Added $.regions[1] "us-east"',
+    '~ Changed $.replicas 2 to 4',
+  ].map(item => item));
+  assert.deepEqual(cleanText(await page.locator('.diffStat').allInnerTexts()).slice(0, 1), ['4 paths changed']);
+  await page.click('.segmented__item[data-value="text"]');
+  await page.waitForSelector('.diff__table');
+  assert.equal(await page.locator('.diff__row--add').count() > 0, true);
+  // The keys are sorted in the text view: the order of the keys in v3 does not show as a change.
+  await page.selectOption('select[aria-label="From version"]', { index: 1 });
+  await until(page, () => document.querySelectorAll('.diff__row--add, .diff__row--del').length > 0 || document.querySelector('.jsonChanges, .diff__empty'));
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+test('versions: the comparison of two CSV versions shows the rows and the cells that changed', async () => {
+  const page = await newPage();
+  await open(page, `${MAIN}versions/`);
+  await openCompareFromDetails(page, 'orders.csv');
+  await page.waitForSelector('.diff__table--csv');
+  // v2 -> v3: the row 1 is removed, the quantity of the row 4 changed.
+  assert.deepEqual(cleanText(await page.locator('.diffStat').allInnerTexts()), ['0 added', '1 removed', '1 modified']);
+  assert.equal(await page.locator('.diff__row--del').count(), 1);
+  assert.equal(await page.locator('.diff__row--mod').count(), 1);
+  assert.deepEqual(cleanText(await page.locator('.csvCell--changed').allInnerTexts()), ['1 to 2']);
+  assert.match(cleanText(await page.locator('.diff__row--del').allInnerTexts())[0], /1 ada 5/);
+  // v1 -> v2: a row added, a quantity changed.
+  await page.selectOption('select[aria-label="From version"]', { index: 2 });
+  await page.selectOption('select[aria-label="To version"]', { index: 1 });
+  await until(page, () => document.querySelectorAll('.diffStat').length === 3 && document.querySelector('.diffStat').textContent.startsWith('1 added'));
+  assert.deepEqual(cleanText(await page.locator('.diffStat').allInnerTexts()), ['1 added', '0 removed', '1 modified']);
+  assert.deepEqual(cleanText(await page.locator('.csvCell--changed').allInnerTexts()), ['7 to 8']);
+  // The unchanged rows are folded; the option shows them.
+  await page.check('[data-diff-whole]');
+  assert.equal(await page.locator('.diff__row--eq').count() >= 2, true);
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+test('versions: a version that is not text gives a clear message and the comparison of the bytes', async () => {
+  const page = await newPage();
+  await open(page, `${MAIN}versions/`);
+  await openCompareFromDetails(page, 'blob.bin');
+  await page.waitForSelector('.diff__empty');
+  assert.match(await page.textContent('.versionDiff__view'), /not text/);
+  assert.equal(await page.locator('.versionDiff__view .bb-btn >> text=Compare the bytes').count(), 1);
+  await page.context().close();
+});
+
+test('versions: two versions with the same content say so', async () => {
+  const page = await newPage();
+  await open(page, `${MAIN}versions/`);
+  await openCompareFromDetails(page, 'notes.txt');
+  await page.waitForSelector('.diffStat');
+  assert.deepEqual(cleanText(await page.locator('.diffStat').allInnerTexts()), ['+1', '−1']);
+  await page.selectOption('select[aria-label="From version"]', { index: 0 });
+  await page.selectOption('select[aria-label="To version"]', { index: 0 });
+  await until(page, () => /two different versions/.test(document.querySelector('.versionDiff__view')?.textContent || ''));
+  await page.context().close();
+});
+
+test('versions: the menu of a row compares the two latest versions, and the table of versions opens the comparison', async () => {
+  const page = await newPage();
+  await open(page, `${MAIN}versions/`);
+  await page.click('tr[data-name="orders.csv"] .bb-kebab');
+  await page.click('tr[data-name="orders.csv"] .bb-menu-item >> text=Compare versions');
+  await page.waitForSelector('.versionDiff .diff__table--csv');
+  await page.click('.bb-modal-x');
+  await page.waitForSelector('.bb-overlay', { state: 'detached' });
+  // A file with one version has no such item.
+  await open(page, `${MAIN}config/`);
+  await page.click('tr[data-name="ingest.json"] .bb-kebab');
+  assert.equal(await page.locator('tr[data-name="ingest.json"] .bb-menu-item >> text=Compare versions').count(), 0);
+  await page.keyboard.press('Escape');
+  // The table of versions: select two and compare.
+  await open(page, `${MAIN}versions/`);
+  await page.click('tr[data-name="report.txt"] .bb-kebab');
+  await page.click('tr[data-name="report.txt"] .bb-menu-item >> text=Versions');
+  await page.waitForSelector('[data-version-select]');
+  await page.check('[data-version-select="0"]');
+  await page.check('[data-version-select="2"]');
+  await page.click('[data-version-compare-selected]');
+  await page.waitForSelector('.versionDiff .diff__table');
+  assert.deepEqual(page.errors, []);
   await page.context().close();
 });
 

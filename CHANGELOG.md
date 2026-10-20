@@ -40,6 +40,11 @@ This document uses ASD-STE100 Simplified Technical English.
 - The gear at the right of the search field opens a menu, as the menu Actions: the columns to show, the filter by tag
   and the tags of the new uploads. The browser keeps the choice. The reload is an icon with no frame, as the gear.
 - The menu Actions has no item "Bucket permissions" any more: the button at the left of the bucket selector has them.
+- The tags of a row are badges with a coloured swatch, as the services of ClickHouse Dash, at the right, next to the
+  versions. A click on a badge filters the page by this tag. The column of versions is narrow.
+- The details of a file have a picker of versions, with the date, the size and the change of size of each version.
+  The new comparison of two versions shows the difference of two texts, two JSON documents or two CSV files. The
+  comparison opens from the picker, from the table of versions and from the menu of a row.
 - A JSON file that fits in one page shows its totals at once and has no button to count lines and pages. The root of
   the JSON tree stays open.
 

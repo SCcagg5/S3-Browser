@@ -12,7 +12,29 @@ const TAGGED = {
   'reports/2026/q3/summary.md': 'team=finance',
   'README.md': 'team=docs',
   'src/main.go': 'lang=go&team=platform',
-  'images/banner.svg': 'kind=image',
+  'images/banner.svg': 'kind=image&team=design&env=prod&license=mit&owner=ada',
+};
+
+// The versions of the files of versions/: a text, a JSON document, a CSV file and a binary file. The comparison reads them.
+const context = Array.from({ length: 12 }, (_, i) => `Context line ${i + 1}`).join('\n');
+const VERSION_BODIES = {
+  'versions/report.txt': [
+    `# Quarterly report\n\nStatus: draft\nOrders: 120\nRevenue: 4000\n\n${context}\n\nNotes:\n- first numbers\n- no review yet\n`,
+    `# Quarterly report\n\nStatus: review\nOrders: 120\nRevenue: 4100\n\n${context}\n\nNotes:\n- first numbers\n- reviewed by finance\n`,
+    `# Quarterly report\n\nStatus: final\nOrders: 124\nRevenue: 4100\n\n${context}\n\nNotes:\n- first numbers\n- reviewed by finance\n- approved\n`,
+  ].map(text => Buffer.from(text)),
+  'versions/notes.txt': ['versions/notes.txt version 1', 'versions/notes.txt version 2'].map(text => Buffer.from(text)),
+  'versions/config.json': [
+    '{"service":"ingest","replicas":2,"limits":{"cpu":"500m"},"regions":["eu-west"],"legacy":true}',
+    '{"service":"ingest","replicas":3,"limits":{"cpu":"500m","memory":"1Gi"},"regions":["eu-west","us-east"]}',
+    '{\n  "regions": ["eu-west", "us-east"],\n  "replicas": 4,\n  "service": "ingest",\n  "limits": { "memory": "1Gi", "cpu": "500m" }\n}',
+  ].map(text => Buffer.from(text)),
+  'versions/orders.csv': [
+    'id,customer,qty\n1,ada,5\n2,grace,7\n3,linus,9\n',
+    'id,customer,qty\n1,ada,5\n2,grace,8\n3,linus,9\n4,ken,1\n',
+    'id,customer,qty\n2,grace,8\n3,linus,9\n4,ken,2\n',
+  ].map(text => Buffer.from(text)),
+  'versions/blob.bin': [Buffer.from([0, 1, 2, 3, 4]), Buffer.from([0, 1, 2, 9, 4])],
 };
 
 // The tags of each version of the files of versions/: the latest version has the last tags.
@@ -92,11 +114,11 @@ const objects = {
       if (!res.ok()) throw new Error(`${instance}/${key}: ${res.status()} ${await res.text()}`);
     }
   }
-  for (const [key, count] of [['versions/report.txt', 3], ['versions/notes.txt', 2]]) {
-    for (let version = 1; version <= count; version += 1) {
-      const headers = { 'Content-Type': 'text/plain' };
-      if (VERSION_TAGS[key][version - 1]) headers['X-Amz-Tagging'] = VERSION_TAGS[key][version - 1];
-      const res = await api.put(`s3?instance=seaweedfs-main&key=${encodeURIComponent(key)}`, { data: Buffer.from(`${key} version ${version}`), headers });
+  for (const [key, bodies] of Object.entries(VERSION_BODIES)) {
+    for (let version = 1; version <= bodies.length; version += 1) {
+      const headers = { 'Content-Type': key.endsWith('.json') ? 'application/json' : key.endsWith('.csv') ? 'text/csv' : key.endsWith('.bin') ? 'application/octet-stream' : 'text/plain' };
+      if (VERSION_TAGS[key]?.[version - 1]) headers['X-Amz-Tagging'] = VERSION_TAGS[key][version - 1];
+      const res = await api.put(`s3?instance=seaweedfs-main&key=${encodeURIComponent(key)}`, { data: bodies[version - 1], headers });
       if (!res.ok()) throw new Error(`${key}: ${res.status()} ${await res.text()}`);
       await new Promise(resolve => setTimeout(resolve, 1100));
     }

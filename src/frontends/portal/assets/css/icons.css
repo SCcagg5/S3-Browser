@@ -247,3 +247,8 @@
 .ic-x { --icon: url("../icons/tabler/x.svg"); }
 .ic-zoom-in { --icon: url("../icons/tabler/zoom-in.svg"); }
 .ic-zoom-out { --icon: url("../icons/tabler/zoom-out.svg"); }
+
+.mdi-arrows-left-right { --icon: url("../icons/tabler/arrows-left-right.svg"); }
+.mdi-git-compare { --icon: url("../icons/tabler/git-compare.svg"); }
+.mdi-layout-columns { --icon: url("../icons/tabler/layout-columns.svg"); }
+.mdi-layout-rows { --icon: url("../icons/tabler/layout-rows.svg"); }

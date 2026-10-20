@@ -892,11 +892,13 @@ BB.cfg = config;
   }
 
   function rowMenu(row) {
+    row.compareItem = row.versionCount > 1;
     const items = row.type === 'content'
       ? [
         canRead() && menuItem('Details', 'information-outline', () => onRowMetadata(row)),
         canRead() && menuItem('Download', 'download', () => onRowDownload(row)),
         canRead() && versioningSupported() && menuItem('Versions', 'source-commit', () => onRowVersions(row)),
+        canRead() && versioningSupported() && row.versionCount > 1 && menuItem('Compare versions', 'git-compare', () => BB.actions.compareLatestVersions(row.key)),
         canCopy() && menuItem('Copy', 'content-copy', () => onRowCopy(row)),
         canRename() && menuItem('Rename', 'rename-outline', () => onRowRename(row)),
         canDelete() && menuItem('Delete', 'delete-outline', () => onRowDelete(row), { danger: true })
@@ -950,6 +952,9 @@ BB.cfg = config;
     for (const row of visibleRows()) {
       const cell = row.element?.querySelector('.col-versions');
       if (cell) cell.replaceChildren(...[versionCell(row)].filter(Boolean));
+      // The item "Compare versions" of the menu of the row needs two versions: the menu is built again when it changes.
+      const menu = row.element?.querySelector('.col-menu');
+      if (menu && row.type === 'content' && row.compareItem !== (row.versionCount > 1)) menu.replaceChildren(rowMenu(row));
     }
   }
 
@@ -1258,7 +1263,22 @@ BB.cfg = config;
     if (row.type !== 'content') return null;
     if (row.tags === undefined) return state.columns.tags ? h('span', { class: 'tagChips__pending', role: 'img', 'aria-label': 'The tags are loading' }) : null;
     if (row.tags === null) return h('span', { class: 'tagChips__state', title: 'The tags of this object cannot be read' }, '—');
-    return h('span', { class: 'tagChips' }, BB.tags.chips(row.tags));
+    // The first tags are badges; the other ones are a count, and the details have them all.
+    const shown = row.tags.slice(0, 3);
+    const extra = row.tags.slice(3);
+    return h('span', { class: 'tagChips' },
+      BB.tags.chips(shown, { onPick: pickTag, filter: state.tagFilterOn ? state.tagFilter : '' }),
+      extra.length ? h('span', { class: 'tagMore', title: extra.map(tag => BB.tags.formatTag(tag)).join(', ') }, `+${extra.length}`) : null);
+  }
+
+  // A click on a tag filters the page by it. A second click clears the filter. Ctrl, Cmd or Shift keeps the other words.
+  function pickTag(tag, event) {
+    state.tagFilterOn = true;
+    saveListing();
+    state.tagFilter = BB.tags.toggleFilterWord(state.tagFilter, tag, Boolean(event?.ctrlKey || event?.metaKey || event?.shiftKey));
+    ui.tagFilter.value = state.tagFilter;
+    for (const row of visibleRows()) if (row.type === 'content') updateTagCell(row);
+    update();
   }
 
   function updateTagCell(row) {
@@ -1281,6 +1301,7 @@ BB.cfg = config;
       row.element.hidden = !matches;
       if (matches) shown += 1;
     }
+    for (const row of rows) if (row.tags && row.element) updateTagCell(row);
     if (!state.tagFilterOn) ui.tagStatus.textContent = '';
     else if (pending) ui.tagStatus.textContent = `Reading ${pending} of ${rows.length}`;
     else ui.tagStatus.textContent = filter ? `${shown} of ${rows.length}` : '';

@@ -523,8 +523,8 @@
       const currentVersionLabel = currentVersionRecord
         ? `Current · ${versionDateLabel(currentVersionRecord)} · ${versionDisplayLabel(currentVersionRecord)}`
         : 'Current';
-      const versionSelector = BB.cfg?.versioningSupported === true
-        ? `<label class="bb-details-version-control" title="${versionCount.toLocaleString()} available version${versionCount === 1 ? '' : 's'}"><span>Version (${versionCount.toLocaleString()})</span><select data-details-version><option value="">${escapeHTML(currentVersionLabel)}</option>${historicalVersions.map(version => `<option value="${escapeHTML(version.version)}"${version.version === selectedVersion ? ' selected' : ''}>${escapeHTML(`${versionDateLabel(version)} · ${versionDisplayLabel(version)}`)}</option>`).join('')}${selectedVersion && !selectedVersionKnown ? `<option value="${escapeHTML(selectedVersion)}" selected>Selected · ${escapeHTML(selectedVersion)}</option>` : ''}</select></label>`
+      const versionSelector = BB.cfg?.versioningSupported === true && BB.versions
+        ? '<div class="bb-details-version-control" data-details-versions></div>'
         : '';
 
       window.clearTimeout(notificationTimer);
@@ -595,15 +595,25 @@
             });
           }
 
-          const versionSelect = overlay.querySelector('[data-details-version]');
-          versionSelect?.addEventListener('change', () => {
-            const nextVersion = String(versionSelect.value || '');
-            if (nextVersion === selectedVersion) return;
-            overlay.querySelector('.bb-modal-x')?.click();
-            window.setTimeout(() => {
-              void showMetadata(key, { instance: selectedInstance, version: nextVersion });
-            }, 140);
-          });
+          const versionHost = overlay.querySelector('[data-details-versions]');
+          if (versionHost) {
+            BB.versions.mountPicker(versionHost, {
+              versions: objectVersions,
+              selected: selectedVersion,
+              onSelect(nextVersion) {
+                overlay.querySelector('.bb-modal-x')?.click();
+                window.setTimeout(() => {
+                  void showMetadata(key, { instance: selectedInstance, version: nextVersion });
+                }, 140);
+              },
+              onCompare({ from, to }) {
+                void BB.versions.openCompare({
+                  key, instance: selectedInstance, versions: objectVersions, from, to,
+                  onBytes: (left, right) => compareVersions(key, left.version, right.version, { instance: selectedInstance })
+                });
+              }
+            });
+          }
 
           if (!countAction) return;
           const button = overlay.querySelector('[data-document-count]');
@@ -1630,6 +1640,29 @@
     }
   }
 
+  // The two latest versions of a file, in the comparison dialog.
+  async function compareLatestVersions(key, options = {}) {
+    if (!(await requirePermissions(['read']))) return false;
+    if (BB.cfg?.versioningSupported !== true || !BB.versions) return false;
+    const instance = options.instance || BB.api.getInstance();
+    try {
+      const versions = await BB.api.allVersions(key, { instance });
+      const list = BB.versions.listVersions(versions);
+      if (list.length < 2) {
+        await ui().alert({ title: 'Compare versions', message: 'This object has one version only.' });
+        return false;
+      }
+      await BB.versions.openCompare({
+        key, instance, versions, from: list[1].version, to: list[0].version,
+        onBytes: (before, after) => compareVersions(key, before.version, after.version, { instance })
+      });
+      return true;
+    } catch (error) {
+      showTaskFailure('Comparing versions', error);
+      return false;
+    }
+  }
+
   async function showVersions(key, options = {}) {
     if (!(await requirePermissions(['read']))) return false;
     if (BB.cfg?.versioningSupported !== true) return false;
@@ -1722,6 +1755,13 @@
             const left = versions[selected[0]];
             const right = versions[selected[1]];
             if (!left || !right || left.deleteMarker || right.deleteMarker) return;
+            if (BB.versions) {
+              await BB.versions.openCompare({
+                key, instance, versions, from: left.version, to: right.version,
+                onBytes: (before, after) => compareVersions(key, before.version, after.version, { instance })
+              });
+              return;
+            }
             await compareVersions(key, left.version, right.version, { instance });
           });
           overlay.addEventListener('change', event => {
@@ -1781,6 +1821,7 @@
   BB.actions = {
     showMetadata,
     tagPrefix,
+    compareLatestVersions,
     showFileDetails: showMetadata,
     showPrefixInsights,
     showPrefixDetails,

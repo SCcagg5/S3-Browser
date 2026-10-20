@@ -43,6 +43,7 @@ docker run --rm \
   -e ONLY="${ONLY:-}" \
   -v "$DIR:/tests:ro" \
   -v "$DIR/../secrets:/secrets:ro" \
+  -v "$DIR/../../src/frontends/portal/assets/js:/src:ro" \
   -v "$modules" \
   "$PLAYWRIGHT_IMAGE" \
-  sh -c "$install && node /tests/seed.js && node /tests/browser-tests.js"
+  sh -c "$install && node /tests/diff-tests.js && node /tests/seed.js && node /tests/browser-tests.js"
