@@ -50,6 +50,8 @@ The image of S3-Browser in this stack copies in parts from 8 KiB up, in parts of
 
 The seed also puts the objects of the metadata tests in `meta/` on each provider: `small.txt` (under the threshold of the copy in parts), `large.bin` (20000 bytes, above it) and `conflict.txt`, each with `Cache-Control: max-age=60` and the user metadata `owner`. `small.txt` and `large.bin` have tags where the provider has them. `versioned.txt` has two versions on SeaweedFS and MinIO. The metadata tests edit these objects through the details on each provider. They check each sentence that the form shows before the save against the result: the date, the ETag, the versions and the tags. They also check that the form shows and sends the stored `Cache-Control`, not the value of the gateway (`private, no-store, max-age=60`). Refer to the section "Edit of the metadata" of [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md).
 
+The seed also puts four incomplete multipart uploads in `mpu/` on each provider, with S3 requests: `one-part.bin` (one part of 1 KiB), `no-part.bin`, and two uploads of `twice.bin`. The folder has `readme.txt`, so the page can open it. The test of each provider opens the window "Incomplete uploads" of the folder. It checks the parts, the age ("unknown" on SeaweedFS) and "Abort everything older than 1 day", which aborts nothing. It then aborts one upload of `twice.bin` with "Abort selected" and `one-part.bin` with the button of its row. The test aborts the last two uploads through the API. A second test starts a resumable upload through the API and checks that the window and the server do not abort it. Refer to the section "Cleanup of incomplete multipart uploads" of [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md).
+
 The smoke test of each provider lists `smoke/`, uploads a file with its SHA-256 checksum, downloads it and deletes it. It checks the versions and the tags where the provider has them. Where the provider does not have them, it checks that the page hides them. `portal-frontend/providers.js` has the flags of each provider.
 
 ## Functions of each provider
@@ -67,7 +69,10 @@ These facts come from S3 requests to the three providers of the portal test stac
 | `x-amz-checksum-sha256` on UploadPart | Yes. ListParts does not show the part checksum | Yes | Yes |
 | Composite checksum of a multipart object (HEAD) | `<digest>-<parts>` | `<digest>-<parts>` | `<digest>`, with no part count |
 | ListMultipartUploads | Yes. No `Initiated` date. Only `NextUploadIdMarker` for the next page | Partial. A prefix that is not a full key gives an empty list. `max-uploads` has no effect | Yes |
+| ListMultipartUploads: order and pages, with three uploads of one key and `max-uploads=2` | Order of the upload ids. The pages continue with `upload-id-marker` only, and each upload comes one time | One page with all the uploads, in the order of the keys | Order of the keys. The pages continue with `key-marker` and `upload-id-marker`, and each upload comes one time |
 | ListParts, AbortMultipartUpload | Yes. ListParts of an aborted upload gives 200 with no part | Yes | Yes |
+| ListParts with `max-parts=1` of an upload with two parts | One part, `IsTruncated` true | One part, `IsTruncated` true | One part, `IsTruncated` true |
+| ListParts or AbortMultipartUpload of an unknown upload id | 404 NoSuchUpload | ListParts: 404 NoSuchUpload. Abort: 404 NoSuchUpload, but 204 for the id of an upload of another key (the upload stays) | 404 NoSuchUpload |
 | UploadPartCopy with `x-amz-copy-source-range` | Yes | Yes | Yes |
 | UploadPartCopy or CopyObject of an older version | Yes | Yes | 404 NoSuchKey |
 | `x-amz-copy-source-if-match` on UploadPartCopy, with the ETag of the source | Yes | Yes | Yes |

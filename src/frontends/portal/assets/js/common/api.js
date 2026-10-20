@@ -398,6 +398,26 @@
       return response.json();
     },
 
+    // One page of the incomplete multipart uploads under a prefix. The token comes from the previous page.
+    async multiparts({ prefix = '', token = '', instance = null } = {}) {
+      const response = await request(withInstance('/api/multiparts', { prefix, token: token || null }, instance));
+      return response.json();
+    },
+
+    // Give uploads ([{ key, uploadId }]) to abort them at any age: the answer is { aborted, skipped, failed }. Give
+    // olderThanDays to start the job that aborts by age: the answer is the job, for waitForJob.
+    async abortMultiparts({ uploads = null, olderThanDays = 0, prefix = '', instance = null } = {}) {
+      const body = { instance: instance === null ? selectedInstance() : String(instance || '') };
+      if (uploads) body.uploads = uploads;
+      else Object.assign(body, { olderThanDays, prefix });
+      const response = await request('/api/multiparts/abort', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      return response.json();
+    },
+
     async tagPrefix(prefix, { add = [], remove = [], instance = null } = {}) {
       const response = await request('/api/tags/bulk', {
         method: 'POST',

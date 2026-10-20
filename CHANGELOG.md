@@ -31,6 +31,22 @@ This document uses ASD-STE100 Simplified Technical English.
 - The action is `objects.write`. The server probes the edit of each instance at start and gives
   `metadataEditSupported` in `/api/instances`. The GCS backend answers `501`.
 
+### Cleanup of incomplete multipart uploads
+
+- New item "Incomplete uploads" in the Actions menu. A large window lists the incomplete multipart uploads of the folder,
+  with the start, the parts, the size and the age of each. The person can abort the selected uploads, one upload with
+  the button of its row, or each upload older than N days. Refer to the section "Cleanup of incomplete multipart
+  uploads" of [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+- New routes: `GET /api/multiparts` (the list, with pages) and `POST /api/multiparts/abort` (the selected uploads, or
+  the new job `abort_multiparts` for the uploads older than N days).
+- The list sends no prefix to the provider and filters the keys in S3-Browser: MinIO gives an empty list for a prefix
+  that is not a full key. The pages follow the markers of each provider. The count and the size of the parts come from
+  the first 1000 parts, and the page says "at least" for a larger upload.
+- The abort by age never aborts an upload without a start date (SeaweedFS gives none) or an upload younger than 24
+  hours. No abort touches an upload that the resumable-upload store of this process sends now.
+- The list needs `objects.read`, and an abort needs `objects.write`. The server probes the list of each instance at
+  start and gives `multipartUploadsSupported` in `/api/instances`. The GCS backend answers `501`.
+
 ### Uploads and deletes
 
 - An S3 upload can carry a SHA-256 checksum. The browser computes the digest of each chunk. The provider refuses a part
@@ -50,6 +66,9 @@ This document uses ASD-STE100 Simplified Technical English.
   from source) and Garage v2.4.1. A smoke test lists, uploads, downloads and deletes on each provider. It also checks
   that the page shows versions and tags only where the provider has them.
 - `test/README.md` has a table of the S3 functions of each provider, from S3 requests to the test stack.
+- The seed puts four incomplete multipart uploads in `mpu/` on each provider. A browser test lists them, aborts them by
+  selection and by row, and checks that the abort by age keeps uploads that are too young or have no date. A second
+  test checks that an upload of the resumable-upload store is not aborted.
 - The metadata tests edit a small file, a file above the threshold of the copy in parts and an older version on each
   provider. They check the date, the ETag, the versions and the tags after the save, and an object that changes while
   the form is open.

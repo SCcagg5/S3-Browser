@@ -87,6 +87,7 @@
 .mdi-file-pdf-box { --icon: url("../icons/tabler/file-type-pdf.svg"); }
 .mdi-file-powerpoint-outline { --icon: url("../icons/tabler/file-description.svg"); }
 .mdi-file-question-outline { --icon: url("../icons/tabler/file-unknown.svg"); }
+.mdi-file-remove-outline { --icon: url("../icons/tabler/file-x.svg"); }
 .mdi-file-search-outline { --icon: url("../icons/tabler/file-search.svg"); }
 .mdi-file-table-outline { --icon: url("../icons/tabler/file-spreadsheet.svg"); }
 .mdi-file-upload-outline { --icon: url("../icons/tabler/file-upload.svg"); }
@@ -198,6 +199,7 @@
 .ic-file-type-pdf { --icon: url("../icons/tabler/file-type-pdf.svg"); }
 .ic-file-unknown { --icon: url("../icons/tabler/file-unknown.svg"); }
 .ic-file-upload { --icon: url("../icons/tabler/file-upload.svg"); }
+.ic-file-x { --icon: url("../icons/tabler/file-x.svg"); }
 .ic-file-zip { --icon: url("../icons/tabler/file-zip.svg"); }
 .ic-filter { --icon: url("../icons/tabler/filter.svg"); }
 .ic-fit { --icon: url("../icons/tabler/fit.svg"); }

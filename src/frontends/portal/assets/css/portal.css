@@ -3192,6 +3192,148 @@ button.versionCount:focus-visible {
   }
 }
 
+/* Incomplete uploads: the window of the Actions menu. The scope, the abort controls, the table of the uploads with a checkbox
+   in each row, one line of message and the note about the lifecycle rules. */
+.multiparts {
+  display: grid;
+  gap: 12px;
+  padding-top: 6px;
+}
+
+.multiparts p {
+  margin: 0;
+}
+
+.multiparts__scope {
+  color: var(--muted);
+}
+
+.multiparts__hint,
+.multiparts__note,
+.multiparts__state,
+.multiparts__count {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.multiparts__empty {
+  padding: 24px 0;
+  color: var(--muted);
+  text-align: center;
+}
+
+.multiparts__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 20px;
+}
+
+.multiparts__older {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.multiparts__older .input {
+  width: 76px;
+}
+
+.multiparts__danger {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  color: var(--danger);
+}
+
+.multiparts__danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: var(--danger-bg);
+}
+
+.multiparts__table {
+  min-height: 0;
+  max-height: calc(var(--bb-large-height) - 13rem);
+  border-radius: var(--radius-control);
+}
+
+.multiparts .data-table {
+  width: 100%;
+  min-width: 640px;
+}
+
+.multiparts .data-table th,
+.multiparts .data-table td {
+  min-width: 0;
+  max-width: none;
+}
+
+.multiparts__check,
+.multiparts__action {
+  width: 40px;
+  padding-right: 0 !important;
+  padding-left: 0 !important;
+  text-align: center !important;
+}
+
+.multiparts__started {
+  width: 210px;
+}
+
+.multiparts__parts,
+.multiparts__size {
+  width: 110px;
+}
+
+.multiparts__age {
+  width: 160px;
+}
+
+.multiparts__started,
+.multiparts__parts,
+.multiparts__size,
+.multiparts__age {
+  white-space: nowrap;
+}
+
+.multiparts__keyline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.multiparts__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.multiparts__action .iconButton {
+  width: 28px;
+  height: 28px;
+  --icon-size: 18px;
+}
+
+.multiparts__footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.multiparts__message {
+  min-height: 1.2em;
+  font-size: var(--fs-sm);
+}
+
+.multiparts__message[data-tone="error"] {
+  color: var(--danger-text, var(--danger));
+}
+
+.multiparts__message[data-tone="ok"] {
+  color: var(--success);
+}
+
 .tagForm {
   display: grid;
   gap: 12px;

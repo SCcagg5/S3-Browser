@@ -125,6 +125,11 @@ func (a *application) probeVersioningSupport() {
 			defer wg.Done()
 			instance.probeMetadataEdit(ctx)
 		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			instance.probeMultipartUploads(ctx)
+		}()
 	}
 	wg.Wait()
 }
@@ -167,6 +172,8 @@ func (a *application) routes() http.Handler {
 	mux.HandleFunc("/api/tags/bulk", a.handleTagsBulk)
 	mux.HandleFunc("/api/metadata", a.handleMetadata)
 	mux.HandleFunc("/api/lifecycle", a.handleLifecycle)
+	mux.HandleFunc("/api/multiparts", a.handleMultiparts)
+	mux.HandleFunc("/api/multiparts/abort", a.handleMultipartAbort)
 	mux.HandleFunc("/api/jobs", http.NotFound)
 	mux.HandleFunc("/api/jobs/", a.handleJobs)
 	mux.HandleFunc("/api/uploads/resume", a.handleUploads)

@@ -44,7 +44,7 @@ const VERSION_TAGS = {
 };
 
 // A request to the S3 API of the provider of an instance, signed with SigV4 (the versioning and the lifecycle of a
-// bucket have no route in S3-Browser). The extra headers are signed too.
+// bucket have no route in S3-Browser). The extra headers are signed too. It gives the text of the answer.
 async function s3(instance, method, path, query, body, extra = {}) {
   const { host, region } = PROVIDERS[instance];
   const secret = fs.readFileSync('/secrets/s3_secret_access_key', 'utf8').trim();
@@ -66,7 +66,9 @@ async function s3(instance, method, path, query, body, extra = {}) {
   const signingKey = hmac(hmac(hmac(hmac(`AWS4${secret}`, day), region), 's3'), 'aws4_request');
   headers.authorization = `AWS4-HMAC-SHA256 Credential=${ACCESS_KEY}/${scope},SignedHeaders=${names.join(';')},Signature=${hmac(signingKey, toSign).toString('hex')}`;
   const response = await fetch(`http://${host}${path}?${query}`, { method, headers, body });
-  if (!response.ok) throw new Error(`${method} ${path}?${query}: ${response.status} ${await response.text()}`);
+  const text = await response.text();
+  if (!response.ok) throw new Error(`${method} ${path}?${query}: ${response.status} ${text}`);
+  return text;
 }
 
 // The lifecycle of the bucket "default": the objects of logs/ with the tag retention=30d expire after 30 days.
@@ -127,6 +129,18 @@ const META_SMALL = 'small metadata file\n';
 const META_LARGE = Buffer.alloc(20000, 'm');
 const META_HEADERS = { 'cache-control': 'max-age=60', 'x-amz-meta-owner': 'ada' };
 
+// The incomplete multipart uploads of the test of the cleanup (mpu/): one upload with one part, one without a part,
+// and two uploads of one key. The folder has one object, so the page can open it. The test aborts the uploads.
+const MPU_PART = Buffer.alloc(1024, 'p');
+async function seedIncompleteUploads(instance) {
+  const create = async key => /<UploadId>([^<]+)<\/UploadId>/.exec(await s3(instance, 'POST', `/default/${key}`, 'uploads=', Buffer.alloc(0)))[1];
+  const onePart = await create('mpu/one-part.bin');
+  await s3(instance, 'PUT', '/default/mpu/one-part.bin', `partNumber=1&uploadId=${encodeURIComponent(onePart)}`, MPU_PART);
+  await create('mpu/no-part.bin');
+  await create('mpu/twice.bin');
+  await create('mpu/twice.bin');
+}
+
 (async () => {
   const api = await request.newContext({ baseURL: BASE });
   const put = async (instance, key, body, headers) => {
@@ -184,6 +198,10 @@ const META_HEADERS = { 'cache-control': 'max-age=60', 'x-amz-meta-owner': 'ada' 
       if (!res.ok()) throw new Error(`${key}: ${res.status()} ${await res.text()}`);
       await new Promise(resolve => setTimeout(resolve, 1100));
     }
+  }
+  for (const instance of Object.keys(PROVIDERS)) {
+    await put(instance, 'mpu/readme.txt', 'The incomplete uploads of this folder are test data.\n', { 'Content-Type': 'text/plain' });
+    await seedIncompleteUploads(instance);
   }
   await s3('seaweedfs-main', 'PUT', '/default', 'lifecycle=', Buffer.from(LIFECYCLE));
   console.log('seeded');

@@ -1,7 +1,8 @@
 // Browser tests of the "portal" interface (server.frontend = "portal"). They cover these parts:
 // 1 the theme selector, 2 the breadcrumb and the toolbar row, the header and the bucket selector, 3 the bulk upload,
 // 4 the access behaviour of 2.0.0, 5 one smoke test on each S3 provider (SeaweedFS, MinIO and Garage), 6 the copy in
-// parts on each provider, 7 the edit of the metadata on each provider.
+// parts on each provider, 7 the edit of the metadata on each provider, 8 the cleanup of the incomplete multipart
+// uploads on each provider.
 // run.sh starts S3-Browser and the three providers, puts the test objects (seed.js) and runs this file in the
 // Playwright container. The tests of parts 1 to 4 use SeaweedFS.
 // The tests change the answers of the server with page.route where a case needs it (403, 401, no answer, access).
@@ -2161,6 +2162,133 @@ test('metadata: without the edit, the details keep the custom metadata and show 
   assert.equal(await second.locator('[data-metadata-section]').count(), 0);
   assert.match(await second.textContent('[data-metadata-fallback]'), /owner/);
   await second.context().close();
+});
+
+// ------------------------------------------------------------------------------------------------------------------
+// 8. Incomplete uploads: the list of the incomplete multipart uploads of a folder, and the abort. seed.js puts four
+// uploads in mpu/ on each provider: one-part.bin (one part of 1 KiB), no-part.bin, and twice.bin two times.
+// ------------------------------------------------------------------------------------------------------------------
+
+async function apiMultiparts(page, instance, prefix) {
+  const response = await page.request.get(`${BASE}api/multiparts?instance=${instance}&prefix=${encodeURIComponent(prefix)}`);
+  assert.equal(response.status(), 200, await response.text());
+  return response.json();
+}
+
+// Opens the window of the incomplete uploads from the Actions menu, and waits for the table or the empty state.
+async function openMultiparts(page) {
+  await page.click('#actionsButton');
+  await page.click('#multipartsItem');
+  await until(page, () => Array.from(document.querySelectorAll('[data-multiparts] .multiparts__table, [data-multiparts] .multiparts__empty')).some(node => !node.hidden), null, 15000);
+}
+
+const multipartRows = page => page.locator('[data-multiparts] tr[data-upload-id]').evaluateAll(rows => rows.map(row => row.dataset.key).sort());
+// The confirmation opens over the large window: its button is in the small window.
+const confirmAbort = page => page.click('.bb-overlay:not(.bb-overlay--large) .bb-btn-primary');
+
+for (const [instance, provider] of Object.entries(PROVIDERS)) {
+  test(`incomplete uploads: ${provider.name} lists the uploads of a folder and aborts one of a key with two uploads, then one with a part`, async () => {
+    const page = await newPage();
+    const info = (await (await page.request.get(`${BASE}api/instances`)).json()).instances.find(item => item.id === instance);
+    assert.equal(info.multipartUploadsSupported, true);
+    const before = await apiMultiparts(page, instance, 'mpu/');
+    assert.deepEqual(before.uploads.map(upload => upload.key).sort(), ['mpu/no-part.bin', 'mpu/one-part.bin', 'mpu/twice.bin', 'mpu/twice.bin']);
+    const onePart = before.uploads.find(upload => upload.key === 'mpu/one-part.bin');
+    assert.equal(onePart.parts, 1);
+    assert.equal(onePart.bytes, 1024);
+    // SeaweedFS gives no start date. MinIO and Garage give one.
+    assert.equal(before.uploads.every(upload => Boolean(upload.initiated)), provider.name !== 'SeaweedFS', JSON.stringify(before.uploads));
+    // The incomplete uploads make no object: the folder lists its one file only.
+    assert.deepEqual(await listKeys(page, instance, 'mpu/'), ['mpu/readme.txt']);
+    await open(page, `-/${info.host}/${instance}/mpu/`);
+    await openMultiparts(page);
+    assert.deepEqual(await multipartRows(page), ['mpu/no-part.bin', 'mpu/one-part.bin', 'mpu/twice.bin', 'mpu/twice.bin']);
+    const row = `[data-multiparts] tr[data-upload-id="${onePart.uploadId}"]`;
+    assert.equal((await page.textContent(`${row} .multiparts__parts`)).trim(), '1');
+    if (provider.name === 'SeaweedFS') {
+      assert.equal((await page.textContent(`${row} .multiparts__age`)).trim(), 'unknown');
+      assert.match(await page.textContent('[data-multipart-undated-note]'), /gives no start date for 4 uploads/);
+    } else {
+      assert.notEqual((await page.textContent(`${row} .multiparts__age`)).trim(), 'unknown');
+      assert.equal(await page.isHidden('[data-multipart-undated-note]'), true);
+    }
+    assert.match(await page.textContent('[data-multiparts] .multiparts__note'), /lifecycle rule/);
+    // Abort everything older than 1 day: the uploads are a few seconds old (or without a date), so all stay.
+    assert.equal(await page.inputValue('[data-multipart-older-days]'), '1');
+    await page.click('[data-multipart-abort-older]');
+    await confirmAbort(page);
+    await until(page, () => document.querySelector('[data-multipart-message]')?.dataset.tone === 'ok');
+    const olderMessage = await page.textContent('[data-multipart-message]');
+    if (provider.name === 'SeaweedFS') assert.match(olderMessage, /4 uploads without a start date stayed/);
+    else assert.match(olderMessage, /No upload was older than 1 day/);
+    assert.equal((await apiMultiparts(page, instance, 'mpu/')).uploads.length, 4);
+    // Abort selected: one of the two uploads of twice.bin. The other upload of the key stays.
+    const [first, second] = before.uploads.filter(upload => upload.key === 'mpu/twice.bin');
+    await page.check(`[data-multiparts] tr[data-upload-id="${first.uploadId}"] [data-multipart-select]`);
+    await page.click('[data-multipart-abort-selected]');
+    await confirmAbort(page);
+    await page.waitForSelector(`[data-multiparts] tr[data-upload-id="${first.uploadId}"]`, { state: 'detached' });
+    await page.waitForSelector(`[data-multiparts] tr[data-upload-id="${second.uploadId}"]`);
+    assert.match(await page.textContent('[data-multipart-message]'), /1 upload aborted/);
+    // The abort button of a row: the upload with a part.
+    await page.click(`${row} [data-multipart-abort-one]`);
+    await confirmAbort(page);
+    await page.waitForSelector(row, { state: 'detached' });
+    assert.deepEqual((await apiMultiparts(page, instance, 'mpu/')).uploads.map(upload => upload.uploadId).sort(),
+      [second.uploadId, before.uploads.find(upload => upload.key === 'mpu/no-part.bin').uploadId].sort());
+    // The last two uploads go through the API; the window then shows its empty state.
+    const rest = (await apiMultiparts(page, instance, 'mpu/')).uploads.map(({ key, uploadId }) => ({ key, uploadId }));
+    const aborted = await page.request.post(`${BASE}api/multiparts/abort`, { data: { instance, uploads: rest } });
+    assert.equal(aborted.status(), 200, await aborted.text());
+    assert.equal((await aborted.json()).aborted.length, 2);
+    await page.click('.bb-modal--large .bb-modal-x');
+    await page.waitForSelector('.bb-overlay', { state: 'detached' });
+    await openMultiparts(page);
+    assert.equal((await page.textContent('[data-multiparts] .multiparts__empty')).trim(), 'No incomplete upload');
+    assert.deepEqual(page.errors, []);
+    await page.context().close();
+  });
+}
+
+test('incomplete uploads: an upload that this S3-Browser sends now cannot be aborted', async () => {
+  const page = await newPage();
+  // A resumable upload of the page: the server creates the multipart upload and keeps the session.
+  const created = await page.request.post(`${BASE}api/uploads`, { data: { instance: 'seaweedfs-main', key: 'mpu/active.bin', size: 6 * 1024 * 1024, contentType: 'application/octet-stream' } });
+  assert.equal(created.status(), 201, await created.text());
+  const session = await created.json();
+  try {
+    const listed = (await apiMultiparts(page, 'seaweedfs-main', 'mpu/')).uploads.find(upload => upload.key === 'mpu/active.bin');
+    assert.equal(listed.active, true);
+    await open(page, `${MAIN}mpu/`);
+    await openMultiparts(page);
+    const row = `[data-multiparts] tr[data-upload-id="${listed.uploadId}"]`;
+    assert.match(await page.textContent(row), /Uploading now/);
+    assert.equal(await page.locator(`${row} [data-multipart-select]`).count(), 0);
+    assert.equal(await page.locator(`${row} [data-multipart-abort-one]`).count(), 0);
+    // The server refuses it too.
+    const refused = await (await page.request.post(`${BASE}api/multiparts/abort`, { data: { instance: 'seaweedfs-main', uploads: [{ key: 'mpu/active.bin', uploadId: listed.uploadId }] } })).json();
+    assert.equal(refused.aborted.length, 0);
+    assert.equal(refused.skipped.length, 1);
+  } finally {
+    await page.request.delete(`${BASE}api/uploads`, { headers: { 'X-S3-Browser-Resume-Token': session.resumeToken } });
+  }
+  assert.equal((await apiMultiparts(page, 'seaweedfs-main', 'mpu/')).uploads.some(upload => upload.key === 'mpu/active.bin'), false);
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+test('incomplete uploads: the item is hidden for an instance without the list', async () => {
+  const page = await newPage();
+  await page.route(/\/api\/instances/, async route => {
+    const response = await route.fetch();
+    const body = await response.json();
+    for (const item of body.instances) item.multipartUploadsSupported = false;
+    await route.fulfill({ response, json: body });
+  });
+  await open(page, `${MAIN}mpu/`);
+  await page.click('#actionsButton');
+  assert.equal(await page.isHidden('#multipartsItem'), true);
+  await page.context().close();
 });
 
 (async () => {

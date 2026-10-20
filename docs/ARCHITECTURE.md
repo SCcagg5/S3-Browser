@@ -131,7 +131,8 @@ Supported job types are limited to operations that can stream with bounded memor
 - Insights statistics;
 - per-object integrity verification;
 - selected archive-entry extraction;
-- selected archive-entry integrity verification.
+- selected archive-entry integrity verification;
+- abort of the incomplete multipart uploads older than a number of days (`abort_multiparts`).
 
 Insights uses a 100 ms synchronous fast path. A fresh completed result can be reused for 30 seconds. Longer work continues in memory and can be paused, resumed, or canceled while the process remains alive.
 
@@ -203,6 +204,39 @@ The details of a file have the section "Metadata" with the stored values and a f
 In the test stack, each multipart object is above the threshold of 8 KiB, so the page copies it in parts. The row of a multipart object under the threshold comes from S3 requests to the three providers (the table of [test/README.md](../test/README.md)).
 
 On all three providers, the tags stay. A copy with REPLACE and no `Content-Type` gives `binary/octet-stream` on SeaweedFS and MinIO, and no `Content-Type` on Garage. `x-amz-copy-source-if-match` with another ETag gives `412` on all three. For a copy of an older version, the three compare it with the ETag of that version.
+
+## Cleanup of incomplete multipart uploads
+
+An incomplete multipart upload keeps its parts on the provider until a person completes it or aborts it. The parts use storage, but no listing shows them. The code is in `src/multiparts.go`, behind the optional interface `MultipartUploadLister` of the S3 backend.
+
+`GET /api/multiparts?prefix=&max=&token=` gives the incomplete uploads under `prefix`. The answer has `uploads`, `nextToken`, `now` (the clock of the server), `minimumAbortAgeHours` and `partsPageSize`. Each upload has `key`, `uploadId`, `initiated`, `parts`, `bytes`, `partsAtLeast`, `partsUnknown` and `active`. `max` is from 1 to 500, and the default is 100. Another value gives `400 invalid_multipart_request`.
+
+The server reads the list with these rules:
+
+- It sends `ListMultipartUploads` with no prefix. MinIO gives an empty list for a prefix that is not a full key. The server keeps the uploads under the root prefix of the instance and under `prefix`.
+- It sends the next request with the markers that the provider sent, as the provider sent them. SeaweedFS sends only `NextUploadIdMarker`. Garage and AWS send `NextKeyMarker` and `NextUploadIdMarker`. MinIO ignores `max-uploads` and sends all the uploads in one page.
+- `nextToken` has the markers and a position in the page. Thus the next answer can start in the middle of a page that has more uploads than the request asked for.
+- One answer reads 10 pages of the provider at most. A provider that sends the same markers again gives `502 provider_paging`, not a loop.
+- For each upload, the server sends one `ListParts` with `max-parts=1000`, four at the same time. An upload with more parts gets `partsAtLeast: true`: the count and the size are those of the first 1000 parts. An upload that the provider no longer knows (`404 NoSuchUpload`) is not in the answer.
+
+`initiated` is the `Initiated` date of the provider. SeaweedFS gives no date. The page then shows "unknown" for the start and the age.
+
+`POST /api/multiparts/abort` has two forms. The body gives one of them. Both forms, or none, give `400 invalid_multipart_request`.
+
+- `uploads`, a list of 1 to 1000 `key` and `uploadId`, aborts each upload at any age. The page asks for a confirmation first. The answer is `200` with `aborted`, `skipped` and `failed`. An upload that the provider no longer knows counts as aborted.
+- `olderThanDays` (1 to 36500) and `prefix` start the job `abort_multiparts`. The answer is `202` with the job. The job reads the whole list and aborts each upload under `prefix` that started before the cutoff. The cutoff is the time of the request minus `olderThanDays` days. A resumed job uses the same cutoff.
+
+The job counts `aborted`, `skippedUndated`, `skippedRecent`, `skippedActive` and `failed` in `multipartAbort`. These safety rules apply:
+
+- The job never aborts an upload without a start date. The provider does not let S3-Browser know its age.
+- The job never aborts an upload younger than 24 hours, also when the cutoff is later.
+- No request aborts an upload that the resumable-upload store of this process sends now (status `uploading`, `src/uploads.go`). The list shows such an upload with `active: true`.
+
+`GET /api/multiparts` needs `objects.read` on the node of `prefix`. An abort needs `objects.write`: on the node of each key, or on the node of `prefix` for the job. The job also needs `objects.read`. Refer to [ACCESS.md](ACCESS.md).
+
+At start, the server sends `ListMultipartUploads` with `max-uploads=1` to each instance that has the read permission. A provider that answers `501` or `405` gets `multipartUploadsSupported: false` in `/api/instances`, and the page hides the item. The GCS backend has no list: it answers `501 multipart_unsupported`.
+
+The item "Incomplete uploads" of the Actions menu opens a large window for the current folder, or for the bucket at the root. The window has a table with the key, the start, the parts, the size and the age of each upload. It has a checkbox and a frameless abort button in each row, "Abort selected", and "Abort everything older than N days" (N is 1 by default). The window tells how many uploads have no start date. A person without the write permission sees the list with no abort control. A note tells that a lifecycle rule can abort the incomplete uploads.
 
 ## Insights treemap normalization
 

@@ -296,6 +296,9 @@ type storageInstance struct {
 	// metadataOff is set when the provider refused the copy that replaces the metadata of an object.
 	metadataOff atomic.Bool
 
+	// multipartsOff is set when the provider refused the list of the incomplete multipart uploads.
+	multipartsOff atomic.Bool
+
 	// batchDeleteOff is set when the provider refused the batch delete once: later deletes go one by one.
 	batchDeleteOff atomic.Bool
 }
@@ -505,6 +508,7 @@ func (s *storageInstance) publicInfo() instanceInfo {
 		VersioningSupported: s.versioningAvailable(),
 		TagsSupported:       s.tagsAvailable(),
 		MetadataEditable:    s.metadataEditAvailable(),
+		MultipartUploads:    s.multipartUploadsAvailable(),
 		Capabilities:        s.capabilities(),
 		Operations:          s.operationCapabilities(),
 	}
@@ -521,6 +525,7 @@ type instanceInfo struct {
 	VersioningSupported bool                       `json:"versioningSupported"`
 	TagsSupported       bool                       `json:"tagsSupported"`
 	MetadataEditable    bool                       `json:"metadataEditSupported"`
+	MultipartUploads    bool                       `json:"multipartUploadsSupported"`
 	Capabilities        capabilities               `json:"capabilities"`
 	Operations          map[string]capabilityState `json:"operations"`
 }

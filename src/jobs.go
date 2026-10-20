@@ -164,6 +164,8 @@ type jobState struct {
 	ArchiveEntryIntegrityRequest *archiveEntryIntegrityRequest `json:"archive_entry_integrity_request,omitempty"`
 	ArchiveEntryIntegrity        *archiveEntryIntegrityResult  `json:"archive_entry_integrity,omitempty"`
 	TagChange                    *tagChange                    `json:"tag_change,omitempty"`
+	MultipartAbort               *multipartAbortJob            `json:"multipart_abort,omitempty"`
+	MultipartResult              *multipartAbortResult         `json:"multipart_result,omitempty"`
 	Error                        string                        `json:"error,omitempty"`
 	CreatedAt                    time.Time                     `json:"created_at"`
 	UpdatedAt                    time.Time                     `json:"updated_at"`
@@ -192,6 +194,8 @@ type publicJob struct {
 	Integrity             *integrityResult             `json:"integrity,omitempty"`
 	ArchiveExtract        *archiveExtractResult        `json:"archiveExtract,omitempty"`
 	ArchiveEntryIntegrity *archiveEntryIntegrityResult `json:"archiveEntryIntegrity,omitempty"`
+	OlderThanDays         int                          `json:"olderThanDays,omitempty"`
+	MultipartAbort        *multipartAbortResult        `json:"multipartAbort,omitempty"`
 	Error                 string                       `json:"error,omitempty"`
 	CreatedAt             time.Time                    `json:"createdAt"`
 	UpdatedAt             time.Time                    `json:"updatedAt"`
@@ -223,6 +227,13 @@ func (j jobState) public() publicJob {
 		UpdatedAt:       j.UpdatedAt,
 		StartedAt:       cloneTimePointer(j.StartedAt),
 		EndedAt:         cloneTimePointer(j.EndedAt),
+	}
+	if j.MultipartAbort != nil {
+		result.OlderThanDays = j.MultipartAbort.OlderThanDays
+	}
+	if j.MultipartResult != nil {
+		counts := *j.MultipartResult
+		result.MultipartAbort = &counts
 	}
 	// Analysis results can be large. Keep progress responses compact and expose
 	// the immutable result only after the job reaches the completed state.
@@ -310,6 +321,14 @@ func cloneJobState(job jobState) jobState {
 		change.Add = append([]objectTag(nil), change.Add...)
 		change.Remove = append([]string(nil), change.Remove...)
 		job.TagChange = &change
+	}
+	if job.MultipartAbort != nil {
+		request := *job.MultipartAbort
+		job.MultipartAbort = &request
+	}
+	if job.MultipartResult != nil {
+		counts := *job.MultipartResult
+		job.MultipartResult = &counts
 	}
 	job.StartedAt = cloneTimePointer(job.StartedAt)
 	job.EndedAt = cloneTimePointer(job.EndedAt)
@@ -659,7 +678,7 @@ func (m *jobManager) run(id string) {
 
 	budget := newResourceBudget(m.app.config.Runtime)
 	if job.Type == jobTypeIntegrity || job.Type == jobTypeExtractArchive || job.Type == jobTypeArchiveEntryIntegrity ||
-		job.Type == jobTypeCopyObject || job.Type == jobTypeMoveObject {
+		job.Type == jobTypeCopyObject || job.Type == jobTypeMoveObject || job.Type == jobTypeAbortMultiparts {
 		budget = newBackgroundResourceBudget(m.app.config.Runtime)
 	}
 	runContext, runCancel := context.WithCancel(m.ctx)
@@ -788,6 +807,13 @@ func (m *jobManager) execute(ctx context.Context, job *jobState) error {
 			}
 		}
 		return m.runTagJob(ctx, job, instance)
+	case jobTypeAbortMultiparts:
+		for _, permission := range []string{permissionRead, permissionWrite} {
+			if err := requirePermission(instance, permission); err != nil {
+				return err
+			}
+		}
+		return m.runAbortMultipartsJob(ctx, job, instance)
 	case jobTypeStatsPrefix:
 		if err := requirePermission(instance, permissionRead); err != nil {
 			return err
