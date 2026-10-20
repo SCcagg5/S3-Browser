@@ -49,7 +49,11 @@ This document uses ASD-STE100 Simplified Technical English.
   "Download .patch". A CSV file shows two tables side by side. The menus of actions have no item "Versions": the badge
   with the count opens them.
 - The columns Size and Modified use a font with one width for every character. Their width is the width of the longest
-  text that they can show.
+  text that they can show. The relative time and the exact time give the same width to Modified, so the columns stay in
+  place when the mode changes.
+- The window of the file details is wider. Its upper edge and its height stay the same for each tab.
+- A read of an older version works with SeaweedFS. The program sends no `If-Match` with a version identifier, because
+  SeaweedFS compares it with the current object and answers HTTP 412.
 - A JSON file that fits in one page shows its totals at once and has no button to count lines and pages. The root of
   the JSON tree stays open.
 

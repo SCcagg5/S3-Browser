@@ -1573,8 +1573,9 @@ button.storageSwitcher__trigger:hover {
 }
 
 /* Size and Modified: every character has the same width, so the width of the column is the width of the longest text that
-   it can show. Size: 4 digits, a space and 2 letters ("1024 KB"). Modified, relative: "59 minutes ago" (14 characters).
-   Modified, exact: "2026-10-20 12:55:12" (19 characters). */
+   it can show. Size: 4 digits, a space and 2 letters ("1024 KB"). Modified: the exact time is the longest text
+   ("2026-10-20 12:55:12", 19 characters). The relative time ("59 minutes ago") uses the same width, so the
+   columns do not move when the person changes the mode. */
 .dataTable td.col-size,
 .dataTable td.col-modified {
   font-family: var(--font-mono);
@@ -1586,10 +1587,6 @@ button.storageSwitcher__trigger:hover {
 }
 
 .dataTable td.col-modified {
-  width: calc(14ch + 2 * var(--cell-x));
-}
-
-.dataTable.is-exact-time td.col-modified {
   width: calc(19ch + 2 * var(--cell-x));
 }
 
@@ -3200,6 +3197,31 @@ button.versionCount:focus-visible {
   }
 }
 
+
+/* Details window: wide, fixed at the top. A tab change never moves the upper edge or changes the height. ------------------ */
+
+.bb-overlay.bb-overlay--top-anchored {
+  --bb-modal-top-offset: clamp(2rem, 9vh, 6rem);
+  box-sizing: border-box;
+  align-items: flex-start;
+  padding: var(--bb-modal-top-offset) 1rem 1rem;
+  overflow: hidden;
+}
+
+.bb-overlay--top-anchored .bb-modal.bb-modal--details {
+  width: min(1040px, 100%);
+}
+
+.bb-overlay--top-anchored .bb-modal.bb-modal--details,
+.bb-overlay--top-anchored .bb-modal.bb-modal--insights {
+  max-height: calc(100dvh - var(--bb-modal-top-offset) - 1rem);
+}
+
+.bb-overlay--top-anchored .bb-modal--details .bb-details--file .bb-details-body {
+  height: min(66vh, 720px);
+  min-height: 360px;
+  max-height: none;
+}
 
 /* Version picker of the file details ------------------------------------------------------------------------------------ */
 

@@ -107,6 +107,7 @@ func (s *storageInstance) GetVersion(ctx context.Context, key, version string, h
 	if err != nil {
 		return objectResponse{}, err
 	}
+	headers = withoutVersionPreconditions(headers)
 	response, err := store.GetObjectVersion(ctx, key, version, headers)
 	if err != nil {
 		release()
@@ -324,6 +325,20 @@ func (s *storageInstance) probeVersioning(ctx context.Context) bool {
 	supported := err == nil
 	s.setVersioningAvailable(supported)
 	return supported
+}
+
+// withoutVersionPreconditions removes If-Match and If-Unmodified-Since from the headers of a read that names a
+// version. The bytes of a version never change, so the precondition adds no safety. A provider can also compare
+// If-Match with the current object instead of the version: SeaweedFS then answers 412 for every older version.
+// The caller still compares the ETag of the response with the ETag that it expects.
+func withoutVersionPreconditions(headers http.Header) http.Header {
+	if headers.Get("If-Match") == "" && headers.Get("If-Unmodified-Since") == "" {
+		return headers
+	}
+	clean := headers.Clone()
+	clean.Del("If-Match")
+	clean.Del("If-Unmodified-Since")
+	return clean
 }
 
 type objectVersionContextKey struct{}

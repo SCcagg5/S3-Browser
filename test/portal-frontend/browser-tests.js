@@ -1122,24 +1122,60 @@ test('versions: the JSON patch follows the option that sorts the keys, and the C
   await page.context().close();
 });
 
+test('versions: an older version of a JSON file opens in the preview, with its ETag, without HTTP 412', async () => {
+  const page = await newPage();
+  const list = await (await page.request.get(`${BASE}api/versions?instance=seaweedfs-main&key=versions/config.json`)).json();
+  const older = list.versions.find(version => !version.isCurrent);
+  assert.ok(older, 'config.json needs an older version');
+  for (const endpoint of ['raw', 'summary', 'tree']) {
+    const response = await page.request.get(`${BASE}api/json/${endpoint}?instance=seaweedfs-main&key=versions/config.json&version=${older.version}&etag=${encodeURIComponent('"' + older.etag + '"')}`);
+    assert.equal(response.status(), 200, `${endpoint}: ${await response.text()}`);
+  }
+  await page.goto(`${BASE}${MAIN}versions/config.json?version=${older.version}`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('.json-range-label', { timeout: 8000 }).catch(async () => assert.fail((await page.evaluate(() => document.querySelector('main, body').innerHTML)).slice(0, 1500)));
+  assert.match(await page.textContent('.json-range-label'), /^Lines 1–\d+ of \d+/);
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+test('details: the window is wide, and its upper edge and its height do not change between the tabs', async () => {
+  const page = await newPage({ viewport: { width: 1600, height: 900 } });
+  await open(page, `${MAIN}versions/`);
+  await openDetails(page, 'report.txt');
+  const box = () => page.evaluate(() => { const rect = document.querySelector('.bb-modal--details').getBoundingClientRect(); return { top: rect.top, height: rect.height, width: rect.width }; });
+  await until(page, () => getComputedStyle(document.querySelector('.bb-modal--details')).transform === 'none');
+  const overview = await box();
+  assert.ok(overview.width >= 900, `width ${overview.width}px`);
+  assert.ok(overview.top < 200, `top ${overview.top}px`);
+  await page.click('[data-details-tab="advanced"]');
+  const advanced = await box();
+  assert.ok(Math.abs(advanced.top - overview.top) < 0.5, `top ${overview.top}px then ${advanced.top}px`);
+  assert.ok(Math.abs(advanced.height - overview.height) < 0.5, `height ${overview.height}px then ${advanced.height}px`);
+  await page.click('[data-details-tab="overview"]');
+  assert.ok(Math.abs((await box()).top - overview.top) < 0.5);
+  await page.context().close();
+});
+
 test('listing: Size and Modified use a font with one width for every character, and their width is the longest text', async () => {
   const page = await newPage();
   await open(page, `${MAIN}config/`);
   const look = await page.evaluate(() => {
     const cell = selector => { const node = document.querySelector(selector); const style = getComputedStyle(node); return { font: style.fontFamily, width: node.getBoundingClientRect().width, ch: parseFloat(style.fontSize) * 0.6 }; };
-    return { size: cell('td.col-size'), modified: cell('td.col-modified'), nameWidth: document.querySelector('th:first-child').getBoundingClientRect().width, tableWidth: document.querySelector('.dataTable').getBoundingClientRect().width };
+    return { size: cell('td.col-size'), modified: cell('td.col-modified'), nameWidth: document.querySelector('th:first-child').getBoundingClientRect().width, tableWidth: document.querySelector('.dataTable').getBoundingClientRect().width, modifiedLeft: document.querySelector('th.col-modified').getBoundingClientRect().left };
   });
   assert.match(look.size.font, /mono/i);
   assert.match(look.modified.font, /mono/i);
-  // Relative time: 14 characters and the padding of the cell. The column is not larger than that, plus a margin of a few pixels.
-  assert.ok(look.modified.width < look.modified.ch * 14 + 20 + 24, `Modified: ${look.modified.width}px`);
-  assert.ok(look.modified.width > look.modified.ch * 14, `Modified: ${look.modified.width}px`);
+  // The width is the one of the longest text, the exact time with 19 characters, plus the padding of the cell.
+  assert.ok(look.modified.width > look.modified.ch * 19, `Modified: ${look.modified.width}px`);
+  assert.ok(look.modified.width < look.modified.ch * 19 + 20 + 24, `Modified: ${look.modified.width}px`);
   assert.ok(look.size.width < look.size.ch * 7 + 20 + 24, `Size: ${look.size.width}px`);
-  // The exact time needs 19 characters.
+  // The column keeps its width when the person changes between the relative and the exact time.
   await page.click('.timeToggle');
   await until(page, () => document.querySelector('.dataTable').classList.contains('is-exact-time'));
-  const exact = await page.evaluate(() => document.querySelector('td.col-modified').getBoundingClientRect().width);
-  assert.ok(exact > look.modified.width + 20, `exact ${exact}px, relative ${look.modified.width}px`);
+  const exact = await page.evaluate(() => ({ modified: document.querySelector('td.col-modified').getBoundingClientRect().width, left: document.querySelector('th.col-modified').getBoundingClientRect().left, table: document.querySelector('.dataTable').getBoundingClientRect().width }));
+  assert.ok(Math.abs(exact.modified - look.modified.width) < 0.5, `exact ${exact.modified}px, relative ${look.modified.width}px`);
+  assert.ok(Math.abs(exact.table - look.tableWidth) < 0.5);
+  assert.ok(Math.abs(exact.left - look.modifiedLeft) < 0.5, `left ${exact.left}px, before ${look.modifiedLeft}px`);
   await page.click('.timeToggle');
   // The width does not change with the value: two rows have the same width, and two digits have the same width.
   const widths = await page.evaluate(() => {
