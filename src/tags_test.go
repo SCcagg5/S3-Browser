@@ -451,3 +451,102 @@ func TestS3BackendLifecycleWithoutRulesIsEmpty(t *testing.T) {
 		t.Fatalf("rules = %v, err = %v", rules, err)
 	}
 }
+
+// versionedTagging is a tagging backend that reports a version id and records the versions of the tag requests.
+type versionedTagging struct {
+	*taggingMemory
+	versionID string
+	heads     int
+	seen      []string
+}
+
+func (b *versionedTagging) Head(ctx context.Context, key string) (objectResponse, error) {
+	b.mu.Lock()
+	b.heads++
+	b.mu.Unlock()
+	response, err := b.taggingMemory.Head(ctx, key)
+	if err == nil {
+		response.Header.Set("x-amz-version-id", b.versionID)
+	}
+	return response, err
+}
+
+func (b *versionedTagging) GetObjectTagging(ctx context.Context, key, version string) ([]objectTag, error) {
+	b.mu.Lock()
+	b.seen = append(b.seen, "get:"+version)
+	b.mu.Unlock()
+	return b.taggingMemory.GetObjectTagging(ctx, key, version)
+}
+
+func (b *versionedTagging) PutObjectTagging(ctx context.Context, key, version string, tags []objectTag) error {
+	b.mu.Lock()
+	b.seen = append(b.seen, "put:"+version)
+	b.mu.Unlock()
+	return b.taggingMemory.PutObjectTagging(ctx, key, version, tags)
+}
+
+func TestTagRequestsNameTheVersionOfTheObjectInABucketWithVersioning(t *testing.T) {
+	app, memory := taggingTestApplication(t)
+	backend := &versionedTagging{taggingMemory: memory, versionID: "null"}
+	app.instances["rw"].backend = backend
+	app.instances["rw"].versioningMu.Lock()
+	app.instances["rw"].versioningChecked, app.instances["rw"].versioningSupported = true, true
+	app.instances["rw"].versioningMu.Unlock()
+	if got := doJSON(app, http.MethodGet, "/api/tags?instance=rw&key=folder/direct.txt", nil); got.Code != http.StatusOK {
+		t.Fatalf("get = %d %s", got.Code, got.Body.String())
+	}
+	if got := doJSON(app, http.MethodPut, "/api/tags", map[string]any{"instance": "rw", "key": "folder/direct.txt", "tags": []objectTag{{"a", "1"}}}); got.Code != http.StatusOK {
+		t.Fatalf("put = %d %s", got.Code, got.Body.String())
+	}
+	if fmt.Sprint(backend.seen) != "[get:null put:null]" || backend.heads != 2 {
+		t.Fatalf("versions = %v, heads = %d", backend.seen, backend.heads)
+	}
+	// A version that the request names is used as it is, with no HEAD request.
+	backend.seen, backend.heads = nil, 0
+	if got := doJSON(app, http.MethodGet, "/api/tags?instance=rw&key=folder/direct.txt&version=abc", nil); got.Code != http.StatusOK {
+		t.Fatalf("get version = %d %s", got.Code, got.Body.String())
+	}
+	if fmt.Sprint(backend.seen) != "[get:abc]" || backend.heads != 0 {
+		t.Fatalf("versions = %v, heads = %d", backend.seen, backend.heads)
+	}
+}
+
+func TestTagRequestsAskNoVersionInABucketWithoutVersioning(t *testing.T) {
+	app, memory := taggingTestApplication(t)
+	backend := &versionedTagging{taggingMemory: memory, versionID: "ignored"}
+	app.instances["rw"].backend = backend
+	if got := doJSON(app, http.MethodGet, "/api/tags?instance=rw&key=folder/direct.txt", nil); got.Code != http.StatusOK {
+		t.Fatalf("get = %d %s", got.Code, got.Body.String())
+	}
+	if fmt.Sprint(backend.seen) != "[get:]" || backend.heads != 0 {
+		t.Fatalf("versions = %v, heads = %d", backend.seen, backend.heads)
+	}
+}
+
+func TestTagJobReadsTheVersionOfEachObjectOnce(t *testing.T) {
+	app, memory := taggingTestApplication(t)
+	backend := &versionedTagging{taggingMemory: memory, versionID: "v1"}
+	app.instances["rw"].backend = backend
+	app.instances["rw"].versioningMu.Lock()
+	app.instances["rw"].versioningChecked, app.instances["rw"].versioningSupported = true, true
+	app.instances["rw"].versioningMu.Unlock()
+	for index := 0; index < 3; index++ {
+		memory.memoryBackend.objects[fmt.Sprintf("tenant/v/f%d.txt", index)] = memoryObject{data: []byte("x")}
+	}
+	created := doJSON(app, http.MethodPost, "/api/tags/bulk", map[string]any{"instance": "rw", "prefix": "v/", "add": []objectTag{{"k", "1"}}})
+	var job publicJob
+	if err := json.Unmarshal(created.Body.Bytes(), &job); err != nil {
+		t.Fatal(err)
+	}
+	waitForJobStatus(t, app.jobs, job.ID, jobStatusCompleted)
+	backend.mu.Lock()
+	defer backend.mu.Unlock()
+	if backend.heads != 3 || len(backend.seen) != 6 {
+		t.Fatalf("heads = %d, requests = %v", backend.heads, backend.seen)
+	}
+	for _, request := range backend.seen {
+		if !strings.HasSuffix(request, ":v1") {
+			t.Fatalf("a request without the version: %v", backend.seen)
+		}
+	}
+}

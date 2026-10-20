@@ -2745,8 +2745,38 @@ button.storageSwitcher__trigger:hover {
   display: none;
 }
 
+/* With the tag column, the name column fits its content and the tags follow the name, at the left. */
+.dataTable:not(.hide-tags) > thead > tr > th:first-child {
+  width: 1%;
+}
+
+.dataTable:not(.hide-tags) .nameCell {
+  max-width: min(40vw, 420px);
+}
+
 .dataTable .col-tags {
-  width: 26%;
+  width: auto;
+}
+
+.tagChips__pending {
+  display: inline-block;
+  width: 56px;
+  height: 10px;
+  border-radius: var(--radius-pill);
+  background: var(--row-hover);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tagChips__pending {
+    animation: none;
+  }
 }
 
 .dataTable .col-versions {

@@ -498,6 +498,55 @@ test('tags: the tag column and the tag filter come from the settings of the list
   await page.context().close();
 });
 
+test('tags: the tag column of versioned files shows no pending mark, and the details of an older version show its tags', async () => {
+  const page = await newPage();
+  await open(page, `${MAIN}versions/`);
+  await page.click('#settingsButton');
+  await page.check('[data-column="tags"]');
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('tr[data-name="report.txt"] .tagChip');
+  await page.waitForSelector('tr[data-name="notes.txt"] .tagChip');
+  const chipsOf = async name => (await page.locator(`tr[data-name="${name}"] .tagChip`).allInnerTexts()).map(item => item.replace(/\s+/g, ' ').trim()).sort();
+  assert.deepEqual(await chipsOf('report.txt'), ['status final', 'team data']);
+  assert.deepEqual(await chipsOf('notes.txt'), ['team docs']);
+  assert.equal(await page.locator('.tagChips__pending').count(), 0);
+  assert.equal(await page.locator('td.col-tags', { hasText: 'Reading' }).count(), 0);
+  assert.equal((await page.textContent('th.col-tags')).trim(), 'Tags');
+  assert.equal(await page.locator('th.col-tags .visually-hidden').count(), 1);
+  // The details of an older version show the tags of that version, and the tags are read only there.
+  await openDetails(page, 'report.txt');
+  await page.waitForSelector('[data-tags-section] .tagChip');
+  assert.equal(await page.isVisible('[data-tags-section] .tagEditor__form'), true);
+  await page.selectOption('[data-details-version]', { index: 2 });
+  await until(page, () => document.querySelector('[data-tags-section] .tagChip')?.textContent.includes('draft'));
+  assert.equal(await page.isHidden('[data-tags-section] .tagEditor__form'), true);
+  assert.equal(await page.locator('[data-tags-section] .tagChip__remove').count(), 0);
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+test('tags: the tags float at the left, next to the name, and the examples of the seed show', async () => {
+  const page = await newPage();
+  await open(page, `${MAIN}config/`);
+  await page.click('#settingsButton');
+  await page.check('[data-column="tags"]');
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('tr[data-name="ingest.json"] .tagChip');
+  const boxes = await page.evaluate(() => {
+    const row = document.querySelector('tr[data-name="ingest.json"]');
+    const name = row.querySelector('.nameLink').getBoundingClientRect();
+    const chip = row.querySelector('.tagChip').getBoundingClientRect();
+    const versions = document.querySelector('th.col-versions').getBoundingClientRect();
+    return { nameRight: name.right, chipLeft: chip.left, versionsLeft: versions.left };
+  });
+  assert.ok(boxes.chipLeft - boxes.nameRight < 200, `the tags next to the name: ${JSON.stringify(boxes)}`);
+  assert.ok(boxes.chipLeft < boxes.versionsLeft - 200, `the tags far from the versions: ${JSON.stringify(boxes)}`);
+  await open(page, '');
+  await page.waitForSelector('tr[data-name="README.md"] .tagChip');
+  assert.deepEqual((await page.locator('tr[data-name="README.md"] .tagChip').allInnerTexts()).map(item => item.replace(/\s+/g, ' ').trim()), ['team docs']);
+  await page.context().close();
+});
+
 test('tags: a folder job sets and removes tags on every object, and keeps the other tags', async () => {
   const page = await newPage();
   await open(page, `${MAIN}reports/2026/`);

@@ -24,6 +24,8 @@ This document uses ASD-STE100 Simplified Technical English.
 
 - New routes: `GET` and `PUT /api/tags`, `POST /api/tags/bulk` (a job for a prefix) and `GET /api/lifecycle`. A provider
   without tags answers `501`. Refer to [docs/ACCESS.md](docs/ACCESS.md) for the actions.
+- In a bucket with versioning, a tag request names the version of the object (a HEAD request finds it). This avoids a
+  delay of more than 10 seconds of SeaweedFS for an object made before the versioning.
 - An upload can carry tags: the header `X-Amz-Tagging` of `PUT /s3` and the field `tags` of `POST /api/uploads`.
 
 ### Interface `portal`
@@ -34,7 +36,7 @@ This document uses ASD-STE100 Simplified Technical English.
   apply to the object. A folder has the action "Tag objects".
 - The listing has the columns Name, Tags, Versions, Size and Modified. The column Versions has no title. It shows the
   icon and the count of versions for a file with more than one version. The clock that shows the exact times is at the
-  left of Modified.
+  left of Modified. The tag column has no title, and its tags follow the name, at the left.
 - The gear at the right of the search field opens a menu, as the menu Actions: the columns to show, the filter by tag
   and the tags of the new uploads. The browser keeps the choice. The reload is an icon with no frame, as the gear.
 - The menu Actions has no item "Bucket permissions" any more: the button at the left of the bucket selector has them.

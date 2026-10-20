@@ -10,6 +10,15 @@ const ACCESS_KEY = 'GK0123456789abcdef01234567';
 const TAGGED = {
   'config/ingest.json': 'team=data&env=prod',
   'reports/2026/q3/summary.md': 'team=finance',
+  'README.md': 'team=docs',
+  'src/main.go': 'lang=go&team=platform',
+  'images/banner.svg': 'kind=image',
+};
+
+// The tags of each version of the files of versions/: the latest version has the last tags.
+const VERSION_TAGS = {
+  'versions/report.txt': ['status=draft', 'status=review', 'status=final&team=data'],
+  'versions/notes.txt': ['', 'team=docs'],
 };
 
 // A request to the S3 API of SeaweedFS, signed with SigV4 (the lifecycle has no route in S3-Browser).
@@ -85,7 +94,9 @@ const objects = {
   }
   for (const [key, count] of [['versions/report.txt', 3], ['versions/notes.txt', 2]]) {
     for (let version = 1; version <= count; version += 1) {
-      const res = await api.put(`s3?instance=seaweedfs-main&key=${encodeURIComponent(key)}`, { data: Buffer.from(`${key} version ${version}`), headers: { 'Content-Type': 'text/plain' } });
+      const headers = { 'Content-Type': 'text/plain' };
+      if (VERSION_TAGS[key][version - 1]) headers['X-Amz-Tagging'] = VERSION_TAGS[key][version - 1];
+      const res = await api.put(`s3?instance=seaweedfs-main&key=${encodeURIComponent(key)}`, { data: Buffer.from(`${key} version ${version}`), headers });
       if (!res.ok()) throw new Error(`${key}: ${res.status()} ${await res.text()}`);
       await new Promise(resolve => setTimeout(resolve, 1100));
     }

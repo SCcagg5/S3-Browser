@@ -89,6 +89,8 @@ Only the S3 provider has object tags. A provider that does not know them answers
 
 An upload can carry tags. A direct upload takes the header `X-Amz-Tagging` (a query string such as `a=b&c=d`). `POST /api/uploads` takes the field `tags`. The server sends them to the provider in `x-amz-tagging`.
 
+In a bucket with versioning, a tag request names the version of the object. The server reads it with a HEAD request. It is `null` for an object made before the versioning. SeaweedFS takes more than 10 seconds to read the tags of such an object when no version is named. A request that has `version` uses it as it is.
+
 `GET /api/lifecycle` gives the lifecycle rules of the bucket in read-only form. A bucket without rules gives an empty list. The details of a file use the rules to tell what happens to the object, also for tags that the person did not save yet.
 
 The listing of the provider does not give tags, and S3 has no request that lists objects by tag. The tag column and the tag filter read the tags of the files on the page. They are in the settings of the listing, behind the gear. They read 4 files at the same time and at most 100. The tag filter hides rows of this page only.

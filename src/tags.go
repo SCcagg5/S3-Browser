@@ -378,10 +378,29 @@ func providerRefusedFeature(err error) bool {
 	return batchDeleteUnsupported(err)
 }
 
+// tagVersion gives the version that a tag request names. A bucket with versioning is asked for the version of the
+// object that a HEAD request reports, "null" for an object made before the versioning. A provider such as SeaweedFS
+// takes more than ten seconds to read the tags of such an object when no version is named. Other buckets get "".
+func (s *storageInstance) tagVersion(ctx context.Context, key, version string) (string, error) {
+	if version != "" || !s.versioningAvailable() {
+		return version, nil
+	}
+	response, err := s.Head(ctx, key)
+	if err != nil {
+		return "", err
+	}
+	defer closeObjectResponse(response)
+	return strings.TrimSpace(response.Header.Get("x-amz-version-id")), nil
+}
+
 func (s *storageInstance) GetTags(ctx context.Context, key, version string) ([]objectTag, error) {
 	tagger, ok := s.backend.(ObjectTagger)
 	if !ok {
 		return nil, taggingUnsupported()
+	}
+	version, err := s.tagVersion(ctx, key, version)
+	if err != nil {
+		return nil, err
 	}
 	release, err := s.beginStorageRequest(ctx)
 	if err != nil {
@@ -400,6 +419,10 @@ func (s *storageInstance) PutTags(ctx context.Context, key, version string, tags
 	tagger, ok := s.backend.(ObjectTagger)
 	if !ok {
 		return taggingUnsupported()
+	}
+	version, err := s.tagVersion(ctx, key, version)
+	if err != nil {
+		return err
 	}
 	release, err := s.beginStorageRequest(ctx)
 	if err != nil {
@@ -586,7 +609,11 @@ func (m *jobManager) runTagJob(ctx context.Context, job *jobState, instance *sto
 	change := *job.TagChange
 	return m.runObjectJob(ctx, job, instance, func(ctx context.Context, _ objectInfo, relative string) error {
 		fullKey := instance.fullKey(relative)
-		current, err := instance.GetTags(ctx, fullKey, "")
+		version, err := instance.tagVersion(ctx, fullKey, "")
+		if err != nil {
+			return err
+		}
+		current, err := instance.GetTags(ctx, fullKey, version)
 		if err != nil {
 			return err
 		}
@@ -597,7 +624,7 @@ func (m *jobManager) runTagJob(ctx context.Context, job *jobState, instance *sto
 		if err := validateTags(next); err != nil {
 			return apiError{Status: http.StatusBadRequest, Code: "invalid_tags", Message: fmt.Sprintf("%s: %s", relative, err.(apiError).Message)}
 		}
-		return instance.PutTags(ctx, fullKey, "", next)
+		return instance.PutTags(ctx, fullKey, version, next)
 	})
 }
 

@@ -817,7 +817,7 @@ BB.cfg = config;
       h('table', { class: 'dataTable', 'aria-label': 'Folder content' },
         h('thead', {}, h('tr', {},
           h('th', { scope: 'col' }, sorts.name.node),
-          h('th', { scope: 'col', class: 'col-tags' }, 'Tags'),
+          h('th', { scope: 'col', class: 'col-tags' }, h('span', { class: 'visually-hidden' }, 'Tags')),
           h('th', { scope: 'col', class: 'col-versions' }, h('span', { class: 'visually-hidden' }, 'Versions')),
           h('th', { scope: 'col', class: 'num col-size' }, sorts.size.node),
           h('th', { scope: 'col', class: 'col-modified' }, h('span', { class: 'headTools' }, timeToggle, sorts.dateModified.node)),
@@ -1256,7 +1256,7 @@ BB.cfg = config;
 
   function tagCell(row) {
     if (row.type !== 'content') return null;
-    if (row.tags === undefined) return h('span', { class: 'tagChips__state' }, state.columns.tags ? 'Reading…' : '');
+    if (row.tags === undefined) return state.columns.tags ? h('span', { class: 'tagChips__pending', role: 'img', 'aria-label': 'The tags are loading' }) : null;
     if (row.tags === null) return h('span', { class: 'tagChips__state', title: 'The tags of this object cannot be read' }, '—');
     return h('span', { class: 'tagChips' }, BB.tags.chips(row.tags));
   }
