@@ -1572,12 +1572,35 @@ button.storageSwitcher__trigger:hover {
   text-align: right;
 }
 
-.dataTable .col-size {
-  width: 112px;
+/* Size and Modified: every character has the same width, so the width of the column is the width of the longest text that
+   it can show. Size: 4 digits, a space and 2 letters ("1024 KB"). Modified, relative: "59 minutes ago" (14 characters).
+   Modified, exact: "2026-10-20 12:55:12" (19 characters). */
+.dataTable td.col-size,
+.dataTable td.col-modified {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
 }
 
-.dataTable .col-modified {
-  width: 190px;
+.dataTable td.col-size {
+  width: calc(7ch + 2 * var(--cell-x));
+}
+
+.dataTable td.col-modified {
+  width: calc(14ch + 2 * var(--cell-x));
+}
+
+.dataTable.is-exact-time td.col-modified {
+  width: calc(19ch + 2 * var(--cell-x));
+}
+
+.sizeCell,
+.modifiedCell {
+  display: inline-block;
+}
+
+.sizeCell__unit {
+  min-width: 0;
+  margin-left: 1ch;
 }
 
 .dataTable .col-menu {
@@ -1695,6 +1718,18 @@ button.storageSwitcher__trigger:hover {
 
 .versionCount {
   flex: none;
+}
+
+button.versionCount {
+  cursor: pointer;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+button.versionCount:hover,
+button.versionCount:focus-visible {
+  border-color: var(--accent-text);
+  color: var(--accent-text);
 }
 
 .sizeCell {
@@ -2591,8 +2626,10 @@ button.storageSwitcher__trigger:hover {
     display: none;
   }
 
-  .dataTable .col-size {
-    width: 88px;
+  .dataTable th.col-size,
+  .dataTable td.col-size {
+    width: auto;
+    min-width: 0;
   }
 
   .nameCell {
@@ -3328,7 +3365,8 @@ button.storageSwitcher__trigger:hover {
   border-top: 1px solid var(--border);
 }
 
-.versionPicker__compare {
+.versionPicker__compare,
+.versionPicker__all {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -3345,7 +3383,9 @@ button.storageSwitcher__trigger:hover {
 }
 
 .versionPicker__compare:hover:not(:disabled),
-.versionPicker__compare:focus-visible {
+.versionPicker__all:hover,
+.versionPicker__compare:focus-visible,
+.versionPicker__all:focus-visible {
   background: var(--row-hover);
   outline: none;
 }
@@ -3736,4 +3776,92 @@ button.storageSwitcher__trigger:hover {
   .jsonChange {
     grid-template-columns: 22px minmax(0, 1fr);
   }
+}
+
+/* Comparison: the patch of git, the empty side of a pair, the tables of CSV side by side ------------------------------------ */
+
+.versionDiff__actions {
+  display: inline-flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.gitPatch {
+  margin: 0;
+  padding: 10px 0;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  overflow: visible;
+  tab-size: 4;
+  white-space: pre;
+}
+
+.gitPatch:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: -2px;
+}
+
+.gitPatch__line {
+  display: block;
+  min-width: max-content;
+  padding: 0 14px;
+}
+
+.gitPatch__line--meta {
+  color: var(--muted);
+  font-weight: var(--fw-semibold);
+}
+
+.gitPatch__line--hunk {
+  background: var(--accent-tint);
+  color: var(--accent-text);
+}
+
+.gitPatch__line--add {
+  background: color-mix(in srgb, var(--success) 13%, transparent);
+}
+
+.gitPatch__line--del {
+  background: color-mix(in srgb, var(--danger) 13%, transparent);
+}
+
+.gitPatch__line--note {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.diff__eol {
+  margin-left: 10px;
+  color: var(--muted);
+  font-family: var(--font-sans, inherit);
+  font-size: var(--fs-xs);
+  font-style: italic;
+  user-select: none;
+}
+
+.diff__text.is-empty,
+.diff__n.is-empty,
+.csvCell.is-empty {
+  background: repeating-linear-gradient(135deg, transparent 0 6px, color-mix(in srgb, var(--muted) 14%, transparent) 6px 7px);
+}
+
+.diff__table--csvsplit td.is-add {
+  background: color-mix(in srgb, var(--success) 13%, transparent);
+}
+
+.diff__table--csvsplit td.is-del {
+  background: color-mix(in srgb, var(--danger) 13%, transparent);
+}
+
+.diff__table--csvsplit td.csvCell--cut.is-del {
+  background: color-mix(in srgb, var(--danger) 34%, transparent);
+}
+
+.diff__table--csvsplit td.csvCell--cut.is-add {
+  background: color-mix(in srgb, var(--success) 34%, transparent);
+}
+
+.diff__table--csvsplit .diff__n:nth-child(n + 2) {
+  border-left: 1px solid var(--border);
 }

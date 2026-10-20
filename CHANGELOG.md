@@ -44,7 +44,12 @@ This document uses ASD-STE100 Simplified Technical English.
   versions. A click on a badge filters the page by this tag. The column of versions is narrow.
 - The details of a file have a picker of versions, with the date, the size and the change of size of each version.
   The new comparison of two versions shows the difference of two texts, two JSON documents or two CSV files. The
-  comparison opens from the picker, from the table of versions and from the menu of a row.
+  comparison opens from the picker and from the table of versions. The picker is also in the bar of the preview page.
+  The views are side by side (the default), unified and the patch of git, with the buttons "Copy patch" and
+  "Download .patch". A CSV file shows two tables side by side. The menus of actions have no item "Versions": the badge
+  with the count opens them.
+- The columns Size and Modified use a font with one width for every character. Their width is the width of the longest
+  text that they can show.
 - A JSON file that fits in one page shows its totals at once and has no button to count lines and pages. The root of
   the JSON tree stays open.
 

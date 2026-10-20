@@ -34,10 +34,7 @@
       </div>
       <div class="previewBar__tools">
         <span class="buildTag" id="previewBuild" hidden><span></span></span>
-        <label class="select previewVersion" id="previewVersionControl" hidden>
-          <span class="visually-hidden">Version</span>
-          <select id="previewVersionSelect" aria-label="Object version"></select>
-        </label>
+        <div class="previewVersion bb-details-version-control" id="previewVersionControl" hidden></div>
         <a class="button button--icon" id="openRawBtn" title="Open the original" aria-label="Open the original" target="_blank" rel="noopener"><i class="ic ic-external-link" aria-hidden="true"></i></a>
         <div class="bb-menu" id="previewMenu">
           <button type="button" class="bb-kebab button button--icon" id="previewKebabBtn" aria-haspopup="menu" aria-expanded="false" aria-label="Actions" title="Actions"><i class="ic ic-dots-vertical" aria-hidden="true"></i></button>
@@ -47,7 +44,6 @@
               <button type="button" class="bb-menu-item" role="menuitem" id="pv-copy"><i class="mdi mdi-content-copy" aria-hidden="true"></i>Copy</button>
               <button type="button" class="bb-menu-item" role="menuitem" id="pv-rename"><i class="mdi mdi-rename-outline" aria-hidden="true"></i>Rename</button>
               <button type="button" class="bb-menu-item" role="menuitem" id="pv-details"><i class="mdi mdi-information-outline" aria-hidden="true"></i>Details</button>
-              <button type="button" class="bb-menu-item" role="menuitem" id="pv-versions"><i class="mdi mdi-source-commit" aria-hidden="true"></i>Versions</button>
               <button type="button" class="bb-menu-item danger" role="menuitem" id="pv-delete"><i class="mdi mdi-delete-outline" aria-hidden="true"></i>Delete</button>
             </div>
           </div>
@@ -85,6 +81,9 @@
   <script src="assets/js/common/download-manager.js"></script>
   <script src="assets/js/common/actions.js"></script>
   <script src="assets/js/common/menu.js"></script>
+  <script src="assets/js/tags.js"></script>
+  <script src="assets/js/diff.js"></script>
+  <script src="assets/js/versions.js"></script>
   <script src="assets/js/common/render.js"></script>
   <script src="assets/js/common/json-viewer.js"></script>
   <script src="assets/js/common/tabular.js"></script>

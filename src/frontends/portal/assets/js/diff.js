@@ -95,11 +95,24 @@
     return lines;
   }
 
+  // The last line of a text that does not end with a line break is not the same line as the same text with a break:
+  // git says so with "\ No newline at end of file". The keys that the diff compares have a mark for this last line.
+  const NO_EOL = '\u0000';
+
+  function linesWithEol(text) {
+    const lines = splitLines(text);
+    const noEol = text !== '' && !/[\r\n]$/.test(text);
+    const keys = lines.slice();
+    if (noEol && keys.length) keys[keys.length - 1] += NO_EOL;
+    return { lines, keys, noEol };
+  }
+
+  // The diff of two texts: a and b are the lines, ops the script, aNoEol and bNoEol tell that the last line has no line break.
   function diffLines(aText, bText, options) {
-    const a = splitLines(aText);
-    const b = splitLines(bText);
-    const { ops, truncated } = diffArrays(a, b, options);
-    return { a, b, ops, truncated, stats: statsOf(ops) };
+    const left = linesWithEol(aText);
+    const right = linesWithEol(bText);
+    const { ops, truncated } = diffArrays(left.keys, right.keys, options);
+    return { a: left.lines, b: right.lines, ops, truncated, aNoEol: left.noEol, bNoEol: right.noEol, stats: statsOf(ops) };
   }
 
   function statsOf(ops) {
@@ -137,6 +150,52 @@
       else merged.push({ ...hunk });
       return merged;
     }, []);
+  }
+
+  // The text of a patch in the unified format of git: it applies with `git apply` and `patch -p1`.
+  function unifiedPatch(result, { aPath = 'file', bPath = aPath, context = 3, aId = '', bId = '' } = {}) {
+    const { a, b, ops } = result;
+    if (!ops.some(op => op.type !== 'eq')) return '';
+    const out = [`diff --git a/${aPath} b/${bPath}`];
+    if (aId || bId) out.push(`index ${aId}..${bId} 100644`);
+    out.push(`--- a/${aPath}`, `+++ b/${bPath}`);
+    const lastA = a.length - 1;
+    const lastB = b.length - 1;
+    const range = (start, count) => (count === 1 ? `${start}` : `${start},${count}`);
+    for (const hunk of hunks(ops, context)) {
+      const slice = ops.slice(hunk.start, hunk.end + 1);
+      const aCount = slice.filter(op => op.type !== 'add').length;
+      const bCount = slice.filter(op => op.type !== 'del').length;
+      const before = ops.slice(0, hunk.start);
+      const aStart = aCount > 0 ? slice.find(op => op.type !== 'add').a + 1 : before.filter(op => op.type !== 'add').length;
+      const bStart = bCount > 0 ? slice.find(op => op.type !== 'del').b + 1 : before.filter(op => op.type !== 'del').length;
+      out.push(`@@ -${range(aStart, aCount)} +${range(bStart, bCount)} @@`);
+      for (let index = 0; index < slice.length;) {
+        const op = slice[index];
+        if (op.type === 'eq') {
+          out.push(` ${a[op.a]}`);
+          if (op.a === lastA && result.aNoEol) out.push('\\ No newline at end of file');
+          index += 1;
+          continue;
+        }
+        // A block of changes: the removed lines, then the added lines, as git writes them.
+        const removed = [];
+        const added = [];
+        while (index < slice.length && slice[index].type !== 'eq') {
+          if (slice[index].type === 'del') removed.push(slice[index]); else added.push(slice[index]);
+          index += 1;
+        }
+        for (const line of removed) {
+          out.push(`-${a[line.a]}`);
+          if (line.a === lastA && result.aNoEol) out.push('\\ No newline at end of file');
+        }
+        for (const line of added) {
+          out.push(`+${b[line.b]}`);
+          if (line.b === lastB && result.bNoEol) out.push('\\ No newline at end of file');
+        }
+      }
+    }
+    return `${out.join('\n')}\n`;
   }
 
   // The words of a line: the words, the spaces and each other character.
@@ -336,7 +395,7 @@
     return { rows, columns, truncated, stats: { added: count('add'), removed: count('del'), modified: count('mod') } };
   }
 
-  const api = { diffArrays, splitLines, diffLines, hunks, statsOf, wordDiff, tokens, normalizeJSON, jsonChanges, diffJSON, parseDelimited, delimiterOf, diffDelimited };
+  const api = { diffArrays, splitLines, linesWithEol, diffLines, hunks, unifiedPatch, statsOf, wordDiff, tokens, normalizeJSON, jsonChanges, diffJSON, parseDelimited, delimiterOf, diffDelimited };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else {
     const BB = (root.BB = root.BB || {});

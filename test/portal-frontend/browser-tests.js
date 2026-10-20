@@ -741,7 +741,7 @@ test('listing: the columns are Name, Tags, Versions, Size and Modified, with the
   await open(page, `${MAIN}versions/`);
   await page.waitForSelector('tr[data-name="report.txt"] .versionCount');
   assert.equal((await page.textContent('tr[data-name="report.txt"] .versionCount')).trim(), '3');
-  assert.equal(await page.getAttribute('tr[data-name="report.txt"] .versionCount', 'title'), '3 versions');
+  assert.equal(await page.getAttribute('tr[data-name="report.txt"] .versionCount', 'title'), '3 versions: open the versions');
   assert.equal(await page.locator('tr[data-name="report.txt"] .versionCount .ic-git-commit').count(), 1);
   assert.equal((await page.textContent('tr[data-name="notes.txt"] .versionCount')).trim(), '2');
   assert.equal(await page.locator('th.col-versions .visually-hidden').count(), 1);
@@ -893,6 +893,11 @@ test('versions: the comparison of two text versions, unified and side by side, w
   assert.equal((await page.locator('select[aria-label="From version"] option:checked').innerText()).startsWith('v2'), true);
   assert.equal((await page.locator('select[aria-label="To version"] option:checked').innerText()).startsWith('v3'), true);
   await page.waitForSelector('.diff__table');
+  // The default view has the two versions side by side.
+  assert.equal(await page.locator('.diff__table.is-split').count(), 1);
+  assert.equal(await page.getAttribute('.segmented__item[data-value="split"]', 'aria-pressed'), 'true');
+  await page.click('.segmented__item[data-value="unified"]');
+  await page.waitForSelector('.diff__table:not(.is-split)');
   const stats = cleanText(await page.locator('.diffStat').allInnerTexts());
   assert.deepEqual(stats, ['+3', '−2']);
   assert.doesNotMatch(await page.textContent('.versionDiff__summary'), /null/);
@@ -929,6 +934,8 @@ test('versions: the comparison of two JSON versions lists the changed paths, and
   const page = await newPage();
   await open(page, `${MAIN}versions/`);
   await openCompareFromDetails(page, 'config.json');
+  await page.waitForSelector('.diff__table.is-split');
+  await page.click('.segmented__item[data-value="changes"]');
   await page.waitForSelector('.jsonChanges');
   // v2 -> v3: replicas 3 to 4; the other differences are the format and the order of the keys.
   assert.deepEqual(cleanText(await page.locator('.jsonChange').allInnerTexts()), ['~ Changed $.replicas 3 to 4']);
@@ -943,8 +950,8 @@ test('versions: the comparison of two JSON versions lists the changed paths, and
     '~ Changed $.replicas 2 to 4',
   ].map(item => item));
   assert.deepEqual(cleanText(await page.locator('.diffStat').allInnerTexts()).slice(0, 1), ['4 paths changed']);
-  await page.click('.segmented__item[data-value="text"]');
-  await page.waitForSelector('.diff__table');
+  await page.click('.segmented__item[data-value="unified"]');
+  await page.waitForSelector('.diff__table:not(.is-split)');
   assert.equal(await page.locator('.diff__row--add').count() > 0, true);
   // The keys are sorted in the text view: the order of the keys in v3 does not show as a change.
   await page.selectOption('select[aria-label="From version"]', { index: 1 });
@@ -957,7 +964,9 @@ test('versions: the comparison of two CSV versions shows the rows and the cells 
   const page = await newPage();
   await open(page, `${MAIN}versions/`);
   await openCompareFromDetails(page, 'orders.csv');
-  await page.waitForSelector('.diff__table--csv');
+  await page.waitForSelector('.diff__table--csvsplit');
+  await page.click('.segmented__item[data-value="table"]');
+  await page.waitForSelector('.diff__table--csv:not(.diff__table--csvsplit)');
   // v2 -> v3: the row 1 is removed, the quantity of the row 4 changed.
   assert.deepEqual(cleanText(await page.locator('.diffStat').allInnerTexts()), ['0 added', '1 removed', '1 modified']);
   assert.equal(await page.locator('.diff__row--del').count(), 1);
@@ -999,29 +1008,146 @@ test('versions: two versions with the same content say so', async () => {
   await page.context().close();
 });
 
-test('versions: the menu of a row compares the two latest versions, and the table of versions opens the comparison', async () => {
+test('versions: the menu of a row has no separate action of versions, and the badge of the count opens them', async () => {
   const page = await newPage();
   await open(page, `${MAIN}versions/`);
+  await page.waitForSelector('tr[data-name="orders.csv"] .versionCount');
   await page.click('tr[data-name="orders.csv"] .bb-kebab');
-  await page.click('tr[data-name="orders.csv"] .bb-menu-item >> text=Compare versions');
-  await page.waitForSelector('.versionDiff .diff__table--csv');
-  await page.click('.bb-modal-x');
-  await page.waitForSelector('.bb-overlay', { state: 'detached' });
-  // A file with one version has no such item.
-  await open(page, `${MAIN}config/`);
-  await page.click('tr[data-name="ingest.json"] .bb-kebab');
-  assert.equal(await page.locator('tr[data-name="ingest.json"] .bb-menu-item >> text=Compare versions').count(), 0);
+  const items = cleanText(await page.locator('tr[data-name="orders.csv"] .bb-menu-item').allInnerTexts());
+  assert.ok(items.length >= 3 && !items.some(item => /version/i.test(item)), `items: ${items}`);
   await page.keyboard.press('Escape');
-  // The table of versions: select two and compare.
-  await open(page, `${MAIN}versions/`);
-  await page.click('tr[data-name="report.txt"] .bb-kebab');
-  await page.click('tr[data-name="report.txt"] .bb-menu-item >> text=Versions');
+  // The badge is a button: it opens the table of the versions. Select two of them to compare.
+  await page.click('tr[data-name="report.txt"] .versionCount');
   await page.waitForSelector('[data-version-select]');
   await page.check('[data-version-select="0"]');
   await page.check('[data-version-select="2"]');
   await page.click('[data-version-compare-selected]');
   await page.waitForSelector('.versionDiff .diff__table');
   assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+test('versions: the preview page has the same picker, with no select and no separate action', async () => {
+  const page = await newPage();
+  await page.goto(`${BASE}${MAIN}versions/report.txt`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('.versionPicker__button');
+  assert.equal(await page.locator('#previewVersionSelect').count(), 0);
+  assert.match(await page.textContent('.versionPicker__button'), /v3.*Current/);
+  await page.click('#previewKebabBtn');
+  assert.equal(await page.locator('#pv-versions').count(), 0);
+  const actions = cleanText(await page.locator('#previewMenu .bb-menu-item').allInnerTexts());
+  assert.ok(!actions.some(item => /^versions$/i.test(item)), `actions: ${actions}`);
+  await page.keyboard.press('Escape');
+  // A choice changes the version of the preview and the label of the picker.
+  await page.click('.versionPicker__button');
+  assert.equal(await page.locator('.versionPicker__item').count(), 3);
+  await page.click('.versionPicker__item >> nth=2');
+  await until(page, () => /v1.*Older/.test(document.querySelector('.versionPicker__button')?.textContent || ''));
+  assert.match(page.url(), /version=/);
+  // The comparison and the table of the versions open from the picker.
+  await page.click('.versionPicker__button');
+  await page.click('.versionPicker__compare');
+  await page.waitForSelector('.versionDiff .diff__table');
+  await page.click('.bb-modal-x');
+  await page.waitForSelector('.bb-overlay', { state: 'detached' });
+  await page.click('.versionPicker__button');
+  await page.click('.versionPicker__all');
+  await page.waitForSelector('[data-version-select]');
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+test('versions: the git patch has the format of git, and can be copied and downloaded', async () => {
+  const page = await newPage();
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: new URL(BASE).origin });
+  await open(page, `${MAIN}versions/`);
+  await openCompareFromDetails(page, 'report.txt');
+  await page.waitForSelector('.diff__table');
+  await page.click('.segmented__item[data-value="git"]');
+  await page.waitForSelector('.gitPatch');
+  const patch = await page.locator('.gitPatch').evaluate(node => node.textContent);
+  const lines = patch.split('\n');
+  assert.match(lines[0], /^diff --git a\/versions\/report\.txt b\/versions\/report\.txt$/);
+  assert.match(lines[1], /^index [0-9a-f]{1,7}\.\.[0-9a-f]{1,7} 100644$/);
+  assert.equal(lines[2], '--- a/versions/report.txt');
+  assert.equal(lines[3], '+++ b/versions/report.txt');
+  assert.match(lines[4], /^@@ -1,7 \+1,7 @@$/);
+  assert.ok(lines.includes('-Status: review') && lines.includes('+Status: final') && lines.includes('-Orders: 120') && lines.includes('+Orders: 124'));
+  assert.ok(lines.includes('+- approved'));
+  assert.ok(patch.endsWith('\n'));
+  assert.equal(await page.locator('.gitPatch__line--hunk').count(), 2);
+  assert.equal(await page.locator('.gitPatch__line--add').count(), 3);
+  assert.equal(await page.locator('.gitPatch__line--del').count(), 2);
+  // Copy and download give the same text as the page.
+  await page.click('[data-diff-copy]');
+  await until(page, async () => (await navigator.clipboard.readText()).startsWith('diff --git'));
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), patch);
+  const [download] = await Promise.all([page.waitForEvent('download'), page.click('[data-diff-download]')]);
+  assert.equal(download.suggestedFilename(), 'report.txt.patch');
+  const stream = await download.createReadStream();
+  let body = '';
+  for await (const chunk of stream) body += chunk;
+  assert.equal(body, patch);
+  // The patch of two other versions follows the choice of the versions.
+  await page.selectOption('select[aria-label="From version"]', { index: 2 });
+  await until(page, () => /@@ -1,\d+ \+1,\d+ @@/.test(document.querySelector('.gitPatch')?.textContent || '') && document.querySelector('.gitPatch').textContent.includes('-Status: draft'));
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+test('versions: the JSON patch follows the option that sorts the keys, and the CSV has two tables side by side', async () => {
+  const page = await newPage();
+  await open(page, `${MAIN}versions/`);
+  await openCompareFromDetails(page, 'config.json');
+  await page.waitForSelector('.diff__table.is-split');
+  // v2 -> v3: the document has the same data, with other keys order and format. Sorted keys: one change.
+  assert.equal(await page.isChecked('[data-diff-sort]'), true);
+  await page.click('.segmented__item[data-value="git"]');
+  await page.waitForSelector('.gitPatch');
+  assert.equal(await page.locator('.gitPatch__line--add').count(), 1);
+  await page.uncheck('[data-diff-sort]');
+  await until(page, () => document.querySelectorAll('.gitPatch__line--add').length > 1);
+  await page.click('.bb-overlay:last-of-type .bb-modal-x');
+  await page.waitForSelector('.versionPicker__button', { state: 'attached' });
+  await page.click('.bb-modal-x');
+  await page.waitForSelector('.bb-overlay', { state: 'detached' });
+  // The CSV side by side: the rows before at the left, the rows after at the right, with the changed cells.
+  await openCompareFromDetails(page, 'orders.csv');
+  await page.waitForSelector('.diff__table--csvsplit');
+  assert.equal(await page.locator('.diff__table--csvsplit thead th').count(), 2);
+  assert.ok(await page.locator('.diff__table--csvsplit .csvCell--cut.is-del').count() >= 1);
+  assert.ok(await page.locator('.diff__table--csvsplit .csvCell--cut.is-add').count() >= 1);
+  assert.ok(await page.locator('.diff__table--csvsplit .is-empty').count() >= 1);
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+test('listing: Size and Modified use a font with one width for every character, and their width is the longest text', async () => {
+  const page = await newPage();
+  await open(page, `${MAIN}config/`);
+  const look = await page.evaluate(() => {
+    const cell = selector => { const node = document.querySelector(selector); const style = getComputedStyle(node); return { font: style.fontFamily, width: node.getBoundingClientRect().width, ch: parseFloat(style.fontSize) * 0.6 }; };
+    return { size: cell('td.col-size'), modified: cell('td.col-modified'), nameWidth: document.querySelector('th:first-child').getBoundingClientRect().width, tableWidth: document.querySelector('.dataTable').getBoundingClientRect().width };
+  });
+  assert.match(look.size.font, /mono/i);
+  assert.match(look.modified.font, /mono/i);
+  // Relative time: 14 characters and the padding of the cell. The column is not larger than that, plus a margin of a few pixels.
+  assert.ok(look.modified.width < look.modified.ch * 14 + 20 + 24, `Modified: ${look.modified.width}px`);
+  assert.ok(look.modified.width > look.modified.ch * 14, `Modified: ${look.modified.width}px`);
+  assert.ok(look.size.width < look.size.ch * 7 + 20 + 24, `Size: ${look.size.width}px`);
+  // The exact time needs 19 characters.
+  await page.click('.timeToggle');
+  await until(page, () => document.querySelector('.dataTable').classList.contains('is-exact-time'));
+  const exact = await page.evaluate(() => document.querySelector('td.col-modified').getBoundingClientRect().width);
+  assert.ok(exact > look.modified.width + 20, `exact ${exact}px, relative ${look.modified.width}px`);
+  await page.click('.timeToggle');
+  // The width does not change with the value: two rows have the same width, and two digits have the same width.
+  const widths = await page.evaluate(() => {
+    const measure = text => { const span = document.createElement('span'); span.style.cssText = 'position:absolute;visibility:hidden;white-space:pre'; span.className = 'modifiedCell'; document.querySelector('td.col-modified').append(span); span.textContent = text; const width = span.getBoundingClientRect().width; span.remove(); return width; };
+    return [measure('11'), measure('88'), measure('iiii')];
+  });
+  assert.ok(Math.abs(widths[0] - widths[1]) < 0.01);
+  assert.ok(Math.abs(widths[1] * 2 - widths[2]) < 0.01);
   await page.context().close();
 });
 

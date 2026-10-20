@@ -184,5 +184,98 @@ test('csv: rows that share most cells are one modified row, without a key', () =
   assert.deepStrictEqual(result.rows[0].cells, [true, false, false, false]);
 });
 
+
+// ---- The patch of git ----
+
+// Applies a unified patch to a text, as `patch` does, and gives the new text.
+function applyPatch(aText, patch) {
+  const original = diff.splitLines(aText);
+  const lines = patch.split('\n');
+  let index = lines.findIndex(line => line.startsWith('@@'));
+  const out = [];
+  let position = 0;
+  let lastOutputMarker = false;
+  while (index >= 0 && index < lines.length) {
+    const line = lines[index];
+    index += 1;
+    if (line.startsWith('@@')) {
+      const match = /^@@ -(\d+)(?:,(\d+))? \+\d+(?:,\d+)? @@/.exec(line);
+      const start = Number(match[1]);
+      const count = match[2] === undefined ? 1 : Number(match[2]);
+      const target = count === 0 ? start : start - 1;
+      while (position < target) { out.push(original[position]); position += 1; }
+      continue;
+    }
+    if (line.startsWith('\\')) { if (out.length) lastOutputMarker = lastOutputMarker || lastWasOutput; continue; }
+    if (line === '') continue;
+    const sign = line[0];
+    const text = line.slice(1);
+    lastWasOutput = sign !== '-';
+    if (sign === ' ') { assert.strictEqual(original[position], text); out.push(text); position += 1; lastOutputMarker = false; }
+    else if (sign === '-') { assert.strictEqual(original[position], text); position += 1; }
+    else if (sign === '+') { out.push(text); lastOutputMarker = false; }
+  }
+  const reachedEnd = position >= original.length;
+  while (position < original.length) { out.push(original[position]); position += 1; }
+  const noEol = reachedEnd ? lastOutputMarker : (aText !== '' && !/\n$/.test(aText));
+  return out.join('\n') + (out.length && !noEol ? '\n' : '');
+}
+let lastWasOutput = false;
+
+test('patch: the header and the hunks have the format of git', () => {
+  const filler = Array.from({ length: 12 }, (_, i) => `f${i}`).join('\n');
+  const result = diff.diffLines(`a\nb\nc\n${filler}\nz\n`, `a\nb\nC\n${filler}\nz\nnew\n`);
+  const patch = diff.unifiedPatch(result, { aPath: 'dir/file.txt', aId: 'abc1234', bId: 'def5678' });
+  assert.strictEqual(patch, [
+    'diff --git a/dir/file.txt b/dir/file.txt',
+    'index abc1234..def5678 100644',
+    '--- a/dir/file.txt',
+    '+++ b/dir/file.txt',
+    '@@ -1,6 +1,6 @@', ' a', ' b', '-c', '+C', ' f0', ' f1', ' f2',
+    '@@ -14,3 +14,4 @@', ' f10', ' f11', ' z', '+new',
+    '',
+  ].join('\n'));
+  assert.strictEqual(diff.unifiedPatch(diff.diffLines('same\n', 'same\n')), '');
+  // Two edits that are 6 lines apart or less make one hunk, as in git.
+  assert.strictEqual(diff.unifiedPatch(diff.diffLines('a\nb\nc\nd\ne\nf\ng\nh\n', 'a\nb\nC\nd\ne\nf\ng\nh\nnew\n')).split('\n').filter(line => line.startsWith('@@')).length, 1);
+});
+
+test('patch: a new file, an emptied file and a file with no line break at the end', () => {
+  assert.strictEqual(diff.unifiedPatch(diff.diffLines('', 'one\ntwo\n')).split('\n')[3], '@@ -0,0 +1,2 @@');
+  assert.strictEqual(diff.unifiedPatch(diff.diffLines('one\ntwo\n', '')).split('\n')[3], '@@ -1,2 +0,0 @@');
+  const noEol = diff.unifiedPatch(diff.diffLines('a\nb', 'a\nb\n'));
+  assert.ok(noEol.includes('-b\n\\ No newline at end of file\n+b\n'), noEol);
+  const both = diff.unifiedPatch(diff.diffLines('a\nb', 'a\nc'));
+  assert.ok(both.endsWith('-b\n\\ No newline at end of file\n+c\n\\ No newline at end of file\n'), both);
+  const context = diff.unifiedPatch(diff.diffLines('x\na\nb', 'y\na\nb'));
+  assert.ok(context.endsWith(' b\n\\ No newline at end of file\n'), context);
+});
+
+test('patch: applying the patch to the first text gives the second text, on random edits and line breaks', () => {
+  let seed = 11;
+  const random = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  for (let round = 0; round < 400; round += 1) {
+    const a = Array.from({ length: Math.floor(random() * 30) }, () => `l${Math.floor(random() * 6)}`);
+    const b = a.slice();
+    for (let edit = 0; edit < Math.floor(random() * 6); edit += 1) {
+      const at = Math.floor(random() * (b.length + 1));
+      if (random() < 0.5) b.splice(at, 1); else b.splice(at, 0, `n${Math.floor(random() * 4)}`);
+    }
+    const finish = lines => (lines.length ? lines.join('\n') + (random() < 0.7 ? '\n' : '') : '');
+    const aText = finish(a);
+    const bText = finish(b);
+    const patch = diff.unifiedPatch(diff.diffLines(aText, bText));
+    if (aText === bText) { assert.strictEqual(patch, ''); continue; }
+    assert.strictEqual(applyPatch(aText, patch), bText, `round ${round}\n${aText}\n---\n${bText}\n---\n${patch}`);
+  }
+});
+
+test('lines: a missing line break at the end is a change, as in git', () => {
+  const result = diff.diffLines('a\nb', 'a\nb\n');
+  assert.deepStrictEqual(result.stats, { added: 1, removed: 1, changed: 2 });
+  assert.strictEqual(result.aNoEol, true);
+  assert.strictEqual(result.bNoEol, false);
+});
+
 if (failed) { console.log(`${failed} test(s) failed`); process.exit(1); }
 console.log('all diff tests passed');

@@ -82,13 +82,22 @@
     return models;
   }
 
+  // The short id of a version in the line "index" of a patch: the start of its ETag, else the end of its version id.
+  const blobId = version => {
+    const etag = String(version.etag || '').replace(/[^0-9a-fA-F]/g, '').toLowerCase();
+    return (etag || String(version.version || '').replace(/[^0-9a-fA-F]/g, '').toLowerCase().slice(-7)).slice(0, 7);
+  };
+
   const versionLabel = version => `v${version.number}`;
 
   // ---------------------------------------------------------------------------------------------------------------
   // Version picker (file details)
   // ---------------------------------------------------------------------------------------------------------------
 
-  function mountPicker(host, { versions, selected = '', onSelect, onCompare }) {
+  function mountPicker(host, { versions, selected = '', onSelect, onCompare, onAll = null }) {
+    // A new picker replaces the one of the host (the label changes with the choice): the old menu goes.
+    host.picker?.close();
+    host.picker?.menu.remove();
     const list = listVersions(versions);
     if (!list.length) { host.hidden = true; return; }
     const current = list.find(version => version.isCurrent) || list[0];
@@ -121,8 +130,11 @@
     });
     const compare = h('button', { type: 'button', class: 'versionPicker__compare', disabled: list.length < 2, onclick: () => { close(); onCompare?.({ to: active.version, from: (active.older || list.find(version => version !== active))?.version }); } },
       icon('git-compare'), h('span', {}, active.older ? `Compare ${versionLabel(active)} with ${versionLabel(active.older)}` : 'Compare versions'));
+    const all = onAll
+      ? h('button', { type: 'button', class: 'versionPicker__all', onclick: () => { close(); onAll(); } }, icon('source-commit'), h('span', {}, 'All versions and actions…'))
+      : null;
     const menu = h('div', { class: 'versionPicker__menu', role: 'listbox', 'aria-label': 'Versions of the object', hidden: true },
-      h('div', { class: 'versionPicker__list' }, items), h('div', { class: 'versionPicker__foot' }, compare));
+      h('div', { class: 'versionPicker__list' }, items), h('div', { class: 'versionPicker__foot' }, compare, all));
 
     function place() {
       const box = button.getBoundingClientRect();
@@ -153,7 +165,7 @@
     }
     const outside = event => { if (!menu.contains(event.target) && !button.contains(event.target)) close(); };
     const keys = event => {
-      const focusable = [...menu.querySelectorAll('.versionPicker__item, .versionPicker__compare:not(:disabled)')];
+      const focusable = [...menu.querySelectorAll('.versionPicker__item, .versionPicker__compare:not(:disabled), .versionPicker__all')];
       const index = focusable.indexOf(document.activeElement);
       if (event.key === 'ArrowDown') { event.preventDefault(); event.stopPropagation(); focusable[Math.min(focusable.length - 1, index + 1)]?.focus(); }
       else if (event.key === 'ArrowUp') { event.preventDefault(); event.stopPropagation(); focusable[Math.max(0, index - 1)]?.focus(); }
@@ -164,7 +176,7 @@
     host.replaceChildren(button);
     // The menu is in the overlay, outside the clipping of the header of the details.
     (host.closest('.bb-overlay') || document.body).append(menu);
-    host.picker = { close };
+    host.picker = { close, menu };
   }
 
   // ---------------------------------------------------------------------------------------------------------------
@@ -245,8 +257,7 @@
     return rows;
   }
 
-  // The cell of a line of text, with the changed words marked.
-  const textCell = row => h('td', { class: 'diff__text' }, row.parts ? words(row.parts) : row.text);
+  const eolNote = () => h('span', { class: 'diff__eol' }, 'No newline at end of file');
 
   function renderText(result, { mode, whole, expanded }) {
     const rows = lineRows(result, { whole, mode });
@@ -277,17 +288,22 @@
         const right = row.right;
         const kind = row.kind === 'eq' ? 'eq' : (left && right ? 'mod' : (left ? 'del' : 'add'));
         if (row.kind === 'eq') {
-          body.append(h('tr', { class: 'diff__row diff__row--eq' }, h('td', { class: 'diff__n' }, row.a + 1), h('td', { class: 'diff__text' }, row.text), h('td', { class: 'diff__n' }, row.b + 1), h('td', { class: 'diff__text' }, row.text)));
+          const missing = result.aNoEol && row.a === result.a.length - 1;
+          body.append(h('tr', { class: 'diff__row diff__row--eq' }, h('td', { class: 'diff__n' }, row.a + 1), h('td', { class: 'diff__text' }, row.text, missing ? eolNote() : null), h('td', { class: 'diff__n' }, row.b + 1), h('td', { class: 'diff__text' }, row.text, missing ? eolNote() : null)));
         } else {
+          const leftMissing = left && result.aNoEol && left.n === result.a.length - 1;
+          const rightMissing = right && result.bNoEol && right.n === result.b.length - 1;
           body.append(h('tr', { class: ['diff__row', `diff__row--${kind}`] },
-            h('td', { class: ['diff__n', left && 'is-del'] }, left ? left.n + 1 : ''), h('td', { class: ['diff__text', left && 'is-del'] }, left ? (left.parts ? words(left.parts) : left.text) : ''),
-            h('td', { class: ['diff__n', right && 'is-add'] }, right ? right.n + 1 : ''), h('td', { class: ['diff__text', right && 'is-add'] }, right ? (right.parts ? words(right.parts) : right.text) : '')));
+            h('td', { class: ['diff__n', left ? 'is-del' : 'is-empty'] }, left ? left.n + 1 : ''), h('td', { class: ['diff__text', left ? 'is-del' : 'is-empty'] }, left ? [left.parts ? words(left.parts) : left.text, leftMissing ? eolNote() : null] : ''),
+            h('td', { class: ['diff__n', right ? 'is-add' : 'is-empty'] }, right ? right.n + 1 : ''), h('td', { class: ['diff__text', right ? 'is-add' : 'is-empty'] }, right ? [right.parts ? words(right.parts) : right.text, rightMissing ? eolNote() : null] : '')));
         }
       } else {
         const sign = row.kind === 'del' ? '−' : (row.kind === 'add' ? '+' : '');
+        const missing = (row.a !== undefined && result.aNoEol && row.a === result.a.length - 1 && row.kind !== 'add')
+          || (row.kind === 'add' && result.bNoEol && row.b === result.b.length - 1);
         body.append(h('tr', { class: ['diff__row', `diff__row--${row.kind}`] },
           h('td', { class: 'diff__n' }, row.a !== undefined ? row.a + 1 : ''), h('td', { class: 'diff__n' }, row.b !== undefined ? row.b + 1 : ''),
-          h('td', { class: 'diff__text' }, h('span', { class: 'diff__sign', 'aria-hidden': 'true' }, sign), row.parts ? words(row.parts) : row.text)));
+          h('td', { class: 'diff__text' }, h('span', { class: 'diff__sign', 'aria-hidden': 'true' }, sign), row.parts ? words(row.parts) : row.text, missing ? eolNote() : null)));
       }
     }
     const more = flat.length > shown ? h('p', { class: 'diff__note' }, `The first ${MAX_ROWS.toLocaleString('en-US')} rows show. Download the versions to read the rest.`) : null;
@@ -352,6 +368,88 @@
     return h('div', { class: 'diff__scroll' }, h('table', { class: 'diff__table diff__table--csv' }, body), note);
   }
 
+  // The patch of git, with its lines coloured.
+  function renderPatch(patch) {
+    const lines = patch.split('\n');
+    if (lines[lines.length - 1] === '') lines.pop();
+    const kindOf = line => {
+      if (line.startsWith('@@')) return 'hunk';
+      if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('diff ') || line.startsWith('index ')) return 'meta';
+      if (line.startsWith('+')) return 'add';
+      if (line.startsWith('-')) return 'del';
+      if (line.startsWith('\\')) return 'note';
+      return 'ctx';
+    };
+    const pre = h('pre', { class: 'gitPatch', tabindex: '0', 'aria-label': 'Patch in the format of git' });
+    for (const line of lines.slice(0, MAX_ROWS * 2)) pre.append(h('span', { class: `gitPatch__line gitPatch__line--${kindOf(line)}` }, `${line}\n`));
+    return h('div', { class: 'diff__scroll' }, pre, lines.length > MAX_ROWS * 2 ? h('p', { class: 'diff__note' }, 'The patch is longer than the page shows. Download it.') : null);
+  }
+
+  // Two tables of rows, side by side: the rows before at the left, the rows after at the right.
+  function renderCSVSplit(result, { whole }) {
+    const rows = result.rows;
+    const keep = new Set();
+    rows.forEach((row, index) => {
+      if (index === 0 || row.type !== 'eq') for (let near = Math.max(0, index - 2); near <= Math.min(rows.length - 1, index + 2); near += 1) keep.add(near);
+    });
+    const body = h('tbody');
+    let skipped = 0;
+    let shown = 0;
+    const flush = () => {
+      if (!skipped) return;
+      body.append(h('tr', { class: 'diff__fold' }, h('td', { colspan: result.columns * 2 + 2 }, h('span', { class: 'diff__expand is-static' }, `${skipped.toLocaleString('en-US')} unchanged row${skipped === 1 ? '' : 's'}`))));
+      skipped = 0;
+    };
+    const side = (row, values, tone, changed) => {
+      const cells = [h('td', { class: ['diff__n', values ? tone : 'is-empty'] }, values ? (tone === 'is-del' ? row.aIndex + 1 : row.bIndex + 1) : '')];
+      for (let column = 0; column < result.columns; column += 1) {
+        cells.push(h('td', { class: ['csvCell', values ? tone : 'is-empty', values && changed && changed[column] && 'csvCell--cut'] }, values ? (values[column] ?? '') : ''));
+      }
+      return cells;
+    };
+    rows.forEach((row, index) => {
+      if (!whole && !keep.has(index)) { skipped += 1; return; }
+      flush();
+      if (shown >= MAX_ROWS) return;
+      shown += 1;
+      const tones = { eq: ['', ''], add: ['is-empty', 'is-add'], del: ['is-del', 'is-empty'], mod: ['is-del', 'is-add'] }[row.type];
+      const leftValues = row.type === 'add' ? null : row.before;
+      const rightValues = row.type === 'del' ? null : row.after;
+      const leftCells = row.type === 'eq' ? side(row, leftValues, '', null) : side(row, leftValues, tones[0] || 'is-del', row.cells);
+      const rightCells = row.type === 'eq' ? side(row, rightValues, '', null) : side(row, rightValues, tones[1] || 'is-add', row.cells);
+      if (row.type === 'eq') { leftCells[0] = h('td', { class: 'diff__n' }, row.aIndex + 1); rightCells[0] = h('td', { class: 'diff__n' }, row.bIndex + 1); }
+      body.append(h('tr', { class: ['diff__row', `diff__row--${row.type}`, index === 0 && 'is-head'] }, leftCells, rightCells));
+    });
+    flush();
+    const head = h('thead', {}, h('tr', {}, h('th', { colspan: result.columns + 1 }, 'From'), h('th', { colspan: result.columns + 1 }, 'To')));
+    return h('div', { class: 'diff__scroll' }, h('table', { class: 'diff__table diff__table--csv diff__table--csvsplit' }, head, body));
+  }
+
+  function download(name, text) {
+    const url = URL.createObjectURL(new Blob([text], { type: 'text/x-diff;charset=utf-8' }));
+    const anchor = h('a', { href: url, download: name, hidden: true });
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  async function copyText(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (_) {
+      const area = h('textarea', { 'aria-hidden': 'true', style: 'position:fixed;opacity:0' });
+      area.value = text;
+      document.body.append(area);
+      area.select();
+      let copied = false;
+      try { copied = document.execCommand('copy'); } catch (__) { copied = false; }
+      area.remove();
+      return copied;
+    }
+  }
+
   // ---------------------------------------------------------------------------------------------------------------
   // The comparison dialog
   // ---------------------------------------------------------------------------------------------------------------
@@ -364,7 +462,7 @@
     if (!left || !right) return Promise.resolve(false);
     const cache = new Map();
     const controller = new AbortController();
-    const state = { mode: 'unified', whole: false, jsonView: 'changes', expanded: new Set(), run: 0 };
+    const state = { view: 'split', whole: false, sortKeys: true, expanded: new Set(), run: 0 };
     const kind = kindOf(key);
 
     return BB.ui.alert({
@@ -443,32 +541,47 @@
           }
           const draw = () => {
             const note = text => h('span', { class: 'versionDiff__note' }, text);
-            options.replaceChildren();
-            if (kind === 'csv') {
-              const result = BB.diff.diffDelimited(a.text, b.text, BB.diff.delimiterOf(key));
-              fill(summary, metadata, stat(`${result.stats.added.toLocaleString('en-US')} added`, 'add'), stat(`${result.stats.removed.toLocaleString('en-US')} removed`, 'del'), stat(`${result.stats.modified.toLocaleString('en-US')} modified`, 'mod'));
-              options.append(h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: state.whole, 'data-diff-whole': '', onchange: event => { state.whole = event.target.checked; draw(); } }), h('span', {}, 'Show the unchanged rows')));
-              view.replaceChildren(renderCSV(result, { whole: state.whole }));
-              return;
-            }
+            let aText = a.text;
+            let bText = b.text;
             let json = null;
             if (kind === 'json') {
               json = BB.diff.diffJSON(a.text, b.text);
-              if (!json.valid) options.append(note('A version is not valid JSON: the text view shows the lines.'));
+              if (json.valid && state.sortKeys) { aText = BB.diff.normalizeJSON(a.text); bText = BB.diff.normalizeJSON(b.text); }
             }
-            const lines = json?.valid ? json.lines : BB.diff.diffLines(a.text, b.text);
-            const stats = lines.stats;
-            fill(summary, metadata,
-              json?.valid ? stat(`${json.changes.length.toLocaleString('en-US')}${json.overflow ? '+' : ''} path${json.changes.length === 1 ? '' : 's'} changed`, 'mod') : null,
-              stat(`+${stats.added.toLocaleString('en-US')}`, 'add'), stat(`−${stats.removed.toLocaleString('en-US')}`, 'del'),
-              lines.truncated ? note('The two texts differ too much: the lines show as a replacement.') : null);
-            if (json?.valid) {
-              options.append(segmented('JSON view', [['changes', 'Changes'], ['text', 'Text (sorted keys)']], state.jsonView, value => { state.jsonView = value; draw(); }));
-              if (state.jsonView === 'changes') { view.replaceChildren(renderJSONChanges(json)); return; }
+            const views = kind === 'csv'
+              ? [['split', 'Side by side', 'layout-columns'], ['table', 'Table', 'layout-rows'], ['git', 'Git patch', 'git-compare']]
+              : [['split', 'Side by side', 'layout-columns'], ['unified', 'Unified', 'layout-rows'], ['git', 'Git patch', 'git-compare'], ...(json?.valid ? [['changes', 'Changes', 'source-commit']] : [])];
+            if (!views.some(([value]) => value === state.view)) state.view = 'split';
+            const lines = BB.diff.diffLines(aText, bText);
+            const patch = () => BB.diff.unifiedPatch(lines, { aPath: key, aId: blobId(left), bId: blobId(right) });
+            const csv = kind === 'csv' ? BB.diff.diffDelimited(a.text, b.text, BB.diff.delimiterOf(key)) : null;
+
+            if (csv) {
+              fill(summary, metadata, stat(`${csv.stats.added.toLocaleString('en-US')} added`, 'add'), stat(`${csv.stats.removed.toLocaleString('en-US')} removed`, 'del'), stat(`${csv.stats.modified.toLocaleString('en-US')} modified`, 'mod'));
+            } else {
+              fill(summary, metadata,
+                json?.valid ? stat(`${json.changes.length.toLocaleString('en-US')}${json.overflow ? '+' : ''} path${json.changes.length === 1 ? '' : 's'} changed`, 'mod') : null,
+                stat(`+${lines.stats.added.toLocaleString('en-US')}`, 'add'), stat(`−${lines.stats.removed.toLocaleString('en-US')}`, 'del'),
+                lines.truncated ? note('The two texts differ too much: the lines show as a replacement.') : null);
             }
-            options.append(segmented('Layout', [['unified', 'Unified', 'layout-rows'], ['split', 'Side by side', 'layout-columns']], state.mode, value => { state.mode = value; draw(); }),
-              h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: state.whole, 'data-diff-whole': '', onchange: event => { state.whole = event.target.checked; draw(); } }), h('span', {}, 'Show the unchanged lines')));
-            view.replaceChildren(renderText(lines, { mode: state.mode, whole: state.whole, expanded: state.expanded }));
+
+            const actions = h('span', { class: 'versionDiff__actions' },
+              h('button', { type: 'button', class: 'bb-btn', 'data-diff-copy': '', onclick: async () => { const done = await copyText(patch()); BB.ui.toast(done ? 'The patch is in the clipboard.' : 'The browser refused to copy the patch.', { status: done ? 'success' : 'error', duration: 2500 }); } }, icon('git-compare'), h('span', {}, 'Copy patch')),
+              h('button', { type: 'button', class: 'bb-btn', 'data-diff-download': '', onclick: () => download(`${key.split('/').pop() || 'file'}.patch`, patch()) }, icon('arrow-down'), h('span', {}, 'Download .patch')));
+            fill(options,
+              segmented('View', views, state.view, value => { state.view = value; draw(); }),
+              json && !json.valid ? note('A version is not valid JSON: the text shows as it is.') : null,
+              json?.valid && state.view !== 'changes' ? h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: state.sortKeys, 'data-diff-sort': '', onchange: event => { state.sortKeys = event.target.checked; draw(); } }), h('span', {}, 'Sort the keys')) : null,
+              state.view === 'split' || state.view === 'unified' || state.view === 'table'
+                ? h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: state.whole, 'data-diff-whole': '', onchange: event => { state.whole = event.target.checked; draw(); } }), h('span', {}, csv ? 'Show the unchanged rows' : 'Show the unchanged lines'))
+                : null,
+              actions);
+
+            if (state.view === 'git') view.replaceChildren(renderPatch(patch()));
+            else if (state.view === 'changes') view.replaceChildren(renderJSONChanges(json));
+            else if (csv && state.view === 'table') view.replaceChildren(renderCSV(csv, { whole: state.whole }));
+            else if (csv) view.replaceChildren(renderCSVSplit(csv, { whole: state.whole }));
+            else view.replaceChildren(renderText(lines, { mode: state.view === 'unified' ? 'unified' : 'split', whole: state.whole, expanded: state.expanded }));
           };
           drawCurrent = draw;
           draw();

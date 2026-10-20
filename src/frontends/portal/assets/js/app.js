@@ -875,6 +875,7 @@ BB.cfg = config;
     table.classList.toggle('hide-versions', !state.columns.versions || !versioningSupported());
     table.classList.toggle('hide-size', !state.columns.size);
     table.classList.toggle('hide-modified', !state.columns.modified);
+    table.classList.toggle('is-exact-time', state.modifiedTimeMode === 'absolute');
     t.tbody.replaceChildren(...visibleRows().map(buildRow));
     applyTagFilter();
     refreshVisibleTags();
@@ -892,13 +893,10 @@ BB.cfg = config;
   }
 
   function rowMenu(row) {
-    row.compareItem = row.versionCount > 1;
     const items = row.type === 'content'
       ? [
         canRead() && menuItem('Details', 'information-outline', () => onRowMetadata(row)),
         canRead() && menuItem('Download', 'download', () => onRowDownload(row)),
-        canRead() && versioningSupported() && menuItem('Versions', 'source-commit', () => onRowVersions(row)),
-        canRead() && versioningSupported() && row.versionCount > 1 && menuItem('Compare versions', 'git-compare', () => BB.actions.compareLatestVersions(row.key)),
         canCopy() && menuItem('Copy', 'content-copy', () => onRowCopy(row)),
         canRename() && menuItem('Rename', 'rename-outline', () => onRowRename(row)),
         canDelete() && menuItem('Delete', 'delete-outline', () => onRowDelete(row), { danger: true })
@@ -916,10 +914,13 @@ BB.cfg = config;
       h('div', { class: 'bb-menu-popover', role: 'menu' }, h('div', { class: 'bb-menu-list' }, items)));
   }
 
-  // The versions of a file: the icon and the count, only when the file has more than one version.
+  // The versions of a file: the icon and the count, only when the file has more than one version. A click opens them.
   function versionCell(row) {
     if (row.type !== 'content' || !versioningSupported() || !Number.isInteger(row.versionCount) || row.versionCount < 2) return null;
-    return h('span', { class: 'badge versionCount', title: plural(row.versionCount, 'version') }, ic('git-commit'), row.versionCount.toLocaleString('en-US'));
+    return h('button', {
+      type: 'button', class: 'badge versionCount', title: `${plural(row.versionCount, 'version')}: open the versions`,
+      'aria-label': `${plural(row.versionCount, 'version')} of ${row.name}`, onclick: () => onRowVersions(row)
+    }, ic('git-commit'), row.versionCount.toLocaleString('en-US'));
   }
 
   function buildRow(row) {
@@ -952,9 +953,6 @@ BB.cfg = config;
     for (const row of visibleRows()) {
       const cell = row.element?.querySelector('.col-versions');
       if (cell) cell.replaceChildren(...[versionCell(row)].filter(Boolean));
-      // The item "Compare versions" of the menu of the row needs two versions: the menu is built again when it changes.
-      const menu = row.element?.querySelector('.col-menu');
-      if (menu && row.type === 'content' && row.compareItem !== (row.versionCount > 1)) menu.replaceChildren(rowMenu(row));
     }
   }
 

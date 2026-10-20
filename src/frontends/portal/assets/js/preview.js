@@ -193,48 +193,37 @@
     return preview;
   }
 
-  function versionOptionLabel(version) {
-    const date = version?.lastModified ? new Date(version.lastModified).toLocaleString() : 'Previous version';
-    const identifier = String(version?.version || '');
-    const short = identifier.length > 24 ? `${identifier.slice(0, 12)}…${identifier.slice(-8)}` : identifier;
-    return short ? `${date} · ${short}` : date;
+  let previewVersions = [];
+
+  // The picker of versions in the bar of the preview: the versions with their date, size and change, and the comparison.
+  function mountVersionPicker() {
+    const control = byId('previewVersionControl');
+    if (!control) return;
+    if (!previewVersions.length || !BB.versions) { control.hidden = true; return; }
+    BB.versions.mountPicker(control, {
+      versions: previewVersions,
+      selected: currentVersion(),
+      onSelect: version => selectVersion(version),
+      onCompare({ from, to }) {
+        void BB.versions.openCompare({
+          key: currentKey(), instance: config.instanceId, versions: previewVersions, from, to,
+          onBytes: (left, right) => BB.actions.compareVersions?.(currentKey(), left.version, right.version, { instance: config.instanceId })
+        });
+      },
+      onAll: () => BB.actions.showVersions(currentKey())
+    });
+    control.hidden = false;
   }
 
   async function configureVersionSelector(key) {
     const control = byId('previewVersionControl');
-    const select = byId('previewVersionSelect');
-    if (!control || !select) return;
+    if (!control) return;
     control.hidden = true;
-    select.replaceChildren();
+    previewVersions = [];
     if (currentArchiveEntry() || currentInstance?.versioningSupported !== true) return;
-
     try {
-      const versions = await BB.api.allVersions(key, { instance: config.instanceId });
-      const availableVersions = versions.filter(version => version && !version.deleteMarker && version.version);
-      const label = control.querySelector('span');
-      if (label) label.textContent = `Version (${availableVersions.length.toLocaleString()})`;
-      control.title = `${availableVersions.length.toLocaleString()} available version${availableVersions.length === 1 ? '' : 's'}`;
-      const current = document.createElement('option');
-      current.value = '';
-      const currentRecord = availableVersions.find(version => version.isCurrent);
-      current.textContent = currentRecord ? `Current · ${versionOptionLabel(currentRecord)}` : 'Current';
-      select.append(current);
-      for (const version of availableVersions) {
-        if (!version || version.deleteMarker || version.isCurrent || !version.version) continue;
-        const option = document.createElement('option');
-        option.value = version.version;
-        option.textContent = versionOptionLabel(version);
-        select.append(option);
-      }
-      const selected = currentVersion();
-      if (selected && !Array.from(select.options).some(option => option.value === selected)) {
-        const option = document.createElement('option');
-        option.value = selected;
-        option.textContent = `Selected · ${selected}`;
-        select.append(option);
-      }
-      select.value = selected;
-      control.hidden = false;
+      previewVersions = await BB.api.allVersions(key, { instance: config.instanceId });
+      mountVersionPicker();
     } catch (error) {
       console.warn('Unable to load object versions for the preview selector', error);
       control.hidden = true;
@@ -247,6 +236,7 @@
     else url.searchParams.delete('version');
     history.replaceState(null, '', url.pathname + url.search);
     applyCapabilities();
+    mountVersionPicker();
     void render();
   }
 
@@ -1453,12 +1443,9 @@
     }
   });
   byId('pv-details').addEventListener('click', () => BB.actions.showMetadata(currentKey(), { version: currentVersion() }));
-  byId('pv-versions').addEventListener('click', () => BB.actions.showVersions(currentKey()));
   byId('pv-delete').addEventListener('click', async () => {
     if (await BB.actions.deleteObject(currentKey())) location.href = byId('backBtn').href;
   });
-
-  byId('previewVersionSelect')?.addEventListener('change', event => selectVersion(event.target.value));
 
   window.addEventListener('keydown', event => {
     if (!(event.ctrlKey || event.metaKey) || event.altKey || String(event.key).toLowerCase() !== 'f') return;

@@ -101,11 +101,16 @@ The details of a file have a picker of versions. It shows each version with its 
 
 The comparison of two versions runs in the browser. The page reads each version with `GET /s3?key=&version=`. A version larger than 2 MiB is not read. A version with a NUL byte or with a text that is not UTF-8 is not text: the page says so, and offers the comparison of the bytes.
 
-The page picks the view from the extension of the key:
+The page picks the view from the extension of the key. The two versions show side by side by default, as on diffchecker.com. Other views are the unified list and the patch of git.
 
-- Text: a diff of lines (Myers), with 3 lines of context. The changed words show in a changed line. The view is a unified list or two columns. A fold hides the unchanged lines, and a click shows them.
-- JSON: the list of the paths that were added, removed or changed, and a text view with sorted keys. The format and the order of the keys are not changes. A version that is not JSON gets the text view.
-- CSV, TSV and PSV: the rows that were added, removed or modified, with the cells that changed. A removed row and an added row that have the same first cell, or most cells equal, are one modified row.
+- Text: a diff of lines (Myers), with 3 lines of context. The changed words show in a changed line. A side that has no line shows hatched. A fold hides the unchanged lines, and a click shows them.
+- JSON: the same views on a text with sorted keys (an option), and the list of the paths that were added, removed or changed. The format and the order of the keys are not changes. A version that is not JSON gets the text views.
+- CSV, TSV and PSV: two tables side by side, or one table, with the rows that were added, removed or modified and the cells that changed. A removed row and an added row that have the same first cell, or most cells equal, are one modified row.
+- Git patch: the patch in the unified format of git, with `diff --git`, `index`, `---`, `+++`, the hunks `@@` and the line `\ No newline at end of file`. It applies with `git apply` and `patch -p1`. The buttons copy it or download it as `<name>.patch`.
+
+The last line of a text with no line break is not the same line as the same text with a break, as in git.
+
+The picker of versions is also in the bar of the preview page. It replaces the list of versions there, and the action "Versions" of the menus. The badge with the count in the listing opens the table of the versions, with the restore and the delete.
 
 A diff that needs more than 2500 edits shows as a replacement of the lines. The algorithms are in `assets/js/diff.js`. They have no DOM, and `test/portal-frontend/diff-tests.js` tests them in Node.
 
