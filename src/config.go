@@ -52,6 +52,8 @@ type bucketConfig struct {
 	PermissionsDefined bool
 	RootPrefix         string
 	MaxScanPages       int
+	// Encryption is "" (no encryption header) or encryptionSSES3 (x-amz-server-side-encryption: AES256 on each write).
+	Encryption string
 }
 
 const (
@@ -517,7 +519,7 @@ func decodeBucketBlock(block hclBlock, authByID map[string]authConfig) (bucketCo
 	}
 	kinds := map[string]hclValueKind{
 		"name": hclString, "auth": hclString, "bucket": hclString,
-		"permissions": hclList, "root_prefix": hclString, "max_scan_pages": hclNumber,
+		"permissions": hclList, "root_prefix": hclString, "max_scan_pages": hclNumber, "encryption": hclString,
 	}
 	if err := requireAttrKinds(block, kinds); err != nil {
 		return bucketConfig{}, err
@@ -560,6 +562,13 @@ func decodeBucketBlock(block hclBlock, authByID map[string]authConfig) (bucketCo
 		}
 		bucket.MaxScanPages = int(value)
 	}
+	if value, ok := block.stringAttr("encryption"); ok {
+		// The value applies as it is: no change of case, no space removed.
+		if value != "" && value != encryptionSSES3 {
+			return bucketConfig{}, block.errorf("%s.encryption must be \"\" (no encryption header) or %q (x-amz-server-side-encryption: AES256), got %q; SSE-C and SSE-KMS are not supported", path, encryptionSSES3, value)
+		}
+		bucket.Encryption = value
+	}
 	if values, ok := block.stringListAttr("permissions"); ok {
 		bucket.PermissionsDefined = true
 		for _, value := range values {
@@ -586,6 +595,10 @@ func decodeBucketBlock(block hclBlock, authByID map[string]authConfig) (bucketCo
 	}
 	bucket.Provider = auth.Provider
 	bucket.Region = auth.Region
+	// The GCS API has no x-amz-server-side-encryption header: the two keys contradict each other.
+	if bucket.Encryption != "" && bucket.Provider != "s3" {
+		return bucketConfig{}, block.errorf("%s.encryption = %q needs an auth block with provider \"s3\", but auth %q has provider %q; remove the key for this bucket", path, bucket.Encryption, bucket.AuthID, bucket.Provider)
+	}
 	return bucket, nil
 }
 

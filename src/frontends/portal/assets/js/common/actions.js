@@ -517,20 +517,24 @@
       const storageSection = `<section class="bb-details-section"><div class="bb-details-section-title"><i class="mdi mdi-database-outline"></i> Storage object</div><div class="bb-kv">${storageRows}</div></section>`;
       // The metadata section reads the stored values from the provider and has the edit. Without the edit (GCS, or a
       // provider that refused it), the custom metadata of this read stays.
-      const metadataEditable = Boolean(BB.metadata) && BB.cfg?.metadataEditSupported !== false;
+      // An object with a key of the client (SSE-C): the provider refuses to read it, so its metadata cannot be read.
+      const customerKey = result.customerKey === true;
+      const metadataEditable = Boolean(BB.metadata) && BB.cfg?.metadataEditSupported !== false && !customerKey;
       const metadataSection = metadataEditable ? '<section class="bb-details-section" data-metadata-section></section>' : '';
       const customSection = customMetadata
         ? `<section class="bb-details-section" data-metadata-fallback${metadataEditable ? ' hidden' : ''}><div class="bb-details-section-title"><i class="mdi mdi-tag-multiple-outline"></i> Custom metadata</div><div class="bb-kv">${customMetadata}</div></section>`
         : '';
       const tagsSection = BB.tags ? '<section class="bb-details-section" data-tags-section></section>' : '';
       const lockSection = BB.objectLock && BB.cfg?.objectLockSupported === true ? '<section class="bb-details-section" data-lock-section></section>' : '';
+      // The encryption section shows itself only when the provider reports an encryption.
+      const encryptionSection = BB.encryption ? '<section class="bb-details-section" data-encryption-section hidden></section>' : '';
       const fileSection = fileRows
         ? `<section class="bb-details-section"><div class="bb-details-section-title"><i class="mdi mdi-file-search-outline"></i> File metadata</div><div class="bb-kv">${fileRows}</div></section>`
         : '';
       const countSection = countAction
         ? `<section class="bb-details-section bb-details-count-section"><div class="bb-details-section-title"><i class="mdi mdi-${escapeHTML(countAction.icon)}"></i> Document dimensions</div><div class="bb-details-count-result" data-document-count-result><span>Not calculated. This operation reads the complete document.</span></div><button type="button" class="bb-btn bb-details-count-button" data-document-count>${escapeHTML(countAction.label)}</button></section>`
         : '';
-      const overviewSections = `${storageSection}${metadataSection}${customSection}${tagsSection}${lockSection}${fileSection}${countSection}`;
+      const overviewSections = `${storageSection}${encryptionSection}${metadataSection}${customSection}${tagsSection}${lockSection}${fileSection}${countSection}`;
       const advancedPanel = `<section class="bb-details-advanced">
         <article class="bb-details-tool-card is-idle" data-details-tool-card="integrity" aria-busy="false">
           <div class="bb-details-tool-card-head"><div class="bb-details-tool-heading"><span class="bb-details-tool-icon"><i class="mdi mdi-shield-key-outline"></i></span><div><strong>Verify integrity</strong><span>Calculate checksums for the complete object and compare them with values exposed by the provider.</span></div></div><button type="button" class="bb-btn bb-details-tool-run" data-details-integrity><i class="mdi mdi-play"></i><span>Run check</span></button></div>
@@ -594,6 +598,11 @@
           inspectButton?.addEventListener('click', () => {
             void renderDetailsInspection(key, selectedVersion, selectedInstance, inspectionCard, inspectButton, inspectionStatusHost, inspectionResultHost);
           });
+
+          const encryptionHost = overlay.querySelector('[data-encryption-section]');
+          if (encryptionHost) {
+            void BB.encryption.mountSection(encryptionHost, { headers, customerKey, instance: selectedInstance });
+          }
 
           const metadataHost = overlay.querySelector('[data-metadata-section]');
           if (metadataHost) {

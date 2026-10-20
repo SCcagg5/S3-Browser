@@ -45,6 +45,9 @@ bucket "documents" {
   bucket         = "documents"
   permissions    = ["read", "write", "delete"]
   max_scan_pages = 15
+  # Each write of an object asks the provider for SSE-S3 (x-amz-server-side-encryption: AES256).
+  # Remove the key to send no encryption header. SSE-C and SSE-KMS are not supported.
+  encryption     = "sse-s3"
 }
 
 bucket "archive" {

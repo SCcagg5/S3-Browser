@@ -1,6 +1,7 @@
 // Puts the test objects in the buckets of the three providers through the API of S3-Browser (PUT /s3).
 const { request } = require('playwright');
-const { PROVIDERS, LOCKED } = require('./providers');
+const { PROVIDERS, LOCKED, ENCRYPTED } = require('./providers');
+const crypto = require('crypto');
 const { s3, SEED_LIFECYCLE } = require('./s3');
 const BASE = process.env.BASE;
 
@@ -174,6 +175,24 @@ async function seedIncompleteUploads(instance) {
   for (const instance of Object.keys(LOCKED)) {
     await put(instance, 'lock/readme.txt', 'The tests of Object Lock make their objects in this folder.\n', { 'Content-Type': 'text/plain' });
   }
+  // The buckets "encrypted" keep the versions of an object: the tests of the restore need them.
+  for (const instance of Object.keys(ENCRYPTED)) {
+    await s3(instance, 'PUT', '/encrypted', 'versioning=', Buffer.from('<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>'));
+  }
+  // The objects of the folder enc/ of the buckets "default": an object with a key of the client (SSE-C) on SeaweedFS and
+  // Garage (MinIO refuses SSE-C over HTTP), and an object with SSE-KMS on MinIO (SeaweedFS answers 500 to aws:kms). The
+  // key of the client is random, lives only in this process, and nobody can read the object again.
+  const customerKey = crypto.randomBytes(32);
+  const customerHeaders = {
+    'content-type': 'text/plain',
+    'x-amz-server-side-encryption-customer-algorithm': 'AES256',
+    'x-amz-server-side-encryption-customer-key': customerKey.toString('base64'),
+    'x-amz-server-side-encryption-customer-key-md5': crypto.createHash('md5').update(customerKey).digest('base64'),
+  };
+  for (const instance of ['seaweedfs-main', 'garage-main']) {
+    await s3(instance, 'PUT', '/default/enc/customer-key.txt', '', Buffer.from('An object with a key of the client.\n'), customerHeaders);
+  }
+  await s3('minio-main', 'PUT', '/default/enc/kms.txt', '', Buffer.from('An object with SSE-KMS.\n'), { 'content-type': 'text/plain', 'x-amz-server-side-encryption': 'aws:kms' });
   await s3('seaweedfs-main', 'PUT', '/default', 'lifecycle=', Buffer.from(SEED_LIFECYCLE));
   console.log('seeded');
   await api.dispose();

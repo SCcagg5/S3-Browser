@@ -94,6 +94,30 @@ This document uses ASD-STE100 Simplified Technical English.
   each instance at start and gives `objectLockSupported` in `/api/instances`. A bucket without Object Lock, Garage
   (`501`) and the GCS backend hide the section.
 
+### Encryption
+
+- New key `encryption` of the `bucket` block: `""` (the default, no header) or `"sse-s3"`. With `"sse-s3"`, the
+  server sends `x-amz-server-side-encryption: AES256` with each request that writes an object: the upload (one request
+  or the start of a multipart upload), the copy, the move and the rename (also in parts), the metadata edit, the
+  restore of a version and the extraction of an archive. Refer to the section "Encryption" of
+  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+- Any other value stops the start, with the key, the two values and the value of the file. SSE-C and SSE-KMS are not
+  supported. A `gcs` bucket with `encryption = "sse-s3"` stops the start. `print-config` and the log at start show
+  the value. The configuration reference has the key.
+- A copy without the header gets the default encryption of the destination bucket: on SeaweedFS and MinIO, a copy of
+  an encrypted object was not encrypted. The metadata edit and the restore of a version now send the SSE-S3 or SSE-KMS
+  headers of their source, with any value of the key.
+- New section "Encryption" in the details of a file: SSE-S3, SSE-KMS and its key, or a key of the client (SSE-C). The
+  page never shows or asks for a key of the client. The details of an SSE-C object open with the size, the ETag and
+  the date of the listing: the provider refuses the HEAD request without the key. The section also shows the default
+  encryption of the bucket. It stays hidden when the provider reports no encryption.
+- New route `GET /api/encryption` (the default encryption of the bucket and the value of the key). `GET /api/media-info`
+  now gives the encryption headers of the object. The download gives them too. The action is `objects.read`. The
+  server reads the default encryption of each bucket at start and gives `bucketEncryptionSupported` in
+  `/api/instances`. Garage (`501`) and the GCS backend hide the default of the bucket.
+- Garage v2.4.1 accepts the header and does not encrypt. The server writes a warning at start for a Garage bucket with
+  `encryption = "sse-s3"`.
+
 ### Uploads and deletes
 
 - An S3 upload can carry a SHA-256 checksum. The browser computes the digest of each chunk. The provider refuses a part

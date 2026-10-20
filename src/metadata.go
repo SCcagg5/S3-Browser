@@ -244,9 +244,8 @@ func storedMetadata(header http.Header) (objectHeaders, []metadataEntry) {
 // keptObjectHeaders gives the headers of the source that the copy must send again, or the provider changes them:
 // the storage class, the redirect of a website and the server-side encryption with a key of the provider.
 func keptObjectHeaders(header http.Header) http.Header {
-	out := make(http.Header)
-	for _, name := range []string{"x-amz-storage-class", "x-amz-website-redirect-location", "x-amz-server-side-encryption",
-		"x-amz-server-side-encryption-aws-kms-key-id", "x-amz-server-side-encryption-bucket-key-enabled"} {
+	out := keptEncryptionHeaders(header)
+	for _, name := range []string{"x-amz-storage-class", "x-amz-website-redirect-location"} {
 		if value := strings.TrimSpace(header.Get(name)); value != "" {
 			out.Set(name, value)
 		}
@@ -282,6 +281,7 @@ func (s *s3Backend) ReplaceObjectMetadata(ctx context.Context, key, version, eta
 	request.Set("x-amz-metadata-directive", "REPLACE")
 	request.Set("x-amz-tagging-directive", "COPY")
 	request.Set("x-amz-copy-source-if-match", `"`+etag+`"`)
+	s.applyWriteEncryption(request)
 	resp, err := s.do(ctx, http.MethodPut, key, nil, nil, 0, request)
 	if err != nil {
 		return err

@@ -337,6 +337,7 @@ func (s *s3Backend) put(ctx context.Context, key string, body io.Reader, size in
 	}
 	setChecksumRequest(ctx, headers)
 	setUploadTagsRequest(ctx, headers)
+	s.applyWriteEncryption(headers)
 	resp, err := s.do(ctx, http.MethodPut, key, nil, body, size, headers)
 	if err != nil {
 		return err
@@ -373,8 +374,14 @@ func (s *s3Backend) InitiateMultipart(ctx context.Context, key, contentType stri
 	return s.initiateMultipart(ctx, key, headers)
 }
 
-// initiateMultipart sends CreateMultipartUpload with the headers of the new object and gives the upload id.
+// initiateMultipart sends CreateMultipartUpload with the headers of the new object and gives the upload id. The
+// encryption of the bucket configuration applies to the new object.
 func (s *s3Backend) initiateMultipart(ctx context.Context, key string, headers http.Header) (string, error) {
+	headers = headers.Clone()
+	if headers == nil {
+		headers = make(http.Header)
+	}
+	s.applyWriteEncryption(headers)
 	query := url.Values{}
 	query.Set("uploads", "")
 	resp, err := s.do(ctx, http.MethodPost, key, query, nil, 0, headers)
@@ -665,8 +672,18 @@ func (s *s3Backend) DeleteObjectVersion(ctx context.Context, key, version string
 }
 
 func (s *s3Backend) RestoreObjectVersion(ctx context.Context, key, version string) error {
-	headers := make(http.Header)
+	return s.RestoreObjectVersionWithHeaders(ctx, key, version, nil)
+}
+
+// RestoreObjectVersionWithHeaders copies the version onto its key with the extra headers, for example the encryption of
+// the version.
+func (s *s3Backend) RestoreObjectVersionWithHeaders(ctx context.Context, key, version string, extra http.Header) error {
+	headers := extra.Clone()
+	if headers == nil {
+		headers = make(http.Header)
+	}
 	headers.Set("x-amz-copy-source", s.copySourceHeader(key, version))
+	s.applyWriteEncryption(headers)
 	resp, err := s.do(ctx, http.MethodPut, key, nil, nil, 0, headers)
 	if err != nil {
 		return err
@@ -693,6 +710,7 @@ func (s *s3Backend) RestoreObjectVersion(ctx context.Context, key, version strin
 func (s *s3Backend) Copy(ctx context.Context, sourceKey, destinationKey string) error {
 	headers := make(http.Header)
 	headers.Set("x-amz-copy-source", s.copySourceHeader(sourceKey, ""))
+	s.applyWriteEncryption(headers)
 	resp, err := s.do(ctx, http.MethodPut, destinationKey, nil, nil, 0, headers)
 	if err != nil {
 		return err

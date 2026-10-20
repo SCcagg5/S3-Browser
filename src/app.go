@@ -140,6 +140,11 @@ func (a *application) probeVersioningSupport() {
 			defer wg.Done()
 			instance.probeObjectLock(ctx)
 		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			instance.probeBucketEncryption(ctx)
+		}()
 	}
 	wg.Wait()
 }
@@ -182,6 +187,7 @@ func (a *application) routes() http.Handler {
 	mux.HandleFunc("/api/tags/bulk", a.handleTagsBulk)
 	mux.HandleFunc("/api/metadata", a.handleMetadata)
 	mux.HandleFunc("/api/lifecycle", a.handleLifecycle)
+	mux.HandleFunc("/api/encryption", a.handleEncryption)
 	mux.HandleFunc("/api/object-lock", a.handleObjectLock)
 	mux.HandleFunc("/api/multiparts", a.handleMultiparts)
 	mux.HandleFunc("/api/multiparts/abort", a.handleMultipartAbort)
@@ -1511,6 +1517,9 @@ func copyObjectHeaders(destination, source http.Header) {
 		"x-amz-version-id":    true,
 		"x-goog-generation":   true,
 		"x-goog-hash":         true,
+	}
+	for _, name := range encryptionResponseHeaders {
+		allowed[name] = true
 	}
 	for name, values := range source {
 		lower := strings.ToLower(name)

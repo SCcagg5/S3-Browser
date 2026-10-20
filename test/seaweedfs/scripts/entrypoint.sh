@@ -3,9 +3,10 @@ set -eu
 
 # One SeaweedFS process for the tests: master, volume, filer and S3 API. The identity comes from the HCL file of the
 # browser, as for the browser itself. The script creates the buckets, and then writes the ready file. The buckets of
-# LOCKED_BUCKETS have Object Lock (and so versioning): a bucket gets Object Lock only at its creation.
+# LOCKED_BUCKETS have Object Lock (and so versioning): a bucket gets Object Lock only at its creation. The bucket
+# "encrypted" is for the instance with encryption = "sse-s3".
 CONFIG_FILE="/config/config.hcl"
-BUCKETS="default archive"
+BUCKETS="default archive encrypted"
 LOCKED_BUCKETS="locked"
 READY_FILE="/tmp/ready"
 
@@ -45,6 +46,10 @@ cat > /etc/seaweedfs/s3.json <<EOF_IDENTITY
 }
 EOF_IDENTITY
 
+# SeaweedFS encrypts with SSE-S3 only with a key encryption key (KEK). Without it, it answers 500 to
+# x-amz-server-side-encryption. The test KEK is a new random key at each start, in the environment of the process only.
+WEED_S3_SSE_KEK="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+export WEED_S3_SSE_KEK
 weed server -dir=/data -ip=127.0.0.1 -ip.bind=0.0.0.0 -master.volumeSizeLimitMB=64 -volume.max=30 \
   -filer -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json >/tmp/seaweedfs.log 2>&1 &
 SERVER_PID=$!

@@ -14,4 +14,13 @@ const LOCKED = {
   'minio-locked': { name: 'MinIO', host: 'minio:9000', region: 'us-east-1', bucket: 'locked', provider: 'minio-main' },
 };
 
-module.exports = { PROVIDERS, LOCKED };
+// The buckets "encrypted" of SeaweedFS and MinIO. Both encrypt with SSE-S3 (a test key in the stack), and the
+// instances have encryption = "sse-s3". The seed enables versioning on them. The instance "garage-encrypted" has no
+// entry: it uses the bucket "default" of Garage, and Garage does not encrypt. The tests of the encryption use it with
+// the entry of garage-main.
+const ENCRYPTED = {
+  'seaweedfs-encrypted': { name: 'SeaweedFS', host: 'seaweedfs:8333', region: 'us-east-1', bucket: 'encrypted', provider: 'seaweedfs-main' },
+  'minio-encrypted': { name: 'MinIO', host: 'minio:9000', region: 'us-east-1', bucket: 'encrypted', provider: 'minio-main' },
+};
+
+module.exports = { PROVIDERS, LOCKED, ENCRYPTED };

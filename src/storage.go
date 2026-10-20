@@ -305,6 +305,9 @@ type storageInstance struct {
 	// objectLock is the state of Object Lock: set when the probe found a bucket with Object Lock.
 	objectLock objectLockCapability
 
+	// encryption is the state of the default encryption of the bucket: set when the probe could read it.
+	encryption encryptionCapability
+
 	// batchDeleteOff is set when the provider refused the batch delete once: later deletes go one by one.
 	batchDeleteOff atomic.Bool
 }
@@ -517,6 +520,7 @@ func (s *storageInstance) publicInfo() instanceInfo {
 		MultipartUploads:    s.multipartUploadsAvailable(),
 		Lifecycle:           s.lifecycleAvailable(),
 		ObjectLock:          s.objectLockAvailable(),
+		BucketEncryption:    s.bucketEncryptionAvailable(),
 		Capabilities:        s.capabilities(),
 		Operations:          s.operationCapabilities(),
 	}
@@ -536,6 +540,7 @@ type instanceInfo struct {
 	MultipartUploads    bool                       `json:"multipartUploadsSupported"`
 	Lifecycle           bool                       `json:"lifecycleSupported"`
 	ObjectLock          bool                       `json:"objectLockSupported"`
+	BucketEncryption    bool                       `json:"bucketEncryptionSupported"`
 	Capabilities        capabilities               `json:"capabilities"`
 	Operations          map[string]capabilityState `json:"operations"`
 }

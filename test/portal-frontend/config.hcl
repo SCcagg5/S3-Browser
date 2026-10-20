@@ -46,6 +46,17 @@ bucket "seaweedfs-locked" {
   max_scan_pages = 15
 }
 
+# encryption = "sse-s3": each write of S3-Browser asks for SSE-S3. SeaweedFS encrypts with its test KEK
+# (test/seaweedfs/scripts/entrypoint.sh). The tests of the encryption use it.
+bucket "seaweedfs-encrypted" {
+  name           = "SeaweedFS - encrypted"
+  auth           = "seaweedfs"
+  bucket         = "encrypted"
+  permissions    = ["read", "write", "delete"]
+  max_scan_pages = 15
+  encryption     = "sse-s3"
+}
+
 auth "minio" {
   provider               = "s3"
   mode                   = "access_key"
@@ -72,6 +83,16 @@ bucket "minio-locked" {
   max_scan_pages = 15
 }
 
+# encryption = "sse-s3": MinIO encrypts with its test KMS key (test/minio/scripts/entrypoint.sh).
+bucket "minio-encrypted" {
+  name           = "MinIO - encrypted"
+  auth           = "minio"
+  bucket         = "encrypted"
+  permissions    = ["read", "write", "delete"]
+  max_scan_pages = 15
+  encryption     = "sse-s3"
+}
+
 auth "garage" {
   provider               = "s3"
   mode                   = "access_key"
@@ -88,6 +109,17 @@ bucket "garage-main" {
   bucket         = "default"
   permissions    = ["read", "write", "delete"]
   max_scan_pages = 15
+}
+
+# The bucket "default" of Garage again, with encryption = "sse-s3". Garage v2.4.1 accepts the header and does not
+# encrypt: the server writes a warning at start, and the details show no encryption.
+bucket "garage-encrypted" {
+  name           = "Garage - encrypted"
+  auth           = "garage"
+  bucket         = "default"
+  permissions    = ["read", "write", "delete"]
+  max_scan_pages = 15
+  encryption     = "sse-s3"
 }
 
 # The test stack has no access gateway: the browser checks no identity.

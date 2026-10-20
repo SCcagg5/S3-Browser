@@ -39,6 +39,19 @@ type mediaInfoResponse struct {
 	Codecs          []string          `json:"codecs,omitempty"`
 	Tracks          []mediaTrackInfo  `json:"tracks,omitempty"`
 	Properties      map[string]string `json:"properties,omitempty"`
+	// CustomerKey is true for an object with a key of the client (SSE-C): the provider refused to read it.
+	CustomerKey bool `json:"customerKey,omitempty"`
+}
+
+// writeMediaInfoError writes the error of a read for the details. The refusal of an object with a key of the client
+// (SSE-C) is not an error for the details: the answer tells that the object has such a key.
+func writeMediaInfoError(w http.ResponseWriter, r *http.Request, instance *storageInstance, key string, err error) {
+	if response, ok := customerKeyMediaInfo(r.Context(), instance, key, err); ok {
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, http.StatusOK, response)
+		return
+	}
+	writeAPIError(w, err)
 }
 
 func (a *application) handleMediaInfo(w http.ResponseWriter, r *http.Request) {
@@ -72,7 +85,7 @@ func (a *application) handleMediaInfo(w http.ResponseWriter, r *http.Request) {
 	response := mediaInfoResponse{Instance: instance.cfg.ID, Key: key}
 	if documentResponse, handled, documentErr := inspectDocumentDetails(r.Context(), instance, key, extension, contentTypeHint, listedMetadata); handled {
 		if documentErr != nil {
-			writeAPIError(w, documentErr)
+			writeMediaInfoError(w, r, instance, key, documentErr)
 			return
 		}
 		w.Header().Set("Cache-Control", "no-store")
@@ -82,7 +95,7 @@ func (a *application) handleMediaInfo(w http.ResponseWriter, r *http.Request) {
 	if !extensionMayContainInspectableMetadata(extension) && !contentTypeMayContainInspectableMetadata(contentTypeHint) {
 		head, headErr := instance.Head(r.Context(), instance.fullKey(key))
 		if headErr != nil {
-			writeAPIError(w, headErr)
+			writeMediaInfoError(w, r, instance, key, headErr)
 			return
 		}
 		if head.Body != nil {
@@ -96,7 +109,7 @@ func (a *application) handleMediaInfo(w http.ResponseWriter, r *http.Request) {
 
 	source, err := openObjectRangeSource(r.Context(), instance, key)
 	if err != nil {
-		writeAPIError(w, err)
+		writeMediaInfoError(w, r, instance, key, err)
 		return
 	}
 	// The format parser performs the first byte-range request. This keeps each
@@ -122,13 +135,13 @@ func (a *application) handleMediaInfo(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		writeAPIError(w, inspectErr)
+		writeMediaInfoError(w, r, instance, key, inspectErr)
 		return
 	}
 	if source.Headers() == nil {
 		head, headErr := instance.Head(r.Context(), instance.fullKey(key))
 		if headErr != nil {
-			writeAPIError(w, headErr)
+			writeMediaInfoError(w, r, instance, key, headErr)
 			return
 		}
 		if head.Body != nil {

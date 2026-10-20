@@ -3,14 +3,15 @@
 // 4 the access behaviour of 2.0.0, 5 one smoke test on each S3 provider (SeaweedFS, MinIO and Garage), 6 the copy in
 // parts on each provider, 7 the edit of the metadata on each provider, 8 the cleanup of the incomplete multipart
 // uploads on each provider, 9 the editor of the lifecycle rules on each provider, 10 Object Lock (retention and legal
-// hold) on the providers with a bucket with Object Lock.
+// hold) on the providers with a bucket with Object Lock, 11 encryption (SSE-S3 of the writes, and the display of SSE-S3,
+// SSE-KMS, SSE-C and the default encryption of the bucket).
 // run.sh starts S3-Browser and the three providers, puts the test objects (seed.js) and runs this file in the
 // Playwright container. The tests of parts 1 to 4 use SeaweedFS.
 // The tests change the answers of the server with page.route where a case needs it (403, 401, no answer, access).
 const { chromium } = require('playwright');
 const assert = require('assert/strict');
-const { PROVIDERS, LOCKED } = require('./providers');
-const { s3, readLifecycle, writeLifecycle, restoreLifecycle } = require('./s3');
+const { PROVIDERS, LOCKED, ENCRYPTED } = require('./providers');
+const { s3, s3Head, readLifecycle, writeLifecycle, restoreLifecycle } = require('./s3');
 const BASE = process.env.BASE;
 const MAIN = '-/seaweedfs/seaweedfs-main/';
 const ONLY = process.env.ONLY || '';
@@ -1417,9 +1418,9 @@ test('selector: the bucket selector of the default interface, by host, with the 
   assert.equal(await trigger.getAttribute('aria-expanded'), 'true');
   // One host for each provider of the test stack; the host of the current bucket is open.
   assert.deepEqual(await page.locator('.storageHost__row').evaluateAll(rows => rows.map(row => row.dataset.host)), ['seaweedfs', 'minio', 'garage']);
-  assert.match(await page.textContent('.storageHost__row'), /seaweedfs\s*S3 · 3 buckets/);
+  assert.match(await page.textContent('.storageHost__row'), /seaweedfs\s*S3 · 4 buckets/);
   assert.equal(await page.getAttribute('.storageHost__row', 'aria-expanded'), 'true');
-  assert.deepEqual(await page.locator('.storageHost[data-host="seaweedfs"] .storageBucket strong').allInnerTexts(), ['SeaweedFS - primary', 'SeaweedFS - archive', 'SeaweedFS - locked']);
+  assert.deepEqual(await page.locator('.storageHost[data-host="seaweedfs"] .storageBucket strong').allInnerTexts(), ['SeaweedFS - primary', 'SeaweedFS - archive', 'SeaweedFS - locked', 'SeaweedFS - encrypted']);
   assert.equal(await page.getAttribute('.storageBucket[data-instance="seaweedfs-main"]', 'aria-selected'), 'true');
   assert.equal(await page.locator('.storageBucket[data-instance="seaweedfs-main"] .storageBucket__check').count(), 1);
   const columns = await page.evaluate(() => {
@@ -2773,6 +2774,385 @@ test('object lock: the Retention section is hidden on Garage and on a bucket wit
     assert.equal(response.status(), 501, instance);
     assert.equal((await response.json()).error.code, 'object_lock_unsupported');
   }
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+// ------------------------------------------------------------------------------------------------------------------
+// 11. Encryption: the key encryption = "sse-s3" of a bucket, and the section "Encryption" of the details. The buckets
+// "encrypted" of SeaweedFS and MinIO really encrypt (a test key in the stack). The instance garage-encrypted has the
+// bucket "default" of Garage: Garage accepts the header and does not encrypt. The tests of the writes make their
+// source objects with s3(), without the header, and so they show that the server adds it. Each test makes its own
+// objects with a unique key in the folder enc/ and deletes them.
+// ------------------------------------------------------------------------------------------------------------------
+
+const ENCRYPTION_XML = '<ServerSideEncryptionConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>';
+const encryptionText = (page, field) => page.textContent(`[data-encryption-section] [data-encryption-field="${field}"]`).then(text => text.trim());
+const encryptionStamp = () => `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+
+// The path of an object for s3(), with its bucket, and the HEAD headers on the provider.
+const encryptedPath = (instance, key) => `/${ENCRYPTED[instance].bucket}/${key}`;
+const headEncrypted = (instance, key) => s3Head(instance, encryptedPath(instance, key));
+
+// Waits until the HEAD of an object gives the header of SSE-S3 (a job of the page ends a short time before the listing).
+async function assertSSE(instance, key, algorithm = 'AES256') {
+  const headers = await headEncrypted(instance, key);
+  assert.equal(headers['x-amz-server-side-encryption'], algorithm, `${key}: ${JSON.stringify(headers)}`);
+  return headers;
+}
+
+// Waits for the section Encryption of the details with its row "object".
+async function openEncryptionDetails(page, name) {
+  await openDetails(page, name);
+  await page.waitForSelector('[data-encryption-section] [data-encryption-field="object"]');
+}
+
+// Waits for the details of a file whose provider reports no encryption: the page removes the section.
+async function openDetailsWithoutEncryption(page, name) {
+  await openDetails(page, name);
+  await page.waitForSelector('[data-details-tool-card="integrity"]');
+  await until(page, () => !document.querySelector('[data-encryption-section]'));
+}
+
+// An upload through the page: the input, then the end of the queue and the new row.
+async function uploadWithPage(page, name, buffer, timeout = 60000) {
+  await page.setInputFiles('#fileInput', [{ name, mimeType: 'application/octet-stream', buffer }]);
+  await page.waitForSelector('.uploadDock[data-state="done"]', { timeout });
+  await page.click('.uploadDock .button >> text=Close');
+  await page.waitForSelector(`tr[data-name="${name}"]`);
+}
+
+// A write through the server (PUT /s3): it adds the header of the encryption of the instance.
+async function putWithServer(page, instance, key, body, headers = { 'Content-Type': 'text/plain' }) {
+  const response = await page.request.put(`${BASE}s3?instance=${instance}&key=${encodeURIComponent(key)}`, { data: Buffer.from(body), headers });
+  assert.equal(response.ok(), true, `${response.status()} ${await response.text()}`);
+}
+
+// A write on the provider with no encryption header: the source of the tests of the copy, the edit and the restore.
+async function putPlain(instance, key, body, extra = {}) {
+  await s3(instance, 'PUT', encryptedPath(instance, key), '', Buffer.from(body), { 'content-type': 'text/plain', ...extra });
+  assert.equal((await headEncrypted(instance, key))['x-amz-server-side-encryption'], undefined, `${key} has no encryption`);
+}
+
+async function deleteEncrypted(page, instance, ...keys) {
+  for (const key of keys) await page.request.delete(`${BASE}s3?instance=${instance}&key=${encodeURIComponent(key)}`);
+}
+
+// Waits until the object exists on the provider (the job of a move has no row to wait for in the folder of the page).
+async function waitForHead(instance, key, timeout = 30000) {
+  const end = Date.now() + timeout;
+  for (;;) {
+    try {
+      return await headEncrypted(instance, key);
+    } catch (error) {
+      if (Date.now() > end) throw error;
+      await sleep(300);
+    }
+  }
+}
+
+for (const [instance, provider] of Object.entries(ENCRYPTED)) {
+  test(`encryption: ${provider.name} encrypts an upload of the page, and the details say SSE-S3; a plain object has no section`, async () => {
+    const page = await newPage();
+    const info = await lockedHostOf(page, instance);
+    assert.equal(info.bucketEncryptionSupported, true);
+    const answer = await (await page.request.get(`${BASE}api/encryption?instance=${instance}`)).json();
+    assert.equal(answer.uploads, 'sse-s3');
+    assert.equal(answer.bucketDefault, null);
+    const stamp = encryptionStamp();
+    const key = `enc/upload-${stamp}.txt`;
+    const plain = `enc/plain-${stamp}.txt`;
+    await putPlain(instance, plain, 'plain on the provider\n');
+    await open(page, `-/${info.host}/${instance}/enc/`);
+    await uploadWithPage(page, `upload-${stamp}.txt`, Buffer.from('uploaded by the page\n'));
+    const head = await assertSSE(instance, key);
+    assert.equal(head['x-amz-server-side-encryption-aws-kms-key-id'], undefined);
+    await openEncryptionDetails(page, `upload-${stamp}.txt`);
+    assert.equal(await page.textContent('[data-encryption-section] .bb-details-section-title'), ' Encryption');
+    assert.equal(await encryptionText(page, 'object'), 'SSE-S3 (AES256)');
+    // The bucket has no default encryption: the page shows no row for it, and no row of a key.
+    assert.equal(await page.locator('[data-encryption-field="default"], [data-encryption-field="kmsKey"], [data-encryption-note]').count(), 0);
+    assert.equal(await page.locator('.bb-details--file [data-details-tool-card="integrity"]').count(), 1);
+    await closeWindow(page);
+    // The provider does not encrypt this object: the section is removed.
+    await openDetailsWithoutEncryption(page, `plain-${stamp}.txt`);
+    assert.deepEqual(page.errors, []);
+    await deleteEncrypted(page, instance, key, plain);
+    await page.context().close();
+  });
+
+  test(`encryption: ${provider.name} encrypts the copy, the rename and the move of an object that has no encryption`, async () => {
+    const page = await newPage();
+    const info = await lockedHostOf(page, instance);
+    const stamp = encryptionStamp();
+    const key = `enc/source-${stamp}.txt`;
+    const names = { copy: `copy-${stamp}.txt`, rename: `renamed-${stamp}.txt` };
+    const moved = `enc/moved/moved-${stamp}.txt`;
+    await putPlain(instance, key, 'a small object\n');
+    await open(page, `-/${info.host}/${instance}/enc/`);
+    await rowActionWithName(page, `source-${stamp}.txt`, 'Copy', names.copy);
+    await page.waitForSelector(`tr[data-name="${names.copy}"]`, { timeout: 60000 });
+    await assertSSE(instance, `enc/${names.copy}`);
+    // The source stays as it was.
+    assert.equal((await headEncrypted(instance, key))['x-amz-server-side-encryption'], undefined);
+    await rowActionWithName(page, names.copy, 'Rename', names.rename);
+    await page.waitForSelector(`tr[data-name="${names.rename}"]`, { timeout: 60000 });
+    await page.waitForSelector(`tr[data-name="${names.copy}"]`, { state: 'detached' });
+    await assertSSE(instance, `enc/${names.rename}`);
+    await openEncryptionDetails(page, names.rename);
+    assert.equal(await encryptionText(page, 'object'), 'SSE-S3 (AES256)');
+    await closeWindow(page);
+    // A move into another folder: the same request as the rename of a path.
+    const response = await page.request.post(`${BASE}api/rename`, { data: { instance, src: key, dst: moved, isPrefix: false } });
+    assert.equal(response.status() < 300, true, await response.text());
+    await waitForHead(instance, moved);
+    await assertSSE(instance, moved);
+    assert.deepEqual(page.errors, []);
+    await deleteEncrypted(page, instance, names.rename, moved);
+    await page.context().close();
+  });
+
+  test(`encryption: ${provider.name} encrypts the copy in parts and the rename of a large object`, async () => {
+    const page = await newPage();
+    const info = await lockedHostOf(page, instance);
+    const stamp = encryptionStamp();
+    const key = `enc/large-${stamp}.bin`;
+    const copy = `copy-large-${stamp}.bin`;
+    const renamed = `renamed-large-${stamp}.bin`;
+    // 20000 bytes are above the threshold of the test image (8192): the copy goes in parts (CreateMultipartUpload).
+    await putPlain(instance, key, 'L'.repeat(20000));
+    await open(page, `-/${info.host}/${instance}/enc/`);
+    await rowActionWithName(page, `large-${stamp}.bin`, 'Copy', copy);
+    await page.waitForSelector(`tr[data-name="${copy}"]`, { timeout: 60000 });
+    const head = await assertSSE(instance, `enc/${copy}`);
+    // An object that has the ETag of a multipart object came from a copy in parts.
+    assert.match(head.etag, /-1"?$/);
+    assert.equal((await getObject(page, instance, `enc/${copy}`)).body.toString(), 'L'.repeat(20000));
+    await rowActionWithName(page, copy, 'Rename', renamed);
+    await page.waitForSelector(`tr[data-name="${renamed}"]`, { timeout: 60000 });
+    await page.waitForSelector(`tr[data-name="${copy}"]`, { state: 'detached' });
+    assert.match((await assertSSE(instance, `enc/${renamed}`)).etag, /-1"?$/);
+    await openEncryptionDetails(page, renamed);
+    assert.equal(await encryptionText(page, 'object'), 'SSE-S3 (AES256)');
+    assert.deepEqual(page.errors, []);
+    await deleteEncrypted(page, instance, key, `enc/${renamed}`);
+    await page.context().close();
+  });
+
+  test(`encryption: ${provider.name} encrypts the edit of the metadata, of a small and of a large object`, async () => {
+    const page = await newPage();
+    const info = await lockedHostOf(page, instance);
+    const stamp = encryptionStamp();
+    const keys = [`enc/meta-small-${stamp}.txt`, `enc/meta-large-${stamp}.bin`];
+    await putPlain(instance, keys[0], 'a small object\n', { 'x-amz-meta-owner': 'ada' });
+    await putPlain(instance, keys[1], 'M'.repeat(20000), { 'x-amz-meta-owner': 'ada' });
+    await open(page, `-/${info.host}/${instance}/enc/`);
+    for (const key of keys) {
+      const name = key.split('/').pop();
+      await openMetadataForm(page, name);
+      await page.fill('[data-metadata-value="owner"]', 'grace');
+      await saveMetadata(page, 'grace');
+      await assertSSE(instance, key);
+      assert.equal((await apiMetadata(page, instance, key)).metadata[0].value, 'grace');
+      // The details open again on the new version: they say SSE-S3.
+      await page.waitForSelector('[data-encryption-section] [data-encryption-field="object"]');
+      assert.equal(await encryptionText(page, 'object'), 'SSE-S3 (AES256)');
+      await closeWindow(page);
+    }
+    // The large object went in parts.
+    assert.match((await headEncrypted(instance, keys[1])).etag, /-1"?$/);
+    assert.deepEqual(page.errors, []);
+    await deleteEncrypted(page, instance, ...keys);
+    await page.context().close();
+  });
+
+  test(`encryption: ${provider.name} encrypts the restore of an older version that has no encryption`, async () => {
+    const page = await newPage();
+    const info = await lockedHostOf(page, instance);
+    const stamp = encryptionStamp();
+    const key = `enc/restore-${stamp}.txt`;
+    await putPlain(instance, key, 'version 1, no encryption\n');
+    await sleep(1100);
+    await putWithServer(page, instance, key, 'version 2, from the page\n');
+    await assertSSE(instance, key);
+    const versions = await apiVersions(page, instance, key);
+    const older = versions.find(version => !version.isCurrent && !version.deleteMarker);
+    assert.ok(older, JSON.stringify(versions));
+    const response = await page.request.post(`${BASE}api/versions/restore`, { data: { instance, key, version: older.version } });
+    assert.equal(response.status(), 200, await response.text());
+    await assertSSE(instance, key);
+    assert.equal((await getObject(page, instance, key)).body.toString(), 'version 1, no encryption\n');
+    assert.equal((await apiVersions(page, instance, key)).filter(version => !version.deleteMarker).length, 3);
+    await open(page, `-/${info.host}/${instance}/enc/`);
+    await openEncryptionDetails(page, key.split('/').pop());
+    assert.equal(await encryptionText(page, 'object'), 'SSE-S3 (AES256)');
+    assert.deepEqual(page.errors, []);
+    await deleteEncrypted(page, instance, key);
+    await page.context().close();
+  });
+
+  test(`encryption: ${provider.name} encrypts a multipart upload of the page`, async () => {
+    const page = await newPage();
+    const info = await lockedHostOf(page, instance);
+    const stamp = encryptionStamp();
+    const name = `parts-${stamp}.bin`;
+    await open(page, `-/${info.host}/${instance}/enc/`);
+    const requests = [];
+    page.on('request', request => { if (request.method() === 'PUT' && request.url().includes('/api/uploads')) requests.push(request.url()); });
+    // 33 MiB are above the threshold of the resumable upload of the page (32 MiB).
+    await uploadWithPage(page, name, Buffer.alloc(33 * 1024 * 1024, 5), 120000);
+    assert.ok(requests.length >= 2, `chunks: ${requests.length}`);
+    const head = await assertSSE(instance, `enc/${name}`);
+    assert.match(head.etag, /-\d+"?$/);
+    await openEncryptionDetails(page, name);
+    assert.equal(await encryptionText(page, 'object'), 'SSE-S3 (AES256)');
+    assert.deepEqual(page.errors, []);
+    await deleteEncrypted(page, instance, `enc/${name}`);
+    await page.context().close();
+  });
+}
+
+test('encryption: MinIO keeps the SSE-KMS of the source in the edit of the metadata and in the restore', async () => {
+  const page = await newPage();
+  const instance = 'minio-encrypted';
+  const info = await lockedHostOf(page, instance);
+  const key = `enc/kms-${encryptionStamp()}.txt`;
+  const kms = { 'x-amz-server-side-encryption': 'aws:kms' };
+  await s3(instance, 'PUT', encryptedPath(instance, key), '', Buffer.from('kms version 1\n'), { 'content-type': 'text/plain', 'x-amz-meta-rev': '1', ...kms });
+  await sleep(1100);
+  await s3(instance, 'PUT', encryptedPath(instance, key), '', Buffer.from('kms version 2\n'), { 'content-type': 'text/plain', 'x-amz-meta-rev': '2', ...kms });
+  assert.equal((await headEncrypted(instance, key))['x-amz-server-side-encryption'], 'aws:kms');
+  await open(page, `-/${info.host}/${instance}/enc/`);
+  const name = key.split('/').pop();
+  await openMetadataForm(page, name);
+  await page.fill('[data-metadata-value="rev"]', '2-edited');
+  await saveMetadata(page, '2-edited');
+  // The source says aws:kms and the instance asks for AES256: the edit keeps the encryption of the source.
+  const edited = await assertSSE(instance, key, 'aws:kms');
+  assert.match(edited['x-amz-server-side-encryption-aws-kms-key-id'], /s3-browser-test/);
+  await page.waitForSelector('[data-encryption-section] [data-encryption-field="kmsKey"]');
+  assert.equal(await encryptionText(page, 'object'), 'SSE-KMS (aws:kms)');
+  await closeWindow(page);
+  const older = (await apiVersions(page, instance, key)).find(version => !version.isCurrent && !version.deleteMarker);
+  const response = await page.request.post(`${BASE}api/versions/restore`, { data: { instance, key, version: older.version } });
+  assert.equal(response.status(), 200, await response.text());
+  assert.equal((await assertSSE(instance, key, 'aws:kms'))['x-amz-server-side-encryption-aws-kms-key-id'], edited['x-amz-server-side-encryption-aws-kms-key-id']);
+  assert.deepEqual(page.errors, []);
+  await deleteEncrypted(page, instance, key);
+  await page.context().close();
+});
+
+test('encryption: an upload to an instance without encryption gives no encryption section', async () => {
+  const page = await newPage();
+  const info = await lockedHostOf(page, 'seaweedfs-main');
+  const name = `plain-${encryptionStamp()}.txt`;
+  await open(page, `-/${info.host}/seaweedfs-main/enc/`);
+  await uploadWithPage(page, name, Buffer.from('uploaded to the bucket without encryption\n'));
+  assert.equal((await s3Head('seaweedfs-main', `/default/enc/${name}`))['x-amz-server-side-encryption'], undefined);
+  await openDetailsWithoutEncryption(page, name);
+  assert.deepEqual(page.errors, []);
+  await deleteEncrypted(page, 'seaweedfs-main', `enc/${name}`);
+  await page.context().close();
+});
+
+for (const instance of ['seaweedfs-main', 'minio-main']) {
+  test(`encryption: ${PROVIDERS[instance].name} shows the default encryption of the bucket, and no row for an object that has none`, async () => {
+    const page = await newPage();
+    const info = await lockedHostOf(page, instance);
+    assert.equal(info.bucketEncryptionSupported, true);
+    const before = await (await page.request.get(`${BASE}api/encryption?instance=${instance}`)).json();
+    assert.equal(before.uploads, '');
+    assert.equal(before.bucketDefault, null);
+    await s3(instance, 'PUT', '/default', 'encryption=', Buffer.from(ENCRYPTION_XML));
+    try {
+      const answer = await (await page.request.get(`${BASE}api/encryption?instance=${instance}`)).json();
+      assert.equal(answer.bucketDefault.algorithm, 'AES256');
+      await open(page, `-/${info.host}/${instance}/smoke/`);
+      await openDetails(page, 'hello.txt');
+      await page.waitForSelector('[data-encryption-section] [data-encryption-field="default"]');
+      assert.equal(await encryptionText(page, 'default'), 'SSE-S3 (AES256)');
+      // The object was stored before the default: the provider reports no encryption for it.
+      assert.equal(await page.locator('[data-encryption-field="object"]').count(), 0);
+      assert.equal(await page.locator('[data-encryption-note]').count(), 0);
+      assert.deepEqual(page.errors, []);
+    } finally {
+      await s3(instance, 'DELETE', '/default', 'encryption=');
+    }
+    // The bucket ends as it started: no default, and so no section.
+    assert.equal((await (await page.request.get(`${BASE}api/encryption?instance=${instance}`)).json()).bucketDefault, null);
+    await page.reload({ waitUntil: 'networkidle' });
+    await open(page, `-/${info.host}/${instance}/smoke/`);
+    await openDetailsWithoutEncryption(page, 'hello.txt');
+    await page.context().close();
+  });
+}
+
+test('encryption: MinIO shows the SSE-KMS of an object with its KMS key', async () => {
+  const page = await newPage();
+  const info = await lockedHostOf(page, 'minio-main');
+  await open(page, `-/${info.host}/minio-main/enc/`);
+  await openEncryptionDetails(page, 'kms.txt');
+  assert.equal(await encryptionText(page, 'object'), 'SSE-KMS (aws:kms)');
+  assert.match(await encryptionText(page, 'kmsKey'), /^arn:aws:kms:s3-browser-test/);
+  assert.equal(await page.locator('[data-encryption-note]').count(), 0);
+  // The object has a normal HEAD answer, so the metadata section stays.
+  await page.waitForSelector('[data-metadata-section] .metaEditor__view');
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+for (const instance of ['seaweedfs-main', 'garage-main']) {
+  test(`encryption: ${PROVIDERS[instance].name} opens the details of an object with a key of the client (SSE-C), and never asks for the key`, async () => {
+    const page = await newPage();
+    const info = await lockedHostOf(page, instance);
+    // The provider refuses the HEAD with 400: the server answers 200 and says that the key is the key of the client.
+    const response = await page.request.get(`${BASE}api/media-info?instance=${instance}&key=${encodeURIComponent('enc/customer-key.txt')}`);
+    assert.equal(response.status(), 200, await response.text());
+    const media = await response.json();
+    assert.equal(media.customerKey, true);
+    assert.equal(media.size, 'An object with a key of the client.\n'.length);
+    assert.ok(!JSON.stringify(media).includes('customer-key-md5'), 'the answer has no hash of the key');
+    await open(page, `-/${info.host}/${instance}/enc/`);
+    await openDetails(page, 'customer-key.txt');
+    await page.waitForSelector('[data-encryption-section] [data-encryption-field="object"]');
+    assert.match(await encryptionText(page, 'object'), /^Key of the client/);
+    assert.match(await page.textContent('[data-encryption-note]'), /key of the client/);
+    // The size comes from the listing: the section "Storage object" has it.
+    const storage = await page.locator('.bb-details-section', { hasText: 'Storage object' }).innerText();
+    assert.match(storage.replace(/\s+/g, ' '), /Size 36 B/);
+    assert.equal(await page.locator('[data-metadata-section]').count(), 0);
+    // The page has no field for a key.
+    assert.equal(await page.locator('.bb-details--file input[type="password"], [data-encryption-section] input, [data-encryption-section] textarea').count(), 0);
+    assert.equal(await visibleText(page, 'customer-key-md5'), 0);
+    assert.deepEqual(page.errors, []);
+    await page.context().close();
+  });
+}
+
+test('encryption: Garage accepts an upload with encryption = "sse-s3" and shows no encryption; garage-main has no default row', async () => {
+  const page = await newPage();
+  const instances = (await (await page.request.get(`${BASE}api/instances`)).json()).instances;
+  const flags = Object.fromEntries(instances.map(item => [item.id, item.bucketEncryptionSupported]));
+  assert.deepEqual(flags, {
+    'seaweedfs-main': true, 'seaweedfs-archive': true, 'seaweedfs-locked': true, 'seaweedfs-encrypted': true,
+    'minio-main': true, 'minio-locked': true, 'minio-encrypted': true,
+    'garage-main': false, 'garage-encrypted': false,
+  });
+  for (const instance of ['garage-main', 'garage-encrypted']) {
+    const response = await page.request.get(`${BASE}api/encryption?instance=${instance}`);
+    assert.equal(response.status(), 501, instance);
+    assert.equal((await response.json()).error.code, 'bucket_encryption_unsupported');
+  }
+  const info = instances.find(item => item.id === 'garage-encrypted');
+  const name = `garage-${encryptionStamp()}.txt`;
+  await open(page, `-/${info.host}/garage-encrypted/enc/`);
+  await uploadWithPage(page, name, Buffer.from('uploaded to Garage\n'));
+  assert.equal((await getObject(page, 'garage-encrypted', `enc/${name}`)).body.toString(), 'uploaded to Garage\n');
+  // Garage does not encrypt: the HEAD says nothing, so the details have no section (and no default row).
+  assert.equal((await s3Head('garage-main', `/default/enc/${name}`))['x-amz-server-side-encryption'], undefined);
+  await openDetailsWithoutEncryption(page, name);
+  await closeWindow(page);
+  await deleteEncrypted(page, 'garage-encrypted', `enc/${name}`);
   assert.deepEqual(page.errors, []);
   await page.context().close();
 });

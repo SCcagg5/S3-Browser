@@ -3,9 +3,10 @@ set -eu
 
 # One MinIO server with one drive for the tests. The identity comes from the HCL file of the browser, as for the
 # browser itself. The script creates the buckets through the S3 API and then writes the ready file. The buckets of
-# LOCKED_BUCKETS have Object Lock (and so versioning): a bucket gets Object Lock only at its creation.
+# LOCKED_BUCKETS have Object Lock (and so versioning): a bucket gets Object Lock only at its creation. The bucket
+# "encrypted" is for the instance with encryption = "sse-s3".
 CONFIG_FILE="/config/config.hcl"
-BUCKETS="default"
+BUCKETS="default encrypted"
 LOCKED_BUCKETS="locked"
 READY_FILE="/tmp/ready"
 
@@ -33,7 +34,10 @@ fi
 
 rm -f "$READY_FILE"
 mkdir -p /data
-MINIO_ROOT_USER="$KEY_ID" MINIO_ROOT_PASSWORD="$KEY_SECRET" MINIO_BROWSER=off \
+# MinIO encrypts with SSE-S3 only with a KMS. The static key of MINIO_KMS_SECRET_KEY is enough for the tests: a new
+# random key at each start, never written to a file or to the log. The data of the stack does not outlive the container.
+KMS_KEY="s3-browser-test:$(head -c 32 /dev/urandom | base64)"
+MINIO_ROOT_USER="$KEY_ID" MINIO_ROOT_PASSWORD="$KEY_SECRET" MINIO_BROWSER=off MINIO_KMS_SECRET_KEY="$KMS_KEY" \
   minio server /data --address :9000 --quiet >/tmp/minio.log 2>&1 &
 SERVER_PID=$!
 trap 'kill "$SERVER_PID" 2>/dev/null || true; wait "$SERVER_PID" 2>/dev/null || true; exit 0' TERM INT

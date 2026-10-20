@@ -398,6 +398,12 @@
       return response.json();
     },
 
+    // The default encryption of the bucket (null when it has none) and the encryption of the uploads of the instance.
+    async encryption(instance = null) {
+      const response = await request(withInstance('/api/encryption', {}, instance));
+      return response.json();
+    },
+
     // The lock of one version: the retention, the legal hold and the default retention of the bucket. Without a version
     // the answer is for the current version, and it names that version.
     async objectLock(key, { version = '', instance = null } = {}) {

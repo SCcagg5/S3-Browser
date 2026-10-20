@@ -91,6 +91,7 @@ Syntax: `bucket "<id>" { ... }`. One or more blocks. One bucket that the browser
 | `permissions` | list of text | (none: no ceiling) | read, write, delete (lower case, each one time) | value | no | The operations that the server can do on this bucket. It is a ceiling: the provider and the access policy can refuse more. |
 | `root_prefix` | text | "" | "", or a prefix that ends with "/" and does not start with "/" | value | no | The part of the bucket that the browser shows. The keys are relative to it. |
 | `max_scan_pages` | integer | 1 | 0 to 1000000 | value | no | The 1000-entry provider pages that one listing combines. 0 = no limit. |
+| `encryption` | text | "" | "" or sse-s3, exact (lower case). SSE-C and SSE-KMS are not supported. Only for an s3 auth block | value | no | The server-side encryption that the server asks for each object that it writes: upload, copy, move, rename, metadata edit, restore of a version, extraction. sse-s3 sends x-amz-server-side-encryption: AES256. "" sends no encryption header: the default encryption of the bucket applies. |
 
 ## `access`
 

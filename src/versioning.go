@@ -48,6 +48,11 @@ type ObjectVersionStore interface {
 	RestoreObjectVersion(context.Context, string, string) error
 }
 
+// versionRestorerWithHeaders restores a version with extra headers of the copy, for example its encryption.
+type versionRestorerWithHeaders interface {
+	RestoreObjectVersionWithHeaders(context.Context, string, string, http.Header) error
+}
+
 type MultipartPartLister interface {
 	ListMultipartParts(context.Context, string, string) ([]multipartPart, error)
 }
@@ -167,13 +172,16 @@ func (s *storageInstance) RestoreVersion(ctx context.Context, key, version strin
 	if err != nil {
 		return err
 	}
-	// A version from multipartCopyThreshold up is too large for CopyObject: it goes in parts. When the HEAD fails, the
-	// plain restore below gives the error of the provider.
+	// A version from multipartCopyThreshold up is too large for CopyObject: it goes in parts. The copy sends the SSE-S3
+	// or SSE-KMS headers of the version, so the restored object keeps its encryption. When the HEAD fails, the plain
+	// restore below gives the error of the provider.
+	var kept http.Header
 	if _, inParts := s.backend.(ObjectMultipartCopier); inParts {
 		if response, headErr := s.HeadVersion(ctx, key, version); headErr == nil {
 			closeObjectResponse(response)
+			kept = keptEncryptionHeaders(response.Header)
 			if size, sizeErr := strconv.ParseInt(strings.TrimSpace(response.Header.Get("Content-Length")), 10, 64); sizeErr == nil && s.copiesInParts(size) {
-				return s.CopyMultipart(ctx, key, key, multipartCopyOptions{SourceVersion: version})
+				return s.CopyMultipart(ctx, key, key, multipartCopyOptions{SourceVersion: version, ExtraHeaders: kept})
 			}
 		}
 	}
@@ -182,7 +190,11 @@ func (s *storageInstance) RestoreVersion(ctx context.Context, key, version strin
 		return err
 	}
 	defer release()
-	err = store.RestoreObjectVersion(ctx, key, version)
+	if restorer, ok := store.(versionRestorerWithHeaders); ok && len(kept) > 0 {
+		err = restorer.RestoreObjectVersionWithHeaders(ctx, key, version, kept)
+	} else {
+		err = store.RestoreObjectVersion(ctx, key, version)
+	}
 	if err == nil {
 		s.observePermission(permissionRead, nil)
 		s.observePermission(permissionWrite, nil)

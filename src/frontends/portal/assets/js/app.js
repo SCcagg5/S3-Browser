@@ -18,7 +18,8 @@ const config = {
   metadataEditSupported: true,
   multipartUploadsSupported: true,
   lifecycleSupported: true,
-  objectLockSupported: false
+  objectLockSupported: false,
+  bucketEncryptionSupported: false
 };
 window.BB = window.BB || {};
 BB.cfg = config;
@@ -1059,6 +1060,8 @@ BB.cfg = config;
     config.lifecycleSupported = instance.lifecycleSupported !== false;
     // The server probes the Object Lock of the bucket at start: the details show the retention only for a bucket with it.
     config.objectLockSupported = instance.objectLockSupported === true;
+    // The server reads the default encryption of the bucket at start: the details show it only when the read worked.
+    config.bucketEncryptionSupported = instance.bucketEncryptionSupported === true;
     config.rootPrefix = instance.rootPrefix || '';
   }
 

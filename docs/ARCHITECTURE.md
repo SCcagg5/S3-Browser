@@ -404,6 +404,49 @@ When `objectLockSupported` is true, the details of a file have the section "Rete
 
 The form refuses an earlier date for an active Compliance retention, and says why, with no request. A change that needs the bypass of a Governance retention opens a confirmation first. It tells what the bypass does. A delete that a lock refuses shows the message of the server. A folder job with locked keys tells how many keys stay, and why.
 
+## Encryption
+
+The code is in `src/encryption.go`. S3-Browser shows the server-side encryption that the provider reports. It can also ask for SSE-S3 for each object that it writes. It does not support SSE-C or SSE-KMS for the writes. It never shows, asks for or keeps a key of the client.
+
+### Encryption of the writes
+
+The key `encryption` of a `bucket` block is `""` (the default) or `"sse-s3"`. Any other value stops the start, and the error says that SSE-C and SSE-KMS are not supported. A `gcs` bucket with `"sse-s3"` stops the start: the GCS API has no such header. Refer to [configuration-reference.md](configuration-reference.md).
+
+With `"sse-s3"`, the S3 backend adds `x-amz-server-side-encryption: AES256` to each request that makes an object:
+
+| Operation | Request with the header |
+| --- | --- |
+| Upload in one request, empty file, extraction of an archive | `PutObject` |
+| Upload in parts | `CreateMultipartUpload` |
+| Copy, move and rename | `CopyObject` |
+| Copy in parts (copy, move, rename, metadata edit, restore) | `CreateMultipartUpload` |
+| Metadata edit | `CopyObject` with `REPLACE` |
+| Restore of a version | `CopyObject` |
+
+`UploadPart`, `UploadPartCopy` and `CompleteMultipartUpload` do not send it: S3 takes the encryption of a multipart upload from its start. A request that already names an encryption keeps it. With `""`, the server sends no header, and the default encryption of the bucket applies.
+
+A copy without the header gets the default encryption of the destination bucket, not the encryption of the source. On SeaweedFS and MinIO, a copy of an SSE-S3 object without the header is not encrypted. Thus, with `"sse-s3"`, each copy sends the header. The metadata edit and the restore of a version replace an object with itself. They also send the SSE-S3 or SSE-KMS headers of their source (`x-amz-server-side-encryption`, the KMS key id and the S3 Bucket Key), with any value of the key. Thus an SSE-KMS object stays SSE-KMS after a metadata edit or a restore.
+
+The providers of the test stack give these results:
+
+| Provider | `x-amz-server-side-encryption: AES256` |
+| --- | --- |
+| SeaweedFS 4.41 | Encrypts when the S3 server has a key encryption key (`WEED_S3_SSE_KEK`, or `s3.sse.kek` in `security.toml`). Without it: `500 InternalError` |
+| MinIO RELEASE.2025-10-15T17-29-55Z | Encrypts when MinIO has a KMS (`MINIO_KMS_SECRET_KEY` or a KES server). Without it: `501 NotImplemented` |
+| Garage v2.4.1 | Accepts the header with `200` and does not encrypt |
+
+A provider that refuses the header refuses the write: no object is written without its encryption. Garage does not refuse. The probe at start finds the provider, and the server writes a warning for a Garage bucket with `"sse-s3"`.
+
+### Display
+
+`GET /api/media-info` gives these headers of the HEAD answer: `x-amz-server-side-encryption`, `x-amz-server-side-encryption-aws-kms-key-id`, `x-amz-server-side-encryption-bucket-key-enabled` and `x-amz-server-side-encryption-customer-algorithm`. The download gives them too. The MD5 of a key of the client does not go to the page.
+
+A provider refuses the HEAD request of an SSE-C object without its key, with `400` and no body. The server then reads one byte with `GET`, and the text of the refusal gives the reason. SeaweedFS says "Customer provided keys", Garage says "Object is encrypted", AWS S3 and MinIO say "Server Side Encryption". For such a refusal, `GET /api/media-info` answers `200` with `customerKey: true`, and the size, the ETag and the date of the listing. MinIO accepts SSE-C only over TLS.
+
+`GET /api/encryption?instance=` gives `uploads` (the value of the key) and `bucketDefault`. `bucketDefault` is `null`, or `algorithm` (`AES256`, `aws:kms` or `aws:kms:dsse`), `kmsKeyId` and `bucketKeyEnabled`, from `GetBucketEncryption`. At start, the server reads it for each instance with the read permission. An answer, or `404 ServerSideEncryptionConfigurationNotFoundError`, gives `bucketEncryptionSupported: true` in `/api/instances`. `501` (Garage), `405` and any other failure give `false`, and the route then answers `501 bucket_encryption_unsupported`. The route needs `objects.read` on the bucket.
+
+The details of a file have the section "Encryption" after "Storage object". It shows the encryption of the object: SSE-S3, SSE-KMS with its key, or "Key of the client, SSE-C". It also shows the default encryption of the bucket. For an SSE-C object, a note tells that the preview, the download and the copy need the key, and the details have no metadata section. The section stays hidden when the provider reports no encryption.
+
 ## Insights treemap normalization
 
 The statistics worker builds the semantic treemap on the backend after the complete Insights scan finishes. The backend:

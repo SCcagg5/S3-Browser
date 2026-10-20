@@ -141,6 +141,7 @@ bucket "archive" {
 | `root_prefix` | empty | Virtual root exposed by the application. |
 | `permissions` | omitted | Optional application ceiling containing `read`, `write`, and/or `delete`. |
 | `max_scan_pages` | `1` | Maximum 1,000-entry provider listing pages combined in navigation. `0` means no page-count limit. |
+| `encryption` | `""` | `""` sends no encryption header. `"sse-s3"` sends `x-amz-server-side-encryption: AES256` with each write of an object (upload, copy, move, rename, metadata edit, restore). SSE-C and SSE-KMS are not supported. Not for a `gcs` bucket. Refer to the section "Encryption" of [ARCHITECTURE.md](ARCHITECTURE.md). |
 
 `read` permits list, preview, details, inspection, version listing, and download. `write` permits upload, destination-side object creation, and the edit of the tags and the metadata of an object. `delete` permits deletion and the source side of move/rename. Provider policy and retention rules still apply.
 

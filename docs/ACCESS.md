@@ -214,6 +214,7 @@ top-level folder, else the bucket.
 | `PUT /api/metadata` | `objects.write` | The node of `key`. |
 | `GET /api/object-lock` | `objects.read` | The node of `key`. |
 | `PUT /api/object-lock` | `objects.write` | The node of `key`. The bypass of a Governance retention needs no other action. The credentials of the instance need the bypass permission of the provider (on AWS S3, `s3:BypassGovernanceRetention`). |
+| `GET /api/encryption` | `objects.read` | The bucket. |
 | `GET /api/multiparts` | `objects.read` | The node of `prefix`. The root of the bucket is the bucket. |
 | `POST /api/multiparts/abort` with `uploads` | `objects.write` | The node of each `key`. |
 | `POST /api/multiparts/abort` with `olderThanDays` | `objects.read` and `objects.write` | The node of `prefix`. The root of the bucket is the bucket. |

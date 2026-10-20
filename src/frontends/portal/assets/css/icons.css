@@ -133,6 +133,7 @@
 .mdi-search-web { --icon: url("../icons/tabler/world.svg"); }
 .mdi-shield-key-outline { --icon: url("../icons/tabler/shield-lock.svg"); }
 .mdi-shield-lock-outline { --icon: url("../icons/tabler/shield-lock.svg"); }
+.mdi-lock-outline { --icon: url("../icons/tabler/lock.svg"); }
 .mdi-source-commit { --icon: url("../icons/tabler/git-commit.svg"); }
 .mdi-spreadsheet { --icon: url("../icons/tabler/file-spreadsheet.svg"); }
 .mdi-subdirectory-arrow-right { --icon: url("../icons/tabler/corner-down-right.svg"); }

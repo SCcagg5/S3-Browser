@@ -36,9 +36,9 @@ The fixed credentials in `config.hcl` and `secrets/` belong only to the isolated
 
 | Provider | Image | Instance | Endpoint |
 | --- | --- | --- | --- |
-| SeaweedFS 4.41 | `seaweedfs/Dockerfile`: the release archive, with its SHA-256 checksum | `seaweedfs-main`, `seaweedfs-archive`, `seaweedfs-locked` | `http://seaweedfs:8333` |
-| MinIO RELEASE.2025-10-15T17-29-55Z | `minio/Dockerfile`: a build from the Git tag, with a check of its commit | `minio-main`, `minio-locked` | `http://minio:9000` |
-| Garage v2.4.1 | `garage/Dockerfile`: the binary of `dxflrs/garage:v2.4.1`, pinned by its digest | `garage-main` | `http://garage:3900` |
+| SeaweedFS 4.41 | `seaweedfs/Dockerfile`: the release archive, with its SHA-256 checksum | `seaweedfs-main`, `seaweedfs-archive`, `seaweedfs-locked`, `seaweedfs-encrypted` | `http://seaweedfs:8333` |
+| MinIO RELEASE.2025-10-15T17-29-55Z | `minio/Dockerfile`: a build from the Git tag, with a check of its commit | `minio-main`, `minio-locked`, `minio-encrypted` | `http://minio:9000` |
+| Garage v2.4.1 | `garage/Dockerfile`: the binary of `dxflrs/garage:v2.4.1`, pinned by its digest | `garage-main`, `garage-encrypted` | `http://garage:3900` |
 
 The MinIO project does not publish a server image or a server binary now, and its repository is archived. Thus `minio/Dockerfile` builds the last release from source. The build takes about one minute, one time. Docker keeps the image in its cache.
 
@@ -55,6 +55,10 @@ The seed also puts four incomplete multipart uploads in `mpu/` on each provider,
 The tests of the lifecycle editor write the rules of the bucket `default` through the S3 API of each provider first (`portal-frontend/s3.js`). At the end, each test writes the rule of the seed again on SeaweedFS and deletes the rules on MinIO and Garage: the tests of the tags read the rule of SeaweedFS. The test of each provider adds a rule through the window, with the confirmation of the deletion. It checks that the rule with a date stays byte for byte, and that the window offers only the fields that the provider keeps. A second test opens the window from the window "Incomplete uploads" with the rule that aborts the uploads, where the provider keeps it. Other tests check a change of the rules while the window is open, the changes of the provider after a save, a read-only editor, and the hidden item.
 
 The tests of Object Lock use the instances `seaweedfs-locked` and `minio-locked`. Each test makes its own object with a unique key. The first test makes two versions, because the page opens the window of the versions only for a file with two versions or more. It sets a legal hold on the current version through the details, and tries to delete this version in the window of the versions. It reads the message that names the lock, removes the hold and deletes the version. A second test extends a Governance retention, and shortens it with the confirmation of the bypass. A third test checks that the page and the server refuse to shorten a Compliance retention. The retentions end after a few seconds, and each test then deletes its version: a run leaves no locked version. `run.sh` also removes the volumes of the stack after each run. A last test checks that the section is hidden on `garage-main` and on the buckets without Object Lock. Refer to the section "Object Lock" of [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md).
+
+SeaweedFS and MinIO really encrypt with SSE-S3 in this stack. The entrypoint of SeaweedFS gives the S3 server a random key encryption key (`WEED_S3_SSE_KEK`, 32 bytes in hexadecimal). The entrypoint of MinIO gives it a random KMS key (`MINIO_KMS_SECRET_KEY`, `s3-browser-test:` and 32 bytes in base64). Each start makes new keys. They stay in the environment of the process: no file, no log, no output. The data of the stack does not outlive its containers. Both entrypoints also create the bucket `encrypted`. The instances `seaweedfs-encrypted` and `minio-encrypted` use it with `encryption = "sse-s3"`, and `portal-frontend/providers.js` lists them in `ENCRYPTED`. The instance `garage-encrypted` uses the bucket `default` of Garage with `encryption = "sse-s3"`. Two instances can use the same bucket. The seed enables the versioning of the buckets `encrypted`. It puts `enc/customer-key.txt` with a key of the client (SSE-C) on SeaweedFS and Garage, with a random key that only the seed process knows. It also puts `enc/kms.txt` with SSE-KMS on MinIO.
+
+The tests of the encryption upload a file through the page to each encrypted instance, in one request and in parts. They copy, rename, move, copy in parts, edit the metadata (also in parts) and restore an older version. Each source is not encrypted. After each operation, the HEAD request on the provider says `AES256`, and the details say "SSE-S3 (AES256)". On MinIO, a metadata edit and a restore keep `aws:kms` and its key. Other tests put a default encryption on the bucket `default` of SeaweedFS and MinIO, check the row "Bucket default", and remove it. They also check the details of the SSE-KMS and SSE-C objects. On Garage, an upload to `garage-encrypted` works, the object has no encryption, and the details show no encryption section. Refer to the section "Encryption" of [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md).
 
 The smoke test of each provider lists `smoke/`, uploads a file with its SHA-256 checksum, downloads it and deletes it. It checks the versions and the tags where the provider has them. Where the provider does not have them, it checks that the page hides them. `portal-frontend/providers.js` has the flags of each provider.
 
@@ -122,8 +126,16 @@ These facts come from S3 requests to the three providers of the portal test stac
 | PutObjectRetention with an empty `Retention` (removal) | 400 InvalidRequest, also with the bypass header | Yes with the bypass header for Governance. Without it: 400 InvalidRequest | - |
 | Delete of a version after the end of its Compliance retention | Yes | Yes | - |
 | PutObjectLegalHold, GetObjectRetention on a bucket with no lock | 400 InvalidRequest | 400 InvalidRequest, "Bucket is missing ObjectLockConfiguration" | 501 NotImplemented |
-| SSE-S3 (`x-amz-server-side-encryption: AES256`) in this stack | 500 InternalError, no object | 501 NotImplemented: no KMS in this stack | Dropped: no encryption header comes back |
-| GetBucketEncryption on `default` | 404 ServerSideEncryptionConfigurationNotFoundError | 404 ServerSideEncryptionConfigurationNotFoundError | 501 NotImplemented |
+| SSE-S3 (`x-amz-server-side-encryption: AES256`) on PutObject, CreateMultipartUpload and CopyObject | Yes, with a KEK (`WEED_S3_SSE_KEK`). Without it: 500 InternalError, no object | Yes, with a KMS (`MINIO_KMS_SECRET_KEY`). Without it: 501 NotImplemented | Dropped: the provider answers 200, does not encrypt, and gives no encryption header |
+| Encryption header in the answer of PutObject with SSE-S3 | `AES256` | `AES256` | None |
+| CopyObject of an SSE-S3 object without the header | The copy is not encrypted | The copy is not encrypted | - |
+| SSE-KMS (`aws:kms`) on PutObject | 500 InternalError | Yes, with the KMS key of MinIO (`arn:aws:kms:<name>`) | Not tested |
+| SSE-C on PutObject over HTTP | Yes | 400 InvalidRequest: SSE-C needs TLS | Yes |
+| HEAD of an SSE-C object without the key | 400 with no body. The answer has `x-amz-server-side-encryption-customer-algorithm` | - | 400 with no body |
+| GET of an SSE-C object without the key | 400 InvalidArgument, "...Customer provided keys must provide the customer key." | - | 400 InvalidRequest, "Bad request: Object is encrypted" |
+| ListObjectsV2 of an SSE-C object | Yes, with the size | - | Yes, with the size |
+| GetBucketEncryption on a bucket with no default | 404 ServerSideEncryptionConfigurationNotFoundError | 404 ServerSideEncryptionConfigurationNotFoundError | 501 NotImplemented |
+| PutBucketEncryption with AES256 | Yes. A later PutObject with no header gets AES256 | Yes (tested with Content-MD5). The effect on a PutObject is not tested | Not tested |
 
 Notes for the code:
 
@@ -137,4 +149,5 @@ Notes for the code:
 - On MinIO, list the multipart uploads with no prefix. Then S3-Browser filters the keys.
 - The lock refusal codes are different: 403 AccessDenied on SeaweedFS, 400 InvalidRequest on MinIO. The bypass header does not remove a legal hold or a Compliance retention. After such a refusal, read the lock of the version: the code alone does not tell a lock from a missing permission.
 - A delete with no `versionId` in a bucket with Object Lock writes a delete marker. Only the delete of a version can meet a lock.
-- SSE-S3 needs a key service. The MinIO of this stack has no `MINIO_KMS_SECRET_KEY`, and SeaweedFS has no encryption configuration.
+- SSE-S3 needs a key service: a KEK for SeaweedFS (`WEED_S3_SSE_KEK`, or `s3.sse.kek` in `security.toml`), a KMS for MinIO. Without it, the write fails. Garage accepts the header and does not encrypt: S3-Browser writes a warning at start for a Garage bucket with `encryption = "sse-s3"`.
+- A copy without `x-amz-server-side-encryption` loses the SSE-S3 of its source on SeaweedFS and MinIO. Send the header with each copy.
