@@ -356,9 +356,12 @@
     uploadListeners.forEach(listener => listener(uploadTags));
   }
 
+  // An instance without tags (Garage) would drop the tags of an upload without a word: the page sends none.
+  const instanceKeepsTags = () => BB.cfg?.tagsSupported !== false;
+
   // The header X-Amz-Tagging of a direct upload: the tags as a query string.
   function uploadTagsHeader() {
-    return uploadTags.length ? uploadTags.map(tag => `${encodeURIComponent(tag.key)}=${encodeURIComponent(tag.value)}`).join('&') : '';
+    return uploadTags.length && instanceKeepsTags() ? uploadTags.map(tag => `${encodeURIComponent(tag.key)}=${encodeURIComponent(tag.value)}`).join('&') : '';
   }
 
   // The text of the tags of the new uploads, from the settings. It returns an error text, or '' when the tags are saved.
@@ -386,6 +389,7 @@
     changeFolderTags,
     saveUploadTagsText,
     uploadTags: () => uploadTags.map(tag => ({ ...tag })),
+    uploadTagsToSend: () => (instanceKeepsTags() ? uploadTags.map(tag => ({ ...tag })) : []),
     uploadTagsText: () => uploadTags.map(formatTag).join(', '),
     uploadTagsHeader,
     onUploadTagsChange(listener) { uploadListeners.add(listener); return () => uploadListeners.delete(listener); }

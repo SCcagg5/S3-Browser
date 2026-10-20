@@ -550,3 +550,53 @@ func TestTagJobReadsTheVersionOfEachObjectOnce(t *testing.T) {
 		}
 	}
 }
+
+func TestProbeTagsMarksAnInstanceWithoutTagsAndRefusesTheTagsOfAnUpload(t *testing.T) {
+	app, memory := taggingTestApplication(t)
+	instance := app.instances["rw"]
+	instance.probeTags(context.Background())
+	if !instance.tagsAvailable() || !instance.publicInfo().TagsSupported {
+		t.Fatal("a provider that answers no such key keeps tags")
+	}
+	instance.backend = refusingTagger{memory}
+	instance.probeTags(context.Background())
+	if instance.tagsAvailable() || instance.publicInfo().TagsSupported {
+		t.Fatal("a provider that answers 501 has no tags")
+	}
+	body := []byte("tagged")
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPut, "/s3?instance=rw&key=tagged.txt", bytes.NewReader(body))
+	request.Header.Set("X-Amz-Tagging", "team=data")
+	app.routes().ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusNotImplemented || !strings.Contains(recorder.Body.String(), "object tags") {
+		t.Fatalf("direct upload with tags = %d %s", recorder.Code, recorder.Body.String())
+	}
+	created := doJSON(app, http.MethodPost, "/api/uploads", map[string]any{
+		"instance": "rw", "key": "multi.bin", "size": 6 << 20, "tags": []objectTag{{"team", "data"}},
+	})
+	if created.Code != http.StatusNotImplemented {
+		t.Fatalf("multipart upload with tags = %d %s", created.Code, created.Body.String())
+	}
+	// An upload with no tags still works.
+	plain := httptest.NewRecorder()
+	app.routes().ServeHTTP(plain, httptest.NewRequest(http.MethodPut, "/s3?instance=rw&key=plain.txt", bytes.NewReader(body)))
+	if plain.Code != http.StatusNoContent {
+		t.Fatalf("direct upload without tags = %d %s", plain.Code, plain.Body.String())
+	}
+}
+
+func TestProbeTagsKeepsTagsWhenTheProbeIsDenied(t *testing.T) {
+	app, memory := taggingTestApplication(t)
+	instance := app.instances["rw"]
+	instance.backend = deniedTagger{memory}
+	instance.probeTags(context.Background())
+	if !instance.tagsAvailable() {
+		t.Fatal("a denied probe does not prove that tags are missing")
+	}
+}
+
+type deniedTagger struct{ *taggingMemory }
+
+func (deniedTagger) GetObjectTagging(context.Context, string, string) ([]objectTag, error) {
+	return nil, &upstreamError{StatusCode: http.StatusForbidden, Code: "AccessDenied"}
+}

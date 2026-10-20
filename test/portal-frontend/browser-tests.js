@@ -714,6 +714,36 @@ test('tags: the uploads of the browser carry the tags that the person sets in th
   await page.context().close();
 });
 
+test('tags: an instance that keeps no tags gets no tag at upload, and the tag settings are hidden', async () => {
+  const page = await newPage();
+  // The server tells that the instance has no tags (as for Garage). The saved tags of the uploads are not sent.
+  await page.addInitScript(() => localStorage.setItem('portal.uploadTags', JSON.stringify([{ key: 'team', value: 'up' }])));
+  await page.route('**/api/instances*', async route => {
+    const response = await route.fetch();
+    const body = await response.json();
+    for (const instance of body.instances || []) instance.tagsSupported = false;
+    await route.fulfill({ response, json: body });
+  });
+  const sent = [];
+  page.on('request', request => {
+    if (request.method() === 'PUT' && request.url().includes('/s3?')) sent.push({ kind: 'put', tagging: request.headers()['x-amz-tagging'] || '' });
+    if (request.method() === 'POST' && request.url().includes('/api/uploads')) sent.push({ kind: 'create', tags: (JSON.parse(request.postData() || '{}').tags || []).length });
+  });
+  await open(page, `${MAIN}config/`);
+  await page.click('#settingsButton');
+  assert.equal(await page.locator('#uploadTagsSetting').isVisible(), false);
+  assert.equal(await page.locator('[data-column="tags"]').isVisible(), false);
+  await page.keyboard.press('Escape');
+  await page.setInputFiles('#fileInput', [{ name: 'notag.txt', mimeType: 'text/plain', buffer: Buffer.from('no tag') }, { name: 'notag-large.bin', mimeType: 'application/octet-stream', buffer: Buffer.alloc(33 * 1024 * 1024, 5) }]);
+  await page.waitForSelector('.uploadDock[data-state="done"]', { timeout: 120000 });
+  assert.ok(sent.length >= 2, JSON.stringify(sent));
+  for (const item of sent) assert.ok(item.kind === 'put' ? item.tagging === '' : item.tags === 0, JSON.stringify(item));
+  assert.deepEqual(await apiTags(page, 'config/notag.txt'), []);
+  await deletePrefix(page, 'seaweedfs-main', 'config/notag');
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
 // ------------------------------------------------------------------------------------------------------------------
 // 2d. Listing: columns, settings, icon buttons
 // ------------------------------------------------------------------------------------------------------------------

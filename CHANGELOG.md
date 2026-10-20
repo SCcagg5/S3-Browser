@@ -27,6 +27,9 @@ This document uses ASD-STE100 Simplified Technical English.
 - In a bucket with versioning, a tag request names the version of the object (a HEAD request finds it). This avoids a
   delay of more than 10 seconds of SeaweedFS for an object made before the versioning.
 - An upload can carry tags: the header `X-Amz-Tagging` of `PUT /s3` and the field `tags` of `POST /api/uploads`.
+- The server probes the tag requests of each instance at start and gives `tagsSupported` in `/api/instances`. An instance
+  without tags (Garage) hides the tag controls from the first load. The page sends no tag with an upload to it, and the
+  server answers `501` to an upload that carries tags, because Garage would drop them without a word.
 
 ### Interface `portal`
 
