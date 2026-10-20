@@ -209,7 +209,9 @@
   function mountVersionPicker() {
     const control = byId('previewVersionControl');
     if (!control) return;
-    if (previewVersions.length < 2 || !BB.versions || (currentCompare() && !currentArchiveEntry())) { control.hidden = true; return; }
+    if (previewVersions.length < 2 || !BB.versions) { control.hidden = true; return; }
+    // During a comparison the picker is the version To, and the comparison draws it.
+    if (currentCompare() && !currentArchiveEntry()) return;
     BB.versions.mountPicker(control, {
       versions: previewVersions,
       selected: currentVersion(),
@@ -247,7 +249,14 @@
     void render();
   }
 
+  // The comparison draws the picker To in the place of the picker of the preview: it goes before the preview draws its own.
+  function stopCompare() {
+    activeCompare?.destroy();
+    activeCompare = null;
+  }
+
   function leaveCompare() {
+    stopCompare();
     const url = new URL(location.href);
     url.searchParams.delete('compare');
     history.pushState(null, '', url.pathname + url.search);
@@ -256,10 +265,10 @@
     void render();
   }
 
-  // The two selects of the versions are in the bar above the preview, with a button that closes the comparison.
+  // The picker of the versions stays in its place and becomes the version To. The version From appears at its left, and the
+  // statistics of the change are between the two. A button closes the comparison.
   function showCompareBar(visible) {
-    byId('compareBar').hidden = !visible;
-    if (!visible) byId('compareBarHost').replaceChildren();
+    for (const id of ['compareFrom', 'compareStats', 'compareClose']) byId(id).hidden = !visible;
   }
 
   function renderCompare(key) {
@@ -276,7 +285,7 @@
     showCompareBar(true);
     activeCompare = BB.versions.mountCompare(host, {
       key, instance: config.instanceId, versions: previewVersions, from: currentCompare(), to: currentVersion(),
-      pickHost: byId('compareBarHost'),
+      slots: { from: byId('compareFrom'), summary: byId('compareStats'), to: byId('previewVersionControl') },
       onBytes: (left, right) => BB.actions.compareVersions?.(key, left.version, right.version, { instance: config.instanceId }),
       onChange({ from, to }) {
         const url = new URL(location.href);
@@ -284,13 +293,14 @@
         url.searchParams.set('compare', from);
         url.searchParams.set('version', to);
         history.replaceState(null, '', url.pathname + url.search);
-        mountVersionPicker();
       }
     });
+    byId('previewVersionControl').hidden = false;
     scheduleViewerLayout();
   }
 
   function selectVersion(version) {
+    stopCompare();
     const url = new URL(location.href);
     if (version) url.searchParams.set('version', version);
     else url.searchParams.delete('version');
@@ -1521,6 +1531,7 @@
   });
   byId('compareClose').addEventListener('click', leaveCompare);
   window.addEventListener('popstate', () => {
+    stopCompare();
     applyCapabilities();
     mountVersionPicker();
     void render();

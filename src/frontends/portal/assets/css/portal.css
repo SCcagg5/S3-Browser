@@ -3876,26 +3876,30 @@ button.versionCount:focus-visible {
 }
 
 
-/* Bar of the comparison, above the preview: the two versions. ------------------------------------------------------------- */
+/* Comparison in the bar of the preview: From, the statistics, and To (the picker of the versions, in its place). The bar has no
+   extra row. ---------------------------------------------------------------------------------------------------------------- */
 
-.compareBar__inner {
-  display: flex;
-  align-items: flex-end;
-  gap: 10px;
-  width: 100%;
-  max-width: var(--preview-max);
-  margin: 0 auto;
-  padding: 0 var(--gutter) 10px;
-}
-
-.compareBar__host {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.compareBar__close {
+.compareFrom,
+.compareStats {
   flex: none;
-  margin-bottom: 4px;
+}
+
+.compareStats {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.compareStats .versionDiff__summary {
+  flex-wrap: nowrap;
+  gap: 6px 8px;
+  white-space: nowrap;
+}
+
+.compareStats[hidden],
+.compareFrom[hidden],
+.compareClose[hidden] {
+  display: none;
 }
 
 /* Tree of two JSON documents. ---------------------------------------------------------------------------------------------- */
@@ -4017,4 +4021,11 @@ button.versionCount:focus-visible {
 
 .jsonTree__same:hover {
   color: var(--text);
+}
+
+/* In the bar of the preview, on a window narrower than 1500 px, the compact pickers show the version and not its date (the menu has it). */
+@media (max-width: 1500px) {
+  .versionPicker__button--compact .versionPicker__date {
+    display: none;
+  }
 }

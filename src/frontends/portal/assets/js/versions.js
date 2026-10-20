@@ -536,8 +536,8 @@
   }
 
   // Draws the comparison of two versions in the element host. The result has destroy(), which stops the reads.
-  // onChange({ from, to }) runs when the person chooses other versions. The two selects of the versions go in pickHost, when it is given.
-  function mountCompare(host, { key, instance = null, versions, from = '', to = '', onBytes = null, onChange = null, pickHost = null }) {
+  // onChange({ from, to }) runs when the person chooses other versions. With slots ({ from, summary, to }, three elements of the page) the pickers and the summary go there.
+  function mountCompare(host, { key, instance = null, versions, from = '', to = '', onBytes = null, onChange = null, slots = null }) {
     const list = listVersions(versions);
     const find = id => list.find(version => version.version === id) || null;
     let right = find(to) || list.find(version => version.isCurrent) || list[0];
@@ -552,8 +552,10 @@
     const root = host;
     let leftId = left.version;
     let rightId = right.version;
-    const fromHost = h('div', { class: 'versionDiff__from' });
-    const toHost = h('div', { class: 'versionDiff__to' });
+    const fromHost = slots?.from || h('div');
+    const toHost = slots?.to || h('div');
+    fromHost.classList.add('versionDiff__from');
+    toHost.classList.add('versionDiff__to');
     const mountPickers = () => {
       mountPicker(fromHost, { versions, selected: leftId, caption: 'From', explicit: true, compact: true, onSelect: id => { leftId = id; mountPickers(); render(); } });
       mountPicker(toHost, { versions, selected: rightId, caption: 'To', explicit: true, compact: true, onSelect: id => { rightId = id; mountPickers(); render(); } });
@@ -562,13 +564,12 @@
     const summary = h('div', { class: 'versionDiff__summary', role: 'status', 'aria-live': 'polite' });
     const options = h('div', { class: 'versionDiff__options' });
     const view = h('div', { class: 'versionDiff__view' });
-    // The two versions and the summary of the change are on one line.
-    const bar = h('div', { class: 'versionDiff__bar' }, h('div', { class: 'versionDiff__pick' }, fromHost, swap, toHost), summary);
-    if (pickHost) {
-      pickHost.replaceChildren(bar);
+    if (slots) {
+      // The statistics are between the version From and the version To.
+      slots.summary.replaceChildren(swap, summary);
       root.replaceChildren(options, view);
     } else {
-      root.replaceChildren(bar, options, view);
+      root.replaceChildren(h('div', { class: 'versionDiff__bar' }, h('div', { class: 'versionDiff__pick' }, fromHost, swap, toHost), summary), options, view);
     }
     mountPickers();
 
@@ -599,7 +600,7 @@
       summary.replaceChildren();
       options.replaceChildren();
       const metadata = h('span', { class: 'versionDiff__meta' },
-        `${versionLabel(left)} → ${versionLabel(right)} · ${formatDelta(Number(right.size) - Number(left.size))}`);
+        formatDelta(Number(right.size) - Number(left.size)));
       if (left === right) { view.replaceChildren(h('p', { class: 'diff__empty' }, 'Choose two different versions.')); return; }
       let a;
       let b;
@@ -681,7 +682,7 @@
     const stat = (text, type) => h('span', { class: `diffStat diffStat--${type}` }, text);
     swap.addEventListener('click', () => { [leftId, rightId] = [rightId, leftId]; mountPickers(); render(); });
     render();
-    return { destroy() { controller.abort(); state.run += 1; for (const picker of [fromHost, toHost]) { picker.picker?.close(); picker.picker?.menu.remove(); } host.replaceChildren(); pickHost?.replaceChildren(); } };
+    return { destroy() { controller.abort(); state.run += 1; for (const picker of [fromHost, toHost]) { picker.picker?.close(); picker.picker?.menu.remove(); } host.replaceChildren(); if (slots) { slots.from.replaceChildren(); slots.summary.replaceChildren(); slots.from.classList.remove('versionDiff__from'); slots.to.classList.remove('versionDiff__to'); } } };
   }
 
   BB.versions = { listVersions, mountPicker, mountCompare, compareURL, kindOf, formatBytes, formatDate };

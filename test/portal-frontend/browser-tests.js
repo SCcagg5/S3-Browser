@@ -906,7 +906,7 @@ test('versions: the comparison of two text versions, unified and side by side, w
   // The two pickers and the summary of the change are on one line.
   const line = await page.evaluate(() => ['.versionDiff__from', '.versionDiff__to', '.versionDiff__summary'].map(selector => { const box = document.querySelector(selector).getBoundingClientRect(); return Math.round(box.top + box.height / 2); }));
   assert.ok(Math.max(...line) - Math.min(...line) <= 12, `lines ${line}`);
-  assert.match(await page.textContent('.versionDiff__summary'), /^v2 → v3 · /);
+  assert.match(await page.textContent('.versionDiff__summary'), /^\+\d+ B/);
   await page.waitForSelector('.diff__table');
   // The default view has the two versions side by side.
   assert.equal(await page.locator('.diff__table.is-split').count(), 1);
@@ -1082,6 +1082,7 @@ test('versions: the preview page has the same picker, with no select and no sepa
   await until(page, () => /v1.*Older/.test(document.querySelector('.versionPicker__button')?.textContent || ''));
   assert.match(page.url(), /version=/);
   // The comparison and the table of the versions open from the picker.
+  const headerBefore = await page.evaluate(() => document.querySelector('.previewBar').getBoundingClientRect().height);
   await page.click('.versionPicker__button');
   await page.click('.versionPicker__compare');
   await page.waitForSelector('.versionComparePage .diff__table');
@@ -1089,12 +1090,26 @@ test('versions: the preview page has the same picker, with no select and no sepa
   assert.match(page.url(), /compare=/);
   assert.equal(await page.locator('.versionDiff__from .versionPicker__button, .versionDiff__to .versionPicker__button').count(), 2);
   assert.equal(await page.locator('select').count(), 0);
-  // No back button, no title and no line of the path in the page. The two versions are in the bar above the content.
+  // No back button, no title and no line of the path in the page.
   assert.equal(await page.locator('.versionComparePage__back, .versionComparePage__title, .versionDiff__file').count(), 0);
-  const place = await page.evaluate(() => ({ select: document.querySelector('.versionDiff__from').getBoundingClientRect().bottom, content: document.querySelector('main.viewer').getBoundingClientRect().top, inBar: Boolean(document.querySelector('#compareBar .versionDiff__from')), picker: document.querySelector('#previewVersionControl').hidden }));
-  assert.equal(place.inBar, true);
-  assert.ok(place.select <= place.content + 1, JSON.stringify(place));
-  assert.equal(place.picker, true);
+  // The header has no new row. The picker stays in its place and becomes the version To. The version From is at its left, and
+  // the statistics are between the two.
+  const place = await page.evaluate(() => {
+    const box = selector => document.querySelector(selector).getBoundingClientRect();
+    return {
+      header: box('.previewBar').height, from: box('#compareFrom'), stats: box('#compareStats'), to: box('#previewVersionControl'),
+      toIsPicker: document.querySelector('#previewVersionControl').classList.contains('versionDiff__to') && !document.querySelector('#previewVersionControl').hidden,
+      inHeader: Boolean(document.querySelector('.previewBar #compareFrom .versionPicker__button')),
+      bar: Boolean(document.querySelector('#compareBar'))
+    };
+  });
+  assert.ok(Math.abs(place.header - headerBefore) < 1.5, `header ${headerBefore}px, then ${place.header}px`);
+  assert.equal(place.inHeader, true);
+  assert.equal(place.toIsPicker, true);
+  assert.equal(place.bar, false);
+  assert.ok(place.from.right <= place.stats.left + 1 && place.stats.right <= place.to.left + 1, JSON.stringify(place));
+  assert.match(await page.textContent('#compareFrom'), /^From/);
+  assert.match(await page.textContent('#previewVersionControl'), /^To/);
   // The comparison is in the page: the browser back button returns to the preview, and so does the button of the page.
   await page.goBack();
   await until(page, () => !document.querySelector('.versionComparePage') && document.querySelector('#viewer')?.textContent.includes('Status'));

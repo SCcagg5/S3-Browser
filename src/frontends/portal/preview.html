@@ -34,7 +34,10 @@
       </div>
       <div class="previewBar__tools">
         <span class="buildTag" id="previewBuild" hidden><span></span></span>
+        <div class="compareFrom" id="compareFrom" hidden></div>
+        <div class="compareStats" id="compareStats" hidden></div>
         <div class="previewVersion bb-details-version-control" id="previewVersionControl" hidden></div>
+        <button type="button" class="iconButton compareClose" id="compareClose" title="Close the comparison" aria-label="Close the comparison" hidden><i class="ic ic-x" aria-hidden="true"></i></button>
         <a class="button button--icon" id="openRawBtn" title="Open the original" aria-label="Open the original" target="_blank" rel="noopener"><i class="ic ic-external-link" aria-hidden="true"></i></a>
         <div class="bb-menu" id="previewMenu">
           <button type="button" class="bb-kebab button button--icon" id="previewKebabBtn" aria-haspopup="menu" aria-expanded="false" aria-label="Actions" title="Actions"><i class="ic ic-dots-vertical" aria-hidden="true"></i></button>
@@ -58,12 +61,6 @@
             <button type="button" class="themeSelect__option" role="option" data-theme-value="light" aria-selected="false" aria-label="Light theme" title="Light"><i class="ic ic-sun" aria-hidden="true"></i></button>
           </div>
         </div>
-      </div>
-    </div>
-    <div class="compareBar" id="compareBar" hidden>
-      <div class="compareBar__inner bb-menu-constrain">
-        <div class="compareBar__host" id="compareBarHost"></div>
-        <button type="button" class="iconButton compareBar__close" id="compareClose" title="Close the comparison" aria-label="Close the comparison"><i class="ic ic-x" aria-hidden="true"></i></button>
       </div>
     </div>
   </header>
