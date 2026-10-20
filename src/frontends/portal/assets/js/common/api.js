@@ -283,7 +283,7 @@
       return BB.runtime.browserPageURL(route.host, route.bucket, prefix).href;
     },
 
-    previewPageURL(path, { instance = null, version = '', entry = '' } = {}) {
+    previewPageURL(path, { instance = null, version = '', entry = '', compare = '' } = {}) {
       const clean = String(path || '').replace(/^\/+/, '');
       const selected = instance === null || instance === undefined ? selectedInstance() : String(instance || '');
       const route = routeForInstance(selected);
@@ -293,6 +293,7 @@
       if (!selected) url.searchParams.set('path', clean);
       if (version) url.searchParams.set('version', String(version));
       if (entry) url.searchParams.set('entry', String(entry));
+      if (compare) url.searchParams.set('compare', String(compare));
       return url.href;
     },
 

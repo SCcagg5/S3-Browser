@@ -25,6 +25,7 @@
   let activeDocumentSearchLabel = '';
   let activeSearchController = null;
   let pdfLoaderPromise = null;
+  let activeCompare = null;
 
   function byId(id) { return document.getElementById(id); }
 
@@ -36,6 +37,11 @@
 
   function currentVersion() {
     return new URLSearchParams(location.search).get('version') || '';
+  }
+
+  // The version that the page compares with the version of the address (the parameter version, or the current one).
+  function currentCompare() {
+    return new URLSearchParams(location.search).get('compare') || '';
   }
 
   function currentArchiveEntry() {
@@ -62,7 +68,7 @@
     const shell = document.querySelector('.viewer');
     if (!shell) return;
     const contained = ['tabular', 'spreadsheet', 'parquet', 'json', 'archive', 'structured'].includes(type);
-    const wide = ['tabular', 'spreadsheet', 'parquet', 'json', 'pdf', 'archive', 'structured'].includes(type);
+    const wide = ['tabular', 'spreadsheet', 'parquet', 'json', 'pdf', 'archive', 'structured', 'compare'].includes(type);
     shell.classList.toggle('is-scroll-contained', contained);
     shell.classList.toggle('is-wide-preview', wide);
     shell.classList.toggle('is-adaptive-code', type === 'code');
@@ -78,6 +84,8 @@
   }
 
   function cleanupPreviewResources() {
+    activeCompare?.destroy();
+    activeCompare = null;
     activeDocumentSearch = null;
     activeDocumentSearchLabel = '';
     activeSearchController?.abort();
@@ -110,7 +118,8 @@
     const url = new URL(BB.api.previewPageURL(key, {
       instance: config.instanceId,
       version: currentVersion(),
-      entry: currentArchiveEntry()
+      entry: currentArchiveEntry(),
+      compare: currentCompare()
     }));
     return url.pathname + url.search + url.hash;
   }
@@ -204,12 +213,7 @@
       versions: previewVersions,
       selected: currentVersion(),
       onSelect: version => selectVersion(version),
-      onCompare({ from, to }) {
-        void BB.versions.openCompare({
-          key: currentKey(), instance: config.instanceId, versions: previewVersions, from, to,
-          onBytes: (left, right) => BB.actions.compareVersions?.(currentKey(), left.version, right.version, { instance: config.instanceId })
-        });
-      },
+      onCompare({ from, to }) { enterCompare(from, to); },
       onAll: () => BB.actions.showVersions(currentKey())
     });
     control.hidden = false;
@@ -230,10 +234,74 @@
     }
   }
 
+  // The comparison takes the place of the preview, in the same page. The browser back button returns to the preview.
+  function enterCompare(from, to) {
+    const url = new URL(location.href);
+    url.searchParams.set('compare', from);
+    if (to) url.searchParams.set('version', to);
+    else url.searchParams.delete('version');
+    history.pushState(null, '', url.pathname + url.search);
+    applyCapabilities();
+    mountVersionPicker();
+    void render();
+  }
+
+  function leaveCompare() {
+    const url = new URL(location.href);
+    url.searchParams.delete('compare');
+    history.pushState(null, '', url.pathname + url.search);
+    applyCapabilities();
+    mountVersionPicker();
+    void render();
+  }
+
+  function renderCompare(key) {
+    const container = byId('viewer');
+    setPreviewMode('compare');
+    container.className = 'versionComparePage';
+    container.replaceChildren();
+    const bar = document.createElement('div');
+    bar.className = 'versionComparePage__bar';
+    const back = document.createElement('button');
+    back.type = 'button';
+    back.className = 'button versionComparePage__back';
+    const arrow = document.createElement('i');
+    arrow.className = 'ic ic-chevron-left';
+    arrow.setAttribute('aria-hidden', 'true');
+    const label = document.createElement('span');
+    label.textContent = 'Back to the preview';
+    back.append(arrow, label);
+    back.addEventListener('click', leaveCompare);
+    const title = document.createElement('h2');
+    title.className = 'versionComparePage__title';
+    title.textContent = 'Compare versions';
+    bar.append(back, title);
+    const host = document.createElement('div');
+    host.className = 'versionComparePage__host';
+    container.append(bar, host);
+    const shown = previewVersions.find(version => version.version === (currentVersion() || previewVersions.find(item => item.isCurrent)?.version));
+    setDocMeta(key, shown ? Number(shown.size) : NaN, '');
+    updateBackLink(key);
+    activeCompare = BB.versions.mountCompare(host, {
+      key, instance: config.instanceId, versions: previewVersions, from: currentCompare(), to: currentVersion(),
+      onBytes: (left, right) => BB.actions.compareVersions?.(key, left.version, right.version, { instance: config.instanceId }),
+      onChange({ from, to }) {
+        const url = new URL(location.href);
+        if (url.searchParams.get('compare') === from && (url.searchParams.get('version') || '') === to) return;
+        url.searchParams.set('compare', from);
+        url.searchParams.set('version', to);
+        history.replaceState(null, '', url.pathname + url.search);
+        mountVersionPicker();
+      }
+    });
+    scheduleViewerLayout();
+  }
+
   function selectVersion(version) {
     const url = new URL(location.href);
     if (version) url.searchParams.set('version', version);
     else url.searchParams.delete('version');
+    url.searchParams.delete('compare');
     history.replaceState(null, '', url.pathname + url.search);
     applyCapabilities();
     mountVersionPicker();
@@ -1230,6 +1298,11 @@
       return;
     }
 
+    if (currentCompare() && !archiveEntry && previewVersions.length > 1 && BB.versions?.mountCompare) {
+      renderCompare(key);
+      return;
+    }
+
     setPreviewMode('loading');
     container.className = 'preview-loading';
     container.replaceChildren();
@@ -1452,6 +1525,11 @@
     if (typeof activeDocumentSearch !== 'function') return;
     event.preventDefault();
     void openDocumentSearch();
+  });
+  window.addEventListener('popstate', () => {
+    applyCapabilities();
+    mountVersionPicker();
+    void render();
   });
   installViewerLayoutObserver();
   initialize();

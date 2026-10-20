@@ -51,7 +51,11 @@ This document uses ASD-STE100 Simplified Technical English.
 - The columns Size and Modified use a font with one width for every character. Their width is the width of the longest
   text that they can show. The relative time and the exact time give the same width to Modified, so the columns stay in
   place when the mode changes.
-- The window of the file details is wider. Its upper edge and its height stay the same for each tab.
+- The comparison of two versions is a part of the preview page, not a dialog. The address has the parameter `compare`.
+  The browser back button and the button "Back to the preview" return to the preview.
+- The details, the folder insights, the table of versions and the comparison of bytes use one window (`bb-modal--large`).
+  The window is wide, fixed at the top, and has the same height for each tab. A dialog asks for it with `large: true`.
+- The values of the columns Size and Modified are at the left of the column.
 - A read of an older version works with SeaweedFS. The program sends no `If-Match` with a version identifier, because
   SeaweedFS compares it with the current object and answers HTTP 412.
 - A JSON file that fits in one page shows its totals at once and has no button to count lines and pages. The root of

@@ -451,150 +451,153 @@
   }
 
   // ---------------------------------------------------------------------------------------------------------------
-  // The comparison dialog
+  // The comparison, drawn in a host of the page
   // ---------------------------------------------------------------------------------------------------------------
 
-  function openCompare({ key, instance = null, versions, from = '', to = '', onBytes = null }) {
+  // The address of the comparison: the preview page of the version "to", with the version "from" in the parameter compare.
+  function compareURL({ key, instance = null, from, to }) {
+    return BB.api.previewPageURL(key, { instance, version: to, compare: from });
+  }
+
+  // Draws the comparison of two versions in the element host. The result has destroy(), which stops the reads.
+  // onChange({ from, to }) runs when the person chooses other versions.
+  function mountCompare(host, { key, instance = null, versions, from = '', to = '', onBytes = null, onChange = null }) {
     const list = listVersions(versions);
     const find = id => list.find(version => version.version === id) || null;
     let right = find(to) || list.find(version => version.isCurrent) || list[0];
     let left = find(from) || right?.older || list.find(version => version !== right);
-    if (!left || !right) return Promise.resolve(false);
+    if (!left || !right) return null;
     const cache = new Map();
     const controller = new AbortController();
     const state = { view: 'split', whole: false, sortKeys: true, expanded: new Set(), run: 0 };
     const kind = kindOf(key);
 
-    return BB.ui.alert({
-      title: 'Compare versions',
-      html: '<div class="versionDiff" data-version-diff></div>',
-      onOpen: ({ overlay, modal }) => {
-        modal?.classList.add('bb-modal--wide', 'bb-modal--diff');
-        const root = overlay.querySelector('[data-version-diff]');
-        const option = version => h('option', { value: version.version }, `${versionLabel(version)} · ${formatDate(version.lastModified)} · ${formatBytes(version.size)}${version.isCurrent ? ' · current' : ''}`);
-        const selectFor = (label, chosen) => {
-          const select = h('select', { class: 'versionDiff__select', 'aria-label': label }, list.map(option));
-          select.value = chosen.version;
-          return select;
-        };
-        const fromSelect = selectFor('From version', left);
-        const toSelect = selectFor('To version', right);
-        const swap = h('button', { type: 'button', class: 'iconButton versionDiff__swap', title: 'Swap the two versions', 'aria-label': 'Swap the two versions' }, icon('arrows-left-right'));
-        const summary = h('div', { class: 'versionDiff__summary', role: 'status', 'aria-live': 'polite' });
-        const options = h('div', { class: 'versionDiff__options' });
-        const view = h('div', { class: 'versionDiff__view' });
-        root.replaceChildren(
-          h('p', { class: 'versionDiff__file' }, icon('source-commit'), h('code', {}, key)),
-          h('div', { class: 'versionDiff__pick' },
-            h('label', {}, h('span', {}, 'From'), fromSelect), swap, h('label', {}, h('span', {}, 'To'), toSelect)),
-          summary, options, view);
+    host.classList.add('versionDiff');
+    const root = host;
+    const option = version => h('option', { value: version.version }, `${versionLabel(version)} · ${formatDate(version.lastModified)} · ${formatBytes(version.size)}${version.isCurrent ? ' · current' : ''}`);
+    const selectFor = (label, chosen) => {
+      const select = h('select', { class: 'versionDiff__select', 'aria-label': label }, list.map(option));
+      select.value = chosen.version;
+      return select;
+    };
+    const fromSelect = selectFor('From version', left);
+    const toSelect = selectFor('To version', right);
+    const swap = h('button', { type: 'button', class: 'iconButton versionDiff__swap', title: 'Swap the two versions', 'aria-label': 'Swap the two versions' }, icon('arrows-left-right'));
+    const summary = h('div', { class: 'versionDiff__summary', role: 'status', 'aria-live': 'polite' });
+    const options = h('div', { class: 'versionDiff__options' });
+    const view = h('div', { class: 'versionDiff__view' });
+    root.replaceChildren(
+      h('p', { class: 'versionDiff__file' }, icon('source-commit'), h('code', {}, key)),
+      h('div', { class: 'versionDiff__pick' },
+        h('label', {}, h('span', {}, 'From'), fromSelect), swap, h('label', {}, h('span', {}, 'To'), toSelect)),
+      summary, options, view);
 
-        const segmented = (name, choices, current, onPick) => h('div', { class: 'segmented', role: 'group', 'aria-label': name },
-          choices.map(([value, text, iconName]) => h('button', { type: 'button', class: ['segmented__item', value === current && 'is-active'], 'aria-pressed': value === current ? 'true' : 'false', 'data-value': value, onclick: () => onPick(value) }, iconName ? icon(iconName) : null, text)));
+    const segmented = (name, choices, current, onPick) => h('div', { class: 'segmented', role: 'group', 'aria-label': name },
+      choices.map(([value, text, iconName]) => h('button', { type: 'button', class: ['segmented__item', value === current && 'is-active'], 'aria-pressed': value === current ? 'true' : 'false', 'data-value': value, onclick: () => onPick(value) }, iconName ? icon(iconName) : null, text)));
 
-        async function load(version) {
-          if (!cache.has(version.version)) cache.set(version.version, readVersion(key, version, instance, controller.signal));
-          return cache.get(version.version);
-        }
+    async function load(version) {
+      if (!cache.has(version.version)) cache.set(version.version, readVersion(key, version, instance, controller.signal));
+      return cache.get(version.version);
+    }
 
-        let drawCurrent = null;
-        view.addEventListener('click', event => {
-          const fold = event.target.closest('[data-fold]');
-          if (!fold || !drawCurrent) return;
-          state.expanded.add(Number(fold.dataset.fold));
-          drawCurrent();
-        });
+    let drawCurrent = null;
+    view.addEventListener('click', event => {
+      const fold = event.target.closest('[data-fold]');
+      if (!fold || !drawCurrent) return;
+      state.expanded.add(Number(fold.dataset.fold));
+      drawCurrent();
+    });
 
-        async function render() {
-          const run = ++state.run;
-          state.expanded.clear();
-          drawCurrent = null;
-          left = find(fromSelect.value);
-          right = find(toSelect.value);
-          view.replaceChildren(h('p', { class: 'diff__empty' }, 'Reading the two versions…'));
-          summary.replaceChildren();
-          options.replaceChildren();
-          const metadata = h('span', { class: 'versionDiff__meta' },
-            `${versionLabel(left)} → ${versionLabel(right)} · ${formatDelta(Number(right.size) - Number(left.size))} · ${formatDate(left.lastModified)} → ${formatDate(right.lastModified)}`);
-          if (left === right) { view.replaceChildren(h('p', { class: 'diff__empty' }, 'Choose two different versions.')); return; }
-          let a;
-          let b;
-          try {
-            [a, b] = await Promise.all([load(left), load(right)]);
-          } catch (error) {
-            if (run === state.run) view.replaceChildren(h('p', { class: 'diff__empty is-error' }, String(error?.message || error)));
-            return;
-          }
-          if (run !== state.run) return;
-          const unsupported = (message) => {
-            fill(summary, metadata);
-            const actions = onBytes ? h('button', { type: 'button', class: 'bb-btn', onclick: () => onBytes(left, right) }, icon('git-compare'), h('span', {}, 'Compare the bytes')) : null;
-            view.replaceChildren(h('div', { class: 'diff__empty' }, h('p', {}, message), ...(actions ? [actions] : [])));
-          };
-          if (a.tooLarge || b.tooLarge) return unsupported(`A version is larger than ${formatBytes(MAX_BYTES)} (${formatBytes(Math.max(a.size || 0, b.size || 0))}): the page does not read it for a comparison.`);
-          if (a.binary || b.binary) return unsupported('A version is not text. The page compares text, JSON and CSV.');
-
-          if (a.text === b.text) {
-            fill(summary, metadata, h('span', { class: 'versionDiff__same' }, icon('check'), 'The content is the same.'));
-            view.replaceChildren(h('p', { class: 'diff__empty' }, 'The two versions have the same content.'));
-            return;
-          }
-          const draw = () => {
-            const note = text => h('span', { class: 'versionDiff__note' }, text);
-            let aText = a.text;
-            let bText = b.text;
-            let json = null;
-            if (kind === 'json') {
-              json = BB.diff.diffJSON(a.text, b.text);
-              if (json.valid && state.sortKeys) { aText = BB.diff.normalizeJSON(a.text); bText = BB.diff.normalizeJSON(b.text); }
-            }
-            const views = kind === 'csv'
-              ? [['split', 'Side by side', 'layout-columns'], ['table', 'Table', 'layout-rows'], ['git', 'Git patch', 'git-compare']]
-              : [['split', 'Side by side', 'layout-columns'], ['unified', 'Unified', 'layout-rows'], ['git', 'Git patch', 'git-compare'], ...(json?.valid ? [['changes', 'Changes', 'source-commit']] : [])];
-            if (!views.some(([value]) => value === state.view)) state.view = 'split';
-            const lines = BB.diff.diffLines(aText, bText);
-            const patch = () => BB.diff.unifiedPatch(lines, { aPath: key, aId: blobId(left), bId: blobId(right) });
-            const csv = kind === 'csv' ? BB.diff.diffDelimited(a.text, b.text, BB.diff.delimiterOf(key)) : null;
-
-            if (csv) {
-              fill(summary, metadata, stat(`${csv.stats.added.toLocaleString('en-US')} added`, 'add'), stat(`${csv.stats.removed.toLocaleString('en-US')} removed`, 'del'), stat(`${csv.stats.modified.toLocaleString('en-US')} modified`, 'mod'));
-            } else {
-              fill(summary, metadata,
-                json?.valid ? stat(`${json.changes.length.toLocaleString('en-US')}${json.overflow ? '+' : ''} path${json.changes.length === 1 ? '' : 's'} changed`, 'mod') : null,
-                stat(`+${lines.stats.added.toLocaleString('en-US')}`, 'add'), stat(`−${lines.stats.removed.toLocaleString('en-US')}`, 'del'),
-                lines.truncated ? note('The two texts differ too much: the lines show as a replacement.') : null);
-            }
-
-            const actions = h('span', { class: 'versionDiff__actions' },
-              h('button', { type: 'button', class: 'bb-btn', 'data-diff-copy': '', onclick: async () => { const done = await copyText(patch()); BB.ui.toast(done ? 'The patch is in the clipboard.' : 'The browser refused to copy the patch.', { status: done ? 'success' : 'error', duration: 2500 }); } }, icon('git-compare'), h('span', {}, 'Copy patch')),
-              h('button', { type: 'button', class: 'bb-btn', 'data-diff-download': '', onclick: () => download(`${key.split('/').pop() || 'file'}.patch`, patch()) }, icon('arrow-down'), h('span', {}, 'Download .patch')));
-            fill(options,
-              segmented('View', views, state.view, value => { state.view = value; draw(); }),
-              json && !json.valid ? note('A version is not valid JSON: the text shows as it is.') : null,
-              json?.valid && state.view !== 'changes' ? h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: state.sortKeys, 'data-diff-sort': '', onchange: event => { state.sortKeys = event.target.checked; draw(); } }), h('span', {}, 'Sort the keys')) : null,
-              state.view === 'split' || state.view === 'unified' || state.view === 'table'
-                ? h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: state.whole, 'data-diff-whole': '', onchange: event => { state.whole = event.target.checked; draw(); } }), h('span', {}, csv ? 'Show the unchanged rows' : 'Show the unchanged lines'))
-                : null,
-              actions);
-
-            if (state.view === 'git') view.replaceChildren(renderPatch(patch()));
-            else if (state.view === 'changes') view.replaceChildren(renderJSONChanges(json));
-            else if (csv && state.view === 'table') view.replaceChildren(renderCSV(csv, { whole: state.whole }));
-            else if (csv) view.replaceChildren(renderCSVSplit(csv, { whole: state.whole }));
-            else view.replaceChildren(renderText(lines, { mode: state.view === 'unified' ? 'unified' : 'split', whole: state.whole, expanded: state.expanded }));
-          };
-          drawCurrent = draw;
-          draw();
-        }
-
-        const stat = (text, type) => h('span', { class: `diffStat diffStat--${type}` }, text);
-        fromSelect.addEventListener('change', render);
-        toSelect.addEventListener('change', render);
-        swap.addEventListener('click', () => { const keep = fromSelect.value; fromSelect.value = toSelect.value; toSelect.value = keep; render(); });
-        render();
+    async function render() {
+      const run = ++state.run;
+      state.expanded.clear();
+      drawCurrent = null;
+      left = find(fromSelect.value);
+      right = find(toSelect.value);
+      if (onChange) onChange({ from: left.version, to: right.version });
+      view.replaceChildren(h('p', { class: 'diff__empty' }, 'Reading the two versions…'));
+      summary.replaceChildren();
+      options.replaceChildren();
+      const metadata = h('span', { class: 'versionDiff__meta' },
+        `${versionLabel(left)} → ${versionLabel(right)} · ${formatDelta(Number(right.size) - Number(left.size))} · ${formatDate(left.lastModified)} → ${formatDate(right.lastModified)}`);
+      if (left === right) { view.replaceChildren(h('p', { class: 'diff__empty' }, 'Choose two different versions.')); return; }
+      let a;
+      let b;
+      try {
+        [a, b] = await Promise.all([load(left), load(right)]);
+      } catch (error) {
+        if (run === state.run) view.replaceChildren(h('p', { class: 'diff__empty is-error' }, String(error?.message || error)));
+        return;
       }
-    }).then(() => { controller.abort(); return true; });
+      if (run !== state.run) return;
+      const unsupported = (message) => {
+        fill(summary, metadata);
+        const actions = onBytes ? h('button', { type: 'button', class: 'bb-btn', onclick: () => onBytes(left, right) }, icon('git-compare'), h('span', {}, 'Compare the bytes')) : null;
+        view.replaceChildren(h('div', { class: 'diff__empty' }, h('p', {}, message), ...(actions ? [actions] : [])));
+      };
+      if (a.tooLarge || b.tooLarge) return unsupported(`A version is larger than ${formatBytes(MAX_BYTES)} (${formatBytes(Math.max(a.size || 0, b.size || 0))}): the page does not read it for a comparison.`);
+      if (a.binary || b.binary) return unsupported('A version is not text. The page compares text, JSON and CSV.');
+
+      if (a.text === b.text) {
+        fill(summary, metadata, h('span', { class: 'versionDiff__same' }, icon('check'), 'The content is the same.'));
+        view.replaceChildren(h('p', { class: 'diff__empty' }, 'The two versions have the same content.'));
+        return;
+      }
+      const draw = () => {
+        const note = text => h('span', { class: 'versionDiff__note' }, text);
+        let aText = a.text;
+        let bText = b.text;
+        let json = null;
+        if (kind === 'json') {
+          json = BB.diff.diffJSON(a.text, b.text);
+          if (json.valid && state.sortKeys) { aText = BB.diff.normalizeJSON(a.text); bText = BB.diff.normalizeJSON(b.text); }
+        }
+        const views = kind === 'csv'
+          ? [['split', 'Side by side', 'layout-columns'], ['table', 'Table', 'layout-rows'], ['git', 'Git patch', 'git-compare']]
+          : [['split', 'Side by side', 'layout-columns'], ['unified', 'Unified', 'layout-rows'], ['git', 'Git patch', 'git-compare'], ...(json?.valid ? [['changes', 'Changes', 'source-commit']] : [])];
+        if (!views.some(([value]) => value === state.view)) state.view = 'split';
+        const lines = BB.diff.diffLines(aText, bText);
+        const patch = () => BB.diff.unifiedPatch(lines, { aPath: key, aId: blobId(left), bId: blobId(right) });
+        const csv = kind === 'csv' ? BB.diff.diffDelimited(a.text, b.text, BB.diff.delimiterOf(key)) : null;
+
+        if (csv) {
+          fill(summary, metadata, stat(`${csv.stats.added.toLocaleString('en-US')} added`, 'add'), stat(`${csv.stats.removed.toLocaleString('en-US')} removed`, 'del'), stat(`${csv.stats.modified.toLocaleString('en-US')} modified`, 'mod'));
+        } else {
+          fill(summary, metadata,
+            json?.valid ? stat(`${json.changes.length.toLocaleString('en-US')}${json.overflow ? '+' : ''} path${json.changes.length === 1 ? '' : 's'} changed`, 'mod') : null,
+            stat(`+${lines.stats.added.toLocaleString('en-US')}`, 'add'), stat(`−${lines.stats.removed.toLocaleString('en-US')}`, 'del'),
+            lines.truncated ? note('The two texts differ too much: the lines show as a replacement.') : null);
+        }
+
+        const actions = h('span', { class: 'versionDiff__actions' },
+          h('button', { type: 'button', class: 'bb-btn', 'data-diff-copy': '', onclick: async () => { const done = await copyText(patch()); BB.ui.toast(done ? 'The patch is in the clipboard.' : 'The browser refused to copy the patch.', { status: done ? 'success' : 'error', duration: 2500 }); } }, icon('git-compare'), h('span', {}, 'Copy patch')),
+          h('button', { type: 'button', class: 'bb-btn', 'data-diff-download': '', onclick: () => download(`${key.split('/').pop() || 'file'}.patch`, patch()) }, icon('arrow-down'), h('span', {}, 'Download .patch')));
+        fill(options,
+          segmented('View', views, state.view, value => { state.view = value; draw(); }),
+          json && !json.valid ? note('A version is not valid JSON: the text shows as it is.') : null,
+          json?.valid && state.view !== 'changes' ? h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: state.sortKeys, 'data-diff-sort': '', onchange: event => { state.sortKeys = event.target.checked; draw(); } }), h('span', {}, 'Sort the keys')) : null,
+          state.view === 'split' || state.view === 'unified' || state.view === 'table'
+            ? h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: state.whole, 'data-diff-whole': '', onchange: event => { state.whole = event.target.checked; draw(); } }), h('span', {}, csv ? 'Show the unchanged rows' : 'Show the unchanged lines'))
+            : null,
+          actions);
+
+        if (state.view === 'git') view.replaceChildren(renderPatch(patch()));
+        else if (state.view === 'changes') view.replaceChildren(renderJSONChanges(json));
+        else if (csv && state.view === 'table') view.replaceChildren(renderCSV(csv, { whole: state.whole }));
+        else if (csv) view.replaceChildren(renderCSVSplit(csv, { whole: state.whole }));
+        else view.replaceChildren(renderText(lines, { mode: state.view === 'unified' ? 'unified' : 'split', whole: state.whole, expanded: state.expanded }));
+      };
+      drawCurrent = draw;
+      draw();
+    }
+
+    const stat = (text, type) => h('span', { class: `diffStat diffStat--${type}` }, text);
+    fromSelect.addEventListener('change', render);
+    toSelect.addEventListener('change', render);
+    swap.addEventListener('click', () => { const keep = fromSelect.value; fromSelect.value = toSelect.value; toSelect.value = keep; render(); });
+    render();
+    return { destroy() { controller.abort(); state.run += 1; host.replaceChildren(); } };
   }
 
-  BB.versions = { listVersions, mountPicker, openCompare, kindOf, formatBytes, formatDate };
+  BB.versions = { listVersions, mountPicker, mountCompare, compareURL, kindOf, formatBytes, formatDate };
 })();

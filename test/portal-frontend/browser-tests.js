@@ -840,7 +840,10 @@ async function openCompareFromDetails(page, name) {
   await openDetails(page, name);
   await page.click('.versionPicker__button');
   await page.click('.versionPicker__compare');
-  await page.waitForSelector('.versionDiff');
+  // The comparison is a page of its own, not a dialog.
+  await page.waitForSelector('.versionComparePage .versionDiff');
+  assert.equal(await page.locator('.bb-overlay').count(), 0);
+  assert.match(page.url(), /[?&]compare=/);
 }
 
 const cleanText = items => items.map(item => item.replace(/\s+/g, ' ').trim());
@@ -1022,7 +1025,8 @@ test('versions: the menu of a row has no separate action of versions, and the ba
   await page.check('[data-version-select="0"]');
   await page.check('[data-version-select="2"]');
   await page.click('[data-version-compare-selected]');
-  await page.waitForSelector('.versionDiff .diff__table');
+  await page.waitForSelector('.versionComparePage .diff__table');
+  assert.equal(await page.locator('.bb-overlay').count(), 0);
   assert.deepEqual(page.errors, []);
   await page.context().close();
 });
@@ -1047,9 +1051,21 @@ test('versions: the preview page has the same picker, with no select and no sepa
   // The comparison and the table of the versions open from the picker.
   await page.click('.versionPicker__button');
   await page.click('.versionPicker__compare');
-  await page.waitForSelector('.versionDiff .diff__table');
-  await page.click('.bb-modal-x');
-  await page.waitForSelector('.bb-overlay', { state: 'detached' });
+  await page.waitForSelector('.versionComparePage .diff__table');
+  assert.equal(await page.locator('.bb-overlay').count(), 0);
+  assert.match(page.url(), /compare=/);
+  assert.equal(await page.locator('.versionComparePage .versionDiff__select').count(), 2);
+  // The comparison is in the page: the browser back button returns to the preview, and so does the button of the page.
+  await page.goBack();
+  await until(page, () => !document.querySelector('.versionComparePage') && document.querySelector('#viewer')?.textContent.includes('Status'));
+  assert.doesNotMatch(page.url(), /compare=/);
+  await page.click('.versionPicker__button');
+  await page.click('.versionPicker__compare');
+  await page.waitForSelector('.versionComparePage .diff__table');
+  await page.click('.versionComparePage__back');
+  await until(page, () => !document.querySelector('.versionComparePage') && document.querySelector('#viewer')?.textContent.includes('Status'));
+  assert.doesNotMatch(page.url(), /compare=/);
+  // The table of all the versions opens from the picker.
   await page.click('.versionPicker__button');
   await page.click('.versionPicker__all');
   await page.waitForSelector('[data-version-select]');
@@ -1107,10 +1123,7 @@ test('versions: the JSON patch follows the option that sorts the keys, and the C
   assert.equal(await page.locator('.gitPatch__line--add').count(), 1);
   await page.uncheck('[data-diff-sort]');
   await until(page, () => document.querySelectorAll('.gitPatch__line--add').length > 1);
-  await page.click('.bb-overlay:last-of-type .bb-modal-x');
-  await page.waitForSelector('.versionPicker__button', { state: 'attached' });
-  await page.click('.bb-modal-x');
-  await page.waitForSelector('.bb-overlay', { state: 'detached' });
+  await open(page, `${MAIN}versions/`);
   // The CSV side by side: the rows before at the left, the rows after at the right, with the changed cells.
   await openCompareFromDetails(page, 'orders.csv');
   await page.waitForSelector('.diff__table--csvsplit');
@@ -1138,21 +1151,49 @@ test('versions: an older version of a JSON file opens in the preview, with its E
   await page.context().close();
 });
 
-test('details: the window is wide, and its upper edge and its height do not change between the tabs', async () => {
+test('windows: the details, the folder insights and the versions use one window, with the same classes, width, top edge and height', async () => {
   const page = await newPage({ viewport: { width: 1600, height: 900 } });
   await open(page, `${MAIN}versions/`);
+  const box = () => page.evaluate(() => {
+    const overlay = document.querySelector('.bb-overlay');
+    const modal = document.querySelector('.bb-modal');
+    const body = document.querySelector('.bb-modal .bb-details-body');
+    const rect = modal.getBoundingClientRect();
+    return { overlay: overlay.className.replace(/\s*is-open\s*/, ' ').trim(), modal: modal.className.trim(), top: rect.top, width: rect.width, height: rect.height, body: body.getBoundingClientRect().height, transform: getComputedStyle(modal).transform };
+  });
+  const settled = () => until(page, () => getComputedStyle(document.querySelector('.bb-modal')).transform === 'none');
+  const close = async () => { await page.click('.bb-modal-x'); await page.waitForSelector('.bb-overlay', { state: 'detached' }); };
+  // The details, with its two tabs.
   await openDetails(page, 'report.txt');
-  const box = () => page.evaluate(() => { const rect = document.querySelector('.bb-modal--details').getBoundingClientRect(); return { top: rect.top, height: rect.height, width: rect.width }; });
-  await until(page, () => getComputedStyle(document.querySelector('.bb-modal--details')).transform === 'none');
-  const overview = await box();
-  assert.ok(overview.width >= 900, `width ${overview.width}px`);
-  assert.ok(overview.top < 200, `top ${overview.top}px`);
+  await settled();
+  const details = await box();
+  assert.equal(details.modal, 'bb-modal bb-modal--large');
+  assert.equal(details.overlay, 'bb-overlay bb-overlay--large');
+  assert.ok(details.width >= 900, `width ${details.width}px`);
+  assert.ok(details.top < 200, `top ${details.top}px`);
   await page.click('[data-details-tab="advanced"]');
   const advanced = await box();
-  assert.ok(Math.abs(advanced.top - overview.top) < 0.5, `top ${overview.top}px then ${advanced.top}px`);
-  assert.ok(Math.abs(advanced.height - overview.height) < 0.5, `height ${overview.height}px then ${advanced.height}px`);
-  await page.click('[data-details-tab="overview"]');
-  assert.ok(Math.abs((await box()).top - overview.top) < 0.5);
+  assert.ok(Math.abs(advanced.top - details.top) < 0.5 && Math.abs(advanced.height - details.height) < 0.5, `${JSON.stringify([details, advanced])}`);
+  await close();
+  // The table of the versions.
+  await page.click('tr[data-name="report.txt"] .versionCount');
+  await page.waitForSelector('[data-version-select]');
+  await settled();
+  const versions = await box();
+  // The folder insights.
+  await close();
+  await page.click('#actionsButton');
+  await page.click('#insightsItem');
+  await page.waitForSelector('.bb-details--insights');
+  await settled();
+  const insights = await box();
+  for (const other of [versions, insights]) {
+    assert.equal(other.modal, details.modal);
+    assert.equal(other.overlay, details.overlay);
+    assert.ok(Math.abs(other.width - details.width) < 0.5, `width ${other.width}px, ${details.width}px`);
+    assert.ok(Math.abs(other.top - details.top) < 0.5, `top ${other.top}px, ${details.top}px`);
+    assert.ok(Math.abs(other.body - details.body) < 0.5, `body ${other.body}px, ${details.body}px`);
+  }
   await page.context().close();
 });
 
@@ -1169,6 +1210,9 @@ test('listing: Size and Modified use a font with one width for every character, 
   assert.ok(look.modified.width > look.modified.ch * 19, `Modified: ${look.modified.width}px`);
   assert.ok(look.modified.width < look.modified.ch * 19 + 20 + 24, `Modified: ${look.modified.width}px`);
   assert.ok(look.size.width < look.size.ch * 7 + 20 + 24, `Size: ${look.size.width}px`);
+  // The values and the titles are at the left of the columns.
+  const align = await page.evaluate(() => ['td.col-size', 'td.col-modified', 'th.col-size', 'th.col-modified'].map(selector => getComputedStyle(document.querySelector(selector)).textAlign));
+  assert.deepEqual(align, ['left', 'left', 'left', 'left']);
   // The column keeps its width when the person changes between the relative and the exact time.
   await page.click('.timeToggle');
   await until(page, () => document.querySelector('.dataTable').classList.contains('is-exact-time'));

@@ -1582,6 +1582,13 @@ button.storageSwitcher__trigger:hover {
   font-size: var(--fs-sm);
 }
 
+.dataTable th.col-size,
+.dataTable td.col-size,
+.dataTable th.col-modified,
+.dataTable td.col-modified {
+  text-align: left;
+}
+
 .dataTable td.col-size {
   width: calc(7ch + 2 * var(--cell-x));
 }
@@ -2236,10 +2243,6 @@ button.versionCount:focus-visible {
 
 .bb-overlay.is-open .bb-modal {
   transform: none;
-}
-
-.bb-modal--wide {
-  width: min(980px, 100%);
 }
 
 .bb-modal-header {
@@ -3198,29 +3201,36 @@ button.versionCount:focus-visible {
 }
 
 
-/* Details window: wide, fixed at the top. A tab change never moves the upper edge or changes the height. ------------------ */
+/* Large window: the details, the folder insights, the versions and the other big dialogs use this one window. It is wide, fixed
+   at the top, and its height is the same for every tab. ------------------------------------------------------------------ */
 
-.bb-overlay.bb-overlay--top-anchored {
+.bb-overlay.bb-overlay--large {
   --bb-modal-top-offset: clamp(2rem, 9vh, 6rem);
+  --bb-large-height: min(66vh, 720px);
   box-sizing: border-box;
   align-items: flex-start;
   padding: var(--bb-modal-top-offset) 1rem 1rem;
   overflow: hidden;
 }
 
-.bb-overlay--top-anchored .bb-modal.bb-modal--details {
+.bb-overlay--large .bb-modal.bb-modal--large {
   width: min(1040px, 100%);
-}
-
-.bb-overlay--top-anchored .bb-modal.bb-modal--details,
-.bb-overlay--top-anchored .bb-modal.bb-modal--insights {
   max-height: calc(100dvh - var(--bb-modal-top-offset) - 1rem);
 }
 
-.bb-overlay--top-anchored .bb-modal--details .bb-details--file .bb-details-body {
-  height: min(66vh, 720px);
+.bb-overlay--large .bb-modal--large .bb-details .bb-details-body {
+  box-sizing: border-box;
+  width: 100%;
+  height: var(--bb-large-height);
   min-height: 360px;
   max-height: none;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.bb-overlay--large .bb-modal--large .folder-insights-panel {
+  height: calc(var(--bb-large-height) - 3.6rem);
+  min-height: 300px;
 }
 
 /* Version picker of the file details ------------------------------------------------------------------------------------ */
@@ -3419,9 +3429,29 @@ button.versionCount:focus-visible {
 
 /* Comparison of two versions ---------------------------------------------------------------------------------------------- */
 
-.bb-modal--diff {
-  width: min(1280px, 100%);
-  max-height: min(92vh, 1000px);
+/* The comparison takes the place of the preview, in the page. */
+.versionComparePage {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding: 4px 0 24px;
+}
+
+.versionComparePage__bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.versionComparePage__title {
+  margin: 0;
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-semibold);
+}
+
+.versionComparePage .diff__scroll {
+  max-height: calc(100vh - 330px);
+  min-height: 260px;
 }
 
 .versionDiff {

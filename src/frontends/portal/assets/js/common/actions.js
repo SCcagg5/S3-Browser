@@ -551,9 +551,8 @@
             <section class="bb-details-panel" data-details-panel="advanced" hidden>${advancedPanel}</section>
           </div>
         </div>`,
-        onOpen: ({ overlay, modal }) => {
-          overlay?.classList.add('bb-overlay--top-anchored');
-          modal?.classList.add('bb-modal--details');
+        large: true,
+        onOpen: ({ overlay }) => {
           const tabs = Array.from(overlay.querySelectorAll('[data-details-tab]'));
           const panels = Array.from(overlay.querySelectorAll('[data-details-panel]'));
           const activateDetailsTab = name => {
@@ -607,10 +606,7 @@
                 }, 140);
               },
               onCompare({ from, to }) {
-                void BB.versions.openCompare({
-                  key, instance: selectedInstance, versions: objectVersions, from, to,
-                  onBytes: (left, right) => compareVersions(key, left.version, right.version, { instance: selectedInstance })
-                });
+                location.href = BB.versions.compareURL({ key, instance: selectedInstance, from, to });
               },
               onAll() { void showVersions(key, { instance: selectedInstance }); }
             });
@@ -1119,10 +1115,7 @@
             </section>
           </div>
         </div>`,
-        onOpen: ({ overlay, modal }) => {
-          overlay?.classList.add('bb-overlay--top-anchored');
-          modal?.classList.add('bb-modal--wide', 'bb-modal--insights');
-        }
+        large: true
       });
 
       let resizeObserver = null;
@@ -1130,8 +1123,6 @@
       requestAnimationFrame(() => {
         const root = document.getElementById(insightID);
         if (!root) return;
-        const modal = root.closest('.bb-modal');
-        modal?.classList.add('bb-modal--wide', 'bb-modal--insights');
         const map = root.querySelector('.folder-treemap');
         const treemapPanel = root.querySelector('[data-insights-panel="treemap"]');
         const treemapTooltip = root.querySelector('[data-treemap-tooltip]');
@@ -1616,6 +1607,7 @@
         : (firstDifference === null ? 'The versions differ.' : `First difference at byte ${Number(firstDifference).toLocaleString()}.`);
       task.complete({ name: key.split('/').pop() || key, detail, progress: 1 });
       await ui().alert({
+        large: true,
         html: `<div class="bb-details bb-comparison">
           <div class="bb-details-head"><i class="mdi mdi-swap-vertical"></i><div class="bb-details-titles"><div class="bb-details-name">${equal ? 'Versions are identical' : 'Versions differ'}</div><div class="bb-details-prefix">${escapeHTML(key)}</div></div></div>
           <div class="bb-details-body"><section class="bb-details-section"><div class="bb-kv">
@@ -1675,6 +1667,7 @@
       };
       const initialRows = versions.map(renderRow).join('');
       await ui().alert({
+        large: true,
         html: `<div class="bb-details bb-version-browser"><div class="bb-details-head"><i class="mdi mdi-source-commit"></i><div class="bb-details-titles"><div class="bb-details-name">Object versions</div><div class="bb-details-prefix">${escapeHTML(key)}</div></div></div><div class="bb-details-body"><div class="bb-version-toolbar"><button type="button" class="bb-btn bb-btn-primary" data-version-compare-selected disabled><i class="mdi mdi-swap-vertical"></i><span>Compare selected</span></button><span data-version-selection>Choose two versions</span></div><div class="data-table-scroll bb-version-table"><table class="data-table"><thead><tr><th aria-label="Selection"></th><th>State</th><th>Version</th><th>Size</th><th>Modified</th><th>Actions</th></tr></thead><tbody data-version-body>${initialRows}</tbody></table></div><div class="bb-version-pagination"><button type="button" class="bb-btn" data-version-more${pageToken ? '' : ' hidden'}>Load more</button><span data-version-count>${versions.length.toLocaleString()} version record(s)</span></div></div></div>`,
         onOpen: ({ overlay }) => {
           const body = overlay.querySelector('[data-version-body]');
@@ -1734,10 +1727,7 @@
             const right = versions[selected[1]];
             if (!left || !right || left.deleteMarker || right.deleteMarker) return;
             if (BB.versions) {
-              await BB.versions.openCompare({
-                key, instance, versions, from: left.version, to: right.version,
-                onBytes: (before, after) => compareVersions(key, before.version, after.version, { instance })
-              });
+              location.href = BB.versions.compareURL({ key, instance, from: left.version, to: right.version });
               return;
             }
             await compareVersions(key, left.version, right.version, { instance });
