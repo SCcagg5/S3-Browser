@@ -157,7 +157,7 @@
     const table = h('div', { class: 'data-table-scroll multiparts__table' }, h('table', { class: 'data-table' },
       h('thead', {}, h('tr', {},
         canWrite && h('th', { class: 'multiparts__check' }, selectAll),
-        h('th', {}, 'Key'),
+        h('th', { class: 'multiparts__key' }, 'Key'),
         h('th', { class: 'multiparts__started' }, 'Started'),
         h('th', { class: 'multiparts__parts' }, 'Parts'),
         h('th', { class: 'multiparts__size' }, 'Size'),

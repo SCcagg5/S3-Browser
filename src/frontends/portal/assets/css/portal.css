@@ -718,6 +718,22 @@ button.storageSwitcher__trigger:hover {
   margin-left: auto;
 }
 
+/* The lock of a bucket that encrypts. An open lock in the colour of a warning: the provider ignores the encryption. */
+.bucketLock {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  color: var(--muted);
+}
+
+.bucketLock .ic {
+  --icon-size: 14px;
+}
+
+.bucketLock.is-warn {
+  color: var(--warning);
+}
+
 .storageSwitcher__copy small,
 .storageBucket__copy small,
 .storageHost__copy small {
@@ -1714,6 +1730,37 @@ button.storageSwitcher__trigger:hover {
   cursor: pointer;
 }
 
+/* The lock of an encrypted file, at the right of its name, in the name cell: the table keeps its columns. */
+.nameLock {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  margin-left: -4px;
+  color: var(--muted);
+}
+
+.nameLock:empty {
+  display: none;
+}
+
+.nameLock__icon {
+  display: inline-grid;
+  place-items: center;
+}
+
+.nameLock .ic {
+  --icon-size: 14px;
+}
+
+.nameLock__pending {
+  display: inline-block;
+  width: 14px;
+  height: 10px;
+  border-radius: var(--radius-pill);
+  background: var(--row-hover);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
 .nameCell.is-folder .nameLink {
   font-weight: var(--fw-semibold);
 }
@@ -2273,6 +2320,11 @@ button.versionCount:focus-visible {
   color: var(--text);
   font-size: var(--fs-lg);
   overflow-wrap: anywhere;
+}
+
+.bb-modal-note {
+  margin-top: 10px;
+  color: var(--warning);
 }
 
 .bb-modal-body .bb-input {
@@ -3245,6 +3297,7 @@ button.versionCount:focus-visible {
    in each row, one line of message and the note about the lifecycle rules. */
 .multiparts {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   padding-top: 6px;
 }
@@ -3324,6 +3377,11 @@ button.versionCount:focus-visible {
   text-align: center !important;
 }
 
+/* The key keeps a width on a narrow window: the table scrolls, and the key does not collapse. */
+.multiparts .data-table .multiparts__key {
+  min-width: 180px;
+}
+
 .multiparts__started {
   width: 210px;
 }
@@ -3395,6 +3453,7 @@ button.versionCount:focus-visible {
    row for each other rule), the buttons, one line of message and the changes of the provider after a save. */
 .lifecycle {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   padding-top: 6px;
 }
@@ -3705,7 +3764,7 @@ button.versionCount:focus-visible {
 }
 
 
-/* Large window: the details, the folder insights, the versions and the other big dialogs use this one window. It is wide, fixed
+/* Large window: the details, the folder insights, the lifecycle rules and the other big dialogs use this one window. It is wide, fixed
    at the top, and its height is the same for every tab. ------------------------------------------------------------------ */
 
 .bb-overlay.bb-overlay--large {
@@ -3731,6 +3790,19 @@ button.versionCount:focus-visible {
   padding-top: 14px;
   overflow: auto;
   scrollbar-gutter: stable;
+}
+
+/* The element that scrolls in a large window touches the right edge of the window: its scrollbar is at the edge. The content
+   keeps a gap at its right, so that the text does not touch the scrollbar. */
+.bb-overlay--large .bb-modal--large .bb-modal-body {
+  padding: 8px 0 16px 20px;
+}
+
+.bb-overlay--large .bb-modal--large .bb-details-head,
+.bb-overlay--large .bb-modal--large .bb-details .bb-details-body,
+.bb-overlay--large .bb-modal--large .lifecycle,
+.bb-overlay--large .bb-modal--large .multiparts {
+  padding-right: 20px;
 }
 
 .bb-overlay--large .bb-modal--large .folder-insights-panel {
@@ -3840,32 +3912,95 @@ button.versionCount:focus-visible {
   overflow-y: auto;
 }
 
+/* A row is an option: the button of the choice, then the action buttons of the version. */
+.versionPicker__list.has-actions {
+  grid-template-columns: 38px minmax(150px, 1fr) max-content max-content 16px max-content;
+}
+
 .versionPicker__item {
   display: grid;
   grid-column: 1 / -1;
   grid-template-columns: subgrid;
   align-items: center;
   column-gap: 12px;
-  width: 100%;
-  padding: 7px 10px;
   border: 1px solid transparent;
   border-radius: var(--radius-control);
-  background: none;
   color: var(--text);
+}
+
+.versionPicker__choose {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
+  color: inherit;
   font: inherit;
   text-align: left;
   cursor: pointer;
 }
 
-.versionPicker__item:hover,
-.versionPicker__item:focus-visible {
-  background: var(--row-hover);
+.has-actions .versionPicker__choose {
+  grid-column: 1 / -2;
+}
+
+.versionPicker__choose:focus-visible {
   outline: none;
+}
+
+.versionPicker__item:hover,
+.versionPicker__item:focus-within {
+  background: var(--row-hover);
 }
 
 .versionPicker__item.is-active {
   border-color: var(--selected-edge);
   background: var(--selected-bg);
+}
+
+/* The action buttons are frameless icons. They show on hover and on keyboard focus; the keyboard reaches them always. */
+.versionPicker__actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 4px;
+  opacity: 0;
+  transition: opacity var(--dur-quick) var(--ease);
+}
+
+.versionPicker__item:hover .versionPicker__actions,
+.versionPicker__item:focus-within .versionPicker__actions {
+  opacity: 1;
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .versionPicker__actions {
+    opacity: 1;
+  }
+}
+
+.versionPicker__action,
+.versionPicker__actionSpace {
+  width: 28px;
+  height: 28px;
+}
+
+.versionPicker__item .versionPicker__action .mdi {
+  color: inherit;
+}
+
+.versionPicker__action:focus-visible {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: -2px;
+}
+
+.versionPicker__action.is-danger:hover,
+.versionPicker__action.is-danger:focus-visible {
+  color: var(--danger);
 }
 
 .versionPicker__number {
@@ -3914,8 +4049,7 @@ button.versionCount:focus-visible {
   border-top: 1px solid var(--border);
 }
 
-.versionPicker__compare,
-.versionPicker__all {
+.versionPicker__compare {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -3932,9 +4066,7 @@ button.versionCount:focus-visible {
 }
 
 .versionPicker__compare:hover:not(:disabled),
-.versionPicker__all:hover,
-.versionPicker__compare:focus-visible,
-.versionPicker__all:focus-visible {
+.versionPicker__compare:focus-visible {
   background: var(--row-hover);
   outline: none;
 }
@@ -4260,6 +4392,10 @@ button.versionCount:focus-visible {
 
   .versionPicker__list {
     grid-template-columns: 34px minmax(0, 1fr) max-content 16px;
+  }
+
+  .versionPicker__list.has-actions {
+    grid-template-columns: 34px minmax(0, 1fr) max-content 16px max-content;
   }
 
   .versionPicker__meta {

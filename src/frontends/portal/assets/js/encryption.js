@@ -4,6 +4,8 @@
  *   (SSE-C) that the provider refused to read. S3-Browser never shows or asks for such a key;
  * - the bucket: its default encryption (GET /api/encryption), when the server could read it at start.
  * The section stays hidden when the provider reports no encryption.
+ * The module also gives the lock next to the name of a bucket (from /api/instances), the lock next to the name of a
+ * file in the listing (from a HEAD request), and the message for an object with a key of the client.
  */
 (function () {
   'use strict';
@@ -82,5 +84,66 @@
     host.hidden = false;
   }
 
-  BB.encryption = { mountSection, objectRows };
+  // ---------------------------------------------------------------------------------------------------------------
+  // Objects with a key of the client (SSE-C)
+  // ---------------------------------------------------------------------------------------------------------------
+
+  const CUSTOMER_KEY_TEXT = 'This object is encrypted with a key of the client (SSE-C). The browser cannot read it without that key.';
+
+  // A read that the provider refused with 400 is an object with a key of the client only when GET /api/media-info says
+  // so (customerKey). The page does not guess from an other 400.
+  async function customerKeyRefusal(error, key, { version = '', instance = null } = {}) {
+    if (Number(error?.status || 0) !== 400 || !key) return false;
+    try {
+      return (await BB.api.mediaInfo(key, { version, instance })).customerKey === true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // ---------------------------------------------------------------------------------------------------------------
+  // The lock of a bucket and the lock of a file
+  // ---------------------------------------------------------------------------------------------------------------
+
+  // The lock of a bucket tells the truth of the provider. A default encryption of the bucket encrypts each new object.
+  // The key encryption = "sse-s3" encrypts only on a provider that applies it (encryptionApplied of /api/instances):
+  // Garage accepts the header and does not encrypt, so its bucket gets an open lock. Null: no lock.
+  function bucketLock(instance) {
+    const algorithm = String(instance?.defaultEncryption || '');
+    const applied = String(instance?.encryptionApplied || '');
+    if (instance?.encryption === 'sse-s3' && applied === 'yes') return { icon: 'lock', tone: 'on', title: 'Encrypted: SSE-S3 for each new object' };
+    if (algorithm) return { icon: 'lock', tone: 'on', title: `Default encryption of the bucket: ${algorithm}` };
+    if (instance?.encryption === 'sse-s3' && applied === 'no') return { icon: 'lock-open', tone: 'warn', title: 'SSE-S3 requested; the provider does not encrypt the objects (Garage)' };
+    if (instance?.encryption === 'sse-s3') return { icon: 'lock', tone: 'warn', title: 'SSE-S3 requested; the provider may not encrypt' };
+    return null;
+  }
+
+  // An instance is "encryption aware" when its bucket can encrypt: a default encryption, or the key on a provider that
+  // applies it or that S3-Browser does not know. The listing then reads the encryption of each file by default.
+  const encryptionAware = instance => Boolean(instance?.defaultEncryption)
+    || (instance?.encryption === 'sse-s3' && instance?.encryptionApplied !== 'no');
+
+  // The encryption of a file from the headers of its HEAD answer, as a text for the tooltip. Empty: no encryption.
+  function objectEncryptionTitle(headers) {
+    if (header(headers, 'x-amz-server-side-encryption-customer-algorithm')) return 'Encrypted with a key of the client (SSE-C)';
+    const algorithm = header(headers, 'x-amz-server-side-encryption');
+    if (!algorithm) return '';
+    const keyID = header(headers, 'x-amz-server-side-encryption-aws-kms-key-id');
+    if (algorithm === 'AES256') return 'Encrypted: SSE-S3';
+    if (algorithm.startsWith('aws:kms')) return `Encrypted: ${algorithm === 'aws:kms:dsse' ? 'DSSE-KMS' : 'SSE-KMS'}${keyID ? `, key ${keyID}` : ''}`;
+    return `Encrypted: ${algorithm}`;
+  }
+
+  // The encryption of a file in the listing: a HEAD request, and for a refusal with 400 the confirmation of
+  // /api/media-info. The answer is the text of the tooltip, or '' when the provider reports nothing.
+  async function objectEncryption(key, instance) {
+    try {
+      return objectEncryptionTitle((await BB.api.head(key, '', instance)).headers);
+    } catch (error) {
+      if (await customerKeyRefusal(error, key, { instance })) return 'Encrypted with a key of the client (SSE-C)';
+      throw error;
+    }
+  }
+
+  BB.encryption = { mountSection, objectRows, CUSTOMER_KEY_TEXT, customerKeyRefusal, bucketLock, encryptionAware, objectEncryptionTitle, objectEncryption };
 })();

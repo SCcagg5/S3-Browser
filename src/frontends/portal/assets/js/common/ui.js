@@ -82,7 +82,7 @@
   }
 
   function buildModal({ title = '', message = '', html = '', kind = 'alert', defaultValue = '', confirmLabel = 'OK', cancelLabel = 'Cancel', large = false }) {
-    // A large window is the same window for the details, the folder insights, the versions and the other big dialogs.
+    // A large window is the same window for the details, the folder insights and the other big dialogs.
     const overlay = el('div', large ? 'bb-overlay bb-overlay--large' : 'bb-overlay', '');
     const modal = el('div', large ? 'bb-modal bb-modal--large' : 'bb-modal', '');
 

@@ -93,6 +93,10 @@ This document uses ASD-STE100 Simplified Technical English.
 - The read needs `objects.read`, and a change needs `objects.write`. The server reads the Object Lock configuration of
   each instance at start and gives `objectLockSupported` in `/api/instances`. A bucket without Object Lock, Garage
   (`501`) and the GCS backend hide the section.
+- On a bucket with Object Lock, the confirmation of the delete of a file or of a folder says: "This bucket has Object
+  Lock. The delete adds a delete marker. A version that a lock protects stays in the bucket." A warning after the
+  delete says the same. A delete without a version is not refused: the provider adds a delete marker, and the locked
+  version stays.
 
 ### Encryption
 
@@ -117,6 +121,19 @@ This document uses ASD-STE100 Simplified Technical English.
   `/api/instances`. Garage (`501`) and the GCS backend hide the default of the bucket.
 - Garage v2.4.1 accepts the header and does not encrypt. The server writes a warning at start for a Garage bucket with
   `encryption = "sse-s3"`.
+- `/api/instances` gives `encryption` (the key), `defaultEncryption` (the algorithm of the default encryption of the
+  bucket at start, or `""`) and `encryptionApplied` (`yes`, `no` or `unknown` for `"sse-s3"`: the provider applies the
+  header, ignores it, or is not known).
+- The bucket selector shows a lock next to a bucket that encrypts, with the reason in its tooltip. A Garage bucket with
+  `"sse-s3"` gets an open lock: Garage does not encrypt.
+- The listing shows a small lock at the right of the name of an encrypted file, with the encryption in its tooltip. The
+  page reads it with a HEAD request for the files on the page: 4 requests at the same time, 100 files at most, one
+  request for each file. The new setting "Show the encryption of the objects" starts or stops it for each bucket. It is
+  on by default for a bucket that encrypts, and off for the other buckets.
+- The preview page of an object with a key of the client (SSE-C) shows the name and the path of the object and the
+  message "This object is encrypted with a key of the client (SSE-C). The browser cannot read it without that key."
+  The title was "Loading" and the message "HTTP 400". The link to the original and the downloads give the same
+  message.
 
 ### Uploads and deletes
 
@@ -150,6 +167,10 @@ This document uses ASD-STE100 Simplified Technical English.
   `seaweedfs-locked` and `minio-locked`. The health check of SeaweedFS waits for its buckets. On both providers, the Object Lock tests set
   and remove a legal hold, and try to delete a locked version. They extend and shorten a Governance retention, and
   check that a Compliance retention cannot be shortened. A test checks that Garage hides the section.
+- The browser tests restore and delete versions with the buttons of the picker, in the details and in the preview, and
+  check the permissions of the buttons. The Object Lock test deletes the locked version with the Delete button of the
+  picker. Other tests check the locks of the buckets and of the files, the count of the HEAD requests, the SSE-C
+  message of the preview and of the downloads, and the sentence of Object Lock in the confirmation of a delete.
 - The test image takes the build arguments `MULTIPART_COPY_THRESHOLD` and `MULTIPART_COPY_PART_SIZE`. The portal test
   stack copies in parts from 8 KiB up, in parts of 5 MiB. A browser test copies and renames a file of 11 MiB on each
   provider and compares the SHA-256 of the result. A second test restores a large version on SeaweedFS and MinIO.
@@ -185,7 +206,7 @@ This document uses ASD-STE100 Simplified Technical English.
   versions. A click on a badge filters the page by this tag. The column of versions is narrow.
 - The details of a file have a picker of versions, with the date, the size and the change of size of each version.
   The new comparison of two versions shows the difference of two texts, two JSON documents or two CSV files. The
-  comparison opens from the picker and from the table of versions. The picker is also in the bar of the preview page.
+  comparison opens from the picker. The picker is also in the bar of the preview page.
   The views are side by side (the default), unified and the patch of git, with the buttons "Copy patch" and
   "Download .patch". A CSV file shows two tables side by side. The menus of actions have no item "Versions": the badge
   with the count opens them.
@@ -197,8 +218,16 @@ This document uses ASD-STE100 Simplified Technical English.
   left, and the statistics of the change are between the two. The header gets no new row, and a button closes the comparison. The view "Git patch" is now "Patch". The browser
   back button returns to the preview. A JSON file has the modes Raw, Beautify and Tree, as the preview. A changed line
   with marked words showed the text `[object HTMLElement]`: this is fixed.
-- The details, the folder insights, the table of versions and the comparison of bytes use one window (`bb-modal--large`).
+- The details, the folder insights and the comparison of bytes use one window (`bb-modal--large`).
   The window is wide, fixed at the top, and has the same height for each tab. A dialog asks for it with `large: true`.
+- Each row of the version picker has frameless icon buttons Download, Restore and Delete. They show on hover and on
+  keyboard focus. Restore needs the write permission and is not on the current version. Delete needs the delete
+  permission. After a restore or a delete, the details, the preview and the listing show the new versions. The
+  pickers From and To of a comparison have no buttons. The item "All versions and actions…" and its table of versions
+  are removed. The badge with the count of versions opens the details of the file.
+- In a large window, the element that scrolls ends at the right edge of the window, so its scrollbar is at the edge. Its
+  content keeps a gap of 20 px at the right. The Key column of the incomplete uploads keeps its width on a narrow
+  window.
 - The values and the titles of the columns Size and Modified are at the right of the column.
 - The details of a file are one page, with no tab. The tools of integrity and inspection follow the sections. The arrow of the
   version picker has the size of the text. The close button of a dialog changes only the colour of its cross.

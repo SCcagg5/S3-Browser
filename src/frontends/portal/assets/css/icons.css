@@ -127,6 +127,7 @@
 .mdi-raw-image { --icon: url("../icons/tabler/photo.svg"); }
 .mdi-refresh { --icon: url("../icons/tabler/refresh.svg"); }
 .mdi-rename-outline { --icon: url("../icons/tabler/pencil.svg"); }
+.mdi-restore { --icon: url("../icons/tabler/restore.svg"); }
 .mdi-rewind { --icon: url("../icons/tabler/player-track-prev.svg"); }
 .mdi-rotate-left { --icon: url("../icons/tabler/rotate.svg"); }
 .mdi-rotate-right { --icon: url("../icons/tabler/rotate-clockwise.svg"); }
@@ -217,6 +218,7 @@
 .ic-list { --icon: url("../icons/tabler/list.svg"); }
 .ic-loader-2 { --icon: url("../icons/tabler/loader-2.svg"); }
 .ic-lock { --icon: url("../icons/tabler/lock.svg"); }
+.ic-lock-open { --icon: url("../icons/tabler/lock-open.svg"); }
 .ic-maximize { --icon: url("../icons/tabler/maximize.svg"); }
 .ic-minimize { --icon: url("../icons/tabler/minimize.svg"); }
 .ic-minus { --icon: url("../icons/tabler/minus.svg"); }

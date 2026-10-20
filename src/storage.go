@@ -506,6 +506,7 @@ func (s *storageInstance) operationCapabilities() map[string]capabilityState {
 }
 
 func (s *storageInstance) publicInfo() instanceInfo {
+	defaultEncryption, encryptionApplied := s.encryptionState()
 	return instanceInfo{
 		ID:                  s.cfg.ID,
 		Host:                s.cfg.AuthID,
@@ -521,28 +522,38 @@ func (s *storageInstance) publicInfo() instanceInfo {
 		Lifecycle:           s.lifecycleAvailable(),
 		ObjectLock:          s.objectLockAvailable(),
 		BucketEncryption:    s.bucketEncryptionAvailable(),
+		Encryption:          s.cfg.Encryption,
+		DefaultEncryption:   defaultEncryption,
+		EncryptionApplied:   encryptionApplied,
 		Capabilities:        s.capabilities(),
 		Operations:          s.operationCapabilities(),
 	}
 }
 
 type instanceInfo struct {
-	ID                  string                     `json:"id"`
-	Host                string                     `json:"host"`
-	Name                string                     `json:"name"`
-	Provider            string                     `json:"provider"`
-	Bucket              string                     `json:"bucket"`
-	Region              string                     `json:"region,omitempty"`
-	RootPrefix          string                     `json:"rootPrefix,omitempty"`
-	VersioningSupported bool                       `json:"versioningSupported"`
-	TagsSupported       bool                       `json:"tagsSupported"`
-	MetadataEditable    bool                       `json:"metadataEditSupported"`
-	MultipartUploads    bool                       `json:"multipartUploadsSupported"`
-	Lifecycle           bool                       `json:"lifecycleSupported"`
-	ObjectLock          bool                       `json:"objectLockSupported"`
-	BucketEncryption    bool                       `json:"bucketEncryptionSupported"`
-	Capabilities        capabilities               `json:"capabilities"`
-	Operations          map[string]capabilityState `json:"operations"`
+	ID                  string `json:"id"`
+	Host                string `json:"host"`
+	Name                string `json:"name"`
+	Provider            string `json:"provider"`
+	Bucket              string `json:"bucket"`
+	Region              string `json:"region,omitempty"`
+	RootPrefix          string `json:"rootPrefix,omitempty"`
+	VersioningSupported bool   `json:"versioningSupported"`
+	TagsSupported       bool   `json:"tagsSupported"`
+	MetadataEditable    bool   `json:"metadataEditSupported"`
+	MultipartUploads    bool   `json:"multipartUploadsSupported"`
+	Lifecycle           bool   `json:"lifecycleSupported"`
+	ObjectLock          bool   `json:"objectLockSupported"`
+	BucketEncryption    bool   `json:"bucketEncryptionSupported"`
+	// Encryption is the key encryption of the bucket: "" or "sse-s3".
+	Encryption string `json:"encryption"`
+	// DefaultEncryption is the algorithm of the default encryption of the bucket at start, empty when it has none.
+	DefaultEncryption string `json:"defaultEncryption"`
+	// EncryptionApplied tells if the provider applies encryption = "sse-s3": "yes", "no" or "unknown". It is empty
+	// without the key.
+	EncryptionApplied string                     `json:"encryptionApplied,omitempty"`
+	Capabilities      capabilities               `json:"capabilities"`
+	Operations        map[string]capabilityState `json:"operations"`
 }
 
 type upstreamError struct {

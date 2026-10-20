@@ -194,6 +194,8 @@ type fakeEncryptionS3 struct {
 	encryptionBody   string
 	// listBody is the answer of ListObjectsV2.
 	listBody string
+	// server is the Server header of each answer. It tells the provider to the probe (empty: an unknown provider).
+	server string
 }
 
 func newFakeEncryptionS3(t *testing.T) (*fakeEncryptionS3, *httptest.Server) {
@@ -213,6 +215,9 @@ func (f *fakeEncryptionS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.requests = append(f.requests, recordedRequest{method: r.Method, path: r.URL.Path, query: r.URL.RawQuery, header: r.Header.Clone()})
+	if f.server != "" {
+		w.Header().Set("Server", f.server)
+	}
 	query := r.URL.Query()
 	bucketLevel := strings.Trim(r.URL.Path, "/") == "bucket"
 	switch {
@@ -595,6 +600,59 @@ func TestProbeBucketEncryptionShowsOrHidesTheFeature(t *testing.T) {
 			if got := instancesBucketEncryptionSupported(t, app); got != test.want {
 				t.Fatalf("bucketEncryptionSupported = %v, want %v", got, test.want)
 			}
+		})
+	}
+}
+
+// /api/instances gives the key encryption, the default encryption of the bucket at start, and what the provider does
+// with the key. The page shows the lock of the bucket from them.
+func TestInstancesGiveTheEncryptionOfTheBucket(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name       string
+		encryption string
+		server     string
+		status     int
+		body       string
+		algorithm  string
+		applied    string
+	}{
+		{"no key and no default", "", "MinIO", 0, "", "", ""},
+		{"default of the bucket", "", "MinIO", http.StatusOK, bucketEncryptionAES, "AES256", ""},
+		{"default with KMS", "", "SeaweedFS 30GB 4.41", http.StatusOK, bucketEncryptionKMS, "aws:kms", ""},
+		{"key on MinIO", encryptionSSES3, "MinIO", 0, "", "", encryptionAppliedYes},
+		{"key on SeaweedFS", encryptionSSES3, "SeaweedFS 30GB 4.41", 0, "", "", encryptionAppliedYes},
+		{"key on AWS", encryptionSSES3, "AmazonS3", 0, "", "", encryptionAppliedYes},
+		{"key on Garage", encryptionSSES3, "Garage", http.StatusNotImplemented, bucketEncryptionGarage, "", encryptionAppliedNo},
+		{"key on an unknown provider", encryptionSSES3, "", 0, "", "", encryptionAppliedUnknown},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			app, _, _ := testApplication(t)
+			fake, server := newFakeEncryptionS3(t)
+			fake.encryptionStatus, fake.encryptionBody, fake.server = test.status, test.body, test.server
+			instance := app.instances["rw"]
+			instance.backend = newAnonymousS3BackendForTest(t, server.URL, "bucket")
+			instance.cfg.Encryption = test.encryption
+			instance.probeBucketEncryption(context.Background())
+			recorder := doJSON(app, http.MethodGet, "/api/instances", nil)
+			var payload struct {
+				Instances []map[string]any `json:"instances"`
+			}
+			if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+				t.Fatal(err)
+			}
+			for _, info := range payload.Instances {
+				if info["id"] != "rw" {
+					continue
+				}
+				applied, present := info["encryptionApplied"]
+				if info["encryption"] != test.encryption || info["defaultEncryption"] != test.algorithm || present != (test.applied != "") || present && applied != test.applied {
+					t.Fatalf("instance = %+v", info)
+				}
+				return
+			}
+			t.Fatal("no instance rw")
 		})
 	}
 }

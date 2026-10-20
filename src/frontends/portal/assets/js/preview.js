@@ -26,6 +26,8 @@
   let activeSearchController = null;
   let pdfLoaderPromise = null;
   let activeCompare = null;
+  // The object of the page has a key of the client (SSE-C): the link to the original gives the message of the page.
+  let customerKeyObject = false;
 
   function byId(id) { return document.getElementById(id); }
 
@@ -205,7 +207,8 @@
 
   let previewVersions = [];
 
-  // The picker of versions in the bar of the preview: the versions with their date, size and change, and the comparison.
+  // The picker of versions in the bar of the preview: the versions with their date, size and change, their actions
+  // (Download, Restore, Delete) and the comparison.
   function mountVersionPicker() {
     const control = byId('previewVersionControl');
     if (!control) return;
@@ -217,7 +220,7 @@
       selected: currentVersion(),
       onSelect: version => selectVersion(version),
       onCompare({ from, to }) { enterCompare(from, to); },
-      onAll: () => BB.actions.showVersions(currentKey())
+      actions: BB.actions.versionActions(currentKey(), { instance: config.instanceId })
     });
     control.hidden = false;
   }
@@ -309,6 +312,22 @@
     applyCapabilities();
     mountVersionPicker();
     void render();
+  }
+
+  // A restore or a delete of a version (in the picker or in the details): the page reads the versions again and shows
+  // the preview again. After the delete of a version that the page shows, the page shows the current version.
+  async function onVersionsChanged(event) {
+    if (event.detail?.key !== currentKey() || currentArchiveEntry()) return;
+    if (event.detail.action === 'delete' && [currentVersion(), currentCompare()].includes(event.detail.version)) {
+      const url = new URL(location.href);
+      url.searchParams.delete('version');
+      url.searchParams.delete('compare');
+      history.replaceState(null, '', url.pathname + url.search);
+      applyCapabilities();
+    }
+    stopCompare();
+    await configureVersionSelector(currentKey());
+    await render();
   }
 
   function updateBackLink(key, entry = '') {
@@ -1122,15 +1141,15 @@
     return unavailablePreview(...labels[type]);
   }
 
-  function renderError(error) {
+  function renderError(error, heading = 'Preview unavailable', iconName = 'alert-circle-outline') {
     setPreviewMode('message');
     const container = byId('viewer');
     container.className = 'preview-error';
     container.replaceChildren();
     const icon = document.createElement('i');
-    icon.className = 'mdi mdi-alert-circle-outline';
+    icon.className = `mdi mdi-${iconName}`;
     const title = document.createElement('strong');
-    title.textContent = 'Preview unavailable';
+    title.textContent = heading;
     const message = document.createElement('p');
     message.textContent = String(error?.message || error || 'Unknown error');
     container.append(icon, title, message);
@@ -1306,6 +1325,7 @@
       return;
     }
 
+    customerKeyObject = false;
     setPreviewMode('loading');
     container.className = 'preview-loading';
     container.replaceChildren();
@@ -1450,6 +1470,17 @@
       }
       scheduleViewerLayout();
     } catch (error) {
+      // The bar shows the name and the path of the object also when the preview fails.
+      setDocMeta(displayKey, NaN, archiveEntry ? key : '');
+      updateBackLink(key, archiveEntry);
+      // An object with a key of the client (SSE-C): the provider refuses the HEAD with 400 and no text, and the details
+      // say why. The size comes from the listing.
+      if (!archiveEntry && await BB.encryption?.customerKeyRefusal(error, key, { version: currentVersion(), instance: config.instanceId })) {
+        customerKeyObject = true;
+        byId('openRawBtn').href = BB.api.openURLForKey(key, config.instanceId, currentVersion());
+        renderError(new Error(BB.encryption.CUSTOMER_KEY_TEXT), 'Encrypted with a key of the client', 'lock-outline');
+        return;
+      }
       renderError(error);
     }
   }
@@ -1533,6 +1564,12 @@
     void openDocumentSearch();
   });
   byId('compareClose').addEventListener('click', leaveCompare);
+  byId('openRawBtn').addEventListener('click', event => {
+    if (!customerKeyObject) return;
+    event.preventDefault();
+    BB.ui.toast(BB.encryption.CUSTOMER_KEY_TEXT, { status: 'error', detail: currentKey(), duration: 9000 });
+  });
+  document.addEventListener('bb:versions-changed', event => { void onVersionsChanged(event); });
   window.addEventListener('popstate', () => {
     stopCompare();
     applyCapabilities();

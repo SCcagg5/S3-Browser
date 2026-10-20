@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -136,6 +137,42 @@ func (s *s3Backend) BucketEncryption(ctx context.Context) (*bucketEncryption, er
 type encryptionCapability struct {
 	// on is set when the probe read the default encryption of the bucket, or found that the bucket has none.
 	on atomic.Bool
+
+	mu sync.Mutex
+	// algorithm is the default encryption of the bucket at start (AES256, aws:kms or aws:kms:dsse). It is empty when the
+	// bucket has none, or when the probe could not read it.
+	algorithm string
+	// applied tells if the provider applies the encryption = "sse-s3" of the writes: encryptionAppliedYes, No or
+	// Unknown. It is empty for an instance without the key.
+	applied string
+}
+
+// The values of encryptionApplied in /api/instances.
+const (
+	encryptionAppliedYes     = "yes"
+	encryptionAppliedNo      = "no"
+	encryptionAppliedUnknown = "unknown"
+)
+
+// sseS3ProviderApplied tells what each known provider does with x-amz-server-side-encryption: AES256 (measured, see
+// test/README.md). AWS S3, MinIO and SeaweedFS encrypt the object, or refuse the write when they have no key. Garage
+// accepts the header and does not encrypt.
+var sseS3ProviderApplied = map[string]string{
+	flavourAWS:       encryptionAppliedYes,
+	flavourMinIO:     encryptionAppliedYes,
+	flavourSeaweedFS: encryptionAppliedYes,
+	flavourGarage:    encryptionAppliedNo,
+}
+
+// encryptionState gives the default encryption of the bucket at start, and what the provider does with the
+// encryption of the writes. The page shows a lock next to the name of the bucket from these two facts.
+func (s *storageInstance) encryptionState() (algorithm, applied string) {
+	if s == nil {
+		return "", ""
+	}
+	s.encryption.mu.Lock()
+	defer s.encryption.mu.Unlock()
+	return s.encryption.algorithm, s.encryption.applied
 }
 
 // bucketEncryptionAvailable tells if the page can read the default encryption of the bucket. Until the probe has run,
@@ -152,8 +189,9 @@ func (s *storageInstance) bucketEncryptionAvailable() bool {
 
 // probeBucketEncryption reads the default encryption of the bucket. An answer (a configuration, or "no configuration")
 // shows it. A provider without the request (501, 405) and any other failure hide it. The request is a read. An
-// instance without the read permission is not probed. For an instance with encryption = "sse-s3" on Garage, the probe
-// writes a warning: Garage accepts the header and does not encrypt.
+// instance without the read permission is not probed. For an instance with encryption = "sse-s3", the probe finds the
+// provider and keeps what it does with the header. On Garage, the probe writes a warning: Garage accepts the header and
+// does not encrypt.
 func (s *storageInstance) probeBucketEncryption(ctx context.Context) {
 	reader, ok := s.backend.(BucketEncryptionReader)
 	if !ok || !s.permitted(permissionRead) {
@@ -161,11 +199,26 @@ func (s *storageInstance) probeBucketEncryption(ctx context.Context) {
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	_, err := reader.BucketEncryption(probeCtx)
+	config, err := reader.BucketEncryption(probeCtx)
 	s.encryption.on.Store(err == nil)
-	if s.cfg.Encryption == encryptionSSES3 && s.lifecycleFlavour(probeCtx) == flavourGarage {
-		log.Printf("config.warning bucket %q encryption = %q: the provider is Garage, which accepts x-amz-server-side-encryption and does not encrypt the objects", s.cfg.ID, s.cfg.Encryption)
+	algorithm := ""
+	if err == nil && config != nil {
+		algorithm = config.Algorithm
 	}
+	applied := ""
+	if s.cfg.Encryption == encryptionSSES3 {
+		flavour := s.lifecycleFlavour(probeCtx)
+		applied = sseS3ProviderApplied[flavour]
+		if applied == "" {
+			applied = encryptionAppliedUnknown
+		}
+		if flavour == flavourGarage {
+			log.Printf("config.warning bucket %q encryption = %q: the provider is Garage, which accepts x-amz-server-side-encryption and does not encrypt the objects", s.cfg.ID, s.cfg.Encryption)
+		}
+	}
+	s.encryption.mu.Lock()
+	s.encryption.algorithm, s.encryption.applied = algorithm, applied
+	s.encryption.mu.Unlock()
 }
 
 // readBucketEncryption reads the default encryption of the bucket in a slot of the gates of the instance.

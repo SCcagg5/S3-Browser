@@ -101,7 +101,13 @@ The listing of the provider does not give tags, and S3 has no request that lists
 
 The details of a file have a picker of versions. It shows each version with its number (v1 is the oldest), its date, its size and the change of size since the version before. A choice opens the details of that version. The tags of an older version are read only.
 
-The comparison of two versions runs in the browser, in the preview page and not in a dialog. The address has the parameter `compare` (the older version) and the parameter `version` (the other version). The comparison takes the place of the preview. The browser back button and the button "Back to the preview" show the preview again. The picker of the versions of the preview stays in its place and becomes the version To. The version From appears at its left, and the statistics of the change are between the two. The header gets no new row. A button closes the comparison. The picker of versions, the table of versions and the details open this address. The page reads each version with `GET /s3?key=&version=`. A version larger than 2 MiB is not read. A version with a NUL byte or with a text that is not UTF-8 is not text: the page says so, and offers the comparison of the bytes.
+Each row of the picker also has frameless icon buttons: Download, Restore and Delete. They show on hover and on keyboard focus. Restore is not on the current version and needs the write permission. Delete needs the delete permission. Restore and Delete open a confirmation first, and call `POST /api/versions/restore` or `DELETE /api/versions`. A delete that a lock refuses shows the message of `409 object_locked`. After a restore or a delete, the details open again, the preview page reads the versions and the preview again, and the listing reads its folder again.
+
+A row of the picker is a `div` with the role `option`. It has a button for the choice and the action buttons. Up and Down go from row to row. Left and Right go from the choice to the action buttons of the row. Tab goes through every button of the menu, and Escape closes it. The pickers From and To of a comparison have no action buttons.
+
+The picker does not list the delete markers. When the current version of an object is a delete marker, the listing does not show the object, so the page cannot open its versions. This is an old limit.
+
+The comparison of two versions runs in the browser, in the preview page and not in a dialog. The address has the parameter `compare` (the older version) and the parameter `version` (the other version). The comparison takes the place of the preview. The browser back button and the button "Back to the preview" show the preview again. The picker of the versions of the preview stays in its place and becomes the version To. The version From appears at its left, and the statistics of the change are between the two. The header gets no new row. A button closes the comparison. The picker of versions opens this address. The page reads each version with `GET /s3?key=&version=`. A version larger than 2 MiB is not read. A version with a NUL byte or with a text that is not UTF-8 is not text: the page says so, and offers the comparison of the bytes.
 
 The page picks the view from the extension of the key. The two versions show side by side by default, as on diffchecker.com. Other views are the unified list and the patch of git.
 
@@ -112,7 +118,7 @@ The page picks the view from the extension of the key. The two versions show sid
 
 The last line of a text with no line break is not the same line as the same text with a break, as in git.
 
-The picker of versions is also in the bar of the preview page. It replaces the list of versions there, and the action "Versions" of the menus. The badge with the count in the listing opens the table of the versions, with the restore and the delete.
+The picker of versions is also in the bar of the preview page, with the same actions. It replaces the list of versions there, and the action "Versions" of the menus. The badge with the count in the listing opens the details of the file, with the picker. The page has no table of the versions.
 
 A diff that needs more than 2500 edits shows as a replacement of the lines. The algorithms are in `assets/js/diff.js`. They have no DOM, and `test/portal-frontend/diff-tests.js` tests them in Node.
 
@@ -386,7 +392,7 @@ The read needs `objects.read`, and a change needs `objects.write` on the node of
 
 The providers refuse the delete of a locked version with different answers. SeaweedFS gives `403 AccessDenied`. MinIO gives `400 InvalidRequest` with the message "Object is WORM protected and cannot be overwritten". `DeleteObjects` gives the same codes for each refused key, in the XML body of a `200` answer. The status alone does not tell a lock from a missing permission. Thus, after a refusal with one of these codes, the server reads the lock of the version. Only a legal hold or an active retention makes the error `409 object_locked`. Its message names the lock and tells what the person can do. Any other refusal stays the error of the provider.
 
-A refusal for a lock does not change the delete permission that the instance reports. A delete without a version id is not refused on SeaweedFS and MinIO: the provider writes a delete marker, and the locked version stays. The code also covers a provider that refuses such a delete:
+A refusal for a lock does not change the delete permission that the instance reports. A delete without a version id is not refused on SeaweedFS and MinIO: the provider writes a delete marker, and the locked version stays. This is the correct behaviour of S3. Thus, on a bucket with `objectLockSupported`, the confirmation of the delete of a file or of a folder has the sentence "This bucket has Object Lock. The delete adds a delete marker. A version that a lock protects stays in the bucket." A warning after the delete tells the same. The code also covers a provider that refuses such a delete:
 
 | Operation | Effect of a lock |
 | --- | --- |
@@ -446,6 +452,24 @@ A provider refuses the HEAD request of an SSE-C object without its key, with `40
 `GET /api/encryption?instance=` gives `uploads` (the value of the key) and `bucketDefault`. `bucketDefault` is `null`, or `algorithm` (`AES256`, `aws:kms` or `aws:kms:dsse`), `kmsKeyId` and `bucketKeyEnabled`, from `GetBucketEncryption`. At start, the server reads it for each instance with the read permission. An answer, or `404 ServerSideEncryptionConfigurationNotFoundError`, gives `bucketEncryptionSupported: true` in `/api/instances`. `501` (Garage), `405` and any other failure give `false`, and the route then answers `501 bucket_encryption_unsupported`. The route needs `objects.read` on the bucket.
 
 The details of a file have the section "Encryption" after "Storage object". It shows the encryption of the object: SSE-S3, SSE-KMS with its key, or "Key of the client, SSE-C". It also shows the default encryption of the bucket. For an SSE-C object, a note tells that the preview, the download and the copy need the key, and the details have no metadata section. The section stays hidden when the provider reports no encryption.
+
+The preview page of an SSE-C object shows the name and the path of the object, and the message "This object is encrypted with a key of the client (SSE-C). The browser cannot read it without that key." The link to the original and the downloads give the same message. The page uses this message only when the HEAD request fails with `400` and `GET /api/media-info` gives `customerKey: true`. Any other `400` stays an error.
+
+### Locks in the bucket selector and in the listing
+
+`/api/instances` gives three facts for each instance:
+
+| Field | Value |
+| --- | --- |
+| `encryption` | The key `encryption` of the bucket: `""` or `"sse-s3"` |
+| `defaultEncryption` | The algorithm of the default encryption of the bucket at start (`AES256`, `aws:kms`), or `""` |
+| `encryptionApplied` | For `"sse-s3"` only: `"yes"` on AWS S3, MinIO and SeaweedFS, `"no"` on Garage, `"unknown"` for a provider that S3-Browser does not know |
+
+The bucket selector shows a lock next to the name of a bucket that encrypts. The tooltip says "Encrypted: SSE-S3 for each new object" or "Default encryption of the bucket: AES256". The lock tells the truth of the provider. Garage accepts the header and does not encrypt, so a Garage bucket with `"sse-s3"` gets an open lock in the colour of a warning. For a provider that S3-Browser does not know, the tooltip says "SSE-S3 requested; the provider may not encrypt".
+
+A listing does not give the encryption of an object. Thus the listing reads it with a HEAD request for each file on the page, as it reads the tags: 4 requests at the same time, 100 files at most. A file waits with a mark, and an answer stays for the ETag and the date of the file. An encrypted file gets a small lock at the right of its name, in the cell of the name. The tooltip names the encryption: SSE-S3, SSE-KMS with its key, or "key of the client" (SSE-C). A HEAD request of an SSE-C object fails with `400`, and `GET /api/media-info` then confirms the key of the client. A file without an encryption gets no lock.
+
+The setting "Show the encryption of the objects" of the listing starts or stops these requests for each bucket. The browser keeps the choice in `portal.listing`. Without a choice, the setting is on for a bucket with a default encryption, or with `"sse-s3"` on a provider that does not ignore it. It is off for the other buckets, so their listing sends no HEAD request.
 
 ## Insights treemap normalization
 

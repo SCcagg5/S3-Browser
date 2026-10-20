@@ -1,7 +1,7 @@
 /*
  * BB.versions: the versions of an object in the portal interface.
  * - the version picker of the file details: one row for each version, with its number, its date, its size and what
- *   changed in size since the version before;
+ *   changed in size since the version before, and the buttons Download, Restore and Delete of the version;
  * - the comparison of two versions: the text, JSON and CSV of the two versions side by side or in one list.
  * The algorithms are in diff.js. The content of a version is read in the browser, up to 2 MiB for each side.
  */
@@ -95,8 +95,10 @@
   // ---------------------------------------------------------------------------------------------------------------
 
   // explicit: a choice gives the identifier of the version (the version of the preview gives '' for the current one).
-  // caption: a word before the version, such as From or To. Without onCompare and onAll the menu has no foot.
-  function mountPicker(host, { versions, selected = '', onSelect, onCompare = null, onAll = null, explicit = false, caption = '', compact = false }) {
+  // caption: a word before the version, such as From or To. Without onCompare the menu has no foot.
+  // actions: the buttons of each row, { download, restore, remove }, each a function of the version or null. Restore is
+  // not on the current version. Without actions (the pickers From and To of a comparison) the rows have no button.
+  function mountPicker(host, { versions, selected = '', onSelect, onCompare = null, actions = null, explicit = false, caption = '', compact = false }) {
     // A new picker replaces the one of the host (the label changes with the choice): the old menu goes.
     host.picker?.close();
     host.picker?.menu.remove();
@@ -112,15 +114,30 @@
     const button = h('button', { type: 'button', class: ['versionPicker__button', compact && 'versionPicker__button--compact'], 'aria-haspopup': 'listbox', 'aria-expanded': 'false', title: `${list.length} versions` },
       caption ? h('span', { class: 'versionPicker__caption' }, caption) : null, icon('source-commit'), label, h('span', { class: 'versionPicker__count' }, `${list.length}`), icon('chevron-down'));
 
+    // The action buttons of a row: frameless icons. They show on hover and on keyboard focus, and the keyboard always
+    // reaches them. An action closes the menu first: its confirmation is a window over the page.
+    const kinds = [['download', 'download', 'Download'], ['restore', 'restore', 'Restore'], ['remove', 'delete-outline', 'Delete']]
+      .filter(([name]) => typeof actions?.[name] === 'function');
+    const actionButtons = version => h('span', { class: 'versionPicker__actions' },
+      kinds.map(([name, iconName, text]) => (name === 'restore' && version.isCurrent
+        ? h('span', { class: 'versionPicker__actionSpace', 'aria-hidden': 'true' })
+        : h('button', {
+          type: 'button', class: ['iconButton', 'versionPicker__action', name === 'remove' && 'is-danger'], 'data-version-action': name,
+          title: `${text} ${versionLabel(version)}`, 'aria-label': `${text} ${versionLabel(version)}`,
+          onclick: event => { event.stopPropagation(); close(true); actions[name](version); }
+        }, icon(iconName)))));
+
+    // A row is an option of the list. It holds the button of the choice and the action buttons.
     const items = list.map(version => {
       const isActive = version === active;
-      return h('button', {
-        type: 'button', class: ['versionPicker__item', isActive && 'is-active'], role: 'option', 'aria-selected': isActive ? 'true' : 'false', 'data-version': version.version,
+      const when = formatDate(version.lastModified);
+      const choose = h('button', {
+        type: 'button', class: 'versionPicker__choose', 'aria-label': `${versionLabel(version)}${version.isCurrent ? ', current' : ''}, ${when}, ${formatBytes(version.size)}`,
         onclick: () => { close(); if (version !== active) onSelect?.(version === current && !explicit ? '' : version.version); }
       },
         h('span', { class: 'versionPicker__number' }, versionLabel(version)),
         h('span', { class: 'versionPicker__when' },
-          h('span', {}, formatDate(version.lastModified)),
+          h('span', {}, when),
           h('small', {}, formatAgo(version.lastModified))),
         h('span', { class: 'versionPicker__size' },
           h('span', {}, formatBytes(version.size)),
@@ -129,14 +146,13 @@
           version.isCurrent ? h('span', { class: 'versionPicker__tag' }, 'Current') : null,
           h('code', { title: version.version }, shortId(version.version))),
         isActive ? icon('check') : h('span', { class: 'versionPicker__spacer' }));
+      return h('div', { class: ['versionPicker__item', isActive && 'is-active'], role: 'option', 'aria-selected': isActive ? 'true' : 'false', 'data-version': version.version },
+        choose, kinds.length ? actionButtons(version) : null);
     });
     const compare = !onCompare ? null : h('button', { type: 'button', class: 'versionPicker__compare', disabled: list.length < 2, onclick: () => { close(); onCompare?.({ to: active.version, from: (active.older || list.find(version => version !== active))?.version }); } },
       icon('git-compare'), h('span', {}, active.older ? `Compare ${versionLabel(active)} with ${versionLabel(active.older)}` : 'Compare versions'));
-    const all = onAll
-      ? h('button', { type: 'button', class: 'versionPicker__all', onclick: () => { close(); onAll(); } }, icon('source-commit'), h('span', {}, 'All versions and actions…'))
-      : null;
     const menu = h('div', { class: 'versionPicker__menu', role: 'listbox', 'aria-label': 'Versions of the object', hidden: true },
-      h('div', { class: 'versionPicker__list' }, items), compare || all ? h('div', { class: 'versionPicker__foot' }, compare, all) : null);
+      h('div', { class: ['versionPicker__list', kinds.length && 'has-actions'] }, items), compare ? h('div', { class: 'versionPicker__foot' }, compare) : null);
 
     function place() {
       const box = button.getBoundingClientRect();
@@ -151,7 +167,7 @@
       menu.hidden = false;
       button.setAttribute('aria-expanded', 'true');
       place();
-      (menu.querySelector('.versionPicker__item.is-active') || items[0]).focus();
+      (menu.querySelector('.versionPicker__item.is-active .versionPicker__choose') || items[0].firstChild).focus();
       document.addEventListener('click', outside, true);
       document.addEventListener('keydown', keys, true);
       window.addEventListener('resize', place);
@@ -166,13 +182,26 @@
       if (focus) button.focus();
     }
     const outside = event => { if (!menu.contains(event.target) && !button.contains(event.target)) close(); };
+    // Up and Down go from row to row (the button of the choice of each row, then Compare). Left and Right go from the
+    // choice to the action buttons of the row. Tab goes through every button of the menu, and past the last one (or
+    // before the first one) the menu closes. Escape closes the menu and gives the focus back to the picker.
     const keys = event => {
-      const focusable = [...menu.querySelectorAll('.versionPicker__item, .versionPicker__compare:not(:disabled), .versionPicker__all')];
-      const index = focusable.indexOf(document.activeElement);
-      if (event.key === 'ArrowDown') { event.preventDefault(); event.stopPropagation(); focusable[Math.min(focusable.length - 1, index + 1)]?.focus(); }
-      else if (event.key === 'ArrowUp') { event.preventDefault(); event.stopPropagation(); focusable[Math.max(0, index - 1)]?.focus(); }
+      const rows = [...items.map(item => item.querySelector('.versionPicker__choose')), ...(compare && !compare.disabled ? [compare] : [])];
+      const focused = document.activeElement;
+      const row = rows.indexOf(focused.closest('.versionPicker__item')?.querySelector('.versionPicker__choose') || focused);
+      const inRow = focused.closest('.versionPicker__item') ? [...focused.closest('.versionPicker__item').querySelectorAll('button')] : [];
+      const all = [...menu.querySelectorAll('button:not(:disabled)')];
+      const move = target => { event.preventDefault(); event.stopPropagation(); target?.focus(); };
+      if (event.key === 'ArrowDown') move(rows[Math.min(rows.length - 1, row + 1)]);
+      else if (event.key === 'ArrowUp') move(rows[Math.max(0, row - 1)]);
+      else if (event.key === 'ArrowRight' && inRow.length) move(inRow[Math.min(inRow.length - 1, inRow.indexOf(focused) + 1)]);
+      else if (event.key === 'ArrowLeft' && inRow.length) move(inRow[Math.max(0, inRow.indexOf(focused) - 1)]);
       else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(true); }
-      else if (event.key === 'Tab') close();
+      else if (event.key === 'Tab') {
+        const next = all.indexOf(focused) + (event.shiftKey ? -1 : 1);
+        if (next >= 0 && next < all.length) move(all[next]);
+        else { event.preventDefault(); close(true); }
+      }
     };
     button.addEventListener('click', () => (menu.hidden ? open() : close()));
     host.replaceChildren(button);

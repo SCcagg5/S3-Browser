@@ -134,22 +134,24 @@ BB.cfg = config;
   // State
   // ---------------------------------------------------------------------------------------------------------------
 
-  // The columns of the listing and the tag filter: the person's choice stays in this browser.
+  // The columns of the listing, the tag filter and the encryption of the files: the person's choice stays in this
+  // browser. The choice of the encryption is for each bucket: without a choice, it is on for a bucket that encrypts.
   const LISTING_KEY = 'portal.listing';
   const LISTING_DEFAULT = { columns: { tags: false, versions: true, size: true, modified: true }, tagFilterOn: false };
 
   function loadListing() {
-    const result = { columns: { ...LISTING_DEFAULT.columns }, tagFilterOn: LISTING_DEFAULT.tagFilterOn };
+    const result = { columns: { ...LISTING_DEFAULT.columns }, tagFilterOn: LISTING_DEFAULT.tagFilterOn, encryption: {} };
     try {
       const stored = JSON.parse(window.localStorage.getItem(LISTING_KEY) || '{}');
       for (const name of Object.keys(result.columns)) if (typeof stored?.columns?.[name] === 'boolean') result.columns[name] = stored.columns[name];
       if (typeof stored?.tagFilterOn === 'boolean') result.tagFilterOn = stored.tagFilterOn;
+      for (const [id, value] of Object.entries(stored?.encryption || {})) if (typeof value === 'boolean') result.encryption[id] = value;
     } catch (_) {}
     return result;
   }
 
   function saveListing() {
-    try { window.localStorage.setItem(LISTING_KEY, JSON.stringify({ columns: state.columns, tagFilterOn: state.tagFilterOn })); } catch (_) {}
+    try { window.localStorage.setItem(LISTING_KEY, JSON.stringify({ columns: state.columns, tagFilterOn: state.tagFilterOn, encryption: state.encryptionChoice })); } catch (_) {}
   }
 
   const state = {
@@ -189,7 +191,11 @@ BB.cfg = config;
     tagFilter: '',
     tagRequest: 0,
     tagSignature: '',
-    tagsUnsupported: false
+    tagsUnsupported: false,
+    // The encryption of the files: the choice of the settings for each bucket, and the reads of the files on the page.
+    encryptionChoice: loadListing().encryption,
+    encryptionRequest: 0,
+    encryptionSignature: ''
   };
 
   const ui = {};
@@ -406,16 +412,24 @@ BB.cfg = config;
     ].join('\n');
   }
 
+  // The lock next to the name of a bucket that encrypts, with the reason in its tooltip. An open lock for a bucket whose
+  // provider ignores the encryption that the server asks for.
+  function bucketLock(instance) {
+    const lock = BB.encryption?.bucketLock(instance);
+    if (!lock) return null;
+    return h('span', { class: ['bucketLock', `is-${lock.tone}`], role: 'img', title: lock.title, 'aria-label': lock.title, 'data-bucket-lock': lock.icon }, ic(lock.icon));
+  }
+
   function switcherCopy(instance) {
     return h('span', { class: 'storageSwitcher__copy' },
-      h('span', { class: 'storageSwitcher__titleRow' }, h('strong', {}, storageName(instance)), permissionDots(instance)));
+      h('span', { class: 'storageSwitcher__titleRow' }, h('strong', {}, storageName(instance)), bucketLock(instance), permissionDots(instance)));
   }
 
   function renderSwitcher() {
     const instance = currentInstance();
     const multiple = state.instances.length > 1;
     const signature = JSON.stringify([state.isInitializing, state.loadError, instance?.id,
-      state.instances.map(item => [item.id, item.host, item.name, item.bucket, item.rootPrefix, item.provider,
+      state.instances.map(item => [item.id, item.host, item.name, item.bucket, item.rootPrefix, item.provider, item.encryption, item.defaultEncryption, item.encryptionApplied,
         permissionStates(item).map(entry => BB.capabilities.normalizeState(entry.state))])]);
     if (ui.switcherSignature !== signature) {
       ui.switcherSignature = signature;
@@ -468,7 +482,7 @@ BB.cfg = config;
             h('span', { class: 'storageBucket__mark' }, entry.id === state.instanceId ? ic('check', 'storageBucket__check') : null),
             ic('folder'),
             h('span', { class: 'storageBucket__copy' },
-              h('span', { class: 'storageBucket__titleRow' }, h('strong', {}, storageName(entry)), permissionDots(entry)),
+              h('span', { class: 'storageBucket__titleRow' }, h('strong', {}, storageName(entry)), bucketLock(entry), permissionDots(entry)),
               entry.rootPrefix ? h('small', {}, `/${entry.rootPrefix}`) : null))));
           const row = h('button', {
             type: 'button', class: 'storageHost__row', 'aria-expanded': expanded ? 'true' : 'false', 'data-host': host.id,
@@ -889,6 +903,7 @@ BB.cfg = config;
     t.tbody.replaceChildren(...visibleRows().map(buildRow));
     applyTagFilter();
     refreshVisibleTags();
+    refreshVisibleEncryption();
     const total = state.nextContinuationToken ? `${rangeEnd().toLocaleString('en-US')}+` : (state.scanOffset + state.rows.length).toLocaleString('en-US');
     t.range.textContent = `${rangeStart().toLocaleString('en-US')} to ${rangeEnd().toLocaleString('en-US')} of ${total}`;
     t.pageSize.value = String(state.pageSize);
@@ -924,12 +939,13 @@ BB.cfg = config;
       h('div', { class: 'bb-menu-popover', role: 'menu' }, h('div', { class: 'bb-menu-list' }, items)));
   }
 
-  // The versions of a file: the icon and the count, only when the file has more than one version. A click opens them.
+  // The versions of a file: the icon and the count, only when the file has more than one version. A click opens the
+  // details of the file, where the version picker is.
   function versionCell(row) {
     if (row.type !== 'content' || !versioningSupported() || !Number.isInteger(row.versionCount) || row.versionCount < 2) return null;
     return h('button', {
-      type: 'button', class: 'badge versionCount', title: `${plural(row.versionCount, 'version')}: open the versions`,
-      'aria-label': `${plural(row.versionCount, 'version')} of ${row.name}`, onclick: () => onRowVersions(row)
+      type: 'button', class: 'badge versionCount', title: `${plural(row.versionCount, 'version')}: open the details`,
+      'aria-label': `${plural(row.versionCount, 'version')} of ${row.name}`, onclick: () => onRowMetadata(row)
     }, ic('git-commit'), row.versionCount.toLocaleString('en-US'));
   }
 
@@ -937,7 +953,8 @@ BB.cfg = config;
     const isContent = row.type === 'content';
     const name = h('div', { class: ['nameCell', !isContent && 'is-folder'] },
       isContent ? mdi(fileIcon(row)) : ic('folder'),
-      h('button', { type: 'button', class: 'nameLink', title: isContent ? row.key : row.prefix, onclick: () => (isContent ? openPreview(row) : goToPrefix(row.prefix)) }, row.name));
+      h('button', { type: 'button', class: 'nameLink', title: isContent ? row.key : row.prefix, onclick: () => (isContent ? openPreview(row) : goToPrefix(row.prefix)) }, row.name),
+      isContent ? h('span', { class: 'nameLock' }, encryptionMark(row)) : null);
     let size;
     if (isContent) {
       const parts = byteParts(row.size);
@@ -1352,6 +1369,7 @@ BB.cfg = config;
     ui.settingsMenu.querySelector('[data-column="tags"]').closest('label').hidden = state.tagsUnsupported;
     ui.settingsMenu.querySelector('#uploadTagsSetting').hidden = state.tagsUnsupported;
     ui.settingsMenu.querySelector('#uploadTagsSeparator').hidden = state.tagsUnsupported;
+    ui.encryptionToggle.checked = encryptionShown();
   }
 
   // The tags of the new uploads: saved when the field changes, with the reason when a tag is wrong.
@@ -1371,6 +1389,10 @@ BB.cfg = config;
       state.tagFilterOn = input.checked;
       if (!state.tagFilterOn) { state.tagFilter = ''; ui.tagFilter.value = ''; }
     }
+    if (input === ui.encryptionToggle) {
+      state.encryptionChoice = { ...state.encryptionChoice, [state.instanceId]: input.checked };
+      state.encryptionSignature = '';
+    }
     saveListing();
     state.tagSignature = '';
     update();
@@ -1383,8 +1405,10 @@ BB.cfg = config;
     state.tagFilterOn = LISTING_DEFAULT.tagFilterOn;
     state.tagFilter = '';
     ui.tagFilter.value = '';
+    state.encryptionChoice = {};
     saveListing();
     state.tagSignature = '';
+    state.encryptionSignature = '';
     update();
     refreshVisibleVersionCounts();
   }
@@ -1433,6 +1457,78 @@ BB.cfg = config;
     if (done) forgetTags('');
   }
 
+  // ---------------------------------------------------------------------------------------------------------------
+  // Encryption: the lock next to the name of an encrypted file
+  // ---------------------------------------------------------------------------------------------------------------
+
+  // A listing does not give the encryption of a file: the page reads it with a HEAD request for the files on the page,
+  // as for the tags. It does this for a bucket that encrypts, or when the person sets the setting for the bucket.
+  const encryptionShown = () => {
+    const choice = state.encryptionChoice[state.instanceId];
+    return typeof choice === 'boolean' ? choice : Boolean(BB.encryption?.encryptionAware(currentInstance()));
+  };
+
+  // The answers stay for the ETag and the date of the file: a new listing does not read an unchanged file again.
+  const encryptionCache = new Map();
+  const encryptionCacheKey = row => `${state.instanceId}|${row.key}|${row.etag}|${row.dateModified?.getTime?.() || ''}`;
+
+  function encryptionMark(row) {
+    if (row.type !== 'content' || !encryptionShown() || row.encryptionSkipped) return null;
+    if (row.encryption === undefined) return h('span', { class: 'nameLock__pending', role: 'img', 'aria-label': 'The encryption is loading' });
+    if (!row.encryption) return null;
+    return h('span', { class: 'nameLock__icon', role: 'img', title: row.encryption, 'aria-label': row.encryption }, ic('lock'));
+  }
+
+  function updateEncryptionCell(row) {
+    const cell = row.element?.querySelector('.nameLock');
+    if (cell) cell.replaceChildren(...[encryptionMark(row)].filter(Boolean));
+  }
+
+  // Reads the encryption of the files on the page, 4 at the same time, at most 100. A file that cannot be read gets no
+  // lock: the page shows only what the provider reports.
+  async function refreshVisibleEncryption() {
+    if (!encryptionShown() || !canRead() || state.listError || !BB.encryption) return;
+    const instanceId = state.instanceId;
+    const files = visibleRows().filter(row => row.type === 'content' && row.key);
+    const rows = files.slice(0, 100);
+    // The files after the first 100 get no mark: the page does not read them.
+    for (const row of files.slice(100)) {
+      if (row.encryption === undefined && !row.encryptionSkipped) { row.encryptionSkipped = true; updateEncryptionCell(row); }
+    }
+    for (const row of rows) {
+      row.encryptionSkipped = false;
+      if (row.encryption === undefined && encryptionCache.has(encryptionCacheKey(row))) {
+        row.encryption = encryptionCache.get(encryptionCacheKey(row));
+        updateEncryptionCell(row);
+      }
+    }
+    const signature = `${instanceId}|${rows.map(row => row.key).join('\n')}`;
+    if (signature === state.encryptionSignature && rows.every(row => row.encryption !== undefined || row.encryptionLoading)) return;
+    state.encryptionSignature = signature;
+    const request = ++state.encryptionRequest;
+    const waiting = rows.filter(row => row.encryption === undefined && !row.encryptionLoading);
+    let next = 0;
+    const worker = async () => {
+      while (next < waiting.length) {
+        const row = waiting[next];
+        next += 1;
+        if (request !== state.encryptionRequest || instanceId !== state.instanceId) return;
+        row.encryptionLoading = true;
+        try {
+          row.encryption = await BB.encryption.objectEncryption(row.key, instanceId);
+          if (encryptionCache.size >= 5000) encryptionCache.clear();
+          encryptionCache.set(encryptionCacheKey(row), row.encryption);
+        } catch (_) {
+          row.encryption = '';
+        } finally {
+          row.encryptionLoading = false;
+        }
+        updateEncryptionCell(row);
+      }
+    };
+    await Promise.all([worker(), worker(), worker(), worker()]);
+  }
+
   function fileIcon(row) {
     return BB.detect.iconForType(BB.detect.resolveType(row.name || '', row.contentType || ''));
   }
@@ -1450,7 +1546,6 @@ BB.cfg = config;
     BB.actions.showMetadata(row.key, { size: row.size, mime: row.contentType, etag: row.etag, lastModified: row.dateModified?.toUTCString?.() || '' });
   }
   function onRowDownload(row) { BB.actions.downloadObject(row.key, row.name); }
-  function onRowVersions(row) { BB.actions.showVersions(row.key); }
   async function onRowCopy(row) { if (await BB.actions.copyObject(row.key)) await refresh(); }
   async function onRowRename(row) { if (await BB.actions.renameObject(row.key)) await refresh(); }
   async function onRowDelete(row) { if (await BB.actions.deleteObject(row.key)) await refresh(); }
@@ -1670,7 +1765,7 @@ BB.cfg = config;
       uploadButton: 'uploadButton', uploadMenu: 'uploadMenu', uploadFilesItem: 'uploadFilesItem',
       uploadFolderItem: 'uploadFolderItem', uploadTagsInput: 'uploadTagsInput', uploadTagsMessage: 'uploadTagsMessage', folderTagsItem: 'folderTagsItem', multipartsItem: 'multipartsItem', lifecycleItem: 'lifecycleItem',
       tagFilterWrap: 'tagFilterWrap', settingsButton: 'settingsButton', settingsMenu: 'settingsMenu', settingsReset: 'settingsReset',
-      tagFilterToggle: 'tagFilterToggle', tagFilter: 'tagFilter', tagStatus: 'tagStatus', listing: 'listing', dropOverlay: 'dropOverlay', dropTarget: 'dropTarget',
+      tagFilterToggle: 'tagFilterToggle', encryptionToggle: 'encryptionToggle', tagFilter: 'tagFilter', tagStatus: 'tagStatus', listing: 'listing', dropOverlay: 'dropOverlay', dropTarget: 'dropTarget',
       uploadDock: 'uploadDock', fileInput: 'fileInput', dirInput: 'dirInput'
     })) ui[name] = byId(id);
     ui.searchLabel = document.querySelector('label[for="searchInput"]');
@@ -1701,6 +1796,8 @@ BB.cfg = config;
     document.addEventListener('bb:tags-changed', event => forgetTags(event.detail?.key));
     // A save of the metadata changes the date and the versions of the object: the listing reads them again.
     document.addEventListener('bb:metadata-changed', () => { void refresh(); });
+    // A restore or a delete of a version changes the date, the size and the count of the versions of the file.
+    document.addEventListener('bb:versions-changed', () => { void refresh(); });
     ui.fileInput.addEventListener('change', onFileInput);
     ui.dirInput.addEventListener('change', onDirInput);
     window.addEventListener('popstate', updateFromLocation);

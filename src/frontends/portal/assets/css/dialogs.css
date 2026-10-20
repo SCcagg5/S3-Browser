@@ -798,26 +798,9 @@
   scrollbar-gutter: auto;
   box-sizing: border-box;
 }
-.bb-version-table,
 .bb-comparison .data-table-scroll {
   width: 100%;
   max-width: none;
-}
-.bb-version-actions {
-  white-space: nowrap;
-}
-.bb-version-actions .bb-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 1.875rem;
-  margin: 0 .2rem .2rem 0;
-  padding: .25rem .5rem;
-  font-size: .75rem;
-  text-decoration: none;
-}
-.bb-version-actions .danger {
-  color: var(--bb-danger, var(--danger));
 }
 .bb-comparison pre,
 .technical-probe {
@@ -827,21 +810,6 @@
   white-space: pre-wrap;
   font-family: var(--bb-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: .75rem;
-}
-.bb-version-pagination {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: .75rem;
-  min-height: 2.5rem;
-  padding-top: .75rem;
-  color: var(--bb-muted, var(--muted));
-  font-size: .8125rem;
-}
-.bb-version-pagination [hidden] {
-  visibility: hidden;
-  display: inline-flex !important;
-  pointer-events: none;
 }
 .bb-details-version-control {
   display: inline-flex;

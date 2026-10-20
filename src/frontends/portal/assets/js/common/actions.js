@@ -549,15 +549,8 @@
       </section>`;
       const icon = BB.detect.iconForType(type);
 
-      const availableVersions = objectVersions
-        .filter(version => version && !version.deleteMarker && version.version);
-      const historicalVersions = availableVersions.filter(version => !version.isCurrent);
-      const currentVersionRecord = availableVersions.find(version => version.isCurrent);
-      const selectedVersionKnown = !selectedVersion || historicalVersions.some(version => version.version === selectedVersion);
-      const versionCount = availableVersions.length;
-      const currentVersionLabel = currentVersionRecord
-        ? `Current · ${versionDateLabel(currentVersionRecord)} · ${versionDisplayLabel(currentVersionRecord)}`
-        : 'Current';
+      const versionCount = objectVersions
+        .filter(version => version && !version.deleteMarker && version.version).length;
       const versionSelector = BB.cfg?.versioningSupported === true && BB.versions && versionCount > 1
         ? '<div class="bb-details-version-control" data-details-versions></div>'
         : '';
@@ -663,7 +656,18 @@
               onCompare({ from, to }) {
                 location.href = BB.versions.compareURL({ key, instance: selectedInstance, from, to });
               },
-              onAll() { void showVersions(key, { instance: selectedInstance }); }
+              // A restore or a delete changes the versions: the details open again. They show the same version, but
+              // the current version after a restore or after the delete of the version that they showed.
+              actions: versionActions(key, {
+                instance: selectedInstance,
+                onChanged({ action, version }) {
+                  overlay.querySelector('.bb-modal-x')?.click();
+                  const next = action === 'delete' && version !== selectedVersion ? selectedVersion : '';
+                  window.setTimeout(() => {
+                    void showMetadata(key, { instance: selectedInstance, version: next });
+                  }, 140);
+                }
+              })
             });
           }
 
@@ -1405,9 +1409,29 @@
     }
   }
 
+  // A delete without a version on a bucket with Object Lock adds a delete marker: a version that a lock protects stays
+  // in the bucket. The confirmation and a warning after the delete say so.
+  const LOCK_DELETE_NOTE = 'This bucket has Object Lock. The delete adds a delete marker. A version that a lock protects stays in the bucket.';
+  const lockedBucket = () => BB.cfg?.objectLockSupported === true;
+
+  // The confirmation of a delete. On a bucket with Object Lock, a second paragraph says what the delete does.
+  function confirmDelete(title, question) {
+    if (!lockedBucket()) return ui().confirm({ title, message: question });
+    return ui().confirm({ title, html: `<div class="bb-modal-text">${escapeHTML(question)}</div><div class="bb-modal-text bb-modal-note" data-lock-delete-note>${escapeHTML(LOCK_DELETE_NOTE)}</div>` });
+  }
+
+  function lockDeleteWarning(detail) {
+    if (!lockedBucket()) return;
+    ui().toast('The versions that a lock protects stay in the bucket.', {
+      status: 'warning',
+      detail: `${detail}: the delete added a delete marker. This bucket has Object Lock.`,
+      duration: 9000
+    });
+  }
+
   async function deleteObject(key) {
     if (!(await requirePermissions(['delete']))) return false;
-    const confirmed = await ui().confirm({ title: 'Delete file', message: `Permanently delete "${key}"?` });
+    const confirmed = await confirmDelete('Delete file', `${lockedBucket() ? 'Delete' : 'Permanently delete'} "${key}"?`);
     if (!confirmed) return false;
     const notification = ui().toast(`Deleting ${key.split('/').pop() || key}...`, {
       persistent: true,
@@ -1425,6 +1449,7 @@
         detail: key,
         duration: 4500
       });
+      lockDeleteWarning(key);
       return true;
     } catch (error) {
       notification.update(`Delete failed: ${String(error.message || error)}`, {
@@ -1497,11 +1522,12 @@
   async function deletePrefix(prefix) {
     if (!(await requirePermissions(['delete']))) return false;
     const source = ensurePrefix(prefix);
-    const confirmed = await ui().confirm({ title: 'Delete folder', message: `Permanently delete "${source}" and all of its contents?` });
+    const confirmed = await confirmDelete('Delete folder', `${lockedBucket() ? 'Delete' : 'Permanently delete'} "${source}" and all of its contents?`);
     if (!confirmed) return false;
     try {
       const created = await BB.api.deletePrefix(source);
       const result = await waitForJob(created, 'Deleting folder');
+      if (result.status === 'completed') lockDeleteWarning(source);
       return result.status === 'completed';
     } catch (error) {
       showTaskFailure('Deleting folder', error);
@@ -1533,6 +1559,11 @@
         });
       } catch (error) {
         if (error?.name === 'AbortError') return false;
+        // An object with a key of the client (SSE-C): the browser download would fail in the same way.
+        if (BB.encryption && await BB.encryption.customerKeyRefusal(error, key, { version: options.version || '', instance: options.instance || BB.api.getInstance() })) {
+          ui().toast(BB.encryption.CUSTOMER_KEY_TEXT, { status: 'error', detail: key, duration: 9000 });
+          return false;
+        }
         BB.downloads.fallbackDownload(key, safeFilename, options.version || '', options.instance || BB.api.getInstance());
         ui().toast(`Resumable download was unavailable: ${String(error?.message || error)}. Browser download started instead.`, { type: 'warning', duration: 6500 });
       }
@@ -1559,16 +1590,6 @@
     const url = URL.createObjectURL(blob);
     triggerBrowserDownload(url, filename);
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }
-
-  function versionDisplayLabel(version) {
-    const identifier = String(version?.version || '');
-    if (!identifier) return 'Unknown version';
-    return identifier.length > 32 ? `${identifier.slice(0, 16)}…${identifier.slice(-12)}` : identifier;
-  }
-
-  function versionDateLabel(version) {
-    return version?.lastModified ? new Date(version.lastModified).toLocaleString() : '';
   }
 
   async function fetchExactVersionRange(key, version, start, end, size, etag, instance, signal) {
@@ -1702,159 +1723,49 @@
     }
   }
 
-  async function showVersions(key, options = {}) {
-    if (!(await requirePermissions(['read']))) return false;
-    if (BB.cfg?.versioningSupported !== true) return false;
-    const instance = options.instance || BB.api.getInstance();
-    const canWriteVersion = allowed('write');
-    const canDeleteVersion = allowed('delete');
-    try {
-      const firstPage = await BB.api.versions(key, { maximum: 250, instance });
-      const versions = [...(firstPage.versions || [])];
-      let pageToken = firstPage.nextPageToken || '';
-      if (!versions.length && !pageToken) {
-        await ui().alert({ title: 'Versions', message: 'No object versions were returned by the provider.' });
-        return true;
-      }
-
-      const renderRow = (version, index) => {
-        const state = version.isCurrent ? '<strong>Current</strong>' : (version.deleteMarker ? 'Delete marker' : 'Previous');
-        const deleteLabel = version.deleteMarker ? (version.isCurrent ? 'Remove marker' : 'Delete marker') : 'Delete';
-        const selectable = !version.deleteMarker && !!version.version;
-        return `<tr data-version-row="${index}">
-          <td class="bb-version-select-cell">${selectable ? `<input type="checkbox" data-version-select="${index}" aria-label="Select version ${escapeHTML(versionDisplayLabel(version))}">` : ''}</td>
-          <td>${state}</td>
-          <td class="is-monospace" title="${escapeHTML(version.version || '')}">${escapeHTML(versionDisplayLabel(version))}</td>
-          <td class="is-numeric">${version.deleteMarker ? '-' : escapeHTML(formatBytes(version.size || 0))}</td>
-          <td>${escapeHTML(versionDateLabel(version))}</td>
-          <td class="bb-version-actions">
-            ${version.deleteMarker ? '' : `<button class="bb-btn" data-version-download="${index}">Download</button>`}
-            ${canWriteVersion && !version.isCurrent && !version.deleteMarker ? `<button class="bb-btn bb-btn-primary" data-version-restore="${index}">Restore</button>` : ''}
-            ${canDeleteVersion ? `<button class="bb-btn danger" data-version-delete="${index}">${deleteLabel}</button>` : ''}
-          </td>
-        </tr>`;
-      };
-      const initialRows = versions.map(renderRow).join('');
-      await ui().alert({
-        large: true,
-        html: `<div class="bb-details bb-version-browser"><div class="bb-details-head"><i class="mdi mdi-source-commit"></i><div class="bb-details-titles"><div class="bb-details-name">Object versions</div><div class="bb-details-prefix">${escapeHTML(key)}</div></div></div><div class="bb-details-body"><div class="bb-version-toolbar"><button type="button" class="bb-btn bb-btn-primary" data-version-compare-selected disabled><i class="mdi mdi-swap-vertical"></i><span>Compare selected</span></button><span data-version-selection>Choose two versions</span></div><div class="data-table-scroll bb-version-table"><table class="data-table"><thead><tr><th aria-label="Selection"></th><th>State</th><th>Version</th><th>Size</th><th>Modified</th><th>Actions</th></tr></thead><tbody data-version-body>${initialRows}</tbody></table></div><div class="bb-version-pagination"><button type="button" class="bb-btn" data-version-more${pageToken ? '' : ' hidden'}>Load more</button><span data-version-count>${versions.length.toLocaleString()} version record(s)</span></div></div></div>`,
-        onOpen: ({ overlay }) => {
-          const body = overlay.querySelector('[data-version-body]');
-          const moreButton = overlay.querySelector('[data-version-more]');
-          const count = overlay.querySelector('[data-version-count]');
-          const compareButton = overlay.querySelector('[data-version-compare-selected]');
-          const selectionLabel = overlay.querySelector('[data-version-selection]');
-          const selected = [];
-
-          const refreshSelection = () => {
-            const selectedSet = new Set(selected);
-            overlay.querySelectorAll('[data-version-select]').forEach(input => {
-              const index = Number(input.dataset.versionSelect);
-              input.checked = selectedSet.has(index);
-              input.disabled = selected.length >= 2 && !selectedSet.has(index);
-            });
-            compareButton.disabled = selected.length !== 2;
-            selectionLabel.textContent = selected.length === 2 ? 'Two versions selected' : `${selected.length} of 2 selected`;
-          };
-          const updateFooter = () => {
-            moreButton.hidden = !pageToken;
-            count.textContent = `${versions.length.toLocaleString()} version record(s)`;
-            refreshSelection();
-          };
-          const appendPage = async () => {
-            if (!pageToken || moreButton.disabled) return;
-            moreButton.disabled = true;
-            moreButton.textContent = 'Loading...';
-            try {
-              const page = await BB.api.versions(key, { pageToken, maximum: 250, instance });
-              const offset = versions.length;
-              const incoming = page.versions || [];
-              versions.push(...incoming);
-              body.insertAdjacentHTML('beforeend', incoming.map((version, index) => renderRow(version, offset + index)).join(''));
-              pageToken = page.nextPageToken || '';
-              updateFooter();
-            } catch (error) {
-              ui().toast(`Loading versions failed: ${String(error?.message || error)}`, { status: 'error', duration: 6000 });
-            } finally {
-              moreButton.disabled = false;
-              moreButton.textContent = 'Load more';
-            }
-          };
-          const reload = async () => {
-            const page = await BB.api.versions(key, { maximum: 250, instance });
-            versions.splice(0, versions.length, ...(page.versions || []));
-            selected.splice(0, selected.length);
-            pageToken = page.nextPageToken || '';
-            body.innerHTML = versions.map(renderRow).join('');
-            updateFooter();
-          };
-
-          moreButton.addEventListener('click', appendPage);
-          compareButton.addEventListener('click', async () => {
-            if (selected.length !== 2) return;
-            const left = versions[selected[0]];
-            const right = versions[selected[1]];
-            if (!left || !right || left.deleteMarker || right.deleteMarker) return;
-            if (BB.versions) {
-              location.href = BB.versions.compareURL({ key, instance, from: left.version, to: right.version });
-              return;
-            }
-            await compareVersions(key, left.version, right.version, { instance });
-          });
-          overlay.addEventListener('change', event => {
-            const input = event.target.closest('[data-version-select]');
-            if (!input) return;
-            const index = Number(input.dataset.versionSelect);
-            const existing = selected.indexOf(index);
-            if (input.checked && existing < 0 && selected.length < 2) selected.push(index);
-            if (!input.checked && existing >= 0) selected.splice(existing, 1);
-            refreshSelection();
-          });
-          overlay.addEventListener('click', async event => {
-            const target = event.target.closest('[data-version-download],[data-version-restore],[data-version-delete]');
-            if (!target) return;
-            const rawIndex = target.dataset.versionDownload ?? target.dataset.versionRestore ?? target.dataset.versionDelete;
-            const version = versions[Number(rawIndex)];
-            if (!version) return;
-            try {
-              if (target.hasAttribute('data-version-download')) {
-                await downloadObject(key, key.split('/').pop(), { version: version.version, instance });
-                return;
-              }
-              if (target.hasAttribute('data-version-restore')) {
-                if (!(await requirePermissions(['write']))) return;
-                if (!(await ui().confirm({ title: 'Restore version', message: `Create a new current version of "${key}" from ${version.version}?` }))) return;
-                await BB.api.restoreVersion(key, version.version, instance);
-                ui().toast('Version restored.', { type: 'success', duration: 4000 });
-                await reload();
-                return;
-              }
-              if (target.hasAttribute('data-version-delete')) {
-                if (!(await requirePermissions(['delete']))) return;
-                const message = version.deleteMarker
-                  ? `Permanently remove delete marker ${version.version} from "${key}"?${version.isCurrent ? ' The previous object version may become current again.' : ''}`
-                  : `Permanently delete exact version ${version.version} of "${key}"?${version.isCurrent ? ' A previous version or delete marker may become current.' : ''}`;
-                if (!(await ui().confirm({ title: version.deleteMarker ? 'Remove delete marker' : 'Delete version', message }))) return;
-                await BB.api.deleteVersion(key, version.version, instance);
-                ui().toast(version.deleteMarker ? 'Delete marker removed.' : 'Version deleted.', { type: 'success', duration: 4000 });
-                await reload();
-              }
-            } catch (error) {
-              // The text of an Object Lock refusal is long and says what to do: it stays longer on the screen.
-              ui().toast(`Version action failed: ${String(error?.message || error)}`, { status: 'error', duration: error?.code === 'object_locked' ? 9000 : 6000 });
-            }
-          });
-          updateFooter();
+  // The actions of the rows of the version picker: Download, Restore (permission write) and Delete (permission delete).
+  // The state of the write permission is the state of the operation upload. The picker does not list the delete
+  // markers. onChanged({ action, version }) runs after a restore or a delete, and the event bb:versions-changed tells
+  // the page to read the versions again.
+  function versionActions(key, { instance = null, onChanged = null } = {}) {
+    const selected = instance || BB.api.getInstance();
+    const changed = (action, version) => {
+      document.dispatchEvent(new CustomEvent('bb:versions-changed', { detail: { key, instance: selected, action, version } }));
+      if (onChanged) onChanged({ action, version });
+    };
+    // The text of an Object Lock refusal is long and says what to do: it stays longer on the screen.
+    const failed = error => ui().toast(`Version action failed: ${String(error?.message || error)}`, { status: 'error', duration: error?.code === 'object_locked' ? 9000 : 6000 });
+    return {
+      download: allowed('download') ? version => downloadObject(key, key.split('/').pop(), { version: version.version, instance: selected }) : null,
+      restore: allowed('upload') ? async version => {
+        if (!(await requirePermissions(['write']))) return false;
+        if (!(await ui().confirm({ title: 'Restore version', message: `Create a new current version of "${key}" from ${version.version}?` }))) return false;
+        try {
+          await BB.api.restoreVersion(key, version.version, selected);
+        } catch (error) {
+          failed(error);
+          return false;
         }
-      });
-      return true;
-    } catch (error) {
-      if (Number(error?.status || 0) === 501) return false;
-      await ui().alert({ title: 'Versions', message: String(error?.message || error) });
-      return false;
-    }
+        ui().toast('Version restored.', { status: 'success', duration: 4000 });
+        changed('restore', version.version);
+        return true;
+      } : null,
+      remove: allowed('delete') ? async version => {
+        if (!(await requirePermissions(['delete']))) return false;
+        const message = `Permanently delete exact version ${version.version} of "${key}"?${version.isCurrent ? ' A previous version or delete marker may become current.' : ''}`;
+        if (!(await ui().confirm({ title: 'Delete version', message }))) return false;
+        try {
+          await BB.api.deleteVersion(key, version.version, selected);
+        } catch (error) {
+          failed(error);
+          return false;
+        }
+        ui().toast('Version deleted.', { status: 'success', duration: 4000 });
+        changed('delete', version.version);
+        return true;
+      } : null
+    };
   }
-
 
   BB.actions = {
     showMetadata,
@@ -1872,7 +1783,7 @@
     deletePrefix,
     waitForJob,
     downloadObject,
-    showVersions,
+    versionActions,
     triggerBrowserDownload,
     formatTransferDetail,
     formatBytes,
