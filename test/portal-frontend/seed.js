@@ -1,9 +1,9 @@
-// Puts the test objects in the two SeaweedFS buckets through the API of S3-Browser (PUT /s3).
+// Puts the test objects in the buckets of the three providers through the API of S3-Browser (PUT /s3).
 const crypto = require('crypto');
 const fs = require('fs');
 const { request } = require('playwright');
+const { PROVIDERS } = require('./providers');
 const BASE = process.env.BASE;
-const S3_HOST = 'seaweedfs:8333';
 const ACCESS_KEY = 'GK0123456789abcdef01234567';
 
 // The tags of some test objects: the header X-Amz-Tagging of the upload.
@@ -43,26 +43,28 @@ const VERSION_TAGS = {
   'versions/notes.txt': ['', 'team=docs'],
 };
 
-// A request to the S3 API of SeaweedFS, signed with SigV4 (the lifecycle has no route in S3-Browser).
-async function s3(method, path, query, body) {
+// A request to the S3 API of the provider of an instance, signed with SigV4 (the versioning and the lifecycle of a
+// bucket have no route in S3-Browser).
+async function s3(instance, method, path, query, body) {
+  const { host, region } = PROVIDERS[instance];
   const secret = fs.readFileSync('/secrets/s3_secret_access_key', 'utf8').trim();
   const hmac = (key, text) => crypto.createHmac('sha256', key).update(text).digest();
   const now = new Date().toISOString().replace(/[:-]|\.\d{3}/g, '');
   const day = now.slice(0, 8);
   const payloadHash = crypto.createHash('sha256').update(body).digest('hex');
   const headers = {
-    host: S3_HOST,
+    host,
     'content-md5': crypto.createHash('md5').update(body).digest('base64'),
     'x-amz-content-sha256': payloadHash,
     'x-amz-date': now,
   };
   const names = Object.keys(headers).sort();
   const canonical = [method, path, query, names.map(name => `${name}:${headers[name]}\n`).join(''), names.join(';'), payloadHash].join('\n');
-  const scope = `${day}/us-east-1/s3/aws4_request`;
+  const scope = `${day}/${region}/s3/aws4_request`;
   const toSign = ['AWS4-HMAC-SHA256', now, scope, crypto.createHash('sha256').update(canonical).digest('hex')].join('\n');
-  const signingKey = hmac(hmac(hmac(hmac(`AWS4${secret}`, day), 'us-east-1'), 's3'), 'aws4_request');
+  const signingKey = hmac(hmac(hmac(hmac(`AWS4${secret}`, day), region), 's3'), 'aws4_request');
   headers.authorization = `AWS4-HMAC-SHA256 Credential=${ACCESS_KEY}/${scope},SignedHeaders=${names.join(';')},Signature=${hmac(signingKey, toSign).toString('hex')}`;
-  const response = await fetch(`http://${S3_HOST}${path}?${query}`, { method, headers, body });
+  const response = await fetch(`http://${host}${path}?${query}`, { method, headers, body });
   if (!response.ok) throw new Error(`${method} ${path}?${query}: ${response.status} ${await response.text()}`);
 }
 
@@ -101,10 +103,35 @@ const objects = {
   }
 };
 
+// The objects of the smoke test of each provider (smoke/). hello.txt has tags where the provider has them, and
+// versioned.txt has two versions where the provider keeps them.
+const SMOKE = instance => ({
+  'smoke/hello.txt': [`Hello from ${PROVIDERS[instance].name}.\n`],
+  'smoke/data.json': [JSON.stringify({ provider: PROVIDERS[instance].name, ok: true })],
+  'smoke/versioned.txt': ['versioned.txt version 1\n', 'versioned.txt version 2\n'],
+});
+
 (async () => {
   const api = await request.newContext({ baseURL: BASE });
-  // The bucket "default" keeps the versions of an object: the files of versions/ have several.
-  await s3('PUT', '/default', 'versioning=', Buffer.from('<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>'));
+  const put = async (instance, key, body, headers) => {
+    const res = await api.put(`s3?instance=${encodeURIComponent(instance)}&key=${encodeURIComponent(key)}`, { data: Buffer.from(body), headers });
+    if (!res.ok()) throw new Error(`${instance}/${key}: ${res.status()} ${await res.text()}`);
+  };
+  // The bucket "default" keeps the versions of an object where the provider can: the files of versions/ have several.
+  for (const [instance, provider] of Object.entries(PROVIDERS)) {
+    if (provider.versioning) await s3(instance, 'PUT', '/default', 'versioning=', Buffer.from('<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>'));
+  }
+  // The providers get their smoke objects at the same time: the versions need one second between them.
+  await Promise.all(Object.entries(PROVIDERS).map(async ([instance, provider]) => {
+    for (const [key, bodies] of Object.entries(SMOKE(instance))) {
+      for (let version = 0; version < bodies.length; version += 1) {
+        const headers = { 'Content-Type': key.endsWith('.json') ? 'application/json' : 'text/plain' };
+        if (provider.tags && key === 'smoke/hello.txt') headers['X-Amz-Tagging'] = 'team=qa&env=test';
+        await put(instance, key, bodies[version], headers);
+        if (version + 1 < bodies.length) await new Promise(resolve => setTimeout(resolve, 1100));
+      }
+    }
+  }));
   for (const [instance, files] of Object.entries(objects)) {
     for (const [key, body] of Object.entries(files)) {
       const type = key.endsWith('.svg') ? 'image/svg+xml' : key.endsWith('.json') ? 'application/json' : key.endsWith('.md') ? 'text/markdown' : key.endsWith('.csv') ? 'text/csv' : 'application/octet-stream';
@@ -123,7 +150,7 @@ const objects = {
       await new Promise(resolve => setTimeout(resolve, 1100));
     }
   }
-  await s3('PUT', '/default', 'lifecycle=', Buffer.from(LIFECYCLE));
+  await s3('seaweedfs-main', 'PUT', '/default', 'lifecycle=', Buffer.from(LIFECYCLE));
   console.log('seeded');
   await api.dispose();
 })().catch(e => { console.error(e); process.exit(1); });

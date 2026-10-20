@@ -1,10 +1,12 @@
 // Browser tests of the "portal" interface (server.frontend = "portal"). They cover these parts:
 // 1 the theme selector, 2 the breadcrumb and the toolbar row, the header and the bucket selector, 3 the bulk upload,
-// 4 the access behaviour of 2.0.0.
-// run.sh starts S3-Browser and SeaweedFS, puts the test objects (seed.js) and runs this file in the Playwright container.
+// 4 the access behaviour of 2.0.0, 5 one smoke test on each S3 provider (SeaweedFS, MinIO and Garage).
+// run.sh starts S3-Browser and the three providers, puts the test objects (seed.js) and runs this file in the
+// Playwright container. The tests of parts 1 to 4 use SeaweedFS.
 // The tests change the answers of the server with page.route where a case needs it (403, 401, no answer, access).
 const { chromium } = require('playwright');
 const assert = require('assert/strict');
+const { PROVIDERS } = require('./providers');
 const BASE = process.env.BASE;
 const MAIN = '-/seaweedfs/seaweedfs-main/';
 const ONLY = process.env.ONLY || '';
@@ -1370,14 +1372,16 @@ test('selector: the bucket selector of the default interface, by host, with the 
   assert.equal(await page.isHidden('#storageSwitcherMenu'), true);
   await trigger.click();
   assert.equal(await trigger.getAttribute('aria-expanded'), 'true');
+  // One host for each provider of the test stack; the host of the current bucket is open.
+  assert.deepEqual(await page.locator('.storageHost__row').evaluateAll(rows => rows.map(row => row.dataset.host)), ['seaweedfs', 'minio', 'garage']);
   assert.match(await page.textContent('.storageHost__row'), /seaweedfs\s*S3 · 2 buckets/);
   assert.equal(await page.getAttribute('.storageHost__row', 'aria-expanded'), 'true');
-  assert.deepEqual(await page.locator('.storageBucket strong').allInnerTexts(), ['SeaweedFS - primary', 'SeaweedFS - archive']);
+  assert.deepEqual(await page.locator('.storageHost[data-host="seaweedfs"] .storageBucket strong').allInnerTexts(), ['SeaweedFS - primary', 'SeaweedFS - archive']);
   assert.equal(await page.getAttribute('.storageBucket[data-instance="seaweedfs-main"]', 'aria-selected'), 'true');
   assert.equal(await page.locator('.storageBucket[data-instance="seaweedfs-main"] .storageBucket__check').count(), 1);
   const columns = await page.evaluate(() => {
     const box = selector => document.querySelector(selector).getBoundingClientRect();
-    const rows = Array.from(document.querySelectorAll('.storageBucket'));
+    const rows = Array.from(document.querySelectorAll('.storageHost[data-host="seaweedfs"] .storageBucket'));
     return {
       checkRight: box('.storageBucket[data-instance="seaweedfs-main"] .storageBucket__check').right,
       folderLeft: box('.storageBucket[data-instance="seaweedfs-main"] .ic-folder').left,
@@ -1771,6 +1775,70 @@ test('access: 401 gives one notice that asks for a new sign-in', async () => {
   assert.equal(await page.isHidden('#uploadWrap'), true);
   await page.context().close();
 });
+
+// ------------------------------------------------------------------------------------------------------------------
+// 5. Providers: the same smoke test on each provider of providers.js
+// ------------------------------------------------------------------------------------------------------------------
+
+for (const [instance, provider] of Object.entries(PROVIDERS)) {
+  test(`providers: ${provider.name} lists, uploads, downloads and deletes; versions and tags show only where it has them`, async () => {
+    const page = await newPage();
+    // The resumable download asks for a file with showSaveFilePicker, and a headless browser cannot answer. Without
+    // the picker, the page uses the plain download of the browser.
+    await page.addInitScript(() => Object.defineProperty(window, 'showSaveFilePicker', { value: undefined }));
+    const info = (await (await page.request.get(`${BASE}api/instances`)).json()).instances.find(item => item.id === instance);
+    assert.equal(info.versioningSupported, provider.versioning);
+    await open(page, `-/${info.host}/${instance}/smoke/`);
+    assert.deepEqual((await page.locator('tbody tr[data-name]').evaluateAll(rows => rows.map(row => row.dataset.name))).sort(), ['data.json', 'hello.txt', 'versioned.txt']);
+    // Versions: the badge of the count where the provider keeps versions, else no column and no setting.
+    if (provider.versioning) {
+      await page.waitForSelector('tr[data-name="versioned.txt"] .versionCount');
+      assert.match(await page.textContent('tr[data-name="versioned.txt"] .versionCount'), /2/);
+    } else {
+      assert.equal(await page.locator('th.col-versions').isVisible(), false);
+      assert.equal(await page.locator('.versionCount').count(), 0);
+    }
+    // Tags: the chips in the details where the provider has tags, else no section, and the settings hide the column.
+    await openDetails(page, 'hello.txt');
+    if (provider.tags) {
+      await page.waitForSelector('[data-tags-section] .tagChip');
+      assert.deepEqual((await page.locator('[data-tags-section] .tagChip').allInnerTexts()).map(item => item.replace(/\s+/g, ' ').trim()).sort(), ['env test', 'team qa']);
+    } else {
+      await sleep(500);
+      assert.equal(await page.locator('[data-tags-section]').count(), 0);
+    }
+    await page.click('.bb-modal-x');
+    await page.waitForSelector('.bb-overlay', { state: 'detached' });
+    await page.click('#settingsButton');
+    assert.equal(await page.locator('#versionsSetting').isHidden(), !provider.versioning);
+    if (!provider.tags) {
+      await page.check('[data-column="tags"]');
+      await until(page, () => document.querySelector('[data-column="tags"]').closest('label').hidden === true);
+      assert.equal(await page.locator('th.col-tags').isVisible(), false);
+    }
+    await page.keyboard.press('Escape');
+    // Upload, download and delete of one file.
+    const body = `smoke upload on ${provider.name}\n`;
+    await page.setInputFiles('#fileInput', [{ name: 'upload.txt', mimeType: 'text/plain', buffer: Buffer.from(body) }]);
+    await page.waitForSelector('.uploadDock[data-state="done"]', { timeout: 30000 });
+    // The three providers check the SHA-256 checksum of the upload and give it back.
+    assert.match(await page.textContent('.uploadDock .summary'), /^1 file uploaded \([\d.]+ B\), 1 checked with SHA-256\.$/);
+    await page.click('.uploadDock .button >> text=Close');
+    await page.waitForSelector('tr[data-name="upload.txt"]');
+    await page.click('tr[data-name="upload.txt"] .bb-kebab');
+    const [download] = await Promise.all([page.waitForEvent('download'), page.click('.bb-menu.is-open .bb-menu-item >> text=Download')]);
+    const chunks = [];
+    for await (const chunk of await download.createReadStream()) chunks.push(chunk);
+    assert.equal(Buffer.concat(chunks).toString(), body);
+    await page.click('tr[data-name="upload.txt"] .bb-kebab');
+    await page.click('.bb-menu.is-open .bb-menu-item >> text=Delete');
+    await page.click('.bb-overlay .bb-btn-primary');
+    await page.waitForSelector('tr[data-name="upload.txt"]', { state: 'detached' });
+    assert.ok(!(await listKeys(page, instance, 'smoke/')).includes('smoke/upload.txt'));
+    assert.deepEqual(page.errors, []);
+    await page.context().close();
+  });
+}
 
 (async () => {
   browser = await chromium.launch();

@@ -1,5 +1,7 @@
-# The test stack of the "portal" interface: one SeaweedFS and one S3-Browser with server.frontend = "portal".
-# run.sh starts it under its own project name. No port is published: the Playwright container joins the network.
+# The test stack of the "portal" interface: three S3 providers (SeaweedFS, MinIO and Garage) and one S3-Browser with
+# server.frontend = "portal". Each provider reads its identity from config.hcl and test/secrets, and creates its
+# buckets at start. run.sh starts it under its own project name. No port is published: the Playwright container joins
+# the network.
 services:
   seaweedfs:
     build:
@@ -8,6 +10,20 @@ services:
       nofile:
         soft: 262144
         hard: 262144
+    volumes:
+      - ./config.hcl:/config/config.hcl:ro
+      - ../secrets:/config/secrets:ro
+
+  minio:
+    build:
+      context: ../minio
+    volumes:
+      - ./config.hcl:/config/config.hcl:ro
+      - ../secrets:/config/secrets:ro
+
+  garage:
+    build:
+      context: ../garage
     volumes:
       - ./config.hcl:/config/config.hcl:ro
       - ../secrets:/config/secrets:ro
@@ -24,4 +40,8 @@ services:
       - ../secrets:/config/secrets:ro
     depends_on:
       seaweedfs:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      garage:
         condition: service_healthy

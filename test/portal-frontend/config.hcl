@@ -1,5 +1,6 @@
-# The test stack of the "portal" interface: the Garage buckets of test/config.hcl and server.frontend = "portal".
-# run.sh starts it with Docker Compose.
+# The test stack of the "portal" interface: three S3 providers and server.frontend = "portal".
+# run.sh starts it with Docker Compose. The three auth blocks use the same key: the entrypoint of each provider reads
+# the first access_key_id and the first secret_access_key_file of this file.
 server {
   frontend                             = "portal"
   listen                               = ":8080"
@@ -32,6 +33,41 @@ bucket "seaweedfs-archive" {
   name           = "SeaweedFS - archive"
   auth           = "seaweedfs"
   bucket         = "archive"
+  permissions    = ["read", "write", "delete"]
+  max_scan_pages = 15
+}
+
+auth "minio" {
+  provider               = "s3"
+  mode                   = "access_key"
+  endpoint               = "http://minio:9000"
+  region                 = "us-east-1"
+  access_key_id          = "GK0123456789abcdef01234567"
+  secret_access_key_file = "/config/secrets/s3_secret_access_key"
+}
+
+bucket "minio-main" {
+  name           = "MinIO - primary"
+  auth           = "minio"
+  bucket         = "default"
+  permissions    = ["read", "write", "delete"]
+  max_scan_pages = 15
+}
+
+auth "garage" {
+  provider               = "s3"
+  mode                   = "access_key"
+  endpoint               = "http://garage:3900"
+  # The s3_region of the Garage configuration (test/garage/scripts/entrypoint.sh).
+  region                 = "garage"
+  access_key_id          = "GK0123456789abcdef01234567"
+  secret_access_key_file = "/config/secrets/s3_secret_access_key"
+}
+
+bucket "garage-main" {
+  name           = "Garage - primary"
+  auth           = "garage"
+  bucket         = "default"
   permissions    = ["read", "write", "delete"]
   max_scan_pages = 15
 }

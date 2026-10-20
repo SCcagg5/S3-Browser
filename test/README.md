@@ -2,7 +2,7 @@
 
 This directory contains an isolated SeaweedFS object-storage service and the browser configuration used by smoke tests.
 
-The SeaweedFS service is one process: it has the master, the volume server, the filer and the S3 API. `seaweedfs/Dockerfile` downloads the release 4.41 and checks its SHA-256 checksum. This version is the one of the Home repository. `seaweedfs/scripts/entrypoint.sh` creates the identity and the buckets `default` and `archive` from `config.hcl`. SeaweedFS supports object tags and the lifecycle, so the tests of these functions use it. Garage returns HTTP 501 for them. The seed of the browser tests enables the versioning of the bucket `default` and puts files with several versions in `versions/`, with tags on each version. Other test files have tags too. The seed also has a JSON file, a CSV file and a binary file with versions, for the tests of the comparison.
+The SeaweedFS service is one process: it has the master, the volume server, the filer and the S3 API. `seaweedfs/Dockerfile` downloads the release 4.41 and checks its SHA-256 checksum. This version is the one of the Home repository. `seaweedfs/scripts/entrypoint.sh` creates the identity and the buckets `default` and `archive` from `config.hcl`.
 
 `config.hcl` defines one S3 authentication shared by two buckets. Each bucket has its own permission ceiling and navigation scan limit.
 
@@ -29,3 +29,61 @@ http://localhost:8080/
 To expose the application under `/s3-browser/`, configure the reverse proxy to remove that prefix before forwarding. The frontend resolves all URLs relative to the public document path and requires no HCL path setting.
 
 The fixed credentials in `config.hcl` and `secrets/` belong only to the isolated SeaweedFS service. Do not reuse them outside this test environment. The secret key is in `secrets/s3_secret_access_key`, because the browser refuses a secret in clear text in the HCL file. The compose file mounts `secrets/` at `/config/secrets` in both containers.
+
+## Portal test stack: three providers
+
+`portal-frontend/compose.yaml` starts three S3 providers next to S3-Browser. `portal-frontend/run.sh` starts the stack, puts the test objects and runs the browser tests. Refer to [docs/DEVELOPMENT.md](../docs/DEVELOPMENT.md#browser-tests-of-the-portal-frontend).
+
+| Provider | Image | Instance | Endpoint |
+| --- | --- | --- | --- |
+| SeaweedFS 4.41 | `seaweedfs/Dockerfile`: the release archive, with its SHA-256 checksum | `seaweedfs-main`, `seaweedfs-archive` | `http://seaweedfs:8333` |
+| MinIO RELEASE.2025-10-15T17-29-55Z | `minio/Dockerfile`: a build from the Git tag, with a check of its commit | `minio-main` | `http://minio:9000` |
+| Garage v2.4.1 | `garage/Dockerfile`: the binary of `dxflrs/garage:v2.4.1`, pinned by its digest | `garage-main` | `http://garage:3900` |
+
+The MinIO project does not publish a server image or a server binary now, and its repository is archived. Thus `minio/Dockerfile` builds the last release from source. The build takes about one minute, one time. Docker keeps the image in its cache.
+
+Each provider reads the first `access_key_id` and the first `secret_access_key_file` of `portal-frontend/config.hcl`. Thus the three `auth` blocks use the same key. Garage needs this format: `GK` and 24 hexadecimal characters for the key ID, 64 hexadecimal characters for the secret. Each entrypoint creates the bucket `default` and then writes a ready file. The health check of each provider reads this file, so the browser starts after the buckets exist. The Garage region is `garage`.
+
+The seed (`portal-frontend/seed.js`) enables the versioning of the bucket `default` on SeaweedFS and MinIO. It puts the same objects in `smoke/` on each provider: one file with tags where the provider has tags, and one file with two versions. On SeaweedFS, the seed also puts the data of the other tests: files with several versions in `versions/`, tags, a lifecycle rule, and a JSON file, a CSV file and a binary file for the comparison. The other browser tests use SeaweedFS only.
+
+The smoke test of each provider lists `smoke/`, uploads a file with its SHA-256 checksum, downloads it and deletes it. It checks the versions and the tags where the provider has them. Where the provider does not have them, it checks that the page hides them. `portal-frontend/providers.js` has the flags of each provider.
+
+## Functions of each provider
+
+These facts come from S3 requests to the three providers of the portal test stack, with a check of the effect by a second request. "Yes" means that the request works and has its effect. "Dropped" means that the provider answers 200 but does not keep the setting. Other cells give the HTTP status and the S3 error code.
+
+| Function | SeaweedFS 4.41 | MinIO 2025-10-15 | Garage v2.4.1 |
+| --- | --- | --- | --- |
+| Object tags (Get, Put, Delete) | Yes | Yes | 501 NotImplemented |
+| Header `x-amz-tagging` on PutObject | Yes | Yes | Dropped |
+| Versioning (PutBucketVersioning, ListObjectVersions) | Yes | Yes | 501 NotImplemented. GetBucketVersioning gives 200 with no status |
+| GET or DELETE with `versionId` | Yes | Yes | The provider ignores `versionId`. A DELETE with any `versionId` deletes the object |
+| DeleteObjects (batch delete) | Yes | Yes. A request with no checksum header gives 400 MissingContentMD5 | Yes |
+| `x-amz-checksum-sha256` on PutObject | Yes. A wrong value gives 400 BadDigest | Yes. A wrong value gives 400 XAmzContentChecksumMismatch | Yes. A wrong value gives 400 InvalidDigest |
+| `x-amz-checksum-sha256` on UploadPart | Yes. ListParts does not show the part checksum | Yes | Yes |
+| Composite checksum of a multipart object (HEAD) | `<digest>-<parts>` | `<digest>-<parts>` | `<digest>`, with no part count |
+| ListMultipartUploads | Yes. No `Initiated` date. Only `NextUploadIdMarker` for the next page | Partial. A prefix that is not a full key gives an empty list. `max-uploads` has no effect | Yes |
+| ListParts, AbortMultipartUpload | Yes. ListParts of an aborted upload gives 200 with no part | Yes | Yes |
+| UploadPartCopy with `x-amz-copy-source-range` | Yes | Yes | Yes |
+| UploadPartCopy or CopyObject of an older version | Yes | Yes | 404 NoSuchKey |
+| CopyObject onto itself with `MetadataDirective=REPLACE` | Yes. The tags stay, the date changes, a new version comes | Yes. The tags stay, the date changes, a new version comes. The ETag of a multipart object changes | Yes. The date changes |
+| Lifecycle: expiration after N days, with a prefix | Yes | Yes | Yes |
+| Lifecycle: abort of incomplete multipart uploads | Yes | 400 InvalidArgument. With an expiration in the same rule: dropped | Yes |
+| Lifecycle: expiration of noncurrent versions | Yes | Yes | Dropped |
+| Lifecycle: tag filter | Yes | Yes | Dropped: the rule applies to all the prefix |
+| Lifecycle: removal of expired delete markers | Yes | Yes | 400 InvalidRequest |
+| Lifecycle: transition to a storage class | 501 NotImplemented | 400 InvalidStorageClass | Dropped |
+| Object Lock: bucket with lock, legal hold, retention | Yes. A refusal gives 403 AccessDenied | Yes. A refusal gives 400 InvalidRequest | 501 NotImplemented |
+| GetObjectLockConfiguration on a bucket with no lock | 404 ObjectLockConfigurationNotFoundError | 404 ObjectLockConfigurationNotFoundError | 501 NotImplemented |
+| SSE-S3 (`x-amz-server-side-encryption: AES256`) in this stack | 500 InternalError, no object | 501 NotImplemented: no KMS in this stack | Dropped: no encryption header comes back |
+| GetBucketEncryption on `default` | 404 ServerSideEncryptionConfigurationNotFoundError | 404 ServerSideEncryptionConfigurationNotFoundError | 501 NotImplemented |
+
+Notes for the code:
+
+- Garage answers 501 NotImplemented for each function that it does not have. The message is `Unimplemented action: <name>`.
+- Do not send a `versionId` to Garage. Garage gives an `x-amz-version-id` header on each write, but it keeps no versions.
+- Garage drops some lifecycle settings with no error. After a write, read the configuration again and compare it.
+- Send `Content-MD5` or an `x-amz-checksum-*` header with DeleteObjects: MinIO refuses the request without one.
+- On MinIO, list the multipart uploads with no prefix. Then S3-Browser filters the keys.
+- The lock refusal codes are different: 403 AccessDenied on SeaweedFS, 400 InvalidRequest on MinIO. The bypass header does not remove a legal hold or a Compliance retention.
+- SSE-S3 needs a key service. The MinIO of this stack has no `MINIO_KMS_SECRET_KEY`, and SeaweedFS has no encryption configuration.

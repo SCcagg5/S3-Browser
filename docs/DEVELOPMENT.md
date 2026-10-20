@@ -3,7 +3,7 @@
 ## Requirements
 
 - Go 1.22 or newer;
-- Docker only for the optional SeaweedFS and scratch-image tests.
+- Docker only for the optional test stacks (SeaweedFS, MinIO and Garage) and the scratch-image test.
 
 ## Build
 
@@ -52,7 +52,9 @@ The test frontend under `src/frontends/portal` follows the same rules. To use it
 
 ### Browser tests of the portal frontend
 
-`test/portal-frontend/run.sh` starts SeaweedFS and S3-Browser with `frontend = "portal"`. It uses Docker Compose with the project name `s3-portal-tests`. Then it puts test objects in the buckets and runs `browser-tests.js` in the Playwright container. The tests cover the theme selector, the header, the bucket selector, the breadcrumb and the toolbar row, the bulk upload and the access behaviour. At the end, the script stops the stack.
+`test/portal-frontend/run.sh` starts three S3 providers (SeaweedFS, MinIO and Garage) and S3-Browser with `frontend = "portal"`. It uses Docker Compose with the project name `s3-portal-tests`. Then it puts test objects in the buckets and runs `browser-tests.js` in the Playwright container. The tests cover the theme selector, the header, the bucket selector, the breadcrumb and the toolbar row, the bulk upload and the access behaviour on SeaweedFS. A smoke test runs on each provider. At the end, the script stops the stack.
+
+`test/portal-frontend/providers.js` tells which provider has versions and tags. Refer to [test/README.md](../test/README.md) for the functions of each provider. Two runs at the same time on one machine need two project names: set `PORTAL_TEST_PROJECT`.
 
 ```sh
 ./test/portal-frontend/run.sh
@@ -76,7 +78,7 @@ Tests may create fixtures inside their temporary test directories.
 ## Shell syntax
 
 ```sh
-for file in test/*.sh test/seaweedfs/scripts/*.sh; do
+for file in test/*.sh test/seaweedfs/scripts/*.sh test/minio/scripts/*.sh test/garage/scripts/*.sh; do
   [ -e "$file" ] || continue
   sh -n "$file"
 done

@@ -19,6 +19,10 @@ This document uses ASD-STE100 Simplified Technical English.
 - The test stacks use SeaweedFS 4.41 in place of Garage. The image downloads the release and checks its checksum.
   The buckets, the identities and the compose files use the name `seaweedfs`.
 - The browser tests open the page at `localhost`. A secure origin gives the page `crypto.subtle`.
+- The stack of the browser tests has three S3 providers: SeaweedFS 4.41, MinIO RELEASE.2025-10-15T17-29-55Z (a build
+  from source) and Garage v2.4.1. A smoke test lists, uploads, downloads and deletes on each provider. It also checks
+  that the page shows versions and tags only where the provider has them.
+- `test/README.md` has a table of the S3 functions of each provider, from S3 requests to the test stack.
 
 ### Tags
 
