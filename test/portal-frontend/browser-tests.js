@@ -2964,6 +2964,62 @@ for (const [instance, provider] of Object.entries(LOCKED)) {
   });
 }
 
+// A bucket with versioning: a delete adds a delete marker. MinIO still lists the folder of such an object with a delimiter,
+// and the folder is empty. The page must not show it, after the delete of the last file, and after the delete of a folder.
+const GHOST_INSTANCES = [
+  { id: 'minio-main', bucket: 'default' }, { id: 'seaweedfs-main', bucket: 'default' },
+  { id: 'minio-locked', bucket: 'locked' }, { id: 'seaweedfs-locked', bucket: 'locked' },
+];
+
+async function purgeVersions(page, instance, key) {
+  for (const version of await apiVersions(page, instance, key)) {
+    await page.request.delete(`${BASE}api/versions?instance=${instance}&key=${encodeURIComponent(key)}&version=${encodeURIComponent(version.version)}`);
+  }
+}
+
+const listedNames = async (page, instance, prefix) => ((await (await page.request.get(`${BASE}api/list?instance=${instance}&prefix=${encodeURIComponent(prefix)}`)).json()).items || []).map(item => item.name);
+
+for (const { id: instance, bucket } of GHOST_INSTANCES) {
+  test(`listing: ${instance}: a folder with no live object is not listed, after the delete of its last file and after the delete of the folder`, async () => {
+    const page = await newPage();
+    const info = await lockedHostOf(page, instance);
+    assert.equal(info.versioningSupported, true);
+    const stamp = Date.now();
+    const parent = 'ghost-tests/';
+    const single = `${parent}one-${stamp}/a.txt`;
+    const many = [`${parent}many-${stamp}/a.txt`, `${parent}many-${stamp}/b.txt`];
+    const keep = `${parent}keep-${stamp}/a.txt`;
+    for (const key of [single, ...many, keep]) await s3(instance, 'PUT', `/${bucket}/${key}`, '', Buffer.from(`${key}\n`), { 'content-type': 'text/plain' });
+    try {
+      assert.deepEqual((await listedNames(page, instance, parent)).sort(), [`keep-${stamp}/`, `many-${stamp}/`, `one-${stamp}/`]);
+      // The last file of a folder: after the delete, the folder is not in the parent.
+      await open(page, `-/${info.host}/${instance}/${parent}one-${stamp}/`);
+      await page.click('tr[data-name="a.txt"] .bb-kebab');
+      await page.click('.bb-menu.is-open .bb-menu-item >> text=Delete');
+      await page.click('.bb-overlay .bb-btn-primary');
+      await page.waitForSelector('tr[data-name="a.txt"]', { state: 'detached' });
+      await open(page, `-/${info.host}/${instance}/${parent}`);
+      assert.equal(await page.locator(`tr[data-name="one-${stamp}"]`).count(), 0);
+      assert.deepEqual((await listedNames(page, instance, parent)).sort(), [`keep-${stamp}/`, `many-${stamp}/`]);
+      // A folder with two files: the delete of the folder, then a reload.
+      await page.click(`tr[data-name="many-${stamp}"] .bb-kebab`);
+      await page.click('.bb-menu.is-open .bb-menu-item >> text=Delete');
+      await page.click('.bb-overlay .bb-btn-primary');
+      await page.waitForSelector(`tr[data-name="many-${stamp}"]`, { state: 'detached', timeout: 30000 });
+      await page.reload({ waitUntil: 'networkidle' });
+      await page.waitForSelector('.dataTable, .empty');
+      assert.equal(await page.locator(`tr[data-name="many-${stamp}"]`).count(), 0);
+      assert.deepEqual(await listedNames(page, instance, parent), [`keep-${stamp}/`]);
+      // The folder with a live file stays.
+      assert.equal(await page.locator(`tr[data-name="keep-${stamp}"]`).count(), 1);
+      assert.deepEqual(page.errors, []);
+    } finally {
+      for (const key of [single, ...many, keep]) await purgeVersions(page, instance, key);
+      await page.context().close();
+    }
+  });
+}
+
 test('object lock: a bucket without Object Lock has no sentence of Object Lock in the confirmation of a delete', async () => {
   const page = await newPage();
   await open(page, `${MAIN}smoke/`);

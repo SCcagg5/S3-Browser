@@ -98,6 +98,14 @@ This document uses ASD-STE100 Simplified Technical English.
   delete says the same. A delete without a version is not refused: the provider adds a delete marker, and the locked
   version stays.
 
+### Listing of a bucket with versioning
+
+- MinIO lists the folder of an object whose current version is a delete marker, and shows no key in it. After the
+  delete of the last file of a folder, or of the folder, the page showed an empty folder that came back after a reload.
+  In a bucket with versioning on MinIO (or on a provider that the server does not know), the listing with a delimiter
+  now asks the provider for one key under each folder, and removes the folders with no live object. SeaweedFS, AWS and
+  Garage need no such request. A request that fails keeps its folder. At most 200 folders of a page are checked.
+
 ### Encryption
 
 - New key `encryption` of the `bucket` block: `""` (the default, no header) or `"sse-s3"`. With `"sse-s3"`, the

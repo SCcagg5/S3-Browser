@@ -80,10 +80,60 @@ func (s *storageInstance) List(ctx context.Context, options listOptions) (listPa
 	if err != nil {
 		return listPage{}, err
 	}
-	defer release()
 	page, err := s.backend.List(ctx, options)
+	release()
 	s.observePermission(permissionRead, err)
+	if err == nil && options.Delimiter != "" && len(page.Prefixes) > 0 {
+		page.Prefixes = s.withoutEmptyPrefixes(ctx, page.Prefixes)
+	}
 	return page, err
+}
+
+// maxPrefixProbes bounds the requests that one page of a listing adds to look for an empty folder.
+const maxPrefixProbes = 200
+
+// withoutEmptyPrefixes removes the folders that hold no object. In a bucket with versioning, MinIO keeps the folder of an
+// object whose current version is a delete marker in the listing with a delimiter, and shows no key for it in the listing
+// without a delimiter. The person then sees a folder that is empty, and a delete of that folder finds nothing to delete.
+// A provider that does not do this (AWS, SeaweedFS) costs no request. A probe that fails keeps its folder.
+func (s *storageInstance) withoutEmptyPrefixes(ctx context.Context, prefixes []string) []string {
+	if !s.versioningAvailable() {
+		return prefixes
+	}
+	if flavour := s.lifecycleFlavour(ctx); flavour == flavourAWS || flavour == flavourSeaweedFS || flavour == flavourGarage {
+		return prefixes
+	}
+	checked := prefixes
+	if len(checked) > maxPrefixProbes {
+		checked = checked[:maxPrefixProbes]
+	}
+	empty := make([]bool, len(checked))
+	var wg sync.WaitGroup
+	slots := make(chan struct{}, 4)
+	for index, prefix := range checked {
+		wg.Add(1)
+		slots <- struct{}{}
+		go func(index int, prefix string) {
+			defer wg.Done()
+			defer func() { <-slots }()
+			release, err := s.beginStorageRequest(ctx)
+			if err != nil {
+				return
+			}
+			defer release()
+			page, err := s.backend.List(ctx, listOptions{Prefix: prefix, MaxResults: 1})
+			empty[index] = err == nil && len(page.Objects) == 0
+		}(index, prefix)
+	}
+	wg.Wait()
+	kept := make([]string, 0, len(prefixes))
+	for index, prefix := range prefixes {
+		if index < len(empty) && empty[index] {
+			continue
+		}
+		kept = append(kept, prefix)
+	}
+	return kept
 }
 
 func (s *storageInstance) Head(ctx context.Context, key string) (objectResponse, error) {

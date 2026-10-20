@@ -497,6 +497,8 @@ When available:
 
 The frontend never offers version controls for a bucket that failed the probe.
 
+An object whose current version is a delete marker is not a live object. MinIO still lists its folder in a listing with a delimiter, and lists no key under it. For a bucket with versioning on MinIO, or on a provider that the server does not know, the listing therefore asks for one key under each folder of the page (4 requests at a time, 200 folders at most). It removes the folders that have no key. A failed request keeps its folder. SeaweedFS, AWS and Garage do not list such a folder, and the server sends no extra request to them.
+
 ## Browser-only version comparison
 
 Comparison is deliberately limited to two immutable versions returned for the same object key. The browser obtains exact version sizes, reads both versions through strict 2 MiB Range requests, compares blocks, and stops at the first differing byte.
