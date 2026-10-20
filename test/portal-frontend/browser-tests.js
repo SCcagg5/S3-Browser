@@ -2,13 +2,14 @@
 // 1 the theme selector, 2 the breadcrumb and the toolbar row, the header and the bucket selector, 3 the bulk upload,
 // 4 the access behaviour of 2.0.0, 5 one smoke test on each S3 provider (SeaweedFS, MinIO and Garage), 6 the copy in
 // parts on each provider, 7 the edit of the metadata on each provider, 8 the cleanup of the incomplete multipart
-// uploads on each provider.
+// uploads on each provider, 9 the editor of the lifecycle rules on each provider.
 // run.sh starts S3-Browser and the three providers, puts the test objects (seed.js) and runs this file in the
 // Playwright container. The tests of parts 1 to 4 use SeaweedFS.
 // The tests change the answers of the server with page.route where a case needs it (403, 401, no answer, access).
 const { chromium } = require('playwright');
 const assert = require('assert/strict');
 const { PROVIDERS } = require('./providers');
+const { readLifecycle, writeLifecycle, restoreLifecycle } = require('./s3');
 const BASE = process.env.BASE;
 const MAIN = '-/seaweedfs/seaweedfs-main/';
 const ONLY = process.env.ONLY || '';
@@ -2288,6 +2289,224 @@ test('incomplete uploads: the item is hidden for an instance without the list', 
   await open(page, `${MAIN}mpu/`);
   await page.click('#actionsButton');
   assert.equal(await page.isHidden('#multipartsItem'), true);
+  await page.context().close();
+});
+
+// ------------------------------------------------------------------------------------------------------------------
+// 9. Lifecycle rules: the editor of the Actions menu. Each test writes the rules of the bucket through the S3 API of
+// the provider first, and restores the rules of the seed at the end: the tests of the tags read the rule of SeaweedFS.
+// ------------------------------------------------------------------------------------------------------------------
+
+// A rule with an expiration on a date: the editor keeps it as is, and the three providers keep it.
+const KEPT_RULE = '<Rule><ID>keep-date</ID><Filter><Prefix>archive/</Prefix></Filter><Status>Enabled</Status><Expiration><Date>2030-01-01T00:00:00Z</Date></Expiration></Rule>';
+// The fields that each provider keeps (test/README.md). The buckets of SeaweedFS and MinIO have versioning.
+const LIFECYCLE_FIELDS = {
+  'seaweedfs-main': { tagFilter: true, noncurrentExpiration: true, abortMultipart: true, expiredDeleteMarker: true },
+  'minio-main': { tagFilter: true, noncurrentExpiration: true, abortMultipart: false, expiredDeleteMarker: true },
+  'garage-main': { tagFilter: false, noncurrentExpiration: false, abortMultipart: true, expiredDeleteMarker: false },
+};
+
+// Opens the window of the lifecycle rules from the Actions menu, and waits for the rules.
+async function openLifecycle(page) {
+  await page.click('#actionsButton');
+  await page.click('#lifecycleItem');
+  await until(page, () => !document.querySelector('[data-lifecycle] .lifecycle__intro')?.hidden, null, 15000);
+}
+
+const confirmLifecycle = page => page.click('.bb-overlay:not(.bb-overlay--large) .bb-btn-primary');
+const lifecycleMessage = page => page.textContent('[data-lifecycle-message]');
+// The raw XML of one rule in a configuration, as the provider sends it.
+const ruleXML = (xml, id) => (xml.match(new RegExp(`<Rule>(?:(?!</Rule>).)*<ID>${id}</ID>(?:(?!</Rule>).)*</Rule>`, 's')) || [''])[0];
+
+for (const [instance, provider] of Object.entries(PROVIDERS)) {
+  test(`lifecycle: ${provider.name} adds a rule after a confirmation of the deletion, keeps the other rule, and offers only the fields that it keeps`, async () => {
+    const page = await newPage();
+    const info = (await (await page.request.get(`${BASE}api/instances`)).json()).instances.find(item => item.id === instance);
+    assert.equal(info.lifecycleSupported, true);
+    await writeLifecycle(instance, `<LifecycleConfiguration>${KEPT_RULE}</LifecycleConfiguration>`);
+    const keptBefore = ruleXML(await readLifecycle(instance), 'keep-date');
+    assert.ok(keptBefore, 'the provider keeps the rule with a date');
+    try {
+      await open(page, `-/${info.host}/${instance}/smoke/`);
+      await openLifecycle(page);
+      // The rule with a date is a read-only row with its reason and its XML.
+      const kept = '[data-lifecycle-kept="keep-date"]';
+      assert.match(await page.textContent(kept), /Kept as is/);
+      assert.match(await page.textContent(kept), /It expires the objects on a date\. S3-Browser writes it back unchanged\./);
+      assert.equal(await page.locator('[data-lifecycle-rule]').count(), 0);
+      await page.click('[data-lifecycle-add]');
+      const rule = page.locator('[data-lifecycle-rule]').last();
+      // The fields of the provider: the others are listed with the reason.
+      const fields = LIFECYCLE_FIELDS[instance];
+      assert.equal(await rule.locator('[data-lifecycle-tag]').count(), fields.tagFilter ? 1 : 0);
+      assert.equal(await rule.locator('[data-lifecycle-action="noncurrent"]').count(), fields.noncurrentExpiration ? 1 : 0);
+      assert.equal(await rule.locator('[data-lifecycle-action="abort"]').count(), fields.abortMultipart ? 1 : 0);
+      assert.equal(await rule.locator('[data-lifecycle-action="deleteMarker"]').count(), fields.expiredDeleteMarker ? 1 : 0);
+      const hidden = await page.locator('[data-lifecycle-hidden] li').evaluateAll(items => items.map(item => item.dataset.field).sort());
+      assert.deepEqual(hidden, Object.keys(fields).filter(field => !fields[field]).sort());
+      if (instance === 'minio-main') assert.match(await page.textContent('[data-lifecycle-hidden] li[data-field="abortMultipart"]'), /MinIO does not keep the abort/);
+      if (instance === 'garage-main') assert.match(await page.textContent('[data-lifecycle-hidden] li[data-field="tagFilter"]'), /Garage drops the tag filter/);
+      // The new rule starts with the folder of the listing and no action.
+      assert.equal(await rule.locator('[data-lifecycle-prefix]').inputValue(), 'smoke/');
+      await page.click('[data-lifecycle-save]');
+      assert.match(await lifecycleMessage(page), /has no action: choose at least one/);
+      await rule.locator('[data-lifecycle-id]').fill('lc-test');
+      await rule.locator('[data-lifecycle-action="expiration"]').check();
+      await rule.locator('[data-lifecycle-days="expiration"]').fill('30');
+      await page.click('[data-lifecycle-save]');
+      await page.waitForSelector('[data-lifecycle-confirm]');
+      assert.deepEqual(cleanText(await page.locator('[data-lifecycle-confirm] li').allInnerTexts()), ['Objects under smoke/ older than 30 days will be deleted.']);
+      await confirmLifecycle(page);
+      await until(page, () => document.querySelector('[data-lifecycle-message]')?.dataset.tone === 'ok');
+      assert.equal(await lifecycleMessage(page), 'The lifecycle rules are saved.');
+      assert.equal(await page.locator('[data-lifecycle-warnings] li').count(), 0);
+      // The provider has the new rule, and the other rule with its bytes.
+      const after = await readLifecycle(instance);
+      assert.match(ruleXML(after, 'lc-test'), /<Prefix>smoke\/<\/Prefix>/);
+      assert.match(ruleXML(after, 'lc-test'), /<Days>30<\/Days>/);
+      assert.equal(ruleXML(after, 'keep-date'), keptBefore);
+      // After a reload of the page, the window shows the rule.
+      await page.reload({ waitUntil: 'networkidle' });
+      await page.waitForSelector('.dataTable, .empty');
+      await openLifecycle(page);
+      const saved = page.locator('[data-lifecycle-rule]');
+      assert.equal(await saved.count(), 1);
+      assert.equal(await saved.locator('[data-lifecycle-id]').inputValue(), 'lc-test');
+      assert.equal(await saved.locator('[data-lifecycle-prefix]').inputValue(), 'smoke/');
+      assert.equal(await saved.locator('[data-lifecycle-action="expiration"]').isChecked(), true);
+      assert.equal(await saved.locator('[data-lifecycle-days="expiration"]').inputValue(), '30');
+      assert.equal(await page.locator(kept).count(), 1);
+      // A save without a change of a deletion asks nothing: the rule is disabled.
+      await saved.locator('[data-lifecycle-enabled]').uncheck();
+      await page.click('[data-lifecycle-save]');
+      await until(page, () => document.querySelector('[data-lifecycle-message]')?.dataset.tone === 'ok');
+      assert.match(ruleXML(await readLifecycle(instance), 'lc-test'), /<Status>Disabled<\/Status>/);
+      assert.deepEqual(page.errors, []);
+    } finally {
+      await restoreLifecycle(instance);
+      await page.context().close();
+    }
+  });
+}
+
+test('lifecycle: a change of the rules after the window read them stops the save, and the window reads them again', async () => {
+  const page = await newPage();
+  try {
+    await open(page, `${MAIN}logs/`);
+    await openLifecycle(page);
+    // The rule of the seed has a tag filter, which SeaweedFS keeps: the window edits it.
+    const seed = page.locator('[data-lifecycle-rule]');
+    assert.equal(await seed.count(), 1);
+    assert.equal(await seed.locator('[data-lifecycle-tag]').inputValue(), 'retention=30d');
+    await writeLifecycle('seaweedfs-main', `<LifecycleConfiguration>${ruleXML(await readLifecycle('seaweedfs-main'), 'expire-logs')}${KEPT_RULE}</LifecycleConfiguration>`);
+    await seed.locator('[data-lifecycle-days="expiration"]').fill('45');
+    await page.click('[data-lifecycle-save]');
+    await page.waitForSelector('[data-lifecycle-confirm]');
+    assert.deepEqual(cleanText(await page.locator('[data-lifecycle-confirm] li').allInnerTexts()), ['Objects under logs/ with the tag retention=30d older than 45 days will be deleted.']);
+    await confirmLifecycle(page);
+    await until(page, () => document.querySelector('[data-lifecycle-message]')?.dataset.tone === 'error');
+    assert.match(await lifecycleMessage(page), /changed after this window read them/);
+    assert.match(ruleXML(await readLifecycle('seaweedfs-main'), 'expire-logs'), /<Days>30<\/Days>/);
+    await page.click('[data-lifecycle-reload]');
+    await page.waitForSelector('[data-lifecycle-kept="keep-date"]');
+    assert.equal(await page.locator('[data-lifecycle-rule] [data-lifecycle-days="expiration"]').inputValue(), '30');
+    assert.deepEqual(page.errors, []);
+  } finally {
+    await restoreLifecycle('seaweedfs-main');
+    await page.context().close();
+  }
+});
+
+for (const [instance, provider] of Object.entries(PROVIDERS)) {
+  test(`lifecycle: ${provider.name}: the window of the incomplete uploads opens the editor${LIFECYCLE_FIELDS[instance].abortMultipart ? ' with a rule that aborts them' : ' and says that the provider does not keep such a rule'}`, async () => {
+    const page = await newPage();
+    const info = (await (await page.request.get(`${BASE}api/instances`)).json()).instances.find(item => item.id === instance);
+    const offered = LIFECYCLE_FIELDS[instance].abortMultipart;
+    try {
+      await open(page, `-/${info.host}/${instance}/mpu/`);
+      await openMultiparts(page);
+      await page.waitForSelector('[data-multipart-lifecycle]');
+      const note = await page.textContent('[data-multipart-lifecycle-note]');
+      if (offered) {
+        assert.equal((await page.textContent('[data-multipart-lifecycle]')).trim(), 'Add a lifecycle rule');
+        assert.doesNotMatch(note, /does not keep/);
+      } else {
+        assert.equal((await page.textContent('[data-multipart-lifecycle]')).trim(), 'Lifecycle rules');
+        assert.match(note, /a number of days after their start\. MinIO does not keep the abort of incomplete multipart uploads/);
+      }
+      await page.click('[data-multipart-lifecycle]');
+      await until(page, () => document.querySelectorAll('.bb-modal--large').length === 1 && !document.querySelector('[data-lifecycle] .lifecycle__intro')?.hidden, null, 15000);
+      if (!offered) {
+        assert.equal(await page.locator('[data-lifecycle-rule]').count(), 0);
+        return;
+      }
+      // The new rule comes after the rules of the bucket (SeaweedFS has the rule of the seed).
+      assert.equal(await page.locator('[data-lifecycle-rule]').count(), instance === 'seaweedfs-main' ? 2 : 1);
+      const rule = page.locator('[data-lifecycle-rule]').last();
+      assert.equal(await rule.locator('[data-lifecycle-id]').inputValue(), 'abort-incomplete-uploads');
+      assert.equal(await rule.locator('[data-lifecycle-prefix]').inputValue(), 'mpu/');
+      assert.equal(await rule.locator('[data-lifecycle-action="abort"]').isChecked(), true);
+      assert.equal(await rule.locator('[data-lifecycle-days="abort"]').inputValue(), '7');
+      assert.equal(await rule.locator('[data-lifecycle-action="expiration"]').isChecked(), false);
+      await page.click('[data-lifecycle-save]');
+      await page.waitForSelector('[data-lifecycle-confirm]');
+      assert.deepEqual(cleanText(await page.locator('[data-lifecycle-confirm] li').allInnerTexts()), ['Incomplete multipart uploads under mpu/ older than 7 days will be aborted, and their parts deleted.']);
+      await confirmLifecycle(page);
+      await until(page, () => document.querySelector('[data-lifecycle-message]')?.dataset.tone === 'ok');
+      assert.match(ruleXML(await readLifecycle(instance), 'abort-incomplete-uploads'), /<DaysAfterInitiation>7<\/DaysAfterInitiation>/);
+      assert.deepEqual(page.errors, []);
+    } finally {
+      await restoreLifecycle(instance);
+      await page.context().close();
+    }
+  });
+}
+
+test('lifecycle: the window shows what the provider changed, and a read-only editor has no Save', async () => {
+  const page = await newPage();
+  let readOnly = false;
+  await page.route(/\/api\/lifecycle/, async route => {
+    const response = await route.fetch();
+    const body = await response.json();
+    if (route.request().method() === 'PUT') body.warnings = ['The storage provider dropped the tag filter retention=30d of the rule "expire-logs".'];
+    if (readOnly && body.editor) Object.assign(body.editor, { writable: false, readOnlyReason: 'The storage provider refused the change (HTTP 403 AccessDenied).' });
+    await route.fulfill({ response, json: body });
+  });
+  try {
+    await open(page, `${MAIN}logs/`);
+    await openLifecycle(page);
+    await page.locator('[data-lifecycle-rule] [data-lifecycle-enabled]').uncheck();
+    await page.click('[data-lifecycle-save]');
+    await until(page, () => document.querySelectorAll('[data-lifecycle-warnings] li').length === 1);
+    assert.equal(await lifecycleMessage(page), 'The rules are saved, but the storage provider changed them:');
+    assert.match(await page.textContent('[data-lifecycle-warnings]'), /dropped the tag filter retention=30d/);
+    await page.click('.bb-modal--large .bb-modal-x');
+    await page.waitForSelector('.bb-overlay', { state: 'detached' });
+    readOnly = true;
+    await openLifecycle(page);
+    assert.match(await page.textContent('[data-lifecycle-readonly]'), /You cannot change the rules here\. The storage provider refused the change \(HTTP 403 AccessDenied\)\./);
+    assert.equal(await page.locator('[data-lifecycle-rule]').count(), 0);
+    assert.equal(await page.locator('[data-lifecycle-view="expire-logs"]').count(), 1);
+    for (const control of ['[data-lifecycle-save]', '[data-lifecycle-add]', '[data-lifecycle-revert]']) assert.equal(await page.isHidden(control), true);
+    assert.deepEqual(page.errors, []);
+  } finally {
+    await restoreLifecycle('seaweedfs-main');
+    await page.context().close();
+  }
+});
+
+test('lifecycle: the item is hidden for an instance without lifecycle rules', async () => {
+  const page = await newPage();
+  await page.route(/\/api\/instances/, async route => {
+    const response = await route.fetch();
+    const body = await response.json();
+    for (const item of body.instances) item.lifecycleSupported = false;
+    await route.fulfill({ response, json: body });
+  });
+  await open(page, MAIN);
+  await page.click('#actionsButton');
+  assert.equal(await page.isHidden('#lifecycleItem'), true);
+  assert.equal(await page.isVisible('#multipartsItem'), true);
   await page.context().close();
 });
 

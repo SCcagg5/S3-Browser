@@ -4,6 +4,8 @@
  *   parts, the size and the age of each upload;
  * - Abort selected, the abort button of a row, and "Abort everything older than N days", which runs as a job;
  * - the age comes from the clock of the server, not from the clock of the browser.
+ * - the note about the lifecycle rules: a button opens the window of the lifecycle rules (lifecycle.js) with a new rule
+ *   that aborts the incomplete uploads of the folder, where the provider keeps such a rule.
  * The server checks each request again. A provider without the list answers 501: the window says it in one line.
  */
 (function () {
@@ -105,8 +107,29 @@
   // The window
   // ---------------------------------------------------------------------------------------------------------------
 
-  // prefix is the folder of the listing ('' for the bucket). canWrite tells if the person can abort.
-  function mount(host, { prefix = '', canWrite = false, instance = null }) {
+  // The note about the lifecycle rules. The button closes this window and opens the window of the lifecycle rules, with
+  // a new rule that aborts the uploads of the folder after 7 days where the provider keeps such a rule.
+  async function renderLifecycleNote(note, { prefix, canWrite, instance, close }) {
+    const lead = 'A lifecycle rule can abort the incomplete uploads by itself, a number of days after their start.';
+    note.replaceChildren(lead);
+    if (BB.cfg?.lifecycleSupported === false || !BB.lifecycle) return;
+    const support = await BB.lifecycle.abortRuleSupport(instance);
+    if (!support.supported || !note.isConnected) return;
+    const prefill = support.offered && support.writable && canWrite;
+    const button = h('button', { type: 'button', class: 'bb-btn multiparts__lifecycle', 'data-multipart-lifecycle': '' },
+      icon('timer-sand'), h('span', {}, prefill ? 'Add a lifecycle rule' : 'Lifecycle rules'));
+    button.addEventListener('click', () => {
+      close();
+      void BB.lifecycle.open({ instance, canWrite, prefix, prefill: prefill ? { id: 'abort-incomplete-uploads', prefix, abortMultipartDays: 7 } : null });
+    });
+    const unsupported = support.offered ? '' : support.reason || 'This storage provider does not keep a lifecycle rule that aborts them.';
+    note.replaceChildren(h('span', {}, lead, unsupported ? ` ${unsupported}` : ''), button);
+    note.dataset.abortRule = support.offered ? 'offered' : 'not-offered';
+  }
+
+  // prefix is the folder of the listing ('' for the bucket). canWrite tells if the person can abort. close closes the
+  // window.
+  function mount(host, { prefix = '', canWrite = false, instance = null, close = () => {} }) {
     let rows = [];
     let nextToken = '';
     let minimumHours = 24;
@@ -152,7 +175,7 @@
     const footer = h('div', { class: 'multiparts__footer' }, total, moreButton);
     footer.hidden = true;
     const message = h('p', { class: 'multiparts__message', role: 'status', 'data-multipart-message': '' });
-    const note = h('p', { class: 'multiparts__note' }, 'A lifecycle rule can abort the incomplete uploads by itself, a number of days after their start.');
+    const note = h('p', { class: 'multiparts__note', 'data-multipart-lifecycle-note': '' });
     const say = (text, tone = '') => { message.textContent = text; message.dataset.tone = tone; };
 
     // The parts of the window that follow each change: the buttons, the state of the checkboxes and the notes.
@@ -337,6 +360,7 @@
 
     host.replaceChildren(scope, readonly, controls, undated, state, empty, table, footer, message, note);
     render();
+    void renderLifecycleNote(note, { prefix, canWrite, instance, close });
     void load(false);
   }
 
@@ -349,7 +373,7 @@
         const body = modal.querySelector('.bb-modal-body');
         const root = h('div', { class: 'multiparts', 'data-multiparts': '' });
         body.replaceChildren(root);
-        mount(root, { prefix, canWrite, instance });
+        mount(root, { prefix, canWrite, instance, close: () => modal.querySelector('.bb-modal-x')?.click() });
       }
     });
   }

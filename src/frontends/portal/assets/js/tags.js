@@ -138,10 +138,12 @@
   }
 
   // ---------------------------------------------------------------------------------------------------------------
-  // Lifecycle rules (read only)
+  // Lifecycle rules (the effect on an object; the editor is in lifecycle.js)
   // ---------------------------------------------------------------------------------------------------------------
 
   const lifecycleCache = new Map();
+  // A save of the lifecycle editor (lifecycle.js) changes the rules: the next details read them again.
+  document.addEventListener('bb:lifecycle-changed', () => lifecycleCache.clear());
 
   // The rules of the bucket, or null when the provider gives none. The answer stays for the page.
   function lifecycleRules(instance) {

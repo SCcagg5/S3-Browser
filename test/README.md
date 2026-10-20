@@ -52,6 +52,8 @@ The seed also puts the objects of the metadata tests in `meta/` on each provider
 
 The seed also puts four incomplete multipart uploads in `mpu/` on each provider, with S3 requests: `one-part.bin` (one part of 1 KiB), `no-part.bin`, and two uploads of `twice.bin`. The folder has `readme.txt`, so the page can open it. The test of each provider opens the window "Incomplete uploads" of the folder. It checks the parts, the age ("unknown" on SeaweedFS) and "Abort everything older than 1 day", which aborts nothing. It then aborts one upload of `twice.bin` with "Abort selected" and `one-part.bin` with the button of its row. The test aborts the last two uploads through the API. A second test starts a resumable upload through the API and checks that the window and the server do not abort it. Refer to the section "Cleanup of incomplete multipart uploads" of [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md).
 
+The tests of the lifecycle editor write the rules of the bucket `default` through the S3 API of each provider first (`portal-frontend/s3.js`). At the end, each test writes the rule of the seed again on SeaweedFS and deletes the rules on MinIO and Garage: the tests of the tags read the rule of SeaweedFS. The test of each provider adds a rule through the window, with the confirmation of the deletion. It checks that the rule with a date stays byte for byte, and that the window offers only the fields that the provider keeps. A second test opens the window from the window "Incomplete uploads" with the rule that aborts the uploads, where the provider keeps it. Other tests check a change of the rules while the window is open, the changes of the provider after a save, a read-only editor, and the hidden item.
+
 The smoke test of each provider lists `smoke/`, uploads a file with its SHA-256 checksum, downloads it and deletes it. It checks the versions and the tags where the provider has them. Where the provider does not have them, it checks that the page hides them. `portal-frontend/providers.js` has the flags of each provider.
 
 ## Functions of each provider
@@ -91,6 +93,14 @@ These facts come from S3 requests to the three providers of the portal test stac
 | Lifecycle: tag filter | Yes | Yes | Dropped: the rule applies to all the prefix |
 | Lifecycle: removal of expired delete markers | Yes | Yes | 400 InvalidRequest |
 | Lifecycle: transition to a storage class | 501 NotImplemented | 400 InvalidStorageClass | Dropped |
+| Lifecycle: expiration on a date, size filter (`ObjectSizeGreaterThan`) | Yes | Yes. The children of `And` come back in another order | Yes |
+| Lifecycle: the old `Prefix` element outside of `Filter` | Yes | Yes | Dropped: the rule applies to the whole bucket |
+| Lifecycle: a rule with no ID | Yes, with no ID | Yes. The provider gives the rule an ID | Yes, with no ID |
+| Lifecycle: two rules with one ID | Yes | 400 InvalidArgument | Yes |
+| Lifecycle: a configuration with no rule | Yes | 400 InvalidArgument | 400 MalformedXML |
+| Lifecycle: an empty `Filter` | Yes | Yes | The provider removes the `Filter` |
+| Effect of the lifecycle rules | A lifecycle worker in a daily pass. The TTL at write is off by default, and an object written after a rule has no TTL | Not measured | Not measured |
+| Header `Server` | `SeaweedFS 30GB 4.41` | `MinIO` | None. No request id. The error document has `Region` and no `RequestId` |
 | Object Lock: bucket with lock, legal hold, retention | Yes. A refusal gives 403 AccessDenied | Yes. A refusal gives 400 InvalidRequest | 501 NotImplemented |
 | GetObjectLockConfiguration on a bucket with no lock | 404 ObjectLockConfigurationNotFoundError | 404 ObjectLockConfigurationNotFoundError | 501 NotImplemented |
 | SSE-S3 (`x-amz-server-side-encryption: AES256`) in this stack | 500 InternalError, no object | 501 NotImplemented: no KMS in this stack | Dropped: no encryption header comes back |
@@ -101,6 +111,9 @@ Notes for the code:
 - Garage answers 501 NotImplemented for each function that it does not have. The message is `Unimplemented action: <name>`.
 - Do not send a `versionId` to Garage. Garage gives an `x-amz-version-id` header on each write, but it keeps no versions.
 - Garage drops some lifecycle settings with no error. After a write, read the configuration again and compare it.
+  The lifecycle editor offers only the fields that each provider keeps. Refer to the section "Edit of the lifecycle
+  rules" of [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md).
+- Delete the lifecycle configuration with `DeleteBucketLifecycle`: MinIO and Garage refuse a configuration with no rule.
 - Send `Content-MD5` or an `x-amz-checksum-*` header with DeleteObjects: MinIO refuses the request without one.
 - On MinIO, list the multipart uploads with no prefix. Then S3-Browser filters the keys.
 - The lock refusal codes are different: 403 AccessDenied on SeaweedFS, 400 InvalidRequest on MinIO. The bypass header does not remove a legal hold or a Compliance retention.

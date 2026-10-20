@@ -47,6 +47,29 @@ This document uses ASD-STE100 Simplified Technical English.
 - The list needs `objects.read`, and an abort needs `objects.write`. The server probes the list of each instance at
   start and gives `multipartUploadsSupported` in `/api/instances`. The GCS backend answers `501`.
 
+### Lifecycle rules
+
+- New item "Lifecycle rules" in the Actions menu. A large window edits the lifecycle rules of the bucket: the ID, the
+  status, the prefix, a tag filter, and the actions "delete the objects after N days", "delete the noncurrent
+  versions after N days", "abort the incomplete multipart uploads after N days" and "remove the expired delete
+  markers". Refer to the section "Edit of the lifecycle rules" of [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+- New route `PUT /api/lifecycle`. The server keeps each other rule byte for byte (transitions, size filters and so on)
+  and writes the whole configuration. The page sends the hash of the configuration that it read. A configuration that
+  changed since gives `409 lifecycle_changed`.
+- Before the save, a confirmation names each new or changed action that deletes data, with its prefix and its days.
+- The window offers only the fields that the provider keeps: a table for AWS S3, SeaweedFS, MinIO and Garage, from
+  the answers of the provider. For another provider, the window offers the expiration after N days and the fields that
+  a rule of the bucket already uses. Garage gets no tag filter: it drops the filter, and the rule then applies to every
+  object under the prefix. MinIO gets no abort of incomplete uploads.
+- After the save, the server reads the rules again and tells in plain words what the provider changed. It restores
+  nothing. It does not offer again a field that the provider dropped.
+- A provider that refuses the write (`403`, `501`) makes the window read only, with the reason.
+- The note of the window "Incomplete uploads" opens the window of the lifecycle rules with a new rule that aborts the
+  uploads of the folder after 7 days. On MinIO, the note gives the reason why no such rule is possible.
+- The action is `objects.write` on the prefix of each rule that a save adds, changes or removes. A rule that deletes
+  objects, versions or delete markers also needs `objects.delete` on its prefix. The server probes the lifecycle rules
+  of each instance at start and gives `lifecycleSupported` in `/api/instances`. The GCS backend answers `501`.
+
 ### Uploads and deletes
 
 - An S3 upload can carry a SHA-256 checksum. The browser computes the digest of each chunk. The provider refuses a part
@@ -72,6 +95,9 @@ This document uses ASD-STE100 Simplified Technical English.
 - The metadata tests edit a small file, a file above the threshold of the copy in parts and an older version on each
   provider. They check the date, the ETag, the versions and the tags after the save, and an object that changes while
   the form is open.
+- The lifecycle tests add a rule on each provider through the window, and check the confirmation, the rule that the
+  editor keeps byte for byte, and the fields of each provider. Each test restores the rules of the seed. The signed S3
+  requests of the tests are in `test/portal-frontend/s3.js`.
 - The test image takes the build arguments `MULTIPART_COPY_THRESHOLD` and `MULTIPART_COPY_PART_SIZE`. The portal test
   stack copies in parts from 8 KiB up, in parts of 5 MiB. A browser test copies and renames a file of 11 MiB on each
   provider and compares the SHA-256 of the result. A second test restores a large version on SeaweedFS and MinIO.

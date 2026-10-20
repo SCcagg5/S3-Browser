@@ -93,7 +93,7 @@ An upload can carry tags. A direct upload takes the header `X-Amz-Tagging` (a qu
 
 In a bucket with versioning, a tag request names the version of the object. The server reads it with a HEAD request. It is `null` for an object made before the versioning. SeaweedFS takes more than 10 seconds to read the tags of such an object when no version is named. A request that has `version` uses it as it is.
 
-`GET /api/lifecycle` gives the lifecycle rules of the bucket in read-only form. A bucket without rules gives an empty list. The details of a file use the rules to tell what happens to the object, also for tags that the person did not save yet.
+`GET /api/lifecycle` gives the lifecycle rules of the bucket in `rules`. A bucket without rules gives an empty list. The details of a file use the rules to tell what happens to the object, also for tags that the person did not save yet. The answer also has the state of the editor of the rules. Refer to [Edit of the lifecycle rules](#edit-of-the-lifecycle-rules).
 
 The listing of the provider does not give tags, and S3 has no request that lists objects by tag. The tag column and the tag filter read the tags of the files on the page. They are in the settings of the listing, behind the gear. They read 4 files at the same time and at most 100. The tag filter hides rows of this page only.
 
@@ -236,7 +236,98 @@ The job counts `aborted`, `skippedUndated`, `skippedRecent`, `skippedActive` and
 
 At start, the server sends `ListMultipartUploads` with `max-uploads=1` to each instance that has the read permission. A provider that answers `501` or `405` gets `multipartUploadsSupported: false` in `/api/instances`, and the page hides the item. The GCS backend has no list: it answers `501 multipart_unsupported`.
 
-The item "Incomplete uploads" of the Actions menu opens a large window for the current folder, or for the bucket at the root. The window has a table with the key, the start, the parts, the size and the age of each upload. It has a checkbox and a frameless abort button in each row, "Abort selected", and "Abort everything older than N days" (N is 1 by default). The window tells how many uploads have no start date. A person without the write permission sees the list with no abort control. A note tells that a lifecycle rule can abort the incomplete uploads.
+The item "Incomplete uploads" of the Actions menu opens a large window for the current folder, or for the bucket at the root. The window has a table with the key, the start, the parts, the size and the age of each upload. It has a checkbox and a frameless abort button in each row, "Abort selected", and "Abort everything older than N days" (N is 1 by default). The window tells how many uploads have no start date. A person without the write permission sees the list with no abort control. A note tells that a lifecycle rule can abort the incomplete uploads. Its button opens the window of the lifecycle rules. Refer to [Edit of the lifecycle rules](#edit-of-the-lifecycle-rules).
+
+## Edit of the lifecycle rules
+
+`PutBucketLifecycleConfiguration` replaces the whole configuration of a bucket. The providers do not keep the same settings, and some drop a setting without an error. The code is in `src/lifecycle.go`, behind the optional interface `BucketLifecycleWriter` of the S3 backend. The GCS backend has no lifecycle rules: it answers `501 lifecycle_unsupported`.
+
+### The state of the editor
+
+`GET /api/lifecycle` gives `editor` next to `rules`. `editor` has these fields:
+
+- `hash`: the SHA-256 of the configuration as the provider sent it, and of the indexes of the editable rules. A rule that becomes "kept as is" thus also changes the hash.
+- `entries`: one entry for each rule, in the order of `rules`. An editable entry has `rule`. Each other entry has `xml` (the bytes of the rule) and `reason`.
+- `fields` and `hidden`: the fields that the editor offers, and the reason for each other field.
+- `provider`, `providerNote`, `versioning`, `rootPrefix`, `writable`, `readOnlyReason`, `maxDays` (36500) and `maxRules` (1000).
+
+A rule is editable when it has an ID and only these elements:
+
+- `Status`;
+- a `Filter` with a `Prefix`, one `Tag`, or an `And` with a `Prefix` and one `Tag`;
+- an `Expiration` with `Days`, or with `ExpiredObjectDeleteMarker`;
+- a `NoncurrentVersionExpiration` with `NoncurrentDays`, and an `AbortIncompleteMultipartUpload`.
+
+Each field of the rule must also be offered for the instance. For an instance with a root prefix, the prefix of the rule must start with the root prefix. The editor shows the prefix after the root prefix, and the server adds the root prefix again. Thus a new rule of such an instance never applies to the whole bucket.
+
+The editor keeps each other rule as is: a transition, an expiration on a date, a size filter, a filter with two tags or more, the old `Prefix` element outside of `Filter`, `NewerNoncurrentVersions`, or an XML attribute. It also keeps a text with spaces at the start or at the end, a tag key with `=` or `,`, and a tag value with `,`: the form cannot show them exactly. The window shows such a rule as a read-only row with the note "Kept as is", the reason and its XML. For an instance with a root prefix, a rule outside of the root prefix shows no XML and no filter: it belongs to another part of the bucket.
+
+### The save
+
+`PUT /api/lifecycle` has `instance`, `hash` and `rules`, the complete list of the editable rules. Each rule has `id`, `enabled`, `prefix`, `tag`, `expirationDays`, `noncurrentDays`, `abortMultipartDays` and `expiredDeleteMarker`. A zero number of days means "no such action". The server does these steps under a lock of the instance:
+
+1. It reads the configuration again and compares its hash with `hash`. A different hash gives `409 lifecycle_changed`. The page then offers "Reload the rules".
+2. It checks the rules. A refusal gives `400 invalid_lifecycle`, or `400 lifecycle_field_unsupported` for a field that the editor does not offer.
+3. It writes the document: the start tag of the root as the provider sent it, the editable rules, then each other element of the root with its bytes. An editable rule that the save does not change also keeps its bytes.
+4. It reads the configuration again and compares each rule with the rule that it sent.
+
+The checks of step 2 are the limits of S3 and of AWS:
+
+- A bucket has 1000 rules at most. An ID has 1 to 255 characters, and no other rule has the same ID. MinIO refuses two rules with one ID.
+- A number of days is from 1 to 36500. A rule has one action or more.
+- A rule cannot have `Days` and `ExpiredObjectDeleteMarker` in one `Expiration`.
+- A rule with a tag filter cannot abort incomplete uploads or remove delete markers. AWS refuses these rules.
+- A tag follows the rules of the object tags.
+
+MinIO and Garage refuse a configuration without a rule. When no element stays, the server sends `DeleteBucketLifecycle` in place of the write.
+
+The comparison of step 4 ignores the spaces, the namespaces and the order of the children: MinIO changes the order in `And`. A rule without an ID matches a rule with the same content, because MinIO gives an ID to such a rule. For each difference, the answer has a sentence in `warnings`, for example "The storage provider dropped the tag filter retention=30d of the rule "logs". The rule now applies to every object under logs/". The server restores nothing. The page shows the sentences and the rules as the provider keeps them. Then this process does not offer the dropped field again for the instance.
+
+A refusal of the write by the provider gives these answers:
+
+- `403` gives `403 lifecycle_write_denied`. `501` or `405` gives `501 lifecycle_write_unsupported`. The editor of the instance is then read only, with the reason, until a later write works.
+- Another `4xx` gives `400 lifecycle_refused`. The rules of the bucket do not change.
+
+When the read of step 4 fails, the answer is `200` with a sentence in `warnings` and no `editor`: the rules are saved, and the page reads them again.
+
+S3 has no condition on `PutBucketLifecycleConfiguration`. The lock and the hash stop a save over a change of another window of this process, or over a change before the save. A change by another S3 client between the check and the write is lost.
+
+### The fields of each provider
+
+S3-Browser never writes to a bucket to find what the provider keeps. It uses a table for each provider that it knows. The facts come from requests to the providers of the test stack (refer to `test/README.md`) and from the documentation of AWS S3.
+
+At start, the server reads the configuration of each instance with the read permission. A provider that answers `501` or `405` gets `lifecycleSupported: false` in `/api/instances`, and the page hides the item. The server also sends one `GetObject` for the key `.s3-browser-provider-probe` under the root prefix. The object does not exist. The answer tells the provider:
+
+- An endpoint under `amazonaws.com`, or the header `Server: AmazonS3`, is AWS S3.
+- `Server: MinIO` is MinIO. `Server: SeaweedFS <size> <version>` is SeaweedFS.
+- Garage v2.4.1 sends no `Server` header and no request id. Its error document has a `Region` element and no `RequestId` element.
+- Any other answer is a provider that S3-Browser does not know.
+
+| Field | AWS S3 | SeaweedFS | MinIO | Garage | Provider that S3-Browser does not know |
+| --- | --- | --- | --- | --- | --- |
+| Expiration after N days, with a prefix | Yes | Yes | Yes | Yes | Yes |
+| Tag filter | Yes | Yes | Yes | No: dropped, and the rule applies to every object under the prefix | Only when a rule of the bucket has one |
+| Expiration of noncurrent versions | Yes | Yes | Yes | No: dropped | Only when a rule of the bucket has one |
+| Abort of incomplete multipart uploads | Yes | Yes | No: `400` in a rule with this action only, dropped in a rule with another action | Yes | Only when a rule of the bucket has one |
+| Removal of expired delete markers | Yes | Yes | Yes | No: `400` | Only when a rule of the bucket has one |
+
+A field also needs its condition. The tag filter needs `tagsSupported`. The noncurrent versions and the delete markers need the status `Enabled` or `Suspended` from `GetBucketVersioning`. The reason of the provider table comes first in `hidden`.
+
+The reason for this decision: a provider can drop a field without an error, as Garage does. A dropped tag filter makes a rule apply to every object under its prefix. Thus the editor offers only the expiration after N days for a provider that it does not know. A rule of the bucket that already uses a field shows that the provider keeps it, so the editor then offers the field. After each save, the comparison of step 4 finds a dropped field, and the editor does not offer it again.
+
+The effect of the rules also depends on the provider. SeaweedFS 4.41 keeps all the fields above and applies the rules with its lifecycle worker, in a daily pass. Its TTL fast path at write is off by default and never applies to a bucket with versioning. In the test stack, an object written after a rule has no TTL. Garage applies the expiration and the abort of incomplete uploads in a daily pass. The window shows these notes.
+
+### The window
+
+The item "Lifecycle rules" of the Actions menu opens a large window. Each editable rule has a form: the ID, "Enabled", a frameless remove button, the prefix, the tag filter, and a checkbox and a number of days for each action. The window shows only the offered fields, and lists the other fields with their reasons. "Add a rule" adds a rule with the prefix of the current folder and no action.
+
+Before the save, a confirmation names each action that deletes data and that is new or changed, with its prefix and its days. An example is "Objects under logs/ older than 30 days will be deleted." A save that adds or changes no such action asks nothing, for example a rule that becomes disabled.
+
+The window is read only, with the reason, when `writable` is false or when the person cannot write in the folder. After a save, the details of a file read the rules again.
+
+The note of the window "Incomplete uploads" has a button. Where the provider keeps the abort of incomplete uploads, the button "Add a lifecycle rule" opens the window with a new rule. This rule `abort-incomplete-uploads` aborts the uploads under the folder 7 days after their start. The person checks it and saves. On MinIO, the note gives the reason, and the button "Lifecycle rules" opens the window without a new rule.
+
+`GET /api/lifecycle` needs `objects.read` on the bucket. `PUT /api/lifecycle` needs the read and write permissions of the instance and `objects.read` on the bucket. It needs `objects.write` on the node of the prefix of each rule that the save adds, changes or removes. A rule deletes objects. Thus a new or changed enabled rule that deletes objects, noncurrent versions or delete markers also needs the delete permission of the instance and `objects.delete` on its prefix. The abort of incomplete uploads needs `objects.write` only, as in the window "Incomplete uploads". Refer to [ACCESS.md](ACCESS.md).
 
 ## Insights treemap normalization
 

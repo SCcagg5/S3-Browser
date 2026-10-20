@@ -432,6 +432,17 @@
       return response.json();
     },
 
+    // The rules of the lifecycle editor replace the editable rules of the bucket. hash is the hash that lifecycle()
+    // gave: the server refuses the save (409 lifecycle_changed) when the rules of the bucket changed since.
+    async putLifecycle({ hash, rules = [], instance = null } = {}) {
+      const response = await request('/api/lifecycle', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instance: instance === null ? selectedInstance() : String(instance || ''), hash, rules })
+      });
+      return response.json();
+    },
+
     async inspect(key, { version = '', instance = null } = {}) {
       const response = await request(withInstance('/api/inspect', { key, version }, instance));
       return response.json();

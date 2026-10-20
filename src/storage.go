@@ -299,6 +299,9 @@ type storageInstance struct {
 	// multipartsOff is set when the provider refused the list of the incomplete multipart uploads.
 	multipartsOff atomic.Bool
 
+	// lifecycle is the state of the lifecycle editor: the provider, the refusals and the dropped fields.
+	lifecycle lifecycleCapability
+
 	// batchDeleteOff is set when the provider refused the batch delete once: later deletes go one by one.
 	batchDeleteOff atomic.Bool
 }
@@ -509,6 +512,7 @@ func (s *storageInstance) publicInfo() instanceInfo {
 		TagsSupported:       s.tagsAvailable(),
 		MetadataEditable:    s.metadataEditAvailable(),
 		MultipartUploads:    s.multipartUploadsAvailable(),
+		Lifecycle:           s.lifecycleAvailable(),
 		Capabilities:        s.capabilities(),
 		Operations:          s.operationCapabilities(),
 	}
@@ -526,6 +530,7 @@ type instanceInfo struct {
 	TagsSupported       bool                       `json:"tagsSupported"`
 	MetadataEditable    bool                       `json:"metadataEditSupported"`
 	MultipartUploads    bool                       `json:"multipartUploadsSupported"`
+	Lifecycle           bool                       `json:"lifecycleSupported"`
 	Capabilities        capabilities               `json:"capabilities"`
 	Operations          map[string]capabilityState `json:"operations"`
 }

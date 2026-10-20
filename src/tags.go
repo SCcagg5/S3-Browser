@@ -16,8 +16,8 @@ import (
 	"unicode/utf8"
 )
 
-// Object tags (S3 ?tagging), the lifecycle rules of a bucket (read only), and the job that changes the tags of a
-// prefix. Only the S3 backend has them: a provider that does not know them answers 501.
+// Object tags (S3 ?tagging), the read of the lifecycle rules of a bucket (the editor is in lifecycle.go), and the job
+// that changes the tags of a prefix. Only the S3 backend has them: a provider that does not know them answers 501.
 
 const (
 	maxObjectTags    = 10
@@ -264,25 +264,17 @@ func (s *s3Backend) PutObjectTagging(ctx context.Context, key, version string, t
 
 // GetBucketLifecycle reads the lifecycle rules. A bucket without rules gives an empty list.
 func (s *s3Backend) GetBucketLifecycle(ctx context.Context) ([]lifecycleRule, error) {
-	query := url.Values{}
-	query.Set("lifecycle", "")
-	resp, err := s.do(ctx, http.MethodGet, "", query, nil, 0, nil)
+	document, err := s.ReadBucketLifecycle(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound {
-		var failure struct {
-			Code string `xml:"Code"`
-		}
-		_ = xml.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&failure)
-		if failure.Code == "NoSuchLifecycleConfiguration" {
-			return []lifecycleRule{}, nil
-		}
-		return nil, &upstreamError{StatusCode: http.StatusNotFound, Code: failure.Code}
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, s3ResponseError(resp)
+	return parseLifecycleRules(document.Body)
+}
+
+// parseLifecycleRules reads the rules of a configuration. An empty document gives an empty list.
+func parseLifecycleRules(body []byte) ([]lifecycleRule, error) {
+	if len(strings.TrimSpace(string(body))) == 0 {
+		return []lifecycleRule{}, nil
 	}
 	type tagXML struct {
 		Key   string `xml:"Key"`
@@ -323,7 +315,7 @@ func (s *s3Backend) GetBucketLifecycle(ctx context.Context) ([]lifecycleRule, er
 			} `xml:"AbortIncompleteMultipartUpload"`
 		} `xml:"Rule"`
 	}
-	if err := xml.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&result); err != nil {
+	if err := xml.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("decode s3 lifecycle response: %w", err)
 	}
 	rules := make([]lifecycleRule, 0, len(result.Rules))
@@ -476,8 +468,8 @@ func (s *storageInstance) PutTags(ctx context.Context, key, version string, tags
 
 func (s *storageInstance) Lifecycle(ctx context.Context) ([]lifecycleRule, error) {
 	reader, ok := s.backend.(BucketLifecycleReader)
-	if !ok {
-		return nil, apiError{Status: http.StatusNotImplemented, Code: "lifecycle_unsupported", Message: "this storage provider does not give lifecycle rules"}
+	if !ok || s.lifecycle.off.Load() {
+		return nil, lifecycleUnsupported()
 	}
 	release, err := s.beginStorageRequest(ctx)
 	if err != nil {
@@ -486,7 +478,8 @@ func (s *storageInstance) Lifecycle(ctx context.Context) ([]lifecycleRule, error
 	defer release()
 	rules, err := reader.GetBucketLifecycle(ctx)
 	if providerRefusedFeature(err) {
-		return nil, apiError{Status: http.StatusNotImplemented, Code: "lifecycle_unsupported", Message: "this storage provider does not give lifecycle rules"}
+		s.lifecycle.off.Store(true)
+		return nil, lifecycleUnsupported()
 	}
 	return rules, err
 }
@@ -668,11 +661,22 @@ func (m *jobManager) runTagJob(ctx context.Context, job *jobState, instance *sto
 type lifecycleResponse struct {
 	Instance string          `json:"instance"`
 	Rules    []lifecycleRule `json:"rules"`
+	// Editor is the state of the editor (lifecycle.go). It is absent for a backend that only reads the rules.
+	Editor *lifecycleEditorState `json:"editor,omitempty"`
+	// Warnings tells what the provider changed in the rules of a save (PUT only).
+	Warnings []string `json:"warnings,omitempty"`
 }
 
+// handleLifecycle gives the rules of the bucket (GET) with the state of the editor, or saves the rules of the editor
+// (PUT, lifecycle.go).
 func (a *application) handleLifecycle(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		methodNotAllowed(w, http.MethodGet)
+	switch r.Method {
+	case http.MethodGet:
+	case http.MethodPut:
+		a.handleLifecycleSave(w, r)
+		return
+	default:
+		methodNotAllowed(w, http.MethodGet, http.MethodPut)
 		return
 	}
 	instance, err := a.readableInstance(r, "")
@@ -682,6 +686,15 @@ func (a *application) handleLifecycle(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := requirePermission(instance, permissionRead); err != nil {
 		writeAPIError(w, err)
+		return
+	}
+	if _, ok := instance.backend.(BucketLifecycleWriter); ok {
+		state, err := instance.readLifecycleState(r.Context())
+		if err != nil {
+			writeAPIError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, lifecycleResponse{Instance: instance.cfg.ID, Rules: state.rules, Editor: &state.editor})
 		return
 	}
 	rules, err := instance.Lifecycle(r.Context())

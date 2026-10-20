@@ -3334,6 +3334,202 @@ button.versionCount:focus-visible {
   color: var(--success);
 }
 
+/* The note about the lifecycle rules: the text, and the button that opens the window of the lifecycle rules. */
+.multiparts__note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+/* Lifecycle rules: the window of the Actions menu. The notes, the rules (a form for each editable rule, a read-only
+   row for each other rule), the buttons, one line of message and the changes of the provider after a save. */
+.lifecycle {
+  display: grid;
+  gap: 12px;
+  padding-top: 6px;
+}
+
+.lifecycle p {
+  margin: 0;
+}
+
+.lifecycle__intro,
+.lifecycle__note,
+.lifecycle__state,
+.lifecycle__hidden {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.lifecycle__readonly {
+  color: var(--warning);
+  font-size: var(--fs-sm);
+}
+
+.lifecycle__hidden {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lifecycle__rules {
+  display: grid;
+  gap: 10px;
+  min-height: 0;
+  max-height: calc(var(--bb-large-height) - 16rem);
+  overflow: auto;
+}
+
+.lifecycleRule {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+}
+
+.lifecycleRule.is-readonly {
+  background: color-mix(in srgb, var(--border) 18%, transparent);
+}
+
+.lifecycleRule__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.lifecycleRule__id {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.lifecycleRule__name {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+}
+
+.lifecycleRule__enabled,
+.lifecycleRule__action {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+
+.lifecycleRule__head .iconButton {
+  width: 28px;
+  height: 28px;
+  margin-left: auto;
+  --icon-size: 18px;
+}
+
+.lifecycleRule__fields {
+  display: grid;
+  gap: 6px;
+}
+
+.lifecycleRule__field {
+  display: grid;
+  grid-template-columns: minmax(112px, 165px) minmax(0, 1fr);
+  align-items: center;
+  gap: .7rem;
+}
+
+.lifecycleRule__field > span {
+  color: var(--muted);
+  font-size: .84rem;
+}
+
+.lifecycleRule__actions {
+  display: grid;
+  gap: 6px;
+}
+
+.lifecycleRule__action .input {
+  width: 84px;
+}
+
+.lifecycleRule__summary,
+.lifecycleRule__reason {
+  font-size: var(--fs-sm);
+}
+
+.lifecycleRule__reason {
+  color: var(--muted);
+}
+
+.lifecycleRule__xml summary {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.lifecycleRule__xml pre {
+  max-height: 10rem;
+  margin: 6px 0 0;
+  overflow: auto;
+  font-size: var(--fs-sm);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.lifecycle__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.lifecycle__message {
+  min-height: 1.2em;
+  font-size: var(--fs-sm);
+}
+
+.lifecycle__message[data-tone="error"],
+.lifecycle__warnings {
+  color: var(--danger-text, var(--danger));
+}
+
+.lifecycle__message[data-tone="ok"] {
+  color: var(--success);
+}
+
+.lifecycle__warnings {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--fs-sm);
+}
+
+.lifecycle__warnings li {
+  display: flex;
+  gap: 6px;
+}
+
+.lifecycle__warnings:empty {
+  display: none;
+}
+
+.lifecycleConfirm ul {
+  margin: 8px 0 0;
+  padding-left: 1.2em;
+}
+
+/* On a phone the name of a field goes above its input. */
+@media (max-width: 560px) {
+  .lifecycleRule__field {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+}
+
 .tagForm {
   display: grid;
   gap: 12px;

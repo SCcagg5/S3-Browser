@@ -130,6 +130,11 @@ func (a *application) probeVersioningSupport() {
 			defer wg.Done()
 			instance.probeMultipartUploads(ctx)
 		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			instance.probeLifecycle(ctx)
+		}()
 	}
 	wg.Wait()
 }

@@ -16,7 +16,8 @@ const config = {
   versioningSupported: false,
   tagsSupported: true,
   metadataEditSupported: true,
-  multipartUploadsSupported: true
+  multipartUploadsSupported: true,
+  lifecycleSupported: true
 };
 window.BB = window.BB || {};
 BB.cfg = config;
@@ -704,6 +705,8 @@ BB.cfg = config;
     ui.folderTagsItem.disabled = !read || !canWrite() || Boolean(state.listError);
     ui.multipartsItem.hidden = !config.multipartUploadsSupported;
     ui.multipartsItem.disabled = !read || Boolean(state.listError);
+    ui.lifecycleItem.hidden = !config.lifecycleSupported;
+    ui.lifecycleItem.disabled = !read || Boolean(state.listError);
     ui.tagFilterWrap.hidden = !state.tagFilterOn || state.tagsUnsupported;
     renderSettings();
     const badge = accessBadge();
@@ -1051,6 +1054,8 @@ BB.cfg = config;
     config.metadataEditSupported = instance.metadataEditSupported !== false;
     // The server probes the list of the incomplete uploads at start: the menu hides the item for an instance without it.
     config.multipartUploadsSupported = instance.multipartUploadsSupported !== false;
+    // The server probes the lifecycle rules at start: the menu hides the item for an instance without them (GCS).
+    config.lifecycleSupported = instance.lifecycleSupported !== false;
     config.rootPrefix = instance.rootPrefix || '';
   }
 
@@ -1657,7 +1662,7 @@ BB.cfg = config;
       refreshButton: 'refreshButton', actionsButton: 'actionsButton', actionsMenu: 'actionsMenu', zipItem: 'zipItem',
       insightsItem: 'insightsItem', accessBadge: 'accessBadge', uploadWrap: 'uploadWrap',
       uploadButton: 'uploadButton', uploadMenu: 'uploadMenu', uploadFilesItem: 'uploadFilesItem',
-      uploadFolderItem: 'uploadFolderItem', uploadTagsInput: 'uploadTagsInput', uploadTagsMessage: 'uploadTagsMessage', folderTagsItem: 'folderTagsItem', multipartsItem: 'multipartsItem',
+      uploadFolderItem: 'uploadFolderItem', uploadTagsInput: 'uploadTagsInput', uploadTagsMessage: 'uploadTagsMessage', folderTagsItem: 'folderTagsItem', multipartsItem: 'multipartsItem', lifecycleItem: 'lifecycleItem',
       tagFilterWrap: 'tagFilterWrap', settingsButton: 'settingsButton', settingsMenu: 'settingsMenu', settingsReset: 'settingsReset',
       tagFilterToggle: 'tagFilterToggle', tagFilter: 'tagFilter', tagStatus: 'tagStatus', listing: 'listing', dropOverlay: 'dropOverlay', dropTarget: 'dropTarget',
       uploadDock: 'uploadDock', fileInput: 'fileInput', dirInput: 'dirInput'
@@ -1685,6 +1690,7 @@ BB.cfg = config;
     ui.settingsMenu.addEventListener('change', onSettingsChange);
     ui.folderTagsItem.addEventListener('click', () => { if (canWrite()) void tagFolder(state.pathPrefix); });
     ui.multipartsItem.addEventListener('click', () => { if (canRead()) BB.multiparts.open({ prefix: state.pathPrefix, canWrite: canWrite() }); });
+    ui.lifecycleItem.addEventListener('click', () => { if (canRead()) BB.lifecycle.open({ prefix: state.pathPrefix, canWrite: canWrite() }); });
     ui.tagFilter.addEventListener('input', () => { state.tagFilter = ui.tagFilter.value; applyTagFilter(); });
     document.addEventListener('bb:tags-changed', event => forgetTags(event.detail?.key));
     // A save of the metadata changes the date and the versions of the object: the listing reads them again.
