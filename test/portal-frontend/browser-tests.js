@@ -846,6 +846,12 @@ async function openCompareFromDetails(page, name) {
   assert.match(page.url(), /[?&]compare=/);
 }
 
+// Chooses a version in the picker From or To of the comparison. The index is the row of the menu (0 is the newest).
+async function pickVersion(page, side, index) {
+  await page.click(`.versionDiff__${side} .versionPicker__button`);
+  await page.click(`.versionPicker__menu:not([hidden]) .versionPicker__item >> nth=${index}`);
+}
+
 const cleanText = items => items.map(item => item.replace(/\s+/g, ' ').trim());
 
 test('versions: the picker of the details lists each version with its date, its size and its change', async () => {
@@ -895,9 +901,12 @@ test('versions: the comparison of two text versions, unified and side by side, w
   const page = await newPage();
   await open(page, `${MAIN}versions/`);
   await openCompareFromDetails(page, 'report.txt');
-  assert.match(await page.inputValue('select[aria-label="From version"]') + '', /./);
-  assert.equal((await page.locator('select[aria-label="From version"] option:checked').innerText()).startsWith('v2'), true);
-  assert.equal((await page.locator('select[aria-label="To version"] option:checked').innerText()).startsWith('v3'), true);
+  assert.match(await page.textContent('.versionDiff__from .versionPicker__button'), /^From\s*v2/);
+  assert.match(await page.textContent('.versionDiff__to .versionPicker__button'), /^To\s*v3/);
+  // The two pickers and the summary of the change are on one line.
+  const line = await page.evaluate(() => ['.versionDiff__from', '.versionDiff__to', '.versionDiff__summary'].map(selector => { const box = document.querySelector(selector).getBoundingClientRect(); return Math.round(box.top + box.height / 2); }));
+  assert.ok(Math.max(...line) - Math.min(...line) <= 12, `lines ${line}`);
+  assert.match(await page.textContent('.versionDiff__summary'), /^v2 → v3 · /);
   await page.waitForSelector('.diff__table');
   // The default view has the two versions side by side.
   assert.equal(await page.locator('.diff__table.is-split').count(), 1);
@@ -957,7 +966,7 @@ test('versions: the comparison of two JSON versions has the modes Raw, Beautify 
   assert.ok((await nodes()).includes('same service'));
   await page.uncheck('[data-diff-whole]');
   // v1 -> v3. The keys are in alphabetical order.
-  await page.selectOption('select[aria-label="From version"]', { index: 2 });
+  await pickVersion(page, 'from', 2);
   await until(page, () => document.querySelectorAll('.jsonTree__node').length >= 7);
   { const got = await nodes(); assert.equal(JSON.stringify(got), JSON.stringify(['changed $', 'removed legacy', 'changed limits', 'added memory', 'changed regions', 'added [1]', 'changed replicas']), JSON.stringify(got)); }
   assert.deepEqual(cleanText(await page.locator('.diffStat').allInnerTexts()).slice(0, 1), ['4 paths changed']);
@@ -969,6 +978,10 @@ test('versions: the comparison of two JSON versions has the modes Raw, Beautify 
   await page.waitForSelector('.diff__table.is-split');
   assert.equal(await page.locator('[data-diff-sort]').count(), 0);
   assert.match(await page.textContent('.diff__table.is-split'), /\{"service":"ingest"/);
+  // The text starts at the left of each side: the number column is narrow.
+  const columns = await page.evaluate(() => { const row = document.querySelector('.diff__table.is-split tbody tr.diff__row'); const cells = Array.from(row.children).map(cell => cell.getBoundingClientRect()); return { number: cells[0].width, gap: cells[1].left - cells[0].right, text: cells[1].width, side: cells[2].left - cells[0].left }; });
+  assert.ok(columns.number <= 80, `number column ${columns.number}px`);
+  assert.ok(Math.abs(columns.side - (columns.number + columns.text)) < 2);
   // A changed line with marked words has no text of an object in it.
   assert.doesNotMatch(await page.textContent('.versionDiff__view'), /\[object /);
   assert.ok(await page.locator('.diff__table.is-split mark').count() >= 1);
@@ -997,8 +1010,8 @@ test('versions: the comparison of two CSV versions shows the rows and the cells 
   assert.deepEqual(cleanText(await page.locator('.csvCell--changed').allInnerTexts()), ['1 to 2']);
   assert.match(cleanText(await page.locator('.diff__row--del').allInnerTexts())[0], /1 ada 5/);
   // v1 -> v2: a row added, a quantity changed.
-  await page.selectOption('select[aria-label="From version"]', { index: 2 });
-  await page.selectOption('select[aria-label="To version"]', { index: 1 });
+  await pickVersion(page, 'from', 2);
+  await pickVersion(page, 'to', 1);
   await until(page, () => document.querySelectorAll('.diffStat').length === 3 && document.querySelector('.diffStat').textContent.startsWith('1 added'));
   assert.deepEqual(cleanText(await page.locator('.diffStat').allInnerTexts()), ['1 added', '0 removed', '1 modified']);
   assert.deepEqual(cleanText(await page.locator('.csvCell--changed').allInnerTexts()), ['7 to 8']);
@@ -1025,8 +1038,8 @@ test('versions: two versions with the same content say so', async () => {
   await openCompareFromDetails(page, 'notes.txt');
   await page.waitForSelector('.diffStat');
   assert.deepEqual(cleanText(await page.locator('.diffStat').allInnerTexts()), ['+1', '−1']);
-  await page.selectOption('select[aria-label="From version"]', { index: 0 });
-  await page.selectOption('select[aria-label="To version"]', { index: 0 });
+  await pickVersion(page, 'from', 0);
+  await pickVersion(page, 'to', 0);
   await until(page, () => /two different versions/.test(document.querySelector('.versionDiff__view')?.textContent || ''));
   await page.context().close();
 });
@@ -1074,10 +1087,11 @@ test('versions: the preview page has the same picker, with no select and no sepa
   await page.waitForSelector('.versionComparePage .diff__table');
   assert.equal(await page.locator('.bb-overlay').count(), 0);
   assert.match(page.url(), /compare=/);
-  assert.equal(await page.locator('.versionDiff__select').count(), 2);
+  assert.equal(await page.locator('.versionDiff__from .versionPicker__button, .versionDiff__to .versionPicker__button').count(), 2);
+  assert.equal(await page.locator('select').count(), 0);
   // No back button, no title and no line of the path in the page. The two versions are in the bar above the content.
   assert.equal(await page.locator('.versionComparePage__back, .versionComparePage__title, .versionDiff__file').count(), 0);
-  const place = await page.evaluate(() => ({ select: document.querySelector('.versionDiff__select').getBoundingClientRect().bottom, content: document.querySelector('main.viewer').getBoundingClientRect().top, inBar: Boolean(document.querySelector('#compareBar .versionDiff__select')), picker: document.querySelector('#previewVersionControl').hidden }));
+  const place = await page.evaluate(() => ({ select: document.querySelector('.versionDiff__from').getBoundingClientRect().bottom, content: document.querySelector('main.viewer').getBoundingClientRect().top, inBar: Boolean(document.querySelector('#compareBar .versionDiff__from')), picker: document.querySelector('#previewVersionControl').hidden }));
   assert.equal(place.inBar, true);
   assert.ok(place.select <= place.content + 1, JSON.stringify(place));
   assert.equal(place.picker, true);
@@ -1131,7 +1145,7 @@ test('versions: the git patch has the format of git, and can be copied and downl
   for await (const chunk of stream) body += chunk;
   assert.equal(body, patch);
   // The patch of two other versions follows the choice of the versions.
-  await page.selectOption('select[aria-label="From version"]', { index: 2 });
+  await pickVersion(page, 'from', 2);
   await until(page, () => /@@ -1,\d+ \+1,\d+ @@/.test(document.querySelector('.gitPatch')?.textContent || '') && document.querySelector('.gitPatch').textContent.includes('-Status: draft'));
   assert.deepEqual(page.errors, []);
   await page.context().close();

@@ -94,7 +94,9 @@
   // Version picker (file details)
   // ---------------------------------------------------------------------------------------------------------------
 
-  function mountPicker(host, { versions, selected = '', onSelect, onCompare, onAll = null }) {
+  // explicit: a choice gives the identifier of the version (the version of the preview gives '' for the current one).
+  // caption: a word before the version, such as From or To. Without onCompare and onAll the menu has no foot.
+  function mountPicker(host, { versions, selected = '', onSelect, onCompare = null, onAll = null, explicit = false, caption = '', compact = false }) {
     // A new picker replaces the one of the host (the label changes with the choice): the old menu goes.
     host.picker?.close();
     host.picker?.menu.remove();
@@ -107,14 +109,14 @@
       h('strong', {}, versionLabel(active)),
       active === current ? h('span', { class: 'versionPicker__tag' }, 'Current') : h('span', { class: 'versionPicker__tag versionPicker__tag--old' }, 'Older'),
       h('span', { class: 'versionPicker__date' }, formatDate(active.lastModified)));
-    const button = h('button', { type: 'button', class: 'versionPicker__button', 'aria-haspopup': 'listbox', 'aria-expanded': 'false', title: `${list.length} versions` },
-      icon('source-commit'), label, h('span', { class: 'versionPicker__count' }, `${list.length}`), icon('chevron-down'));
+    const button = h('button', { type: 'button', class: ['versionPicker__button', compact && 'versionPicker__button--compact'], 'aria-haspopup': 'listbox', 'aria-expanded': 'false', title: `${list.length} versions` },
+      caption ? h('span', { class: 'versionPicker__caption' }, caption) : null, icon('source-commit'), label, h('span', { class: 'versionPicker__count' }, `${list.length}`), icon('chevron-down'));
 
     const items = list.map(version => {
       const isActive = version === active;
       return h('button', {
         type: 'button', class: ['versionPicker__item', isActive && 'is-active'], role: 'option', 'aria-selected': isActive ? 'true' : 'false', 'data-version': version.version,
-        onclick: () => { close(); if (version !== active) onSelect?.(version === current ? '' : version.version); }
+        onclick: () => { close(); if (version !== active) onSelect?.(version === current && !explicit ? '' : version.version); }
       },
         h('span', { class: 'versionPicker__number' }, versionLabel(version)),
         h('span', { class: 'versionPicker__when' },
@@ -128,13 +130,13 @@
           h('code', { title: version.version }, shortId(version.version))),
         isActive ? icon('check') : h('span', { class: 'versionPicker__spacer' }));
     });
-    const compare = h('button', { type: 'button', class: 'versionPicker__compare', disabled: list.length < 2, onclick: () => { close(); onCompare?.({ to: active.version, from: (active.older || list.find(version => version !== active))?.version }); } },
+    const compare = !onCompare ? null : h('button', { type: 'button', class: 'versionPicker__compare', disabled: list.length < 2, onclick: () => { close(); onCompare?.({ to: active.version, from: (active.older || list.find(version => version !== active))?.version }); } },
       icon('git-compare'), h('span', {}, active.older ? `Compare ${versionLabel(active)} with ${versionLabel(active.older)}` : 'Compare versions'));
     const all = onAll
       ? h('button', { type: 'button', class: 'versionPicker__all', onclick: () => { close(); onAll(); } }, icon('source-commit'), h('span', {}, 'All versions and actions…'))
       : null;
     const menu = h('div', { class: 'versionPicker__menu', role: 'listbox', 'aria-label': 'Versions of the object', hidden: true },
-      h('div', { class: 'versionPicker__list' }, items), h('div', { class: 'versionPicker__foot' }, compare, all));
+      h('div', { class: 'versionPicker__list' }, items), compare || all ? h('div', { class: 'versionPicker__foot' }, compare, all) : null);
 
     function place() {
       const box = button.getBoundingClientRect();
@@ -310,7 +312,11 @@
     const head = mode === 'split'
       ? h('thead', {}, h('tr', {}, h('th', { colspan: 2 }, 'From'), h('th', { colspan: 2 }, 'To')))
       : null;
-    return h('div', { class: 'diff__scroll' }, h('table', { class: ['diff__table', mode === 'split' && 'is-split'] }, head, body), more);
+    // The columns of the numbers are narrow and the texts share the rest, so the text starts at the left of each side.
+    const columns = mode === 'split'
+      ? h('colgroup', {}, h('col', { class: 'diff__col-n' }), h('col'), h('col', { class: 'diff__col-n' }), h('col'))
+      : null;
+    return h('div', { class: 'diff__scroll' }, h('table', { class: ['diff__table', mode === 'split' && 'is-split'] }, columns, head, body), more);
   }
 
   // The tree of two JSON documents: every path with its state (added, removed, changed, the same). A branch with a change
@@ -544,26 +550,27 @@
 
     host.classList.add('versionDiff');
     const root = host;
-    const option = version => h('option', { value: version.version }, `${versionLabel(version)} · ${formatDate(version.lastModified)} · ${formatBytes(version.size)}${version.isCurrent ? ' · current' : ''}`);
-    const selectFor = (label, chosen) => {
-      const select = h('select', { class: 'versionDiff__select', 'aria-label': label }, list.map(option));
-      select.value = chosen.version;
-      return select;
+    let leftId = left.version;
+    let rightId = right.version;
+    const fromHost = h('div', { class: 'versionDiff__from' });
+    const toHost = h('div', { class: 'versionDiff__to' });
+    const mountPickers = () => {
+      mountPicker(fromHost, { versions, selected: leftId, caption: 'From', explicit: true, compact: true, onSelect: id => { leftId = id; mountPickers(); render(); } });
+      mountPicker(toHost, { versions, selected: rightId, caption: 'To', explicit: true, compact: true, onSelect: id => { rightId = id; mountPickers(); render(); } });
     };
-    const fromSelect = selectFor('From version', left);
-    const toSelect = selectFor('To version', right);
     const swap = h('button', { type: 'button', class: 'iconButton versionDiff__swap', title: 'Swap the two versions', 'aria-label': 'Swap the two versions' }, icon('arrows-left-right'));
     const summary = h('div', { class: 'versionDiff__summary', role: 'status', 'aria-live': 'polite' });
     const options = h('div', { class: 'versionDiff__options' });
     const view = h('div', { class: 'versionDiff__view' });
-    const pick = h('div', { class: 'versionDiff__pick' },
-      h('label', {}, h('span', {}, 'From'), fromSelect), swap, h('label', {}, h('span', {}, 'To'), toSelect));
+    // The two versions and the summary of the change are on one line.
+    const bar = h('div', { class: 'versionDiff__bar' }, h('div', { class: 'versionDiff__pick' }, fromHost, swap, toHost), summary);
     if (pickHost) {
-      pickHost.replaceChildren(pick);
-      root.replaceChildren(summary, options, view);
+      pickHost.replaceChildren(bar);
+      root.replaceChildren(options, view);
     } else {
-      root.replaceChildren(pick, summary, options, view);
+      root.replaceChildren(bar, options, view);
     }
+    mountPickers();
 
     const segmented = (name, choices, current, onPick) => h('div', { class: 'segmented', role: 'group', 'aria-label': name },
       choices.map(([value, text, iconName]) => h('button', { type: 'button', class: ['segmented__item', value === current && 'is-active'], 'aria-pressed': value === current ? 'true' : 'false', 'data-value': value, onclick: () => onPick(value) }, iconName ? icon(iconName) : null, text)));
@@ -585,14 +592,14 @@
       const run = ++state.run;
       state.expanded.clear();
       drawCurrent = null;
-      left = find(fromSelect.value);
-      right = find(toSelect.value);
+      left = find(leftId);
+      right = find(rightId);
       if (onChange) onChange({ from: left.version, to: right.version });
       view.replaceChildren(h('p', { class: 'diff__empty' }, 'Reading the two versions…'));
       summary.replaceChildren();
       options.replaceChildren();
       const metadata = h('span', { class: 'versionDiff__meta' },
-        `${versionLabel(left)} → ${versionLabel(right)} · ${formatDelta(Number(right.size) - Number(left.size))} · ${formatDate(left.lastModified)} → ${formatDate(right.lastModified)}`);
+        `${versionLabel(left)} → ${versionLabel(right)} · ${formatDelta(Number(right.size) - Number(left.size))}`);
       if (left === right) { view.replaceChildren(h('p', { class: 'diff__empty' }, 'Choose two different versions.')); return; }
       let a;
       let b;
@@ -632,8 +639,8 @@
         }
         const tree = Boolean(json?.valid) && state.mode === 'tree';
         const views = kind === 'csv'
-          ? [['split', 'Side by side', 'layout-columns'], ['table', 'Table', 'layout-rows'], ['git', 'Git patch', 'git-compare']]
-          : [['split', 'Side by side', 'layout-columns'], ['unified', 'Unified', 'layout-rows'], ['git', 'Git patch', 'git-compare']];
+          ? [['split', 'Side by side', 'layout-columns'], ['table', 'Table', 'layout-rows'], ['git', 'Patch', 'git-compare']]
+          : [['split', 'Side by side', 'layout-columns'], ['unified', 'Unified', 'layout-rows'], ['git', 'Patch', 'git-compare']];
         if (!views.some(([value]) => value === state.view)) state.view = 'split';
         const lines = BB.diff.diffLines(aText, bText);
         const patch = () => BB.diff.unifiedPatch(lines, { aPath: key, aId: blobId(left), bId: blobId(right) });
@@ -672,11 +679,9 @@
     }
 
     const stat = (text, type) => h('span', { class: `diffStat diffStat--${type}` }, text);
-    fromSelect.addEventListener('change', render);
-    toSelect.addEventListener('change', render);
-    swap.addEventListener('click', () => { const keep = fromSelect.value; fromSelect.value = toSelect.value; toSelect.value = keep; render(); });
+    swap.addEventListener('click', () => { [leftId, rightId] = [rightId, leftId]; mountPickers(); render(); });
     render();
-    return { destroy() { controller.abort(); state.run += 1; host.replaceChildren(); pickHost?.replaceChildren(); } };
+    return { destroy() { controller.abort(); state.run += 1; for (const picker of [fromHost, toHost]) { picker.picker?.close(); picker.picker?.menu.remove(); } host.replaceChildren(); pickHost?.replaceChildren(); } };
   }
 
   BB.versions = { listVersions, mountPicker, mountCompare, compareURL, kindOf, formatBytes, formatDate };

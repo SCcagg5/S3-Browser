@@ -3485,32 +3485,32 @@ button.versionCount:focus-visible {
   color: var(--muted);
 }
 
-.versionDiff__pick {
+.versionDiff__bar {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 10px;
+  align-items: center;
+  gap: 8px 14px;
+  min-width: 0;
 }
 
-.versionDiff__pick label {
-  display: grid;
-  flex: 1 1 280px;
-  gap: 4px;
-  min-width: 0;
+.versionDiff__pick {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+
+.versionPicker__button--compact .versionPicker__tag,
+.versionPicker__button--compact .versionPicker__count {
+  display: none;
+}
+
+.versionPicker__caption {
   color: var(--muted);
-  font-size: var(--fs-sm);
 }
 
-.versionDiff__select {
-  width: 100%;
-  min-width: 0;
-  height: 36px;
-  padding: 0 8px;
-  border: 1px solid var(--button-border);
-  border-radius: var(--radius-control);
-  background: var(--button-bg);
-  color: var(--text);
-  font: inherit;
+.diff__col-n {
+  width: 56px;
 }
 
 .versionDiff__swap {
