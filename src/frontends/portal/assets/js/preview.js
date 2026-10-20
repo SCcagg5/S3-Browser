@@ -208,7 +208,7 @@
   function mountVersionPicker() {
     const control = byId('previewVersionControl');
     if (!control) return;
-    if (!previewVersions.length || !BB.versions) { control.hidden = true; return; }
+    if (previewVersions.length < 2 || !BB.versions) { control.hidden = true; return; }
     BB.versions.mountPicker(control, {
       versions: previewVersions,
       selected: currentVersion(),

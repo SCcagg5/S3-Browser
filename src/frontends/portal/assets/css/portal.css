@@ -1383,17 +1383,17 @@ button.storageSwitcher__trigger:hover {
   width: 28px;
   height: 26px;
   padding: 0;
-  border: 1px solid transparent;
+  border: 0;
   border-radius: var(--radius-control);
   background: transparent;
   color: var(--muted);
   cursor: pointer;
 }
 
+/* No frame and no fill, as the close button of a dialog: only the colour of the icon changes. */
 .bb-kebab:hover,
+.bb-kebab:focus-visible,
 .bb-menu.is-open .bb-kebab {
-  border-color: var(--button-border);
-  background: var(--button-bg);
   color: var(--text);
 }
 
@@ -3345,16 +3345,19 @@ button.versionCount:focus-visible {
 
 .versionPicker__list {
   display: grid;
-  gap: 2px;
+  /* The columns belong to the list, so every row has the same column positions. */
+  grid-template-columns: 38px minmax(150px, 1fr) max-content max-content 16px;
+  gap: 2px 12px;
   padding: 6px;
   overflow-y: auto;
 }
 
 .versionPicker__item {
   display: grid;
-  grid-template-columns: 38px minmax(150px, 1fr) minmax(90px, auto) minmax(90px, auto) 16px;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
   align-items: center;
-  gap: 12px;
+  column-gap: 12px;
   width: 100%;
   padding: 7px 10px;
   border: 1px solid transparent;
@@ -3843,8 +3846,8 @@ button.versionCount:focus-visible {
     width: calc(100vw - 16px);
   }
 
-  .versionPicker__item {
-    grid-template-columns: 34px minmax(0, 1fr) auto 16px;
+  .versionPicker__list {
+    grid-template-columns: 34px minmax(0, 1fr) max-content 16px;
   }
 
   .versionPicker__meta {

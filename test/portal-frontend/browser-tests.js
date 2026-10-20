@@ -866,6 +866,9 @@ test('versions: the picker of the details lists each version with its date, its 
   assert.match(items[0], /\+\d+ B/);
   assert.equal(await page.getAttribute('.versionPicker__item >> nth=0', 'aria-selected'), 'true');
   assert.match(await page.textContent('.versionPicker__compare'), /Compare v3 with v2/);
+  // The columns line up: the number, the date, the size and the id start at the same place in every row.
+  const columns = await page.evaluate(() => Array.from(document.querySelectorAll('.versionPicker__item')).map(row => ['.versionPicker__number', '.versionPicker__when', '.versionPicker__size', '.versionPicker__meta'].map(selector => Math.round(row.querySelector(selector).getBoundingClientRect().left * 10) / 10)));
+  for (const row of columns.slice(1)) assert.deepEqual(row, columns[0], `columns: ${JSON.stringify(columns)}`);
   // The menu stays in the window, under the button.
   const place = await page.evaluate(() => {
     const menu = document.querySelector('.versionPicker__menu').getBoundingClientRect();
@@ -1207,6 +1210,28 @@ test('windows: the details, the folder insights and the versions use one window,
     assert.ok(Math.abs(other.top - details.top) < 0.5, `top ${other.top}px, ${details.top}px`);
     assert.ok(Math.abs(other.body - details.body) < 0.5, `body ${other.body}px, ${details.body}px`);
   }
+  await page.context().close();
+});
+
+test('versions: a file with one version has no version picker; the action button of a row has no frame', async () => {
+  const page = await newPage();
+  await open(page, `${MAIN}config/`);
+  // The button of the row: no frame and no fill, only the colour changes.
+  const kebab = page.locator('tr[data-name="ingest.json"] .bb-kebab');
+  const before = await kebab.evaluate(node => getComputedStyle(node).color);
+  await kebab.hover();
+  await until(page, previous => getComputedStyle(document.querySelector('tr[data-name="ingest.json"] .bb-kebab')).color !== previous, before);
+  const style = await kebab.evaluate(node => { const css = getComputedStyle(node); return { background: css.backgroundColor, border: css.borderTopWidth }; });
+  assert.equal(style.background, 'rgba(0, 0, 0, 0)');
+  assert.equal(style.border, '0px');
+  // One version: no picker in the details, and none in the preview page.
+  await openDetails(page, 'ingest.json');
+  assert.equal(await page.locator('.bb-details-head .versionPicker__button, [data-details-versions]').count(), 0);
+  await page.goto(`${BASE}${MAIN}config/ingest.json`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('.json-range-label');
+  assert.equal(await page.locator('#previewVersionControl').isVisible(), false);
+  assert.equal(await page.locator('.versionPicker__button').count(), 0);
+  assert.deepEqual(page.errors, []);
   await page.context().close();
 });
 

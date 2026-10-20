@@ -58,6 +58,8 @@ This document uses ASD-STE100 Simplified Technical English.
 - The values and the titles of the columns Size and Modified are at the right of the column.
 - The details of a file are one page, with no tab. The tools of integrity and inspection follow the sections. The arrow of the
   version picker has the size of the text. The close button of a dialog changes only the colour of its cross.
+- The action button at the right of a row has no frame: only the colour of the icon changes. A file with one version has no
+  version picker. The columns of the version picker line up in every row.
 - A read of an older version works with SeaweedFS. The program sends no `If-Match` with a version identifier, because
   SeaweedFS compares it with the current object and answers HTTP 412.
 - A JSON file that fits in one page shows its totals at once and has no button to count lines and pages. The root of

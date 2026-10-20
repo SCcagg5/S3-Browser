@@ -523,7 +523,7 @@
       const currentVersionLabel = currentVersionRecord
         ? `Current · ${versionDateLabel(currentVersionRecord)} · ${versionDisplayLabel(currentVersionRecord)}`
         : 'Current';
-      const versionSelector = BB.cfg?.versioningSupported === true && BB.versions
+      const versionSelector = BB.cfg?.versioningSupported === true && BB.versions && versionCount > 1
         ? '<div class="bb-details-version-control" data-details-versions></div>'
         : '';
 
