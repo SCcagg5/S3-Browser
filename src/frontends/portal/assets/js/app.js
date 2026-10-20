@@ -14,7 +14,8 @@ const config = {
   operations: {},
   runtime: {},
   versioningSupported: false,
-  tagsSupported: true
+  tagsSupported: true,
+  metadataEditSupported: true
 };
 window.BB = window.BB || {};
 BB.cfg = config;
@@ -1043,6 +1044,8 @@ BB.cfg = config;
     // The server probes the tag requests at start. The state of the page follows the instance, also after a change of instance.
     config.tagsSupported = instance.tagsSupported !== false;
     state.tagsUnsupported = !config.tagsSupported;
+    // The server probes the edit of the metadata at start: the details hide the button for an instance without it.
+    config.metadataEditSupported = instance.metadataEditSupported !== false;
     config.rootPrefix = instance.rootPrefix || '';
   }
 
@@ -1678,6 +1681,8 @@ BB.cfg = config;
     ui.folderTagsItem.addEventListener('click', () => { if (canWrite()) void tagFolder(state.pathPrefix); });
     ui.tagFilter.addEventListener('input', () => { state.tagFilter = ui.tagFilter.value; applyTagFilter(); });
     document.addEventListener('bb:tags-changed', event => forgetTags(event.detail?.key));
+    // A save of the metadata changes the date and the versions of the object: the listing reads them again.
+    document.addEventListener('bb:metadata-changed', () => { void refresh(); });
     ui.fileInput.addEventListener('change', onFileInput);
     ui.dirInput.addEventListener('change', onDirInput);
     window.addEventListener('popstate', updateFromLocation);

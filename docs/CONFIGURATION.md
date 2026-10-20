@@ -142,7 +142,7 @@ bucket "archive" {
 | `permissions` | omitted | Optional application ceiling containing `read`, `write`, and/or `delete`. |
 | `max_scan_pages` | `1` | Maximum 1,000-entry provider listing pages combined in navigation. `0` means no page-count limit. |
 
-`read` permits list, preview, details, inspection, version listing, and download. `write` permits upload and destination-side object creation. `delete` permits deletion and the source side of move/rename. Provider policy and retention rules still apply.
+`read` permits list, preview, details, inspection, version listing, and download. `write` permits upload, destination-side object creation, and the edit of the tags and the metadata of an object. `delete` permits deletion and the source side of move/rename. Provider policy and retention rules still apply.
 
 ## Access block
 

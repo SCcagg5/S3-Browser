@@ -98,6 +98,7 @@ type fakeCopyS3 struct {
 	completed      int
 	aborted        int
 	copyObjects    int
+	copyHeaders    []http.Header
 	taggingQueries int
 	nextUpload     int
 }
@@ -210,11 +211,20 @@ func (f *fakeCopyS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	case r.Method == http.MethodPut && r.Header.Get("x-amz-copy-source") != "":
 		f.copyObjects++
+		f.copyHeaders = append(f.copyHeaders, r.Header.Clone())
 		sourceKey, version := f.parseCopySource(r.Header.Get("x-amz-copy-source"))
 		object, ok := f.source(sourceKey, version)
 		if !ok {
 			w.WriteHeader(http.StatusNotFound)
 			return
+		}
+		if match := r.Header.Get("x-amz-copy-source-if-match"); match != "" && match != `"etag-`+sourceKey+`"` {
+			w.WriteHeader(http.StatusPreconditionFailed)
+			_, _ = io.WriteString(w, "<Error><Code>PreconditionFailed</Code><Message>At least one of the pre-conditions you specified did not hold</Message></Error>")
+			return
+		}
+		if r.Header.Get("x-amz-metadata-directive") == "REPLACE" {
+			object.headers = copyMetadataHeaders(r.Header)
 		}
 		f.objects[key] = object
 		_, _ = io.WriteString(w, "<CopyObjectResult/>")

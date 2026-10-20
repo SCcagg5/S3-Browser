@@ -229,6 +229,29 @@
     return icons[String(type || '')] || 'file-outline';
   }
 
+  // The usual Content-Type of each extension. The metadata editor suggests the type of the file name.
+  const EXT_TO_CONTENT_TYPE = {
+    txt: 'text/plain', log: 'text/plain', md: 'text/markdown', markdown: 'text/markdown', csv: 'text/csv', tsv: 'text/tab-separated-values',
+    html: 'text/html', htm: 'text/html', css: 'text/css', js: 'text/javascript', mjs: 'text/javascript', ics: 'text/calendar', vcf: 'text/vcard',
+    json: 'application/json', geojson: 'application/geo+json', ndjson: 'application/x-ndjson', xml: 'application/xml',
+    yaml: 'application/yaml', yml: 'application/yaml', toml: 'application/toml', pdf: 'application/pdf', wasm: 'application/wasm',
+    zip: 'application/zip', gz: 'application/gzip', tar: 'application/x-tar', zst: 'application/zstd', '7z': 'application/x-7z-compressed',
+    parquet: 'application/vnd.apache.parquet', sqlite: 'application/vnd.sqlite3', eml: 'message/rfc822',
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', avif: 'image/avif', svg: 'image/svg+xml',
+    bmp: 'image/bmp', tif: 'image/tiff', tiff: 'image/tiff', ico: 'image/vnd.microsoft.icon',
+    mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', mkv: 'video/x-matroska',
+    mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', flac: 'audio/flac', m4a: 'audio/mp4', opus: 'audio/opus',
+    woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf', otf: 'font/otf'
+  };
+
+  // The usual Content-Type of a file name, or '' for an extension that the table does not have.
+  function contentTypeForName(value = '') {
+    return EXT_TO_CONTENT_TYPE[extOf(value)] || '';
+  }
+
   function resolveType(key, mime = '') {
     const extension = extOf(key);
     const contentType = String(mime || '').toLowerCase();
@@ -268,6 +291,7 @@
     extOf,
     resolveLang,
     resolveType,
+    contentTypeForName,
     codeLanguageForName,
     languageDisplayNameForName,
     isTextualMime,

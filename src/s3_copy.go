@@ -80,6 +80,11 @@ type multipartCopyOptions struct {
 	// ReplaceTags gives the destination Tags instead of the tags of the source. An empty Tags then means no tag.
 	ReplaceTags bool
 	Tags        []objectTag
+	// ExtraHeaders are other headers of CreateMultipartUpload, for example the storage class of the source.
+	ExtraHeaders http.Header
+	// SourceETag is the ETag that the caller read, without quotes. When it is not empty, a source with another ETag
+	// stops the copy with 412 before the provider writes a byte.
+	SourceETag string
 	// Progress receives the size of each part after the provider copied it. The calls do not overlap.
 	Progress func(int64)
 
@@ -173,6 +178,9 @@ func (s *s3Backend) CopyMultipart(ctx context.Context, source, destination strin
 	if err != nil {
 		return err
 	}
+	if options.SourceETag != "" && strings.Trim(strings.TrimSpace(head.Header.Get("ETag")), `"`) != options.SourceETag {
+		return &upstreamError{StatusCode: http.StatusPreconditionFailed, Code: "PreconditionFailed", Message: "the ETag of the source is not the ETag that the caller read"}
+	}
 	size, sizeErr := strconv.ParseInt(strings.TrimSpace(head.Header.Get("Content-Length")), 10, 64)
 	if sizeErr != nil {
 		return fmt.Errorf("the provider gave no size for the source of the copy")
@@ -197,6 +205,9 @@ func (s *s3Backend) CopyMultipart(ctx context.Context, source, destination strin
 	}
 	if len(tags) > 0 {
 		headers.Set("x-amz-tagging", encodeTagsHeader(tags))
+	}
+	for name, values := range options.ExtraHeaders {
+		headers[http.CanonicalHeaderKey(name)] = append([]string(nil), values...)
 	}
 
 	release, err := gate(ctx)

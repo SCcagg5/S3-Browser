@@ -3025,9 +3025,24 @@ button.versionCount:focus-visible {
   white-space: nowrap;
 }
 
-.tagEditor {
+.tagEditor,
+.metaEditor {
   display: grid;
   gap: 10px;
+}
+
+/* The tags and the metadata of the details have one look: the frameless "Edit" button at the right of the title, the
+   form under the values, Save and Revert, one line of message, the notes. */
+.bb-details-section-title .detailsEditButton {
+  width: 26px;
+  height: 22px;
+  margin: -2px 0 -2px auto;
+  text-transform: none;
+}
+
+.bb-details-section-title .detailsEditButton .mdi {
+  color: inherit;
+  font-size: 1rem;
 }
 
 .tagEditor__list {
@@ -3036,7 +3051,8 @@ button.versionCount:focus-visible {
   gap: 6px;
 }
 
-.tagEditor__state {
+.tagEditor__state,
+.metaEditor__state {
   color: var(--muted);
 }
 
@@ -3047,36 +3063,43 @@ button.versionCount:focus-visible {
   gap: 8px;
 }
 
-.tagEditor__form .input {
+.tagEditor__form .input,
+.metaEditor__add .input {
   flex: 1 1 140px;
   min-width: 0;
 }
 
-.tagEditor__count {
+.tagEditor__count,
+.metaEditor__count {
   color: var(--muted);
   font-size: var(--fs-sm);
 }
 
-.tagEditor__actions {
+.tagEditor__actions,
+.metaEditor__actions {
   display: flex;
   gap: 8px;
 }
 
-.tagEditor__message {
+.tagEditor__message,
+.metaEditor__message {
   min-height: 1.2em;
   margin: 0;
   font-size: var(--fs-sm);
 }
 
-.tagEditor__message[data-tone="error"] {
+.tagEditor__message[data-tone="error"],
+.metaEditor__message[data-tone="error"] {
   color: var(--danger-text, var(--danger));
 }
 
-.tagEditor__message[data-tone="ok"] {
+.tagEditor__message[data-tone="ok"],
+.metaEditor__message[data-tone="ok"] {
   color: var(--success);
 }
 
-.tagEditor__notes {
+.tagEditor__notes,
+.metaEditor__notes {
   display: grid;
   gap: 6px;
   margin: 0;
@@ -3086,9 +3109,87 @@ button.versionCount:focus-visible {
   font-size: var(--fs-sm);
 }
 
-.tagEditor__notes li {
+.tagEditor__notes li,
+.metaEditor__notes li {
   display: flex;
   gap: 6px;
+}
+
+/* The form of the metadata: one row for each standard header, then the user metadata, then the row that adds one. */
+.metaEditor__form {
+  display: grid;
+  gap: 10px;
+}
+
+.metaEditor__fields {
+  display: grid;
+  gap: 6px;
+}
+
+.metaEditor__field {
+  display: grid;
+  grid-template-columns: minmax(112px, 165px) minmax(0, 1fr);
+  align-items: center;
+  gap: .7rem;
+}
+
+.metaEditor__field > span,
+.metaEditor__key {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: .84rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metaEditor__caption {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.metaEditor__view .metaEditor__caption {
+  padding-top: 4px;
+}
+
+.metaEditor__entries {
+  display: grid;
+  gap: 6px;
+}
+
+.metaEditor__entries:empty {
+  display: none;
+}
+
+.metaEditor__entry {
+  display: grid;
+  grid-template-columns: minmax(112px, 165px) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: .7rem;
+}
+
+.metaEditor__add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* On a phone the name of a field goes above its input. */
+@media (max-width: 560px) {
+  .metaEditor__field {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+
+  .metaEditor__entry {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 4px 8px;
+  }
+
+  .metaEditor__entry .metaEditor__key {
+    grid-column: 1 / -1;
+  }
 }
 
 .tagForm {

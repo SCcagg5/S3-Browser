@@ -16,6 +16,21 @@ This document uses ASD-STE100 Simplified Technical English.
 - The restore of a large version copies that version in parts.
 - The interfaces show the copied bytes of a copy job, with a progress bar for one object.
 
+### Edit of the metadata
+
+- New routes: `GET /api/metadata` (the stored metadata of an object, from the provider) and `PUT /api/metadata` (the
+  complete new state). The server copies the object onto its key with `x-amz-metadata-directive: REPLACE` and keeps
+  the tags. From the threshold of the copy in parts up, the copy goes in parts. Refer to the section "Edit of the
+  metadata" of [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+- The edit sets `Content-Type`, `Cache-Control`, `Content-Disposition`, `Content-Encoding`, `Content-Language`,
+  `Expires` and the user metadata (`x-amz-meta-*`, 2 KiB at most). The server checks each value. A missing value is
+  removed.
+- The copy names the ETag that the form read (`x-amz-copy-source-if-match`). The server also compares the date. An
+  object that changed after the read gives `412 object_changed`, and the form reads the new values.
+- The edit of an older version makes it the current version, as a restore does.
+- The action is `objects.write`. The server probes the edit of each instance at start and gives
+  `metadataEditSupported` in `/api/instances`. The GCS backend answers `501`.
+
 ### Uploads and deletes
 
 - An S3 upload can carry a SHA-256 checksum. The browser computes the digest of each chunk. The provider refuses a part
@@ -35,6 +50,9 @@ This document uses ASD-STE100 Simplified Technical English.
   from source) and Garage v2.4.1. A smoke test lists, uploads, downloads and deletes on each provider. It also checks
   that the page shows versions and tags only where the provider has them.
 - `test/README.md` has a table of the S3 functions of each provider, from S3 requests to the test stack.
+- The metadata tests edit a small file, a file above the threshold of the copy in parts and an older version on each
+  provider. They check the date, the ETag, the versions and the tags after the save, and an object that changes while
+  the form is open.
 - The test image takes the build arguments `MULTIPART_COPY_THRESHOLD` and `MULTIPART_COPY_PART_SIZE`. The portal test
   stack copies in parts from 8 KiB up, in parts of 5 MiB. A browser test copies and renames a file of 11 MiB on each
   provider and compares the SHA-256 of the result. A second test restores a large version on SeaweedFS and MinIO.
@@ -56,6 +74,10 @@ This document uses ASD-STE100 Simplified Technical English.
   the left of the selector. The crumbs start with the mark of the bucket and a slash.
 - The details of a file show its tags. The person can add, remove and save them. The details tell which lifecycle rules
   apply to the object. A folder has the action "Tag objects".
+- The details of a file have the section "Metadata": the stored headers and the user metadata. A frameless "Edit" button
+  opens the form in the same window, with Save and Revert. Before the save, the form tells what changes: the date, a
+  new version where versioning is on, and the ETag where it changes. The section "Tags" has the same button and look:
+  the tags are read only until the person clicks "Edit".
 - The listing has the columns Name, Tags, Versions, Size and Modified. The column Versions has no title. It shows the
   icon and the count of versions for a file with more than one version. The clock that shows the exact times is at the
   left of Modified. The tag column has no title, and its tags follow the name, at the left.

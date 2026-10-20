@@ -293,6 +293,9 @@ type storageInstance struct {
 	// tagsOff is set when a probe found that the provider does not know the tag requests.
 	tagsOff atomic.Bool
 
+	// metadataOff is set when the provider refused the copy that replaces the metadata of an object.
+	metadataOff atomic.Bool
+
 	// batchDeleteOff is set when the provider refused the batch delete once: later deletes go one by one.
 	batchDeleteOff atomic.Bool
 }
@@ -501,6 +504,7 @@ func (s *storageInstance) publicInfo() instanceInfo {
 		RootPrefix:          s.cfg.RootPrefix,
 		VersioningSupported: s.versioningAvailable(),
 		TagsSupported:       s.tagsAvailable(),
+		MetadataEditable:    s.metadataEditAvailable(),
 		Capabilities:        s.capabilities(),
 		Operations:          s.operationCapabilities(),
 	}
@@ -516,6 +520,7 @@ type instanceInfo struct {
 	RootPrefix          string                     `json:"rootPrefix,omitempty"`
 	VersioningSupported bool                       `json:"versioningSupported"`
 	TagsSupported       bool                       `json:"tagsSupported"`
+	MetadataEditable    bool                       `json:"metadataEditSupported"`
 	Capabilities        capabilities               `json:"capabilities"`
 	Operations          map[string]capabilityState `json:"operations"`
 }

@@ -119,6 +119,14 @@ const COPY_SOURCE = Buffer.alloc(11 * 1024 * 1024 + 123);
 for (let i = 0; i < COPY_SOURCE.length; i += 1) COPY_SOURCE[i] = (i * 31 + (i >> 9)) & 255;
 const COPY_HEADERS = { 'content-type': 'application/x-copy-test', 'cache-control': 'max-age=600', 'content-disposition': 'attachment; filename="source.bin"', 'x-amz-meta-origin': 'seed' };
 
+// The objects of the test of the metadata (meta/). small.txt stays under the threshold of the copy in parts (one
+// CopyObject request), large.bin is above it. Both have a Cache-Control, a user metadata and, where the provider has
+// them, tags. versioned.txt has two versions where the provider keeps them. conflict.txt is for the test of an object
+// that changes while the form is open.
+const META_SMALL = 'small metadata file\n';
+const META_LARGE = Buffer.alloc(20000, 'm');
+const META_HEADERS = { 'cache-control': 'max-age=60', 'x-amz-meta-owner': 'ada' };
+
 (async () => {
   const api = await request.newContext({ baseURL: BASE });
   const put = async (instance, key, body, headers) => {
@@ -143,6 +151,17 @@ const COPY_HEADERS = { 'content-type': 'application/x-copy-test', 'cache-control
   for (const [instance, provider] of Object.entries(PROVIDERS)) {
     await s3(instance, 'PUT', '/default/copy/source.bin', '', COPY_SOURCE, { ...COPY_HEADERS, ...(provider.tags ? { 'x-amz-tagging': 'team=copy' } : {}) });
   }
+  for (const [instance, provider] of Object.entries(PROVIDERS)) {
+    const tags = provider.tags ? { 'x-amz-tagging': 'team=meta' } : {};
+    await s3(instance, 'PUT', '/default/meta/small.txt', '', Buffer.from(META_SMALL), { 'content-type': 'text/plain', ...META_HEADERS, ...tags });
+    await s3(instance, 'PUT', '/default/meta/large.bin', '', META_LARGE, { 'content-type': 'application/octet-stream', ...META_HEADERS, ...tags });
+    await s3(instance, 'PUT', '/default/meta/conflict.txt', '', Buffer.from('conflict\n'), { 'content-type': 'text/plain', ...META_HEADERS });
+  }
+  await Promise.all(Object.entries(PROVIDERS).filter(([, provider]) => provider.versioning).map(async ([instance]) => {
+    await s3(instance, 'PUT', '/default/meta/versioned.txt', '', Buffer.from('versioned metadata v1\n'), { 'content-type': 'text/plain', 'x-amz-meta-rev': '1' });
+    await new Promise(resolve => setTimeout(resolve, 1100));
+    await s3(instance, 'PUT', '/default/meta/versioned.txt', '', Buffer.from('versioned metadata v2\n'), { 'content-type': 'text/markdown', 'x-amz-meta-rev': '2' });
+  }));
   await Promise.all(Object.entries(PROVIDERS).filter(([, provider]) => provider.versioning).map(async ([instance]) => {
     await put(instance, 'copy/versioned.bin', Buffer.alloc(20000, 'a'), { 'Content-Type': 'application/octet-stream' });
     await new Promise(resolve => setTimeout(resolve, 1100));

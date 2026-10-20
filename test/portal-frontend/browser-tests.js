@@ -1,7 +1,7 @@
 // Browser tests of the "portal" interface (server.frontend = "portal"). They cover these parts:
 // 1 the theme selector, 2 the breadcrumb and the toolbar row, the header and the bucket selector, 3 the bulk upload,
 // 4 the access behaviour of 2.0.0, 5 one smoke test on each S3 provider (SeaweedFS, MinIO and Garage), 6 the copy in
-// parts on each provider.
+// parts on each provider, 7 the edit of the metadata on each provider.
 // run.sh starts S3-Browser and the three providers, puts the test objects (seed.js) and runs this file in the
 // Playwright container. The tests of parts 1 to 4 use SeaweedFS.
 // The tests change the answers of the server with page.route where a case needs it (403, 401, no answer, access).
@@ -385,6 +385,10 @@ test('tags: the details of a file show its tags, add, remove and save', async ()
   await openDetails(page, 'ingest.json');
   await page.waitForSelector('[data-tags-section] .tagChip');
   assert.deepEqual(await page.locator('[data-tags-section] .tagChip').allInnerTexts().then(items => items.map(item => item.replace(/\s+/g, ' ').trim()).sort()), ['env prod', 'team data']);
+  // The tags are read only until the frameless button Edit opens the form.
+  assert.equal(await page.isHidden('[data-tags-section] .tagEditor__form'), true);
+  assert.equal(await page.locator('[data-tags-section] .tagChip__remove').count(), 0);
+  await page.click('[data-tag-edit]');
   assert.equal(await page.isDisabled('[data-tag-save]'), true);
   // A wrong tag is refused with a reason, a good tag joins the list.
   await page.fill('[data-tags-section] input[aria-label="Tag key"]', 'aws:reserved');
@@ -398,7 +402,9 @@ test('tags: the details of a file show its tags, add, remove and save', async ()
   await page.click('[data-tag-save]');
   await until(page, () => document.querySelector('.tagEditor__message')?.textContent === 'The tags are saved.');
   assert.deepEqual((await apiTags(page, 'config/ingest.json')).sort(), ['env=prod', 'owner=ada', 'team=data']);
-  // Remove one and save again; Revert undoes an edit that is not saved.
+  // The save closes the form. Remove one and save again; Revert undoes an edit that is not saved.
+  assert.equal(await page.isHidden('[data-tags-section] .tagEditor__form'), true);
+  await page.click('[data-tag-edit]');
   await page.click('[data-tags-section] .tagChip:has-text("owner") .tagChip__remove');
   await page.click('[data-tag-revert]');
   assert.equal(await page.locator('[data-tags-section] .tagChip').count(), 3);
@@ -414,6 +420,7 @@ test('tags: the limit of ten tags and the characters of S3 are checked in the pa
   const page = await newPage();
   await open(page, `${MAIN}config/`);
   await openDetails(page, 'app.yaml');
+  await page.click('[data-tag-edit]');
   await page.waitForSelector('[data-tags-section] .tagEditor__form');
   for (let index = 0; index < 10; index += 1) {
     await page.fill('[data-tags-section] input[aria-label="Tag key"]', `k${index}`);
@@ -435,6 +442,7 @@ test('tags: the details show what the lifecycle rules do to the object, before t
   const page = await newPage();
   await open(page, `${MAIN}logs/`);
   await openDetails(page, '2026-10-18.log');
+  await page.click('[data-tag-edit]');
   await page.waitForSelector('[data-tags-section] .tagEditor__form');
   assert.equal(await page.locator('.tagEditor__notes').isVisible(), false);
   await page.fill('[data-tags-section] input[aria-label="Tag key"]', 'retention');
@@ -519,11 +527,12 @@ test('tags: the tag column of versioned files shows no pending mark, and the det
   // The details of an older version show the tags of that version, and the tags are read only there.
   await openDetails(page, 'report.txt');
   await page.waitForSelector('[data-tags-section] .tagChip');
-  assert.equal(await page.isVisible('[data-tags-section] .tagEditor__form'), true);
+  assert.equal(await page.isVisible('[data-tag-edit]'), true);
   await page.click('.versionPicker__button');
   await page.click('.versionPicker__item[aria-selected="false"] >> nth=1');
   await until(page, () => document.querySelector('[data-tags-section] .tagChip')?.textContent.includes('draft'));
   assert.equal(await page.isHidden('[data-tags-section] .tagEditor__form'), true);
+  assert.equal(await page.isHidden('[data-tag-edit]'), true);
   assert.equal(await page.locator('[data-tags-section] .tagChip__remove').count(), 0);
   assert.deepEqual(page.errors, []);
   await page.context().close();
@@ -1953,6 +1962,206 @@ for (const [instance, provider] of Object.entries(PROVIDERS).filter(([, item]) =
     await page.context().close();
   });
 }
+
+// ------------------------------------------------------------------------------------------------------------------
+// 7. Metadata: the edit in the details. A copy onto the key (CopyObject with x-amz-metadata-directive: REPLACE), or a
+// copy in parts from 8 KiB up. Each test checks what the page says before the save against the result.
+// ------------------------------------------------------------------------------------------------------------------
+
+async function apiMetadata(page, instance, key) {
+  const response = await page.request.get(`${BASE}api/metadata?instance=${instance}&key=${encodeURIComponent(key)}`);
+  assert.equal(response.status(), 200, await response.text());
+  return response.json();
+}
+
+async function versionCount(page, instance, key) {
+  const list = await (await page.request.get(`${BASE}api/versions?instance=${instance}&key=${encodeURIComponent(key)}`)).json();
+  return (list.versions || []).filter(version => !version.deleteMarker).length;
+}
+
+// Opens the details of a file and the form of its metadata.
+async function openMetadataForm(page, name) {
+  await openDetails(page, name);
+  await page.waitForSelector('[data-metadata-section] .metaEditor__view');
+  assert.equal(await page.isHidden('[data-metadata-section] .metaEditor__form'), true);
+  await page.click('[data-metadata-edit]');
+  await page.waitForSelector('[data-metadata-section] .metaEditor__form', { state: 'visible' });
+}
+
+const metadataNotes = async page => cleanText(await page.locator('[data-metadata-section] .metaEditor__notes li').allInnerTexts());
+
+// Saves the form. The details then open again on the current version: the function waits for the values of the new
+// window.
+async function saveMetadata(page, text) {
+  await page.evaluate(() => { document.querySelector('[data-metadata-section]').dataset.before = 'save'; });
+  await page.click('[data-metadata-save]');
+  await until(page, value => {
+    const sections = Array.from(document.querySelectorAll('[data-metadata-section]'));
+    return sections.length === 1 && !sections[0].dataset.before && !!sections[0].querySelector('.metaEditor__view:not([hidden])')?.textContent.includes(value);
+  }, text);
+}
+
+for (const [instance, provider] of Object.entries(PROVIDERS)) {
+  test(`metadata: ${provider.name} edits the type and a user metadata; the date changes, the ETag stays, a new version comes where versioning is on`, async () => {
+    const page = await newPage();
+    const info = (await (await page.request.get(`${BASE}api/instances`)).json()).instances.find(item => item.id === instance);
+    assert.equal(info.metadataEditSupported, true);
+    const key = 'meta/small.txt';
+    const before = await apiMetadata(page, instance, key);
+    assert.equal(before.copyInParts, false);
+    assert.equal(before.multipartETag, false);
+    // The gateway puts its own Cache-Control in front of the stored value. The form has the stored value.
+    const head = await page.request.head(`${BASE}s3?instance=${instance}&key=${encodeURIComponent(key)}`);
+    assert.equal(head.headers()['cache-control'], 'private, no-store, max-age=60');
+    const versionsBefore = provider.versioning ? await versionCount(page, instance, key) : 0;
+    await open(page, `-/${info.host}/${instance}/meta/`);
+    await openMetadataForm(page, 'small.txt');
+    assert.equal(await page.inputValue('[data-metadata-header="cacheControl"]'), 'max-age=60');
+    assert.equal(await page.inputValue('[data-metadata-header="contentType"]'), 'text/plain');
+    assert.equal(await page.inputValue('[data-metadata-value="owner"]'), 'ada');
+    // Before the save the page says what changes: the date, and a new version where versioning is on. The ETag of an
+    // object in one part stays, so the page says nothing about it.
+    const notes = await metadataNotes(page);
+    assert.ok(notes.some(note => /modification date changes/.test(note)), notes.join(' | '));
+    assert.equal(notes.some(note => /new version/.test(note)), provider.versioning, notes.join(' | '));
+    assert.ok(!notes.some(note => /ETag/.test(note)), notes.join(' | '));
+    assert.equal(await page.isDisabled('[data-metadata-save]'), true);
+    await page.fill('[data-metadata-header="contentType"]', 'application/json');
+    // S3 keeps the keys in lowercase: the field does the same.
+    await page.fill('[data-metadata-section] input[aria-label="Metadata key"]', 'Reviewer');
+    await page.fill('[data-metadata-section] input[aria-label="Metadata value"]', 'grace');
+    await page.click('[data-metadata-add]');
+    await page.waitForSelector('[data-metadata-value="reviewer"]');
+    assert.match(await page.textContent('.metaEditor__count'), /^21 of 2,048 bytes$/);
+    await saveMetadata(page, 'grace');
+    const after = await apiMetadata(page, instance, key);
+    assert.equal(after.headers.contentType, 'application/json');
+    // The value of the provider, not the value of the gateway: the edit sent the stored value back.
+    assert.equal(after.headers.cacheControl, 'max-age=60');
+    assert.deepEqual(after.metadata, [{ key: 'owner', value: 'ada' }, { key: 'reviewer', value: 'grace' }]);
+    assert.notEqual(after.lastModified, before.lastModified);
+    assert.equal(after.etag, before.etag);
+    if (provider.versioning) {
+      assert.equal(await versionCount(page, instance, key), versionsBefore + 1);
+      assert.notEqual(after.version, before.version);
+      await page.waitForSelector('.bb-details--file .versionPicker__button');
+      assert.equal(await page.locator('.bb-details--file .versionPicker__button').count(), 1);
+    }
+    if (provider.tags) assert.deepEqual(await apiTags(page, key, instance), ['team=meta']);
+    assert.equal((await getObject(page, instance, key)).body.toString(), 'small metadata file\n');
+    assert.deepEqual(page.errors, []);
+    await page.context().close();
+  });
+
+  test(`metadata: ${provider.name} copies a file above the threshold in parts with the new metadata, and its ETag changes`, async () => {
+    const page = await newPage();
+    const info = (await (await page.request.get(`${BASE}api/instances`)).json()).instances.find(item => item.id === instance);
+    const key = 'meta/large.bin';
+    const before = await apiMetadata(page, instance, key);
+    assert.equal(before.copyInParts, true);
+    const versionsBefore = provider.versioning ? await versionCount(page, instance, key) : 0;
+    const sum = sha256((await getObject(page, instance, key)).body);
+    await open(page, `-/${info.host}/${instance}/meta/`);
+    await openMetadataForm(page, 'large.bin');
+    assert.ok((await metadataNotes(page)).some(note => /The ETag changes: S3-Browser copies an object of this size in parts\./.test(note)));
+    await page.click('[data-metadata-remove="owner"]');
+    await page.fill('[data-metadata-header="cacheControl"]', 'no-cache');
+    await page.fill('[data-metadata-section] input[aria-label="Metadata key"]', 'stage');
+    await page.fill('[data-metadata-section] input[aria-label="Metadata value"]', 'done');
+    await page.press('[data-metadata-section] input[aria-label="Metadata value"]', 'Enter');
+    await saveMetadata(page, 'done');
+    const after = await apiMetadata(page, instance, key);
+    assert.deepEqual(after.headers, { contentType: 'application/octet-stream', cacheControl: 'no-cache' });
+    assert.deepEqual(after.metadata, [{ key: 'stage', value: 'done' }]);
+    assert.notEqual(after.etag, before.etag);
+    assert.match(after.etag, /-1$/);
+    assert.notEqual(after.lastModified, before.lastModified);
+    assert.equal(sha256((await getObject(page, instance, key)).body), sum);
+    if (provider.versioning) assert.equal(await versionCount(page, instance, key), versionsBefore + 1);
+    if (provider.tags) assert.deepEqual(await apiTags(page, key, instance), ['team=meta']);
+    assert.deepEqual(page.errors, []);
+    await page.context().close();
+  });
+}
+
+for (const [instance, provider] of Object.entries(PROVIDERS).filter(([, item]) => item.versioning)) {
+  test(`metadata: ${provider.name} saves the metadata of an older version as the new current version`, async () => {
+    const page = await newPage();
+    const info = (await (await page.request.get(`${BASE}api/instances`)).json()).instances.find(item => item.id === instance);
+    const key = 'meta/versioned.txt';
+    const versionsBefore = await versionCount(page, instance, key);
+    await open(page, `-/${info.host}/${instance}/meta/`);
+    await openDetails(page, 'versioned.txt');
+    await page.waitForSelector('[data-metadata-section] .metaEditor__view');
+    await page.click('.versionPicker__button');
+    await page.click('.versionPicker__menu:not([hidden]) .versionPicker__item >> nth=1');
+    await until(page, () => document.querySelector('[data-metadata-section] .metaEditor__view')?.textContent.includes('text/plain'));
+    await page.click('[data-metadata-edit]');
+    assert.equal(await page.inputValue('[data-metadata-value="rev"]'), '1');
+    assert.ok((await metadataNotes(page)).some(note => /This version becomes the current version, as a restore does\./.test(note)));
+    await page.fill('[data-metadata-value="rev"]', '1-restored');
+    await saveMetadata(page, '1-restored');
+    const after = await apiMetadata(page, instance, key);
+    assert.deepEqual(after.metadata, [{ key: 'rev', value: '1-restored' }]);
+    assert.equal(after.headers.contentType, 'text/plain');
+    assert.equal((await getObject(page, instance, key)).body.toString(), 'versioned metadata v1\n');
+    assert.equal(await versionCount(page, instance, key), versionsBefore + 1);
+    assert.deepEqual(page.errors, []);
+    await page.context().close();
+  });
+}
+
+test('metadata: an object that changes while the form is open is not overwritten; the form reads the new values', async () => {
+  const page = await newPage();
+  const key = 'meta/conflict.txt';
+  await open(page, `${MAIN}meta/`);
+  await openMetadataForm(page, 'conflict.txt');
+  await page.fill('[data-metadata-value="owner"]', 'from-the-form');
+  // Another person changes the metadata: the ETag stays, the date changes.
+  const read = await apiMetadata(page, 'seaweedfs-main', key);
+  const other = await page.request.put(`${BASE}api/metadata`, { data: { instance: 'seaweedfs-main', key, etag: read.etag, lastModified: read.lastModified, headers: read.headers, metadata: [{ key: 'owner', value: 'other-person' }] } });
+  assert.equal(other.status(), 200, await other.text());
+  await page.click('[data-metadata-save]');
+  await until(page, () => /The object changed after the form read it/.test(document.querySelector('.metaEditor__message')?.textContent || ''));
+  assert.equal(await page.inputValue('[data-metadata-value="owner"]'), 'other-person');
+  assert.equal(await page.isDisabled('[data-metadata-save]'), true);
+  assert.deepEqual((await apiMetadata(page, 'seaweedfs-main', key)).metadata, [{ key: 'owner', value: 'other-person' }]);
+  // The values are checked in the page before the save, and the server checks them again.
+  await page.fill('[data-metadata-header="expires"]', 'tomorrow');
+  await page.click('[data-metadata-save]');
+  assert.match(await page.textContent('.metaEditor__message'), /Expires is an HTTP date/);
+  const refused = await page.request.put(`${BASE}api/metadata`, { data: { instance: 'seaweedfs-main', key, etag: read.etag, headers: { expires: 'tomorrow' }, metadata: [] } });
+  assert.equal(refused.status(), 400);
+  assert.equal((await refused.json()).error.code, 'invalid_metadata');
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+test('metadata: without the edit, the details keep the custom metadata and show no Edit button', async () => {
+  const page = await newPage();
+  // An instance that the server marked without the edit (a provider that refused it, or GCS).
+  await page.route(/\/api\/instances/, async route => {
+    const response = await route.fetch();
+    const body = await response.json();
+    for (const item of body.instances) item.metadataEditSupported = false;
+    await route.fulfill({ response, json: body });
+  });
+  await open(page, `${MAIN}meta/`);
+  await openDetails(page, 'small.txt');
+  await page.waitForSelector('[data-metadata-fallback]:not([hidden])');
+  assert.equal(await page.locator('[data-metadata-section]').count(), 0);
+  assert.equal(await page.locator('[data-metadata-edit]').count(), 0);
+  await page.context().close();
+  // A provider that answers 501 to the read of the metadata: the section goes and the custom metadata stays.
+  const second = await newPage();
+  await second.route(/\/api\/metadata/, route => route.fulfill({ status: 501, contentType: 'application/json', body: JSON.stringify({ error: { code: 'metadata_unsupported', message: 'no edit' } }) }));
+  await open(second, `${MAIN}meta/`);
+  await openDetails(second, 'small.txt');
+  await second.waitForSelector('[data-metadata-fallback]:not([hidden])');
+  assert.equal(await second.locator('[data-metadata-section]').count(), 0);
+  assert.match(await second.textContent('[data-metadata-fallback]'), /owner/);
+  await second.context().close();
+});
 
 (async () => {
   browser = await chromium.launch();

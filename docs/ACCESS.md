@@ -162,7 +162,7 @@ on its top-level folder.
 | Action | Resource types | What it permits |
 |---|---|---|
 | `objects.read` | `service`, `bucket`, `prefix` | List, preview, inspect and download objects. See the versions, the Insights and the archive entries. Check the integrity of an object. |
-| `objects.write` | `service`, `bucket`, `prefix` | Upload objects, make folders and restore a version. Be the destination of a copy, a move or an archive extraction. |
+| `objects.write` | `service`, `bucket`, `prefix` | Upload objects, make folders and restore a version. Change the tags and the metadata of an object. Be the destination of a copy, a move or an archive extraction. |
 | `objects.delete` | `service`, `bucket`, `prefix` | Delete objects, versions and folders. Be the source of a move or a rename. |
 
 S3-Browser has no administration of a bucket (no creation, no policy, no lifecycle). Thus it has no action for it.
@@ -208,6 +208,8 @@ top-level folder, else the bucket.
 | `GET /api/tags` | `objects.read` | The node of `key`. |
 | `PUT /api/tags` | `objects.write` | The node of `key`. |
 | `POST /api/tags/bulk` | `objects.read` and `objects.write` | The node of `prefix`. The root of the bucket is the bucket. |
+| `GET /api/metadata` | `objects.read` | The node of `key`. |
+| `PUT /api/metadata` | `objects.write` | The node of `key`. |
 | `GET /api/lifecycle` | `objects.read` | The bucket. |
 | `POST /api/archive-extract` | `objects.read` on the archive; `objects.write` and `objects.read` on the target folder | The target folder of the target bucket. An empty target is the bucket. |
 | `POST /api/uploads` and each request with an upload resume token | `objects.write` | The node of the key of the upload. |

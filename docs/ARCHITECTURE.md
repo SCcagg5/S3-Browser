@@ -155,7 +155,7 @@ Each part has `x-amz-copy-source-if-match` with the ETag of the source. A source
 
 Each request of the engine takes a slot of the concurrency gates of the bucket. Thus the limits `max_concurrent_requests_per_storage` and `max_concurrent_storage_requests` apply. A request of the engine waits for its slot with no time limit.
 
-The engine has an options structure: the source version, new metadata, new tags, and a progress function. The metadata edit uses the same engine with new metadata.
+The engine has an options structure: the source version, new metadata, new tags, other headers of `CreateMultipartUpload`, the ETag that the caller read, and a progress function. When the options give an ETag, a source with another ETag stops the copy with `412` before the upload starts. The metadata edit uses the same engine with new metadata.
 
 `POST /api/copy` and `POST /api/rename` of one object first read its size with `HEAD`. Under the threshold, the copy stays one synchronous `CopyObject` request, and the answer is `200`. From the threshold up, the answer is `202` with a job `copy_object` or `move_object`. The job has `totalBytes`, the size of the source, and `copiedBytes`, which grows after each copied part. A move deletes the source after the copy. A pause or a cancel aborts the multipart upload. A resume starts the copy again from the first part. The jobs of one object use the background request budget (`max_background_storage_requests`).
 
@@ -164,6 +164,45 @@ A prefix copy and a prefix move use the size of each object in the listing. An o
 The restore of a version from the threshold up uses the engine with the version as the source. It is a synchronous request, as before.
 
 The threshold and the part size are unexported variables. Go tests set them. The test image sets them at build with `-ldflags -X main.multipartCopyThresholdBuild=<bytes> -X main.multipartCopyPartSizeBuild=<bytes>` (Docker build arguments `MULTIPART_COPY_THRESHOLD` and `MULTIPART_COPY_PART_SIZE` of `test/browser/Dockerfile`). These are not configuration keys. A release build leaves them empty. A value that is not an integer in its range stops the program at start. The log shows each value that the build changed.
+
+## Edit of the metadata
+
+`GET /api/metadata?key=&version=` gives the stored metadata of an object, or of one version: the standard headers `Content-Type`, `Cache-Control`, `Content-Disposition`, `Content-Encoding`, `Content-Language`, `Expires`, and the user metadata (`x-amz-meta-*`). The server reads them with a HEAD request to the provider. The gateway `/s3` puts `private, no-store` in front of the `Cache-Control` of the provider, so the page does not read the values from the gateway. The answer also has `etag`, `lastModified`, `version`, `size`, `multipartETag` (the ETag has the form `<digest>-<parts>`), `copyInParts` (the save copies the object in parts) and `maxMetadataBytes`.
+
+`PUT /api/metadata` replaces the metadata. The body has `key`, `version` (optional), `etag` and `lastModified` (the values that the form read), `headers` and `metadata` (a list of `key` and `value`). The body gives the complete state: a header or a user metadata that the body does not give is removed. The answer is the new state of the current object. The server checks each value before it sends a request:
+
+- The six headers are a closed set. An unknown field in `headers` or in the body gives `400 invalid_json`.
+- Each value has 1 to 1024 printable ASCII characters, with no space at the start or the end. `Content-Type` is a media type, `Content-Disposition` is `inline` or `attachment` with parameters, `Content-Encoding` and `Content-Language` are lists of tokens, `Cache-Control` is a list of directives, `Expires` is an HTTP date in GMT.
+- A user metadata key has lowercase letters, digits, `.`, `_` and `-`, and starts with a letter or a digit. Each key is unique. A value has printable ASCII characters and is not empty. The keys and the values have 2048 bytes at most in total, as in S3.
+
+A wrong value gives `400 invalid_metadata` with the name of the field. The server then does these steps:
+
+1. It reads the object (or the version) with HEAD. An ETag or a modification date that is not the value of the form gives `412 object_changed`. SeaweedFS, MinIO and Garage keep the ETag when only the metadata changes, so the date is necessary.
+2. Under the threshold of the copy in parts, it sends `CopyObject` onto the same key with `x-amz-metadata-directive: REPLACE`, `x-amz-tagging-directive: COPY` and `x-amz-copy-source-if-match` with the ETag of the form. A provider answer `412` also gives `412 object_changed`.
+3. From the threshold up, it uses the engine of the copy in parts, with the new metadata at `CreateMultipartUpload`, the tags of the source and the ETag of the form.
+
+The copy also sends the storage class, the website redirect and the server-side encryption of the source again, when the HEAD answer has them. Else AWS would change them. An object with an encryption key of the customer (SSE-C) gives `400`: S3-Browser does not have the key.
+
+A request with `version` copies that version onto the key. The version becomes the current version, as a restore does. The tags of that version stay.
+
+The action is `objects.write` on the node of the key (refer to [ACCESS.md](ACCESS.md)). No new right exists.
+
+At start, the server probes each instance that has the write permission: a copy with REPLACE of an object that does not exist, with an ETag that no object has. A provider with `CopyObject` answers "no such key" and writes nothing. A provider without it answers `501` or `405`, and the instance then reports `metadataEditSupported: false` in `/api/instances`. A later `501` of an edit has the same effect. The GCS backend has no edit: it answers `501 metadata_unsupported`, and the page hides the button.
+
+The details of a file have the section "Metadata" with the stored values and a frameless "Edit" button. The form is in the same window, with Save and Revert, as the tags section. Before the save, the form tells what changes. The browser tests check each sentence on each provider of the test stack:
+
+| Sentence of the form | When | SeaweedFS 4.41 | MinIO 2025-10-15 | Garage v2.4.1 |
+| --- | --- | --- | --- | --- |
+| The modification date changes. | Always | Yes | Yes | Yes |
+| A new version is created. | Versioning is on | Yes | Yes | No versioning: the sentence is not shown |
+| This version becomes the current version. | The form shows an older version | Yes | Yes | No versioning |
+| The ETag changes: S3-Browser copies an object of this size in parts. | `copyInParts` | Yes (`<digest>-<parts>`) | Yes | Yes |
+| The ETag can change: the object was uploaded in parts. | `multipartETag`, under the threshold | No: the ETag stays | Yes: the ETag becomes the MD5 of the object | No: the ETag stays |
+| (No sentence) | One part, under the threshold | The ETag stays | The ETag stays | The ETag stays |
+
+In the test stack, each multipart object is above the threshold of 8 KiB, so the page copies it in parts. The row of a multipart object under the threshold comes from S3 requests to the three providers (the table of [test/README.md](../test/README.md)).
+
+On all three providers, the tags stay. A copy with REPLACE and no `Content-Type` gives `binary/octet-stream` on SeaweedFS and MinIO, and no `Content-Type` on Garage. `x-amz-copy-source-if-match` with another ETag gives `412` on all three. For a copy of an older version, the three compare it with the ETag of that version.
 
 ## Insights treemap normalization
 
@@ -221,7 +260,7 @@ The binary embeds two frontend trees. The HCL key `server.frontend` selects one 
 The `portal` tree contains its own pages and scripts:
 
 - `assets/js/common/` has copies of the shared scripts of the default tree (API, previews, dialogs). `preview.js` is a copy with the header of the portal.
-- `assets/js/app.js` is the browser page. `uploads.js` is the bulk upload. `theme.js` applies the theme before the first paint. `session.js` gives one message for an ended sign-in (401) or a server that does not answer.
+- `assets/js/app.js` is the browser page. `uploads.js` is the bulk upload. `tags.js` and `metadata.js` are the sections of the details that edit the tags and the metadata. `theme.js` applies the theme before the first paint. `session.js` gives one message for an ended sign-in (401) or a server that does not answer.
 - `assets/css/dialogs.css` and `assets/css/viewers.css` have the rules of the default tree for the dialogs and the previews. Each colour is a token of `portal.css`, so these rules follow the theme.
 - `assets/icons/tabler/` has one Tabler icon (MIT) for each name. `assets/css/icons.css` gives the icon for each `mdi-*` name of the shared scripts.
 

@@ -1,6 +1,7 @@
 /*
  * BB.tags: the object tags of the portal interface.
- * - the tags section of the file details (read, add, remove, save), with the lifecycle rules that apply;
+ * - the tags section of the file details (read; with the frameless "Edit" button: add, remove, save), with the lifecycle
+ *   rules that apply. The metadata section (metadata.js) has the same look;
  * - the form that changes the tags of every object under a folder;
  * - the tags of the next uploads;
  * - the helpers of the tag column and of the tag filter of the listing.
@@ -184,8 +185,9 @@
   // ---------------------------------------------------------------------------------------------------------------
 
   async function mountEditor(host, { key, size = 0, instance = null, version = '', canWrite = false, rootPrefix = '' }) {
+    const editButton = h('button', { type: 'button', class: 'iconButton detailsEditButton', 'data-tag-edit': '', title: 'Edit the tags', 'aria-label': 'Edit the tags', 'aria-pressed': 'false', hidden: true }, icon('pencil-outline'));
     const body = h('div', { class: 'tagEditor' }, h('span', { class: 'tagEditor__state' }, 'Loading the tags…'));
-    host.replaceChildren(h('div', { class: 'bb-details-section-title' }, icon('tag-multiple-outline'), ' Tags'), body);
+    host.replaceChildren(h('div', { class: 'bb-details-section-title' }, icon('tag-multiple-outline'), ' Tags', editButton), body);
     let saved;
     let limit = MAX_TAGS;
     try {
@@ -203,6 +205,7 @@
     const rules = await lifecycleRules(instance);
     let draft = saved.map(tag => ({ ...tag }));
     const editable = canWrite && !version;
+    let editing = false;
 
     const list = h('div', { class: 'tagEditor__list', 'aria-live': 'polite' });
     const notes = h('ul', { class: 'tagEditor__notes' });
@@ -220,7 +223,7 @@
 
     function render() {
       list.replaceChildren(...(draft.length
-        ? chips(draft, { onRemove: editable ? tag => { draft = draft.filter(item => item.key !== tag.key); say(''); render(); } : null })
+        ? chips(draft, { onRemove: editing ? tag => { draft = draft.filter(item => item.key !== tag.key); say(''); render(); } : null })
         : [h('span', { class: 'tagEditor__state' }, 'No tag.')]));
       const evaluated = lifecycleNotes(rules, { fullKey: `${rootPrefix}${key}`, size, tags: draft });
       notes.replaceChildren(...evaluated.map(text => h('li', {}, icon('clock-outline'), text)));
@@ -228,9 +231,12 @@
       saveButton.disabled = !dirty();
       revertButton.disabled = !dirty();
       addButton.disabled = draft.length >= limit;
-      form.hidden = !editable;
-      actions.hidden = !editable;
-      if (editable) {
+      editButton.hidden = !editable;
+      editButton.setAttribute('aria-pressed', String(editing));
+      editButton.classList.toggle('is-open', editing);
+      form.hidden = !editing;
+      actions.hidden = !editing;
+      if (editing) {
         const count = h('span', { class: 'tagEditor__count' }, `${draft.length} of ${limit}`);
         form.querySelector('.tagEditor__count')?.remove();
         form.append(count);
@@ -251,6 +257,14 @@
       keyInput.focus();
     }
 
+    // The button opens the form. A second click closes it and drops the changes that are not saved.
+    editButton.addEventListener('click', () => {
+      editing = !editing;
+      draft = saved.map(tag => ({ ...tag }));
+      say('');
+      render();
+      if (editing) keyInput.focus();
+    });
     addButton.addEventListener('click', add);
     for (const input of [keyInput, valueInput]) {
       input.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); add(); } });
@@ -263,6 +277,7 @@
         const response = await BB.api.putTags(key, draft, { instance, version });
         saved = response.tags || [];
         draft = saved.map(tag => ({ ...tag }));
+        editing = false;
         say('The tags are saved.', 'ok');
         document.dispatchEvent(new CustomEvent('bb:tags-changed', { detail: { key } }));
       } catch (error) {

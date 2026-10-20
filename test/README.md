@@ -48,6 +48,8 @@ The seed (`portal-frontend/seed.js`) enables the versioning of the bucket `defau
 
 The image of S3-Browser in this stack copies in parts from 8 KiB up, in parts of 5 MiB (the build arguments `MULTIPART_COPY_THRESHOLD` and `MULTIPART_COPY_PART_SIZE` of `browser/Dockerfile`). The seed puts `copy/source.bin` (11 MiB, three parts) with standard headers, a user metadata and tags on each provider. On SeaweedFS and MinIO, it also puts `copy/versioned.bin` with two versions. The tests of the copy in parts copy and rename `source.bin` through the page and compare the SHA-256, the headers and the tags. They also restore the older version of `versioned.bin`.
 
+The seed also puts the objects of the metadata tests in `meta/` on each provider: `small.txt` (under the threshold of the copy in parts), `large.bin` (20000 bytes, above it) and `conflict.txt`, each with `Cache-Control: max-age=60` and the user metadata `owner`. `small.txt` and `large.bin` have tags where the provider has them. `versioned.txt` has two versions on SeaweedFS and MinIO. The metadata tests edit these objects through the details on each provider. They check each sentence that the form shows before the save against the result: the date, the ETag, the versions and the tags. They also check that the form shows and sends the stored `Cache-Control`, not the value of the gateway (`private, no-store, max-age=60`). Refer to the section "Edit of the metadata" of [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md).
+
 The smoke test of each provider lists `smoke/`, uploads a file with its SHA-256 checksum, downloads it and deletes it. It checks the versions and the tags where the provider has them. Where the provider does not have them, it checks that the page hides them. `portal-frontend/providers.js` has the flags of each provider.
 
 ## Functions of each provider
@@ -71,7 +73,13 @@ These facts come from S3 requests to the three providers of the portal test stac
 | `x-amz-copy-source-if-match` on UploadPartCopy, with the ETag of the source | Yes | Yes | Yes |
 | Header `x-amz-tagging` on CreateMultipartUpload | Yes | Yes | No tags (not tested) |
 | ETag of a copy in 3 parts | `<digest>-3` | `<digest>-3` | `<digest>-3` |
-| CopyObject onto itself with `MetadataDirective=REPLACE` | Yes. The tags stay, the date changes, a new version comes | Yes. The tags stay, the date changes, a new version comes. The ETag of a multipart object changes | Yes. The date changes |
+| CopyObject onto itself with `MetadataDirective=REPLACE` | Yes. The tags stay, the date changes, a new version comes | Yes. The tags stay, the date changes, a new version comes | Yes. The date changes |
+| ETag after CopyObject REPLACE of an object in one part | The ETag stays | The ETag stays | The ETag stays |
+| ETag after CopyObject REPLACE of a multipart object | The ETag stays (`<digest>-<parts>`) | The ETag changes: it becomes the MD5 of the object | The ETag stays (`<digest>-<parts>`) |
+| CopyObject REPLACE with no `Content-Type` | `binary/octet-stream` | `binary/octet-stream` | No `Content-Type` |
+| `x-amz-copy-source-if-match` on CopyObject, with another ETag | 412 PreconditionFailed | 412 PreconditionFailed | 412 PreconditionFailed |
+| `x-amz-copy-source-if-match` on CopyObject of an older version | Compared with the ETag of that version | Compared with the ETag of that version | 404 NoSuchKey (no versions) |
+| CopyObject REPLACE of a key that does not exist (the start probe of the metadata edit) | 404 NoSuchKey, no object | 404 NoSuchKey, no object | 404 NoSuchKey, no object |
 | Lifecycle: expiration after N days, with a prefix | Yes | Yes | Yes |
 | Lifecycle: abort of incomplete multipart uploads | Yes | 400 InvalidArgument. With an expiration in the same rule: dropped | Yes |
 | Lifecycle: expiration of noncurrent versions | Yes | Yes | Dropped |

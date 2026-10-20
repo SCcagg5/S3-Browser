@@ -383,6 +383,21 @@
       return response.json();
     },
 
+    async metadata(key, { version = '', instance = null } = {}) {
+      const response = await request(withInstance('/api/metadata', { key, version }, instance));
+      return response.json();
+    },
+
+    // The complete state of the metadata: a header or a user metadata that the request does not give is removed.
+    async putMetadata(key, { etag, lastModified = '', headers = {}, metadata = [], version = '', instance = null } = {}) {
+      const response = await request('/api/metadata', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instance: instance === null ? selectedInstance() : String(instance || ''), key, version, etag, lastModified, headers, metadata })
+      });
+      return response.json();
+    },
+
     async tagPrefix(prefix, { add = [], remove = [], instance = null } = {}) {
       const response = await request('/api/tags/bulk', {
         method: 'POST',
