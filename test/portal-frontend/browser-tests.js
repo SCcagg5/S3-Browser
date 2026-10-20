@@ -1843,8 +1843,9 @@ for (const [instance, provider] of Object.entries(PROVIDERS)) {
     await page.click('#settingsButton');
     assert.equal(await page.locator('#versionsSetting').isHidden(), !provider.versioning);
     if (!provider.tags) {
-      await page.check('[data-column="tags"]');
-      await until(page, () => document.querySelector('[data-column="tags"]').closest('label').hidden === true);
+      // The server probed the tag requests at start: the controls are hidden from the first load, with no tag read.
+      assert.equal(await page.locator('[data-column="tags"]').isHidden(), true);
+      assert.equal(await page.locator('#uploadTagsSetting').isHidden(), true);
       assert.equal(await page.locator('th.col-tags').isVisible(), false);
     }
     await page.keyboard.press('Escape');
