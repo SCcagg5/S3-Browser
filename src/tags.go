@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 )
@@ -373,6 +374,42 @@ func taggingUnsupported() error {
 	return apiError{Status: http.StatusNotImplemented, Code: "tagging_unsupported", Message: "this storage provider does not support object tags"}
 }
 
+// tagsAvailable tells if the instance keeps object tags. A provider that does not know the tag requests, such as Garage,
+// answers 501 to them, or accepts the header x-amz-tagging and drops the tags without a word: the page must know it before
+// an upload. Until the probe has run, the answer is yes.
+func (s *storageInstance) tagsAvailable() bool {
+	if s == nil {
+		return false
+	}
+	if _, ok := s.backend.(ObjectTagger); !ok {
+		return false
+	}
+	return !s.tagsOff.Load()
+}
+
+// probeTags reads the tags of an object that does not exist. A provider with tags answers "no such key". A provider
+// without tags answers 501 or 405. Any other failure (denied, timeout) leaves the answer at yes.
+func (s *storageInstance) probeTags(ctx context.Context) {
+	tagger, ok := s.backend.(ObjectTagger)
+	if !ok {
+		return
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	_, err := tagger.GetObjectTagging(probeCtx, s.fullKey(".s3-browser-tags-probe"), "")
+	if providerRefusedFeature(err) {
+		s.tagsOff.Store(true)
+	}
+}
+
+// requireTags refuses tags for an instance that does not keep them: the provider would drop them without a word.
+func (s *storageInstance) requireTags(tags []objectTag) error {
+	if len(tags) > 0 && !s.tagsAvailable() {
+		return taggingUnsupported()
+	}
+	return nil
+}
+
 // providerRefusedFeature reports a provider that does not know a request: it answers 501 or 405.
 func providerRefusedFeature(err error) bool {
 	return batchDeleteUnsupported(err)
@@ -395,7 +432,7 @@ func (s *storageInstance) tagVersion(ctx context.Context, key, version string) (
 
 func (s *storageInstance) GetTags(ctx context.Context, key, version string) ([]objectTag, error) {
 	tagger, ok := s.backend.(ObjectTagger)
-	if !ok {
+	if !ok || s.tagsOff.Load() {
 		return nil, taggingUnsupported()
 	}
 	version, err := s.tagVersion(ctx, key, version)
@@ -417,7 +454,7 @@ func (s *storageInstance) GetTags(ctx context.Context, key, version string) ([]o
 
 func (s *storageInstance) PutTags(ctx context.Context, key, version string, tags []objectTag) error {
 	tagger, ok := s.backend.(ObjectTagger)
-	if !ok {
+	if !ok || s.tagsOff.Load() {
 		return taggingUnsupported()
 	}
 	version, err := s.tagVersion(ctx, key, version)

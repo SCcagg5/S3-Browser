@@ -422,6 +422,9 @@ func (m *uploadManager) create(ctx context.Context, request createUploadRequest)
 	if err := validateTags(request.Tags); err != nil {
 		return uploadSession{}, err
 	}
+	if err := instance.requireTags(request.Tags); err != nil {
+		return uploadSession{}, err
+	}
 	ctx = withUploadTags(ctx, request.Tags)
 	if request.Checksum != "" && request.Checksum != uploadChecksumSHA256 {
 		return uploadSession{}, apiError{Status: http.StatusBadRequest, Code: "invalid_checksum", Message: `checksum must be "" or "sha256"`}

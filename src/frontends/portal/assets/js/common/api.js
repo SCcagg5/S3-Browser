@@ -711,7 +711,7 @@
           size,
           contentType: contentType || 'application/octet-stream',
           checksum: canChecksum() ? 'sha256' : '',
-          tags: BB.tags?.uploadTags?.() || []
+          tags: BB.tags?.uploadTagsToSend?.() || []
         }),
         signal: options.signal || null
       });

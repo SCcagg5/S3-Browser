@@ -115,6 +115,11 @@ func (a *application) probeVersioningSupport() {
 			defer wg.Done()
 			instance.probeVersioning(ctx)
 		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			instance.probeTags(ctx)
+		}()
 	}
 	wg.Wait()
 }
@@ -1068,6 +1073,10 @@ func (a *application) handleObjectGateway(w http.ResponseWriter, r *http.Request
 		}
 		tags, err := parseTaggingHeader(r.Header)
 		if err != nil {
+			writeGatewayError(w, err)
+			return
+		}
+		if err := instance.requireTags(tags); err != nil {
 			writeGatewayError(w, err)
 			return
 		}

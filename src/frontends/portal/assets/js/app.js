@@ -13,7 +13,8 @@ const config = {
   capabilities: {},
   operations: {},
   runtime: {},
-  versioningSupported: false
+  versioningSupported: false,
+  tagsSupported: true
 };
 window.BB = window.BB || {};
 BB.cfg = config;
@@ -1039,6 +1040,9 @@ BB.cfg = config;
     config.capabilities = instance.capabilities || {};
     config.operations = instance.operations || {};
     config.versioningSupported = instance.versioningSupported === true;
+    // The server probes the tag requests at start. The state of the page follows the instance, also after a change of instance.
+    config.tagsSupported = instance.tagsSupported !== false;
+    state.tagsUnsupported = !config.tagsSupported;
     config.rootPrefix = instance.rootPrefix || '';
   }
 

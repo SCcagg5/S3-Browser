@@ -87,6 +87,8 @@ Only the S3 provider has object tags. A provider that does not know them answers
 
 `POST /api/tags/bulk` starts the job `tag_prefix`. The body has `prefix`, `add` (tags to set) and `remove` (keys to remove). The job reads the tags of each object under the prefix. It writes them again only when the result is different. An object that would have more than 10 tags stops the job with its key in the message.
 
+At start, the server probes each instance with a tag read on a key that does not exist. A provider with tags answers "no such key". A provider without tags answers `501` or `405`. The instance then reports `tagsSupported: false` in `/api/instances`. A denied or slow probe does not count as a missing feature. The page hides the tag controls from the first load and sends no tag with an upload. Garage accepts `x-amz-tagging` and drops the tags without a word, so the server refuses an upload with tags for an instance without tags: it answers `501` with `tagging_unsupported`.
+
 An upload can carry tags. A direct upload takes the header `X-Amz-Tagging` (a query string such as `a=b&c=d`). `POST /api/uploads` takes the field `tags`. The server sends them to the provider in `x-amz-tagging`.
 
 In a bucket with versioning, a tag request names the version of the object. The server reads it with a HEAD request. It is `null` for an object made before the versioning. SeaweedFS takes more than 10 seconds to read the tags of such an object when no version is named. A request that has `version` uses it as it is.

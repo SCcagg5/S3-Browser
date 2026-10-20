@@ -290,6 +290,9 @@ type storageInstance struct {
 	versioningSupported bool
 	versioningChecked   bool
 
+	// tagsOff is set when a probe found that the provider does not know the tag requests.
+	tagsOff atomic.Bool
+
 	// batchDeleteOff is set when the provider refused the batch delete once: later deletes go one by one.
 	batchDeleteOff atomic.Bool
 }
@@ -497,6 +500,7 @@ func (s *storageInstance) publicInfo() instanceInfo {
 		Region:              s.cfg.Region,
 		RootPrefix:          s.cfg.RootPrefix,
 		VersioningSupported: s.versioningAvailable(),
+		TagsSupported:       s.tagsAvailable(),
 		Capabilities:        s.capabilities(),
 		Operations:          s.operationCapabilities(),
 	}
@@ -511,6 +515,7 @@ type instanceInfo struct {
 	Region              string                     `json:"region,omitempty"`
 	RootPrefix          string                     `json:"rootPrefix,omitempty"`
 	VersioningSupported bool                       `json:"versioningSupported"`
+	TagsSupported       bool                       `json:"tagsSupported"`
 	Capabilities        capabilities               `json:"capabilities"`
 	Operations          map[string]capabilityState `json:"operations"`
 }
