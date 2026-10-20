@@ -1586,7 +1586,11 @@ button.storageSwitcher__trigger:hover {
 .dataTable td.col-size,
 .dataTable th.col-modified,
 .dataTable td.col-modified {
-  text-align: left;
+  text-align: right;
+}
+
+.dataTable th.col-modified .headTools {
+  justify-content: flex-end;
 }
 
 .dataTable td.col-size {
@@ -2343,12 +2347,24 @@ button.versionCount:focus-visible {
 }
 
 .bb-btn-ghost:hover:not(:disabled) {
+  border-color: transparent;
+  background: transparent;
   color: var(--text);
 }
 
 .bb-modal-x {
   width: var(--control-h);
   padding: 0;
+}
+
+/* The close button has no frame and no fill: only the colour of the cross changes. */
+.bb-modal-x:hover:not(:disabled),
+.bb-modal-x:active:not(:disabled),
+.bb-modal-x:focus-visible {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text);
 }
 
 .bb-pre {
@@ -3224,6 +3240,7 @@ button.versionCount:focus-visible {
   height: var(--bb-large-height);
   min-height: 360px;
   max-height: none;
+  padding-top: 14px;
   overflow: auto;
   scrollbar-gutter: stable;
 }
@@ -3238,6 +3255,15 @@ button.versionCount:focus-visible {
 .bb-details-version-control {
   position: relative;
   margin-right: 34px;
+}
+
+.bb-details-head .versionPicker__button .mdi {
+  color: inherit;
+  font-size: 16px;
+}
+
+.bb-details-head .versionPicker__button .versionPicker__count {
+  font-size: var(--fs-xs, 11px);
 }
 
 .versionPicker__button {
@@ -3916,4 +3942,11 @@ button.versionCount:focus-visible {
 
 .diff__table--csvsplit .diff__n:nth-child(n + 2) {
   border-left: 1px solid var(--border);
+}
+
+/* The tools of the details (integrity, inspection) follow the sections, in the same page. */
+.bb-details-tools {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
 }

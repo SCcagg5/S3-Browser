@@ -1171,9 +1171,22 @@ test('windows: the details, the folder insights and the versions use one window,
   assert.equal(details.overlay, 'bb-overlay bb-overlay--large');
   assert.ok(details.width >= 900, `width ${details.width}px`);
   assert.ok(details.top < 200, `top ${details.top}px`);
-  await page.click('[data-details-tab="advanced"]');
-  const advanced = await box();
-  assert.ok(Math.abs(advanced.top - details.top) < 0.5 && Math.abs(advanced.height - details.height) < 0.5, `${JSON.stringify([details, advanced])}`);
+  // One page, with no tab: the sections and the tools (integrity, inspection) are in the same window.
+  assert.equal(await page.locator('[data-details-tab], .bb-details-tabs').count(), 0);
+  assert.equal(await page.locator('[data-details-tool-card="integrity"]').count(), 1);
+  assert.equal(await page.locator('[data-details-tool-card="inspection"]').count(), 1);
+  assert.equal(await page.locator('[data-tags-section]').isVisible(), true);
+  // The arrow of the picker has the size of the text, and the close button changes only its colour.
+  const look = await page.evaluate(() => {
+    const arrow = document.querySelector('.bb-details-head .versionPicker__button .mdi-chevron-down').getBoundingClientRect();
+    return { arrow: arrow.width, before: getComputedStyle(document.querySelector('.bb-modal-x')).color };
+  });
+  assert.ok(look.arrow <= 20, `arrow ${look.arrow}px`);
+  await page.hover('.bb-modal-x');
+  await until(page, before => getComputedStyle(document.querySelector('.bb-modal-x')).color !== before, look.before);
+  const after = await page.evaluate(() => { const style = getComputedStyle(document.querySelector('.bb-modal-x')); return { background: style.backgroundColor, border: style.borderTopColor }; });
+  assert.equal(after.background, 'rgba(0, 0, 0, 0)');
+  assert.equal(after.border, 'rgba(0, 0, 0, 0)');
   await close();
   // The table of the versions.
   await page.click('tr[data-name="report.txt"] .versionCount');
@@ -1210,9 +1223,9 @@ test('listing: Size and Modified use a font with one width for every character, 
   assert.ok(look.modified.width > look.modified.ch * 19, `Modified: ${look.modified.width}px`);
   assert.ok(look.modified.width < look.modified.ch * 19 + 20 + 24, `Modified: ${look.modified.width}px`);
   assert.ok(look.size.width < look.size.ch * 7 + 20 + 24, `Size: ${look.size.width}px`);
-  // The values and the titles are at the left of the columns.
+  // The values and the titles are at the right of the columns.
   const align = await page.evaluate(() => ['td.col-size', 'td.col-modified', 'th.col-size', 'th.col-modified'].map(selector => getComputedStyle(document.querySelector(selector)).textAlign));
-  assert.deepEqual(align, ['left', 'left', 'left', 'left']);
+  assert.deepEqual(align, ['right', 'right', 'right', 'right']);
   // The column keeps its width when the person changes between the relative and the exact time.
   await page.click('.timeToggle');
   await until(page, () => document.querySelector('.dataTable').classList.contains('is-exact-time'));

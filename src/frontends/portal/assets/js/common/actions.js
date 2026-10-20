@@ -543,30 +543,12 @@
         html: `<div class="bb-details bb-details--file">
           <div class="bb-details-head"><i class="mdi mdi-${escapeHTML(icon)}"></i><div class="bb-details-titles"><div class="bb-details-name">${escapeHTML(name)}</div><div class="bb-details-prefix">${escapeHTML(key)}</div></div>${versionSelector}</div>
           <div class="bb-details-body">
-            <div class="spreadsheet-tabs bb-details-tabs" role="tablist" aria-label="File details">
-              <button type="button" class="spreadsheet-tab is-active" role="tab" aria-selected="true" data-details-tab="overview"><i class="mdi mdi-information-outline"></i><span>Overview</span></button>
-              <button type="button" class="spreadsheet-tab" role="tab" aria-selected="false" data-details-tab="advanced"><i class="mdi mdi-cogs"></i><span>Advanced</span></button>
-            </div>
-            <section class="bb-details-panel" data-details-panel="overview">${overviewSections}</section>
-            <section class="bb-details-panel" data-details-panel="advanced" hidden>${advancedPanel}</section>
+            <section class="bb-details-panel">${overviewSections}</section>
+            <section class="bb-details-panel bb-details-tools">${advancedPanel}</section>
           </div>
         </div>`,
         large: true,
         onOpen: ({ overlay }) => {
-          const tabs = Array.from(overlay.querySelectorAll('[data-details-tab]'));
-          const panels = Array.from(overlay.querySelectorAll('[data-details-panel]'));
-          const activateDetailsTab = name => {
-            const next = name === 'advanced' ? 'advanced' : 'overview';
-            tabs.forEach(tab => {
-              const active = tab.dataset.detailsTab === next;
-              tab.classList.toggle('is-active', active);
-              tab.setAttribute('aria-selected', active ? 'true' : 'false');
-              tab.tabIndex = active ? 0 : -1;
-            });
-            panels.forEach(panel => { panel.hidden = panel.dataset.detailsPanel !== next; });
-          };
-          tabs.forEach(tab => tab.addEventListener('click', () => activateDetailsTab(tab.dataset.detailsTab)));
-
           const integrityCard = overlay.querySelector('[data-details-tool-card="integrity"]');
           const integrityButton = overlay.querySelector('[data-details-integrity]');
           const integrityStatusHost = overlay.querySelector('[data-details-integrity-status]');
