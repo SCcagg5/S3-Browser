@@ -132,6 +132,9 @@ type objectInfo struct {
 	LastModified time.Time
 	ETag         string
 	ContentType  string
+	// Unreadable is true for an entry of a volume that S3-Browser does not read: a symbolic link that leaves the
+	// volume or that does not resolve, or a file that is not a regular file.
+	Unreadable bool
 }
 
 type listPage struct {
@@ -344,6 +347,16 @@ func newStorageInstance(cfg bucketConfig, auth *sharedAuthentication, policy run
 	if err != nil {
 		return nil, err
 	}
+	instance := newInstanceOfBackend(cfg, backend, policy, concurrency)
+	if auth.usage != nil && auth.cfg.Usage != nil {
+		instance.usage.reader, instance.usage.source = auth.usage, auth.cfg.Usage.Source
+	}
+	return instance, nil
+}
+
+// newInstanceOfBackend makes the storage instance of a backend, with the gates of the runtime policy and the
+// capabilities of the configuration.
+func newInstanceOfBackend(cfg bucketConfig, backend storageBackend, policy runtimePolicy, concurrency *storageConcurrency) *storageInstance {
 	perStorage := policy.MaxConcurrentRequestsPerStore
 	if perStorage <= 0 {
 		perStorage = defaultMaxConcurrentPerStorage
@@ -353,10 +366,7 @@ func newStorageInstance(cfg bucketConfig, auth *sharedAuthentication, policy run
 		concurrency: concurrency, gate: make(chan struct{}, perStorage),
 	}
 	instance.caps = initialCapabilities(cfg, instance.forceReadOnly)
-	if auth.usage != nil && auth.cfg.Usage != nil {
-		instance.usage.reader, instance.usage.source = auth.usage, auth.cfg.Usage.Source
-	}
-	return instance, nil
+	return instance
 }
 
 func initialCapabilities(cfg bucketConfig, forceReadOnlyValues ...bool) capabilities {

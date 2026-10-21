@@ -21,9 +21,11 @@ type appConfig struct {
 	Runtime         runtimePolicy
 	Authentications []authConfig
 	Buckets         []bucketConfig
-	Access          accessConfig
-	SourceDir       string
-	SourceName      string
+	// Volumes are the volume blocks: the folders of the server that the browser shows as buckets (volume_config.go).
+	Volumes    []volumeConfig
+	Access     accessConfig
+	SourceDir  string
+	SourceName string
 	// Sources gives the source of each key that the file sets: "file",
 	// "env:VAR" or "file:/path". A key that is not in it has its default.
 	Sources map[string]string
@@ -195,16 +197,33 @@ func decodeConfig(data, sourceName, sourceDir string) (appConfig, error) {
 			}
 			bucketIDs[id] = struct{}{}
 			bucketBlocks = append(bucketBlocks, block)
+		case "volume":
+			volume, err := decodeVolumeBlock(block)
+			if err != nil {
+				return appConfig{}, err
+			}
+			// The buckets and the volumes are the instances of the interface: one label names one instance.
+			if _, exists := bucketIDs[volume.ID]; exists {
+				return appConfig{}, block.errorf("duplicate bucket or volume id %q: a volume block and a bucket block cannot have the same label", volume.ID)
+			}
+			bucketIDs[volume.ID] = struct{}{}
+			cfg.Volumes = append(cfg.Volumes, volume)
+			recordSources(&cfg, "volume "+strconv.Quote(volume.ID), "volume", block, sourceDir)
 		default:
-			return appConfig{}, block.errorf("unknown block type %q; supported blocks are server, auth, bucket and access", block.Type)
+			return appConfig{}, block.errorf("unknown block type %q; supported blocks are server, auth, bucket, volume and access", block.Type)
 		}
 	}
 
-	if len(authByID) == 0 {
+	if len(bucketBlocks) == 0 && len(cfg.Volumes) == 0 {
+		return appConfig{}, fmt.Errorf("at least one bucket block or one volume block is required")
+	}
+	if len(bucketBlocks) > 0 && len(authByID) == 0 {
 		return appConfig{}, fmt.Errorf("at least one auth block is required")
 	}
-	if len(bucketBlocks) == 0 {
-		return appConfig{}, fmt.Errorf("at least one bucket block is required")
+	// The address of a bucket in the interface is /-/<auth>/<bucket>/, and the address of a volume is
+	// /-/volume/<volume>/: an auth block with the label "volume" makes two instances with the same address.
+	if _, exists := authByID[volumeHostID]; exists && len(cfg.Volumes) > 0 {
+		return appConfig{}, fmt.Errorf("auth %q: the label %q is the address word of the volumes in the interface (/-/%s/<id>/), and the file has a volume block; give the auth block an other label", volumeHostID, volumeHostID, volumeHostID)
 	}
 	for _, block := range bucketBlocks {
 		bucket, err := decodeBucketBlock(block, authByID)
@@ -224,6 +243,11 @@ func decodeConfig(data, sourceName, sourceDir string) (appConfig, error) {
 		for _, bucket := range cfg.Buckets {
 			if !validAccessID(bucket.ID) {
 				return appConfig{}, fmt.Errorf("bucket %q: with access.mode = \"authzen\", the label of a bucket block must have 1 to %d bytes", bucket.ID, maxAccessIDBytes)
+			}
+		}
+		for _, volume := range cfg.Volumes {
+			if !validAccessID(volume.ID) {
+				return appConfig{}, fmt.Errorf("volume %q: with access.mode = \"authzen\", the label of a volume block must have 1 to %d bytes", volume.ID, maxAccessIDBytes)
 			}
 		}
 	}

@@ -48,8 +48,8 @@ type accessActionInfo struct {
 }
 
 var accessResourceTypes = []accessResourceType{
-	{Name: resourceBucket, Parent: resourceService, Description: "One bucket block of the configuration. The id is the label of the block, for example \"docker-registry\"."},
-	{Name: resourcePrefix, Parent: resourceBucket, Description: "One top-level folder of a bucket. The id is the part of the object key before the first \"/\", below root_prefix."},
+	{Name: resourceBucket, Parent: resourceService, Description: "One bucket block or one volume block of the configuration. The id is the label of the block, for example \"docker-registry\"."},
+	{Name: resourcePrefix, Parent: resourceBucket, Description: "One top-level folder of a bucket or of a volume. The id is the part of the object key before the first \"/\", below root_prefix."},
 }
 
 var accessActions = []accessActionInfo{

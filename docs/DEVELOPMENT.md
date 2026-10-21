@@ -64,15 +64,19 @@ The Playwright container installs the `playwright` package one time, in a Docker
 
 ## Filesystem-write check
 
-Production Go source must not call local filesystem write APIs:
+The program keeps no state on the local file system. Only the files of the volume backend (`src/volume_*.go`) write
+to the local file system: they write the files of a `volume` block (refer to the section "Volumes" of
+[ARCHITECTURE.md](ARCHITECTURE.md)). Each other production Go file must not call a write API of the file system. The CI
+does this check:
 
 ```sh
-if grep -R --include='*.go' --exclude='*_test.go' \
-  -E 'os\.(Create|Mkdir|MkdirAll|WriteFile|OpenFile|Remove|RemoveAll|Rename)|CreateTemp|MkdirTemp' src; then
+if grep -R --include='*.go' --exclude='*_test.go' --exclude='volume_*.go' \
+  -E 'os\.(Create|Mkdir|MkdirAll|WriteFile|OpenFile|Remove|RemoveAll|Rename|Link|Symlink|Truncate|Chmod|Chown|Lchown|Chtimes)\b|CreateTemp|MkdirTemp|syscall\.(Open|Creat|Mkdir|Rmdir|Unlink|Rename|Link|Symlink|Truncate)\b' src; then
   exit 1
 fi
 ```
 
+Put new code that writes the files of a volume in a file named `volume_*.go`. Do not put other code in these files.
 Tests may create fixtures inside their temporary test directories.
 
 ## Shell syntax

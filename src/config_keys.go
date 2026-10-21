@@ -45,6 +45,7 @@ var configBlocks = []configBlock{
 	{"auth", `auth "<id>" { ... }`, "One or more blocks. A credential set and an endpoint that one or more buckets use."},
 	{"auth.usage", `auth "<id>" { usage { ... } }`, "Zero or one block in an auth block with provider \"s3\". The admin API that gives the usage and the quota of the buckets of the auth block (docs/ARCHITECTURE.md, \"Usage and quota of a bucket\"). Without it, the interface shows no usage and no quota."},
 	{"bucket", `bucket "<id>" { ... }`, "One or more blocks. One bucket that the browser shows. The label is the id of the bucket for the URL and for the access policy."},
+	{"volume", `volume "<id>" { ... }`, "Zero or more blocks. One folder of the server that the browser shows as a bucket: a Docker volume, an NFS, CephFS or FUSE mount (docs/ARCHITECTURE.md, \"Volumes\"). The label is the id of the volume for the URL (/-/volume/<id>/) and for the access policy. A file needs one bucket block or one volume block at least."},
 	{"access", "access { ... }", "Exactly one block. It is mandatory. The access of humans: `open` or `authzen` (docs/ACCESS.md)."},
 	{"access.identity", "access { identity { ... } }", "Exactly one block with `mode = \"authzen\"`. None with `mode = \"open\"`. The identity token of the access gateway."},
 	{"access.pdp", "access { pdp { ... } }", "Exactly one block with `mode = \"authzen\"`. None with `mode = \"open\"`. The AuthZEN PDP that decides each action."},
@@ -92,6 +93,12 @@ var configKeys = []configKey{
 	{"bucket", "max_scan_pages", "integer", "1", "0 to 1000000", formValue, false, "The 1000-entry provider pages that one listing combines. 0 = no limit."},
 	{"bucket", "encryption", "text", `""`, "\"\" or sse-s3, exact (lower case). SSE-C and SSE-KMS are not supported. Only for an s3 auth block", formValue, false, "The server-side encryption that the server asks for each object that it writes: upload, copy, move, rename, metadata edit, restore of a version, extraction. sse-s3 sends x-amz-server-side-encryption: AES256. \"\" sends no encryption header: the default encryption of the bucket applies."},
 	{"bucket", "quota_bytes", "integer", "(none: the limit of the provider, or no limit)", "1 to 1152921504606846976. Only with a usage block in the auth block", formValue, false, "The size limit of the bucket that the interface shows when the provider gives no limit. The server does not enforce it."},
+
+	{"volume", "name", "text", "the label of the block", "", formValue, false, "The name that the user interface shows."},
+	{"volume", "path", "file path", "(required)", "an absolute path, without \"/\" at the end and without an empty, \".\" or \"..\" part. The folder must exist at start, and the process must read it", formValue, false, "The folder of the volume. The server reads and writes its files with the identity of the process. With write or delete in permissions (or without permissions), the start writes and removes a test file: a folder that the process cannot write stops the start."},
+	{"volume", "permissions", "list of text", "(none: read, write and delete)", "read, write, delete (lower case, each one time)", formValue, false, "The operations that the server can do in this volume. It is a ceiling: the file system and the access policy can refuse more. Give [\"read\"] for a folder that the process cannot write."},
+	{"volume", "root_prefix", "text", `""`, "\"\", or a relative folder path that ends with \"/\", without an empty, \".\" or \"..\" part. The folder must exist at start", formValue, false, "The folder of path that the browser shows. The keys are relative to it. A symbolic link that leaves it is not followed."},
+	{"volume", "max_scan_pages", "integer", "1", "0 to 1000000", formValue, false, "The 1000-entry pages of a folder that one listing combines. 0 = no limit."},
 
 	{"access", "mode", "text", "(required)", "authzen or open", formValue, false, "authzen: verify the identity token and ask the PDP for each action. open: no check of identity or permission. The server writes a warning at each start."},
 
@@ -187,6 +194,7 @@ func configReference() string {
 	b.WriteString("- A value that is not in its range stops the start. The error gives the key and the line.\n")
 	b.WriteString("- A key without a value in the file has its default value. A key with `(required)` must have a value.\n")
 	b.WriteString("- The `access` block is mandatory. A file without it stops the start.\n")
+	b.WriteString("- A file needs one `bucket` block or one `volume` block at least. A `bucket` block needs an `auth` block.\n")
 	b.WriteString("- `s3-browser print-config -c <file>` checks the file, writes the value of each key and its source, and exits with status 0.\n")
 	b.WriteString("  The source is `file`, `env:<VAR>`, `file:<path>` or `default`. The output hides each secret.\n")
 	b.WriteString("- At start, the server writes the same values in its log.\n\n")
@@ -343,6 +351,18 @@ func effectiveConfiguration(cfg appConfig) []effectiveSetting {
 			values["quota_bytes"] = strconv.FormatInt(bucket.QuotaBytes, 10)
 		}
 		add("bucket "+strconv.Quote(bucket.ID), values)
+	}
+	for _, volume := range cfg.Volumes {
+		values := map[string]string{
+			"name":           strconv.Quote(volume.Name),
+			"path":           strconv.Quote(volume.Path),
+			"root_prefix":    strconv.Quote(volume.RootPrefix),
+			"max_scan_pages": strconv.Itoa(volume.MaxScanPages),
+		}
+		if volume.PermissionsDefined {
+			values["permissions"] = quotedList(volume.Permissions)
+		}
+		add("volume "+strconv.Quote(volume.ID), values)
 	}
 	access := cfg.Access
 	add("access", map[string]string{"mode": strconv.Quote(access.Mode)})

@@ -12,6 +12,7 @@ A test makes sure that this file and the table agree.
 - A value that is not in its range stops the start. The error gives the key and the line.
 - A key without a value in the file has its default value. A key with `(required)` must have a value.
 - The `access` block is mandatory. A file without it stops the start.
+- A file needs one `bucket` block or one `volume` block at least. A `bucket` block needs an `auth` block.
 - `s3-browser print-config -c <file>` checks the file, writes the value of each key and its source, and exits with status 0.
   The source is `file`, `env:<VAR>`, `file:<path>` or `default`. The output hides each secret.
 - At start, the server writes the same values in its log.
@@ -104,6 +105,18 @@ Syntax: `bucket "<id>" { ... }`. One or more blocks. One bucket that the browser
 | `max_scan_pages` | integer | 1 | 0 to 1000000 | value | no | The 1000-entry provider pages that one listing combines. 0 = no limit. |
 | `encryption` | text | "" | "" or sse-s3, exact (lower case). SSE-C and SSE-KMS are not supported. Only for an s3 auth block | value | no | The server-side encryption that the server asks for each object that it writes: upload, copy, move, rename, metadata edit, restore of a version, extraction. sse-s3 sends x-amz-server-side-encryption: AES256. "" sends no encryption header: the default encryption of the bucket applies. |
 | `quota_bytes` | integer | (none: the limit of the provider, or no limit) | 1 to 1152921504606846976. Only with a usage block in the auth block | value | no | The size limit of the bucket that the interface shows when the provider gives no limit. The server does not enforce it. |
+
+## `volume`
+
+Syntax: `volume "<id>" { ... }`. Zero or more blocks. One folder of the server that the browser shows as a bucket: a Docker volume, an NFS, CephFS or FUSE mount (docs/ARCHITECTURE.md, "Volumes"). The label is the id of the volume for the URL (/-/volume/<id>/) and for the access policy. A file needs one bucket block or one volume block at least.
+
+| Key | Type | Default | Range | Forms | Secret | Use |
+|---|---|---|---|---|---|---|
+| `name` | text | the label of the block |   | value | no | The name that the user interface shows. |
+| `path` | file path | (required) | an absolute path, without "/" at the end and without an empty, "." or ".." part. The folder must exist at start, and the process must read it | value | no | The folder of the volume. The server reads and writes its files with the identity of the process. With write or delete in permissions (or without permissions), the start writes and removes a test file: a folder that the process cannot write stops the start. |
+| `permissions` | list of text | (none: read, write and delete) | read, write, delete (lower case, each one time) | value | no | The operations that the server can do in this volume. It is a ceiling: the file system and the access policy can refuse more. Give ["read"] for a folder that the process cannot write. |
+| `root_prefix` | text | "" | "", or a relative folder path that ends with "/", without an empty, "." or ".." part. The folder must exist at start | value | no | The folder of path that the browser shows. The keys are relative to it. A symbolic link that leaves it is not followed. |
+| `max_scan_pages` | integer | 1 | 0 to 1000000 | value | no | The 1000-entry pages of a folder that one listing combines. 0 = no limit. |
 
 ## `access`
 

@@ -60,8 +60,10 @@ jobs:
             echo "only src/config_env.go may read an environment variable that the configuration names" >&2
             exit 1
           fi
-          if grep -R --include='*.go' --exclude='*_test.go' -E 'os\.(Create|Mkdir|MkdirAll|WriteFile|OpenFile|Remove|RemoveAll|Rename)|CreateTemp|MkdirTemp' src; then
-            echo "runtime source must not write application state to the local filesystem" >&2
+          # Only the files of the volume backend (src/volume_*.go) write to the local filesystem: the files of a volume
+          # block. No other runtime file writes application state.
+          if grep -R --include='*.go' --exclude='*_test.go' --exclude='volume_*.go' -E 'os\.(Create|Mkdir|MkdirAll|WriteFile|OpenFile|Remove|RemoveAll|Rename|Link|Symlink|Truncate|Chmod|Chown|Lchown|Chtimes)\b|CreateTemp|MkdirTemp|syscall\.(Open|Creat|Mkdir|Rmdir|Unlink|Rename|Link|Symlink|Truncate)\b' src; then
+            echo "runtime source must not write application state to the local filesystem; only src/volume_*.go may write (the files of a volume block)" >&2
             exit 1
           fi
           if find . -type f \( -iname '*.ttf' -o -iname '*.otf' -o -iname '*.woff' -o -iname '*.woff2' -o -iname '*.eot' \) | grep -q .; then

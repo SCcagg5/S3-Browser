@@ -55,7 +55,7 @@ func newApplication(cfg appConfig) (*application, error) {
 	app := &application{
 		config:          cfg,
 		authentications: make(map[string]*sharedAuthentication, len(cfg.Authentications)),
-		instances:       make(map[string]*storageInstance, len(cfg.Buckets)),
+		instances:       make(map[string]*storageInstance, len(cfg.Buckets)+len(cfg.Volumes)),
 		publicFS:        publicFS,
 	}
 	if _, err := rand.Read(app.resumeTokenKey[:]); err != nil {
@@ -82,6 +82,16 @@ func newApplication(cfg appConfig) (*application, error) {
 		}
 		app.instances[bucketCfg.ID] = instance
 		app.order = append(app.order, bucketCfg.ID)
+	}
+	// The volumes follow the buckets in the list of the interface.
+	for _, volume := range cfg.Volumes {
+		instance, err := newVolumeInstance(volume, cfg.Runtime, concurrency)
+		if err != nil {
+			app.closeAuthentications()
+			return nil, fmt.Errorf("initialize volume %q: %w", volume.ID, err)
+		}
+		app.instances[volume.ID] = instance
+		app.order = append(app.order, volume.ID)
 	}
 	app.probeVersioningSupport()
 	jobs, err := newJobManager(app, cfg.JobHistoryLimit)
@@ -316,6 +326,8 @@ type listItemJSON struct {
 	LastModified *time.Time `json:"lastModified,omitempty"`
 	ETag         string     `json:"etag,omitempty"`
 	ContentType  string     `json:"contentType,omitempty"`
+	// Unreadable marks an entry of a volume that S3-Browser does not read (refer to objectInfo).
+	Unreadable bool `json:"unreadable,omitempty"`
 }
 
 type listResponseJSON struct {
@@ -462,6 +474,7 @@ func (a *application) handleList(w http.ResponseWriter, r *http.Request) {
 			LastModified: modifiedPtr,
 			ETag:         object.ETag,
 			ContentType:  object.ContentType,
+			Unreadable:   object.Unreadable,
 		})
 	}
 	if navigationOnly {

@@ -36,6 +36,9 @@ const (
 	usageSourceGarage    = flavourGarage
 	usageSourceSeaweedFS = flavourSeaweedFS
 	usageSourceMinIO     = flavourMinIO
+	// usageSourceStatfs is the source of the usage of a volume: the size of its file system. A volume block has it;
+	// a usage block cannot name it.
+	usageSourceStatfs = "statfs"
 )
 
 const (
