@@ -339,8 +339,8 @@
   async function changeFolderTags({ prefix, instance, start }) {
     let started = null;
     const done = await openForm({
-      title: 'Tag the objects of a folder',
-      intro: `This changes the tags of every object under ${prefix || 'the root of the bucket'}. Each object keeps its other tags.`,
+      title: prefix ? 'Tag this folder' : 'Tag this bucket',
+      intro: `This changes the tags of every object ${prefix ? `under ${prefix}` : 'in the bucket'}. Each object keeps its other tags.`,
       applyLabel: 'Apply to all objects',
       fields: [
         { name: 'add', label: 'Tags to set', placeholder: 'team=data, retention=30d', hint: 'A key that exists gets the new value.', multiline: true },

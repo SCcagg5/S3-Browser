@@ -530,8 +530,6 @@ BB.cfg = config;
               title: storageDetails(entry),
               onclick: () => { closeSwitcher(true); selectInstance(entry.id); }
             },
-            h('span', { class: 'storageBucket__mark' }, entry.id === state.instanceId ? ic('check', 'storageBucket__check') : null),
-            ic('folder'),
             h('span', { class: 'storageBucket__copy' },
               h('span', { class: 'storageBucket__titleRow' }, h('strong', {}, storageName(entry)), bucketLock(entry), bucketObjectLock(entry), permissionDots(entry)),
               entry.rootPrefix ? h('small', {}, `/${entry.rootPrefix}`) : null))));
@@ -756,11 +754,10 @@ BB.cfg = config;
     ui.insightsItem.querySelector('span').textContent = state.pathPrefix ? 'Folder insights' : 'Bucket insights';
     ui.uploadWrap.hidden = !instance || !canWrite() || Boolean(state.listError);
     ui.folderTagsItem.hidden = state.tagsUnsupported;
+    ui.folderTagsItem.querySelector('span').textContent = state.pathPrefix ? 'Tag this folder' : 'Tag this bucket';
     ui.folderTagsItem.disabled = !read || !canWrite() || Boolean(state.listError);
     ui.multipartsItem.hidden = !config.multipartUploadsSupported;
     ui.multipartsItem.disabled = !read || Boolean(state.listError);
-    ui.lifecycleItem.hidden = !config.lifecycleSupported;
-    ui.lifecycleItem.disabled = !read || Boolean(state.listError);
     ui.tagFilterWrap.hidden = !state.tagFilterOn || state.tagsUnsupported;
     renderSettings();
     const badge = accessBadge();
@@ -939,11 +936,18 @@ BB.cfg = config;
       const retention = instance.objectLockDefault ? `: ${BB.objectLock.defaultText(instance.objectLockDefault)}` : '';
       items.push(bucketChip('object-lock', 'lock', `Object Lock${retention}`, lockTitle));
     }
-    if (info?.rules?.length && instance.lifecycleSupported !== false) {
-      const enabled = info.rules.filter(rule => rule.enabled).length;
-      items.push(bucketChip('lifecycle', 'hourglass', plural(info.rules.length, 'lifecycle rule'),
-        `${plural(info.rules.length, 'lifecycle rule')}, ${plural(enabled, 'rule')} on. Open the lifecycle rules of the bucket.`,
-        { short: info.rules.length.toLocaleString('en-US'), onclick: () => { closeBucketInfo(); if (canRead()) BB.lifecycle.open({ prefix: state.pathPrefix, canWrite: canWrite() }); } }));
+    // The chip is the way to the editor of the rules: it shows also for a bucket without rule, to add the first one.
+    if (Array.isArray(info?.rules) && instance.lifecycleSupported !== false) {
+      const open = () => { closeBucketInfo(); if (canRead()) BB.lifecycle.open({ prefix: state.pathPrefix, canWrite: canWrite() }); };
+      if (info.rules.length) {
+        const enabled = info.rules.filter(rule => rule.enabled).length;
+        items.push(bucketChip('lifecycle', 'hourglass', plural(info.rules.length, 'lifecycle rule'),
+          `${plural(info.rules.length, 'lifecycle rule')}, ${plural(enabled, 'rule')} on. Open the lifecycle rules of the bucket.`,
+          { short: info.rules.length.toLocaleString('en-US'), onclick: open }));
+      } else {
+        items.push(bucketChip('lifecycle', 'hourglass', 'No lifecycle rule', 'The bucket has no lifecycle rule. Open the lifecycle rules of the bucket to add one.',
+          { short: '0', tone: 'muted', onclick: open }));
+      }
     }
     const usage = instance.usageSupported === true ? BB.usage.cached(instance.id) : null;
     if (BB.usage.shown(usage)) {
@@ -1101,7 +1105,7 @@ BB.cfg = config;
       : [
         canRead() && menuItem('Insights', 'chart-box-outline', () => onPrefixInsights(row)),
         canRead() && menuItem('Download as ZIP', 'folder-download-outline', () => onPrefixDownload(row)),
-        canWrite() && !state.tagsUnsupported && menuItem('Tag objects', 'tag-multiple-outline', () => tagFolder(row.prefix)),
+        canWrite() && !state.tagsUnsupported && menuItem('Tag this folder', 'tag-multiple-outline', () => tagFolder(row.prefix)),
         canCopy() && menuItem('Copy', 'content-copy', () => onPrefixCopy(row)),
         canRename() && menuItem('Rename', 'rename-outline', () => onPrefixRename(row)),
         canDelete() && menuItem('Delete', 'delete-outline', () => onPrefixDelete(row), { danger: true })
@@ -1967,7 +1971,7 @@ BB.cfg = config;
       refreshButton: 'refreshButton', actionsButton: 'actionsButton', actionsMenu: 'actionsMenu', zipItem: 'zipItem',
       insightsItem: 'insightsItem', accessBadge: 'accessBadge', uploadWrap: 'uploadWrap',
       uploadButton: 'uploadButton', uploadMenu: 'uploadMenu', uploadFilesItem: 'uploadFilesItem',
-      uploadFolderItem: 'uploadFolderItem', uploadTagsInput: 'uploadTagsInput', uploadTagsMessage: 'uploadTagsMessage', folderTagsItem: 'folderTagsItem', multipartsItem: 'multipartsItem', lifecycleItem: 'lifecycleItem',
+      uploadFolderItem: 'uploadFolderItem', uploadTagsInput: 'uploadTagsInput', uploadTagsMessage: 'uploadTagsMessage', folderTagsItem: 'folderTagsItem', multipartsItem: 'multipartsItem',
       tagFilterWrap: 'tagFilterWrap', settingsButton: 'settingsButton', settingsMenu: 'settingsMenu', settingsReset: 'settingsReset',
       tagFilterToggle: 'tagFilterToggle', encryptionToggle: 'encryptionToggle', tagFilter: 'tagFilter', tagStatus: 'tagStatus', listing: 'listing', dropOverlay: 'dropOverlay', dropTarget: 'dropTarget',
       uploadDock: 'uploadDock', fileInput: 'fileInput', dirInput: 'dirInput'
@@ -1995,7 +1999,6 @@ BB.cfg = config;
     ui.settingsMenu.addEventListener('change', onSettingsChange);
     ui.folderTagsItem.addEventListener('click', () => { if (canWrite()) void tagFolder(state.pathPrefix); });
     ui.multipartsItem.addEventListener('click', () => { if (canRead()) BB.multiparts.open({ prefix: state.pathPrefix, canWrite: canWrite() }); });
-    ui.lifecycleItem.addEventListener('click', () => { if (canRead()) BB.lifecycle.open({ prefix: state.pathPrefix, canWrite: canWrite() }); });
     ui.tagFilter.addEventListener('input', () => { state.tagFilter = ui.tagFilter.value; applyTagFilter(); });
     document.addEventListener('bb:tags-changed', event => forgetTags(event.detail?.key));
     // A save of the metadata changes the date and the versions of the object: the listing reads them again.

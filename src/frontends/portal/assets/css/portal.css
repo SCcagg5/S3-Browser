@@ -896,16 +896,11 @@ button.storageSwitcher__trigger:hover {
 .storageHost__buckets {
   display: grid;
   gap: 2px;
-  padding-left: 22px;
+  padding-left: 14px;
 }
 
 .storageHost__buckets[hidden] {
   display: none;
-}
-
-.storageBucket > .ic-folder {
-  --icon-size: 17px;
-  color: var(--folder);
 }
 
 .storageBucket__titleRow {
@@ -918,19 +913,6 @@ button.storageSwitcher__trigger:hover {
 .storageBucket[aria-selected="true"] {
   border-color: var(--selected-edge);
   background: var(--selected-bg);
-}
-
-.storageBucket__mark {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-}
-
-.storageBucket__check {
-  --icon-size: 16px;
-  color: var(--accent-text);
 }
 
 /* Page and parts (portal) ------------------------------------------------------------------------------------------- */

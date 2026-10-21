@@ -652,7 +652,7 @@ test('tags: a folder job sets and removes tags on every object, and keeps the ot
   const keys = ['reports/2026/q1/summary.md', 'reports/2026/q2/summary.md', 'reports/2026/q3/summary.md', 'reports/2026/q3/orders.csv'];
   await open(page, `${MAIN}reports/`);
   await page.click('tr[data-name="2026"] .bb-kebab');
-  await page.click('tr[data-name="2026"] .bb-menu-item >> text=Tag objects');
+  await page.click('tr[data-name="2026"] .bb-menu-item >> text=Tag this folder');
   await page.waitForSelector('[data-tag-form]');
   await page.fill('[data-tag-form] textarea', 'batch=yes, bad&key');
   await page.click('[data-tag-form] .bb-btn-primary');
@@ -674,7 +674,7 @@ test('tags: a folder job sets and removes tags on every object, and keeps the ot
   assert.deepEqual((await apiTags(page, 'reports/2026/q3/summary.md')).sort(), ['batch=yes', 'stage=one', 'team=finance']);
   // Remove the two keys with a second job.
   await page.click('tr[data-name="2026"] .bb-kebab');
-  await page.click('tr[data-name="2026"] .bb-menu-item >> text=Tag objects');
+  await page.click('tr[data-name="2026"] .bb-menu-item >> text=Tag this folder');
   await page.waitForSelector('[data-tag-form]');
   await page.fill('[data-tag-form] input', 'batch, stage');
   await page.click('[data-tag-form] .bb-btn-primary');
@@ -1814,19 +1814,20 @@ test('selector: the bucket selector of the default interface, by host, with the 
   assert.equal(await page.getAttribute('.storageHost__row', 'aria-expanded'), 'true');
   assert.deepEqual(await page.locator('.storageHost[data-host="seaweedfs"] .storageBucket strong').allInnerTexts(), ['SeaweedFS - primary', 'SeaweedFS - archive', 'SeaweedFS - locked', 'SeaweedFS - encrypted']);
   assert.equal(await page.getAttribute('.storageBucket[data-instance="seaweedfs-main"]', 'aria-selected'), 'true');
-  assert.equal(await page.locator('.storageBucket[data-instance="seaweedfs-main"] .storageBucket__check').count(), 1);
+  // No mark in front of a bucket (no check, no folder icon): the highlight of the row tells the current bucket.
+  assert.equal(await page.locator('.storageBucket .ic-folder, .storageBucket .storageBucket__check, .storageBucket__mark').count(), 0);
   const columns = await page.evaluate(() => {
-    const box = selector => document.querySelector(selector).getBoundingClientRect();
     const rows = Array.from(document.querySelectorAll('.storageHost[data-host="seaweedfs"] .storageBucket'));
+    const current = document.querySelector('.storageBucket[data-instance="seaweedfs-main"]');
+    const other = document.querySelector('.storageBucket[data-instance="seaweedfs-archive"]');
     return {
-      checkRight: box('.storageBucket[data-instance="seaweedfs-main"] .storageBucket__check').right,
-      folderLeft: box('.storageBucket[data-instance="seaweedfs-main"] .ic-folder').left,
-      folders: rows.map(row => Math.round(row.querySelector('.ic-folder').getBoundingClientRect().left)),
-      dots: rows.map(row => Math.round(row.querySelector('.permDots').getBoundingClientRect().right))
+      names: rows.map(row => Math.round(row.querySelector('strong').getBoundingClientRect().left)),
+      dots: rows.map(row => Math.round(row.querySelector('.permDots').getBoundingClientRect().right)),
+      highlight: getComputedStyle(current).backgroundColor !== getComputedStyle(other).backgroundColor
     };
   });
-  assert.ok(columns.checkRight <= columns.folderLeft, `the check before the folder icon: ${JSON.stringify(columns)}`);
-  assert.equal(new Set(columns.folders).size, 1, `the folder icons in one column: ${JSON.stringify(columns)}`);
+  assert.equal(columns.highlight, true, 'the current bucket is highlighted');
+  assert.equal(new Set(columns.names).size, 1, `the names in one column: ${JSON.stringify(columns)}`);
   assert.equal(new Set(columns.dots).size, 1, `the permission dots in one column: ${JSON.stringify(columns)}`);
   // A click on the host closes its list; Escape closes the menu.
   await page.click('.storageHost__row');
@@ -2832,8 +2833,7 @@ const LIFECYCLE_FIELDS = {
 
 // Opens the window of the lifecycle rules from the Actions menu, and waits for the rules.
 async function openLifecycle(page) {
-  await page.click('#actionsButton');
-  await page.click('#lifecycleItem');
+  await page.click('#bucketChips [data-chip="lifecycle"]');
   await until(page, () => !document.querySelector('[data-lifecycle] .lifecycle__intro')?.hidden, null, 15000);
 }
 
@@ -3019,7 +3019,38 @@ test('lifecycle: the window shows what the provider changed, and a read-only edi
   }
 });
 
-test('lifecycle: the item is hidden for an instance without lifecycle rules', async () => {
+test('actions: the tag item names the folder or the bucket, and the lifecycle editor opens from the chip of the header', async () => {
+  const page = await newPage();
+  await open(page, MAIN);
+  await page.click('#actionsButton');
+  assert.equal(await page.locator('#lifecycleItem').count(), 0);
+  assert.equal((await page.textContent('#folderTagsItem')).trim(), 'Tag this bucket');
+  await page.click('#folderTagsItem');
+  await page.waitForSelector('.bb-overlay .bb-modal-title');
+  assert.equal((await page.textContent('.bb-overlay .bb-modal-title')).trim(), 'Tag this bucket');
+  assert.match(await page.textContent('.bb-overlay .tagForm__intro'), /every object in the bucket/);
+  await page.click('.bb-modal-x');
+  await page.waitForSelector('.bb-overlay', { state: 'detached' });
+  await open(page, `${MAIN}config/`);
+  await page.click('#actionsButton');
+  assert.equal((await page.textContent('#folderTagsItem')).trim(), 'Tag this folder');
+  await page.click('#folderTagsItem');
+  await page.waitForSelector('.bb-overlay .bb-modal-title');
+  assert.equal((await page.textContent('.bb-overlay .bb-modal-title')).trim(), 'Tag this folder');
+  assert.match(await page.textContent('.bb-overlay .tagForm__intro'), /under config\//);
+  await page.click('.bb-modal-x');
+  await page.waitForSelector('.bb-overlay', { state: 'detached' });
+  // A bucket without rule has the chip too: it is the way to add the first rule.
+  await open(page, '-/minio/minio-main/');
+  await page.waitForSelector('#bucketChips [data-chip="lifecycle"]', { timeout: 15000 });
+  assert.match(await page.textContent('#bucketChips [data-chip="lifecycle"]'), /No lifecycle rule/);
+  await page.click('#bucketChips [data-chip="lifecycle"]');
+  await page.waitForSelector('[data-lifecycle]');
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+test('lifecycle: the chip is hidden for an instance without lifecycle rules, and the Actions menu has no item for them', async () => {
   const page = await newPage();
   await page.route(/\/api\/instances/, async route => {
     const response = await route.fetch();
@@ -3028,8 +3059,10 @@ test('lifecycle: the item is hidden for an instance without lifecycle rules', as
     await route.fulfill({ response, json: body });
   });
   await open(page, MAIN);
+  await page.waitForSelector('#bucketChips [data-chip="usage"], #bucketChips .bucketChip', { timeout: 15000 }).catch(() => {});
+  assert.equal(await page.locator('#bucketChips [data-chip="lifecycle"]').count(), 0);
   await page.click('#actionsButton');
-  assert.equal(await page.isHidden('#lifecycleItem'), true);
+  assert.equal(await page.locator('#lifecycleItem').count(), 0);
   assert.equal(await page.isVisible('#multipartsItem'), true);
   await page.context().close();
 });
@@ -4277,9 +4310,9 @@ for (const [instance, provider] of Object.entries(PROVIDERS)) {
     assert.ok(box.inHeader && box.right <= box.selectorLeft && Math.abs(box.middle - box.selectorMiddle) < 3, JSON.stringify(box));
     // Versioning shows where the bucket has it on. Garage shows the usage only.
     assert.equal(await page.locator('#bucketChips [data-chip="versioning"]').count(), provider.versioning ? 1 : 0);
-    if (instance === 'garage-main') assert.deepEqual(await chipNames(page), ['usage']);
+    if (instance === 'garage-main') assert.deepEqual(await chipNames(page), ['lifecycle', 'usage']);
     if (instance === 'seaweedfs-main') assert.deepEqual(await chipNames(page), ['versioning', 'lifecycle', 'usage']);
-    if (instance === 'minio-main') assert.deepEqual(await chipNames(page), ['versioning', 'usage']);
+    if (instance === 'minio-main') assert.deepEqual(await chipNames(page), ['versioning', 'lifecycle', 'usage']);
     // The listing has no totals at its foot: only the range of the page and the rows.
     assert.equal(await page.locator('#folderCount, .tableFoot__count, .bucketStatus').count(), 0);
     assert.match(await page.textContent('.tableFoot'), /^\d+ to \d+ of \d+\+?Rows/);
@@ -4293,15 +4326,15 @@ test('usage: the chips of seaweedfs-locked, of the encrypted buckets and of a bu
   const page = await newPage();
   await open(page, '-/seaweedfs/seaweedfs-locked/');
   await page.waitForSelector('#bucketChips [data-chip="usage"]');
-  // A bucket with Object Lock has versioning and its padlock; it does not encrypt.
-  assert.deepEqual(await chipNames(page), ['versioning', 'object-lock', 'usage']);
+  // A bucket with Object Lock has versioning and its padlock; it does not encrypt. The chip of the rules shows for a bucket without rule too.
+  assert.deepEqual(await chipNames(page), ['versioning', 'object-lock', 'lifecycle', 'usage']);
   assert.equal(await page.getAttribute('#bucketChips [data-chip="versioning"]', 'title'), 'Versioning is on: a change or a delete keeps the older versions of a file.');
   assert.equal(await page.locator('#bucketChips [data-chip="object-lock"] .ic-lock').count(), 1);
   assert.match(await page.textContent('#bucketChips [data-chip="object-lock"] .bucketChip__label'), /^Object Lock/);
   assert.equal(await page.getAttribute('#bucketChips [data-chip="object-lock"]', 'title'), 'Object Lock is on');
   // Each chip is an icon with a tooltip: the label is for a screen reader, and the usage keeps its short text.
   const looks = await page.locator('#bucketChips .bucketChip').evaluateAll(nodes => nodes.map(node => [node.dataset.chip, node.querySelector('.bucketChip__label').getBoundingClientRect().width > 1, Boolean(node.title)]));
-  assert.deepEqual(looks, [['versioning', false, true], ['object-lock', false, true], ['usage', true, true]]);
+  assert.deepEqual(looks, [['versioning', false, true], ['object-lock', false, true], ['lifecycle', false, true], ['usage', true, true]]);
   // No limit: "used", no bar.
   assert.match(await usageItem(page).locator('.bucketChip__label').textContent(), /^~[\d.]+ (B|KB|MB) used$/);
   assert.equal(await usageItem(page).locator('.usageMeter').count(), 0);
@@ -4472,16 +4505,16 @@ test('usage: the chips keep one row in the header at 1440 and 1280, lose the tex
   assert.equal(await phone.getAttribute('#bucketInfoButton', 'aria-expanded'), 'true');
   // One line for each chip, with its label; the popover stays in the window, above the selector.
   const lines = await phone.locator('#bucketChips .bucketChip').evaluateAll(nodes => nodes.map(node => node.querySelector('.bucketChip__label').textContent));
-  assert.equal(lines.length, 3);
-  assert.deepEqual(lines.slice(0, 2), ['Versioning', 'Object Lock']);
-  assert.match(lines[2], /^~[\d.]+ (B|KB|MB) used$/);
+  assert.equal(lines.length, 4);
+  assert.deepEqual(lines.slice(0, 3), ['Versioning', 'Object Lock', 'No lifecycle rule']);
+  assert.match(lines[3], /^~[\d.]+ (B|KB|MB) used$/);
   const pop = await phone.evaluate(() => {
     const rect = document.querySelector('#bucketChips').getBoundingClientRect();
     const tops = Array.from(document.querySelectorAll('#bucketChips .bucketChip')).map(node => node.getBoundingClientRect().top);
     const hit = document.elementFromPoint(rect.left + rect.width - 20, rect.top + 20);
     return { left: rect.left, right: rect.right, rows: new Set(tops.map(Math.round)).size, onTop: Boolean(hit?.closest('#bucketChips')) };
   });
-  assert.ok(pop.left >= 0 && pop.right <= 390 && pop.rows === 3 && pop.onTop, JSON.stringify(pop));
+  assert.ok(pop.left >= 0 && pop.right <= 390 && pop.rows === 4 && pop.onTop, JSON.stringify(pop));
   // A tap outside closes it; Escape closes it too and gives the focus back to the button.
   await phone.tap('.tableFoot__range');
   assert.equal(await phone.isVisible('#bucketChips'), false);

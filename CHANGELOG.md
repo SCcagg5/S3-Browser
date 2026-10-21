@@ -109,6 +109,14 @@ This document uses ASD-STE100 Simplified Technical English.
   `years`), from the probe at start.
 - The bar of the preview page shows the same padlock and tooltip for the version on the page.
 
+### Menus of the header
+
+- The item "Lifecycle rules" is no longer in the menu Actions. The chip of the lifecycle rules in the header opens the
+  editor, and it shows also for a bucket without rule, to add the first one.
+- The item of the folder tags reads "Tag this folder", and "Tag this bucket" at the root.
+- The list of the buckets has no check and no folder icon in front of a bucket. The highlight shows the current bucket,
+  and the names have more room.
+
 ### Listing of a bucket with versioning
 
 - MinIO lists the folder of an object whose current version is a delete marker, and shows no key in it. After the
