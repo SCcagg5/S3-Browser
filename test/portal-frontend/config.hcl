@@ -146,6 +146,15 @@ bucket "garage-encrypted" {
   encryption     = "sse-s3"
 }
 
+# A volume: the folder /data/volume of the container of S3-Browser, a Docker volume (compose.yaml). The seed puts its
+# test files in it through the API and through the volume, which the Playwright container also mounts (run.sh). It
+# has no auth block. The tests of the volumes use it.
+volume "files" {
+  name           = "Files - volume"
+  path           = "/data/volume"
+  max_scan_pages = 15
+}
+
 # The test stack has no access gateway: the browser checks no identity.
 access {
   mode = "open"

@@ -23,4 +23,11 @@ const ENCRYPTED = {
   'minio-encrypted': { name: 'MinIO', host: 'minio:9000', region: 'us-east-1', bucket: 'encrypted', provider: 'minio-main' },
 };
 
-module.exports = { PROVIDERS, LOCKED, ENCRYPTED };
+// The volume of the test stack: the Docker volume volume-data, at /data/volume in S3-Browser and at /volume in the
+// Playwright container (run.sh). It has no tags, no versions, no lifecycle, no Object Lock and no encryption of S3: the
+// page hides them. Its usage is the size of its file system.
+const VOLUMES = {
+  files: { name: 'Volume', mount: '/volume', uid: 65532 },
+};
+
+module.exports = { PROVIDERS, LOCKED, ENCRYPTED, VOLUMES };

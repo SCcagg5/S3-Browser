@@ -369,9 +369,13 @@ func (a *application) handleUsage(w http.ResponseWriter, r *http.Request) {
 	}
 	value, err := instance.bucketUsage(r.Context(), r.URL.Query().Get("fresh") == "1")
 	if err != nil {
+		noun := "bucket"
+		if instance.cfg.Provider == providerVolume {
+			noun = "volume"
+		}
 		writeJSON(w, http.StatusOK, usageResponse{
 			Supported: true, Instance: instance.cfg.ID, Bucket: instance.cfg.Bucket, RootPrefix: instance.cfg.RootPrefix, Source: instance.usage.source,
-			Error: &usageErrorJSON{Code: "usage_unavailable", Message: "The usage of the bucket is unavailable: " + err.Error() + "."},
+			Error: &usageErrorJSON{Code: "usage_unavailable", Message: "The usage of the " + noun + " is unavailable: " + err.Error() + "."},
 		})
 		return
 	}

@@ -2049,6 +2049,20 @@ button.storageSwitcher__trigger:hover,
   font-weight: var(--fw-semibold);
 }
 
+/* An entry of a volume that S3-Browser does not read: muted, without a link. */
+.nameCell.is-unreadable {
+  color: var(--muted);
+  cursor: help;
+}
+
+.nameText {
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--fs-md);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .nameLink:hover {
   color: var(--accent-text);
   text-decoration: underline;

@@ -7,6 +7,8 @@
  * - the note about the lifecycle rules: a button opens the window of the lifecycle rules (lifecycle.js) with a new rule
  *   that aborts the incomplete uploads of the folder, where the provider keeps such a rule.
  * The server checks each request again. A provider without the list answers 501: the window says it in one line.
+ * A volume (provider fs) lists the temporary files of its uploads: the date is the last write to the file, a file has
+ * no parts, and the abort removes the file.
  */
 (function () {
   'use strict';
@@ -110,6 +112,10 @@
   // The note about the lifecycle rules. The button closes this window and opens the window of the lifecycle rules, with
   // a new rule that aborts the uploads of the folder after 7 days where the provider keeps such a rule.
   async function renderLifecycleNote(note, { prefix, canWrite, instance, close }) {
+    if (BB.cfg?.provider === 'fs') {
+      note.replaceChildren('An upload that stops before its end leaves a temporary file in the folder of the file. The date is the last write to the temporary file.');
+      return;
+    }
     const lead = 'A lifecycle rule can abort the incomplete uploads by itself, a number of days after their start.';
     note.replaceChildren(lead);
     if (BB.cfg?.lifecycleSupported === false || !BB.lifecycle) return;
@@ -130,6 +136,9 @@
   // prefix is the folder of the listing ('' for the bucket). canWrite tells if the person can abort. close closes the
   // window.
   function mount(host, { prefix = '', canWrite = false, instance = null, close = () => {} }) {
+    // A volume lists temporary files: no parts, and the date of the last write.
+    const volume = BB.cfg?.provider === 'fs';
+    const removed = volume ? 'The temporary files are deleted' : 'The parts are deleted';
     let rows = [];
     let nextToken = '';
     let minimumHours = 24;
@@ -138,7 +147,7 @@
     let busy = false;
     const selected = new Set();
 
-    const scope = h('p', { class: 'multiparts__scope' }, prefix ? ['Under ', h('code', {}, prefix)] : 'In this bucket');
+    const scope = h('p', { class: 'multiparts__scope' }, prefix ? ['Under ', h('code', {}, prefix)] : `In this ${volume ? 'volume' : 'bucket'}`);
     const readonly = h('p', { class: 'multiparts__hint' }, 'You can see the incomplete uploads, but you cannot abort them.');
     readonly.hidden = canWrite;
 
@@ -158,8 +167,8 @@
       h('thead', {}, h('tr', {},
         canWrite && h('th', { class: 'multiparts__check' }, selectAll),
         h('th', { class: 'multiparts__key' }, 'Key'),
-        h('th', { class: 'multiparts__started' }, 'Started'),
-        h('th', { class: 'multiparts__parts' }, 'Parts'),
+        h('th', { class: 'multiparts__started' }, volume ? 'Last write' : 'Started'),
+        !volume && h('th', { class: 'multiparts__parts' }, 'Parts'),
         h('th', { class: 'multiparts__size' }, 'Size'),
         h('th', { class: 'multiparts__age' }, 'Age'),
         canWrite && h('th', { class: 'multiparts__action' }, h('span', { class: 'visually-hidden' }, 'Actions')))),
@@ -225,7 +234,7 @@
           h('span', { class: 'multiparts__name mono' }, row.key),
           row.active && h('span', { class: 'badge badge--ok multiparts__active' }, 'Uploading now'))),
         h('td', { class: 'multiparts__started' }, row.started),
-        h('td', { class: 'multiparts__parts' }, row.parts),
+        !volume && h('td', { class: 'multiparts__parts' }, row.parts),
         h('td', { class: 'multiparts__size' }, row.size),
         h('td', { class: 'multiparts__age' }, row.age),
         canWrite && h('td', { class: 'multiparts__action' }, abortOne));
@@ -286,7 +295,7 @@
       const names = items.length === 1 ? `the incomplete upload of ${items[0].key}` : `${plural(items.length, 'incomplete upload')}`;
       const confirmed = await BB.ui.confirm({
         title: 'Abort incomplete uploads',
-        message: `Abort ${names}? The parts are deleted and ${items.length === 1 ? 'the upload cannot' : 'the uploads cannot'} continue.`,
+        message: `Abort ${names}? ${removed} and ${items.length === 1 ? 'the upload cannot' : 'the uploads cannot'} continue.`,
         confirmLabel: 'Abort'
       });
       if (!confirmed) return;
@@ -319,7 +328,7 @@
       // The two numbers are integers: the text has no data of the storage.
       const confirmed = await BB.ui.confirm({
         title: 'Abort incomplete uploads',
-        html: `<p>Abort the incomplete uploads that started more than ${plural(days, 'day')} ago? The parts are deleted and the uploads cannot continue.</p>`
+        html: `<p>Abort the incomplete uploads ${volume ? 'with no write for more than' : 'that started more than'} ${plural(days, 'day')}${volume ? '' : ' ago'}? ${removed} and the uploads cannot continue.</p>`
           + `<p>These uploads stay: an upload without a start date, an upload younger than ${plural(minimumHours, 'hour')}, and an upload that this S3-Browser sends now.</p>`,
         confirmLabel: 'Abort'
       });

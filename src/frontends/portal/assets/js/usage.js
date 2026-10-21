@@ -6,14 +6,15 @@
  *   the objects, the source, the time of the count and the reason of an approximate number.
  * - the warning of a full bucket: 90 % or more of the limit of bytes, with the text of the banner of the listing.
  * The numbers are for the whole bucket, also for an instance with a root prefix. The server reads the admin API only for
- * an instance with a usage block in its configuration (usageSupported of /api/instances). The page sends at most
- * MAX_READS reads at the same time: the selector reads the usage of each bucket.
+ * an instance with a usage block in its configuration (usageSupported of /api/instances). A volume (source statfs) gives
+ * the size of its file system: the texts name a volume and its file system. The page sends at most MAX_READS reads at
+ * the same time: the selector reads the usage of each bucket.
  */
 (function () {
   'use strict';
 
   const BB = (window.BB = window.BB || {});
-  const SOURCES = { garage: 'Garage', seaweedfs: 'SeaweedFS', minio: 'MinIO' };
+  const SOURCES = { garage: 'Garage', seaweedfs: 'SeaweedFS', minio: 'MinIO', statfs: 'the file system of the server (statfs)' };
   // The page reads an instance again after this time, also without a change.
   const PAGE_TTL_MS = 60000;
   const MAX_READS = 4;
@@ -53,6 +54,10 @@
 
   const count = value => Number(value || 0).toLocaleString('en-US');
 
+  // The usage of a volume is the size of its file system (source statfs).
+  const volumeAnswer = answer => answer?.source === 'statfs';
+  const noun = answer => (volumeAnswer(answer) ? 'volume' : 'bucket');
+
   // The answer of an instance: { supported: false }, an answer with available false and the error, or the numbers.
   // Two reads of the same instance at the same time share one request.
   function load(instance, { fresh = false } = {}) {
@@ -67,7 +72,7 @@
         return answer;
       })
       .catch(error => {
-        const answer = { supported: true, available: false, error: { code: 'usage_unavailable', message: `The usage of the bucket is unavailable: ${error?.message || error}` } };
+        const answer = { supported: true, available: false, error: { code: 'usage_unavailable', message: `The usage is unavailable: ${error?.message || error}` } };
         answers.set(id, { answer, at: Date.now() });
         return answer;
       });
@@ -89,12 +94,17 @@
 
   // The lines of the tooltip.
   function title(answer) {
-    if (answer?.supported === true && answer.available !== true) return answer.error?.message || 'The usage of the bucket is unavailable.';
+    if (answer?.supported === true && answer.available !== true) return answer.error?.message || `The usage of the ${noun(answer)} is unavailable.`;
     if (!shown(answer)) return '';
     const lines = [];
-    lines.push(answer.rootPrefix
-      ? `Usage of the whole bucket ${answer.bucket}, not only of ${answer.rootPrefix}`
-      : `Usage of the whole bucket ${answer.bucket}`);
+    if (volumeAnswer(answer)) {
+      lines.push(`Usage of the file system of the volume ${answer.bucket}`);
+      lines.push('The numbers are for the whole file system: the other folders on it count too.');
+    } else {
+      lines.push(answer.rootPrefix
+        ? `Usage of the whole bucket ${answer.bucket}, not only of ${answer.rootPrefix}`
+        : `Usage of the whole bucket ${answer.bucket}`);
+    }
     lines.push(`Used: ${formatBytes(answer.usedBytes)} (${count(answer.usedBytes)} bytes)`);
     if (Number(answer.limitBytes) > 0) {
       lines.push(`Limit: ${formatBytes(answer.limitBytes)} (${count(answer.limitBytes)} bytes), ${answer.percent} % used`);
@@ -139,8 +149,8 @@
       : `${mark}${formatBytes(answer.usedBytes)} used of ${formatBytes(answer.limitBytes)}`;
     const reason = note ? approximateNote(answer) : '';
     return percent >= 100
-      ? `This bucket is full: ${amount} (${mark}${percent} %). New uploads fail.${reason ? ` ${reason}` : ''}`
-      : `This bucket is ${mark}${percent} % full: ${amount}. New uploads can fail.${reason ? ` ${reason}` : ''}`;
+      ? `This ${noun(answer)} is full: ${amount} (${mark}${percent} %). New uploads fail.${reason ? ` ${reason}` : ''}`
+      : `This ${noun(answer)} is ${mark}${percent} % full: ${amount}. New uploads can fail.${reason ? ` ${reason}` : ''}`;
   }
 
   // The reason of an approximate number, or ''.

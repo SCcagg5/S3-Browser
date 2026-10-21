@@ -5,13 +5,14 @@
 // uploads on each provider, 9 the editor of the lifecycle rules on each provider, 10 Object Lock (retention and legal
 // hold) on the providers with a bucket with Object Lock, 11 encryption (SSE-S3 of the writes, and the display of SSE-S3,
 // SSE-KMS, SSE-C and the default encryption of the bucket), 12 the usage and the quota of a bucket (the facts of each
-// bucket in the selector, the warning of a full bucket, the tooltips) and the summary strip and the columns of the details.
+// bucket in the selector, the warning of a full bucket, the tooltips) and the summary strip and the columns of the details,
+// 13 the volumes (a folder of the server: listing, links, writes, uploads, previews, incomplete uploads, usage).
 // run.sh starts S3-Browser and the three providers, puts the test objects (seed.js) and runs this file in the
 // Playwright container. The tests of parts 1 to 4 use SeaweedFS.
 // The tests change the answers of the server with page.route where a case needs it (403, 401, no answer, access).
 const { chromium } = require('playwright');
 const assert = require('assert/strict');
-const { PROVIDERS, LOCKED, ENCRYPTED } = require('./providers');
+const { PROVIDERS, LOCKED, ENCRYPTED, VOLUMES } = require('./providers');
 const { s3, s3Head, readLifecycle, writeLifecycle, restoreLifecycle } = require('./s3');
 const BASE = process.env.BASE;
 const MAIN = '-/seaweedfs/seaweedfs-main/';
@@ -2104,7 +2105,7 @@ test('selector: the bucket selector of the default interface, by host, with the 
   await trigger.locator('strong').click();
   assert.equal(await trigger.getAttribute('aria-expanded'), 'true');
   // One host for each provider of the test stack; the host of the current bucket is open.
-  assert.deepEqual(await page.locator('.storageHost__row').evaluateAll(rows => rows.map(row => row.dataset.host)), ['seaweedfs', 'minio', 'garage']);
+  assert.deepEqual(await page.locator('.storageHost__row').evaluateAll(rows => rows.map(row => row.dataset.host)), ['seaweedfs', 'minio', 'garage', 'volume']);
   assert.match(await page.textContent('.storageHost__row'), /seaweedfs\s*S3 · 4 buckets/);
   assert.equal(await page.getAttribute('.storageHost__row', 'aria-expanded'), 'true');
   assert.deepEqual(await page.locator('.storageHost[data-host="seaweedfs"] .storageBucket strong').allInnerTexts(), ['SeaweedFS - primary', 'SeaweedFS - archive', 'SeaweedFS - locked', 'SeaweedFS - encrypted']);
@@ -4100,7 +4101,7 @@ test('encryption: Garage accepts an upload with encryption = "sse-s3" and shows 
   assert.deepEqual(flags, {
     'seaweedfs-main': true, 'seaweedfs-archive': true, 'seaweedfs-locked': true, 'seaweedfs-encrypted': true,
     'minio-main': true, 'minio-locked': true, 'minio-encrypted': true,
-    'garage-main': false, 'garage-encrypted': false,
+    'garage-main': false, 'garage-encrypted': false, files: false,
   });
   for (const instance of ['garage-main', 'garage-encrypted']) {
     const response = await page.request.get(`${BASE}api/encryption?instance=${instance}`);
@@ -5344,6 +5345,317 @@ test('details: on a desktop window the sections are in two columns, Storage obje
   await page.click('[data-section-toggle="metadata"]');
   const again = await measure();
   assert.ok(again.tags.left >= again.storage.right);
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+// ------------------------------------------------------------------------------------------------------------------
+// 13. Volumes: the volume "files" is a Docker volume, a folder of the server (provider fs, address /-/volume/files/).
+// The seed puts its files in it (seed.js). The Playwright container mounts the same Docker volume at /volume: the tests
+// read the real files and folders there. Each test that writes uses its own folder and removes it at the end.
+// ------------------------------------------------------------------------------------------------------------------
+
+const VOLUME = '-/volume/files/';
+const volumeFS = require('fs');
+const volumePath = require('path');
+const volumeFile = relative => volumePath.join(VOLUMES.files.mount, relative);
+const temporaryNames = relative => volumeFS.readdirSync(volumeFile(relative)).filter(name => name.startsWith('.s3b-tmp-'));
+const rowNames = page => page.locator('tbody tr[data-name]').evaluateAll(rows => rows.map(row => row.dataset.name));
+
+// Removes a test folder of the volume, also when an earlier run stopped in the middle.
+function removeVolumeFolder(relative) {
+  volumeFS.rmSync(volumeFile(relative), { recursive: true, force: true });
+}
+
+async function volumeInfo(page) {
+  return (await (await page.request.get(`${BASE}api/instances`)).json()).instances.find(item => item.id === 'files');
+}
+
+test('volumes: the volume lists real folders, an empty folder, hidden files and nested folders at the address /-/volume/', async () => {
+  const page = await newPage();
+  const info = await volumeInfo(page);
+  assert.equal(info.host, 'volume');
+  assert.equal(info.provider, 'fs');
+  await open(page, VOLUME);
+  const names = await rowNames(page);
+  for (const name of ['data', 'docs', 'empty', 'images', 'links', 'uploads', '.hidden-settings']) assert.ok(names.includes(name), `${name} in ${names}`);
+  // The folders come first, then the files; the temporary file of an upload is not in the listing.
+  assert.ok(names.indexOf('uploads') < names.indexOf('.hidden-settings'));
+  assert.equal(await page.getAttribute('.crumb--root', 'aria-label'), 'Files - volume, volume root');
+  assert.equal(await page.locator('.crumb--root .ic-folder-open').count(), 1);
+  assert.equal(await page.getAttribute('#searchInput', 'placeholder'), 'Open a prefix in this volume');
+  // A nested folder: docs/nested/deep/note.txt.
+  await page.click('tr[data-name="docs"] .nameLink');
+  await page.waitForSelector('tr[data-name="nested"]');
+  await page.click('tr[data-name="nested"] .nameLink');
+  await page.waitForSelector('tr[data-name="deep"]');
+  await page.click('tr[data-name="deep"] .nameLink');
+  await page.waitForSelector('tr[data-name="note.txt"]');
+  assert.equal(new URL(page.url()).pathname, `/${VOLUME}docs/nested/deep/`);
+  // An empty folder of the volume exists: the page shows it and its empty state.
+  await open(page, `${VOLUME}empty/`);
+  assert.equal(await page.locator('tbody tr[data-name]').count(), 0);
+  await open(page, `${VOLUME}uploads/`);
+  assert.equal(await page.locator('tbody tr[data-name]').count(), 0);
+  assert.deepEqual(temporaryNames('uploads'), ['.s3b-tmp-5eed0000000000000000000000000001-stale.bin']);
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+test('volumes: the page hides tags, versions, lifecycle rules, Object Lock, encryption and the edit of the metadata', async () => {
+  const page = await newPage();
+  const info = await volumeInfo(page);
+  for (const flag of ['versioningSupported', 'tagsSupported', 'metadataEditSupported', 'lifecycleSupported', 'objectLockSupported', 'bucketEncryptionSupported']) {
+    assert.equal(info[flag], false, flag);
+  }
+  assert.equal(info.multipartUploadsSupported, true);
+  assert.equal(info.usageSupported, true);
+  const heads = [];
+  page.on('request', request => { if (request.method() === 'HEAD') heads.push(request.url()); });
+  await open(page, `${VOLUME}docs/`);
+  // The facts of the selector: the usage only.
+  await page.waitForSelector('#storageSwitcherFacts [data-fact="usage"]');
+  assert.deepEqual(await page.locator('#storageSwitcherFacts [data-fact]').evaluateAll(nodes => nodes.map(node => node.dataset.fact)), ['usage']);
+  assert.equal(await page.locator('.storageSwitcher__versioning [data-fact="versioning"]').count(), 0);
+  await page.click('#settingsButton');
+  for (const selector of ['#versionsSetting', '#tagFilterSetting', '#uploadTagsSetting', '#encryptionSetting']) assert.equal(await page.isHidden(selector), true, selector);
+  assert.equal(await page.locator('[data-column="tags"]').isHidden(), true);
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('th.col-tags').isVisible(), false);
+  assert.equal(await page.locator('th.col-versions').isVisible(), false);
+  await page.click('#actionsButton');
+  assert.equal(await page.isHidden('#folderTagsItem'), true);
+  assert.equal(await page.isVisible('#newFolderItem'), true);
+  assert.equal((await page.textContent('#insightsItem')).trim(), 'Folder insights');
+  await page.keyboard.press('Escape');
+  // The details of a file: the storage object with the weak ETag, no tags, no edit of the metadata, no retention, no
+  // version picker.
+  await openDetails(page, 'report.txt');
+  await page.waitForSelector('[data-details-tool-card="integrity"]');
+  await sleep(500);
+  assert.match(await page.textContent('[data-section="storage"]'), /W\/"107-\d+"/);
+  for (const selector of ['[data-tags-section]', '[data-lock-section]', 'select[data-details-version]', '[data-metadata-edit]', '.versionPicker']) {
+    assert.equal(await page.locator(selector).count(), 0, selector);
+  }
+  assert.equal(heads.filter(url => url.includes('instance=files')).length, 0, `HEAD requests of the listing: ${heads}`);
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+test('volumes: a link to a folder of the volume opens, a link to a file previews, a link that leaves the volume is unreadable', async () => {
+  const page = await newPage();
+  await open(page, `${VOLUME}links/`);
+  assert.deepEqual((await rowNames(page)).sort(), ['escape', 'inside', 'note']);
+  const escape = 'tr[data-name="escape"]';
+  assert.equal(await page.getAttribute(escape, 'data-unreadable'), 'true');
+  assert.match(await page.getAttribute(`${escape} .nameCell`, 'title'), /leaves the volume/);
+  assert.equal(await page.locator(`${escape} .nameLink, ${escape} .bb-kebab`).count(), 0);
+  for (const key of ['links/escape', 'links/escape/passwd']) {
+    const response = await page.request.get(`${BASE}s3?instance=files&key=${encodeURIComponent(key)}`);
+    assert.equal(response.status(), 403, key);
+    assert.doesNotMatch(await response.text(), /root:/);
+  }
+  const write = await page.request.put(`${BASE}s3?instance=files&key=${encodeURIComponent('links/escape/new.txt')}`, { data: Buffer.from('x') });
+  assert.equal(write.status(), 403);
+  const dots = await page.request.get(`${BASE}s3?instance=files&key=${encodeURIComponent('docs/../../etc/passwd')}`);
+  assert.equal(dots.status(), 400);
+  await page.click('tr[data-name="inside"] .nameLink');
+  await page.waitForSelector('tr[data-name="readme.md"]');
+  await open(page, `${VOLUME}links/`);
+  await page.click('tr[data-name="note"] .nameLink');
+  await page.waitForSelector('text=The report of the volume.');
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+test('volumes: New folder makes a real folder; copy, rename and delete of a file; copy, rename and delete of a folder', async () => {
+  const page = await newPage();
+  removeVolumeFolder('t-folders');
+  await open(page, VOLUME);
+  await page.click('#actionsButton');
+  await page.click('#newFolderItem');
+  await page.fill('.bb-overlay .bb-input', 't-folders');
+  await page.click('.bb-overlay .bb-btn-primary');
+  await page.waitForSelector('tr[data-name="t-folders"]');
+  assert.equal(volumeFS.statSync(volumeFile('t-folders')).isDirectory(), true);
+  await page.click('tr[data-name="t-folders"] .nameLink');
+  await page.waitForSelector('.empty, .dataTable');
+  // A name with "/" is refused in the page.
+  await page.click('#actionsButton');
+  await page.click('#newFolderItem');
+  await page.fill('.bb-overlay .bb-input', 'a/b');
+  await page.click('.bb-overlay .bb-btn-primary');
+  await page.waitForSelector('text=A name cannot have a "/".');
+  await page.click('#actionsButton');
+  await page.click('#newFolderItem');
+  await page.fill('.bb-overlay .bb-input', 'sub');
+  await page.click('.bb-overlay .bb-btn-primary');
+  await page.waitForSelector('tr[data-name="sub"]');
+  await page.setInputFiles('#fileInput', [{ name: 'file.txt', mimeType: 'text/plain', buffer: Buffer.from('a file of the volume\n') }]);
+  await page.waitForSelector('.uploadDock[data-state="done"]', { timeout: 30000 });
+  // A small upload is one PUT: the server checks its SHA-256.
+  assert.match(await page.textContent('.uploadDock .summary'), /^1 file uploaded \([\d.]+ B\), 1 checked with SHA-256\.$/);
+  await page.click('.uploadDock .button >> text=Close');
+  await page.waitForSelector('tr[data-name="file.txt"]');
+  const before = volumeFS.statSync(volumeFile('t-folders/file.txt'));
+  await rowActionWithName(page, 'file.txt', 'Copy', 'copy.txt');
+  await page.waitForSelector('tr[data-name="copy.txt"]');
+  assert.equal(volumeFS.readFileSync(volumeFile('t-folders/copy.txt'), 'utf8'), 'a file of the volume\n');
+  await rowActionWithName(page, 'file.txt', 'Rename', 'renamed.txt');
+  await page.waitForSelector('tr[data-name="renamed.txt"]');
+  await page.waitForSelector('tr[data-name="file.txt"]', { state: 'detached' });
+  // The rename is one rename of the file: the same inode.
+  assert.equal(volumeFS.statSync(volumeFile('t-folders/renamed.txt')).ino, before.ino);
+  await page.click('tr[data-name="copy.txt"] .bb-kebab');
+  await page.click('.bb-menu.is-open .bb-menu-item >> text=Delete');
+  await page.click('.bb-overlay .bb-btn-primary');
+  await page.waitForSelector('tr[data-name="copy.txt"]', { state: 'detached' });
+  assert.equal(volumeFS.existsSync(volumeFile('t-folders/copy.txt')), false);
+  // A folder: copy (with its empty folder), rename (the source folder goes), delete (the folder goes).
+  volumeFS.mkdirSync(volumeFile('t-folders/sub/void'));
+  volumeFS.chownSync(volumeFile('t-folders/sub/void'), VOLUMES.files.uid, VOLUMES.files.uid);
+  await page.request.put(`${BASE}s3?instance=files&key=${encodeURIComponent('t-folders/sub/inner.txt')}`, { data: Buffer.from('inner\n') });
+  await rowActionWithName(page, 'sub', 'Copy', 'sub-copy');
+  await page.waitForSelector('tr[data-name="sub-copy"]', { timeout: 30000 });
+  await waitForVolume(() => volumeFS.existsSync(volumeFile('t-folders/sub-copy/void')) && volumeFS.existsSync(volumeFile('t-folders/sub-copy/inner.txt')));
+  await rowActionWithName(page, 'sub-copy', 'Rename', 'moved');
+  await page.waitForSelector('tr[data-name="moved"]', { timeout: 30000 });
+  await waitForVolume(() => !volumeFS.existsSync(volumeFile('t-folders/sub-copy')));
+  assert.equal(volumeFS.statSync(volumeFile('t-folders/moved/void')).isDirectory(), true);
+  assert.equal(volumeFS.readFileSync(volumeFile('t-folders/moved/inner.txt'), 'utf8'), 'inner\n');
+  await page.click('tr[data-name="moved"] .bb-kebab');
+  await page.click('.bb-menu.is-open .bb-menu-item >> text=Delete');
+  await page.click('.bb-overlay .bb-btn-primary');
+  await page.waitForSelector('tr[data-name="moved"]', { state: 'detached', timeout: 30000 });
+  await waitForVolume(() => !volumeFS.existsSync(volumeFile('t-folders/moved')));
+  assert.deepEqual(temporaryNames('t-folders'), []);
+  assert.deepEqual(page.errors, []);
+  removeVolumeFolder('t-folders');
+  await page.context().close();
+});
+
+// Waits for a condition on the files of the volume, 15 seconds at most.
+async function waitForVolume(check) {
+  for (let tries = 0; tries < 150; tries += 1) {
+    if (check()) return;
+    await sleep(100);
+  }
+  assert.fail('the volume did not reach the expected state');
+}
+
+test('volumes: a large upload goes in chunks to a temporary file, resumes after a lost chunk, and has no temporary file at the end', async () => {
+  const page = await newPage();
+  removeVolumeFolder('t-upload');
+  await page.request.put(`${BASE}s3?instance=files&key=${encodeURIComponent('t-upload/')}`, { data: Buffer.alloc(0) });
+  await open(page, `${VOLUME}t-upload/`);
+  const content = Buffer.alloc(40 * 1024 * 1024);
+  for (let index = 0; index < content.length; index += 4096) content.writeUInt32BE(index, index);
+  let chunks = 0;
+  let duringUpload = [];
+  await page.route(/\/api\/uploads$/, async route => {
+    if (route.request().method() !== 'PUT') return route.continue();
+    chunks += 1;
+    if (chunks === 2) {
+      // The first chunk is in the temporary file, in the folder of the file.
+      duringUpload = temporaryNames('t-upload');
+      return route.abort('connectionreset');
+    }
+    return route.continue();
+  });
+  await page.setInputFiles('#fileInput', [{ name: 'large.bin', mimeType: 'application/octet-stream', buffer: content }]);
+  await page.waitForSelector('.uploadDock[data-state="done"]', { timeout: 120000 });
+  assert.equal(duringUpload.length, 1, `temporary files during the upload: ${duringUpload}`);
+  assert.match(duringUpload[0], /^\.s3b-tmp-[0-9a-f]{32}-large\.bin$/);
+  assert.ok(chunks >= 3, `chunks: ${chunks}`);
+  assert.equal(sha256(volumeFS.readFileSync(volumeFile('t-upload/large.bin'))), sha256(content));
+  assert.deepEqual(temporaryNames('t-upload'), []);
+  // Download with a range: 206 and the bytes of the range.
+  const range = await page.request.get(`${BASE}s3?instance=files&key=${encodeURIComponent('t-upload/large.bin')}`, { headers: { Range: 'bytes=8192-8199' } });
+  assert.equal(range.status(), 206);
+  assert.equal(range.headers()['content-range'], `bytes 8192-8199/${content.length}`);
+  assert.deepEqual(await range.body(), content.subarray(8192, 8200));
+  const head = await page.request.head(`${BASE}s3?instance=files&key=${encodeURIComponent('t-upload/large.bin')}`);
+  assert.match(head.headers().etag, new RegExp(`^W/"${content.length}-\\d+"$`));
+  assert.deepEqual(page.errors, []);
+  removeVolumeFolder('t-upload');
+  await page.context().close();
+});
+
+test('volumes: the previews of a CSV file, a Markdown file and an image, the insights of a folder, and the prefix search', async () => {
+  const page = await newPage();
+  await open(page, `${VOLUME}data/`);
+  await page.click('tr[data-name="orders.csv"] .nameLink');
+  await page.waitForSelector('table >> text=North');
+  await page.goto(`${BASE}${VOLUME}images/banner.svg`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('img, svg image, .imageViewer, [data-image-preview]');
+  await page.goto(`${BASE}${VOLUME}docs/readme.md`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('text=Figures are provisional.');
+  // The insights of the folder docs/: three files.
+  await open(page, `${VOLUME}docs/`);
+  await page.click('#actionsButton');
+  await page.click('#insightsItem');
+  await page.waitForSelector('.folder-insights-tabs', { timeout: 30000 });
+  assert.match(await page.textContent('.bb-overlay'), /3 (objects|files)/);
+  await page.click('.bb-modal-x');
+  // The prefix search opens a folder of the volume.
+  await page.fill('#searchInput', 'nested/deep/');
+  await page.press('#searchInput', 'Enter');
+  await page.waitForSelector('tr[data-name="note.txt"]');
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+test('volumes: the window Incomplete uploads lists the temporary file of an old upload, with its last write, and aborts it', async () => {
+  const page = await newPage();
+  const stale = 'uploads/.s3b-tmp-5eed0000000000000000000000000001-stale.bin';
+  await open(page, `${VOLUME}uploads/`);
+  await openMultiparts(page);
+  assert.deepEqual(await multipartRows(page), ['uploads/stale.bin']);
+  assert.equal((await page.textContent('[data-multiparts] th.multiparts__started')).trim(), 'Last write');
+  assert.equal(await page.locator('[data-multiparts] .multiparts__parts').count(), 0);
+  assert.equal((await page.textContent('[data-multiparts] tr[data-upload-id] .multiparts__age')).trim(), '3 days');
+  assert.match(await page.textContent('[data-multiparts] .multiparts__note'), /temporary file/);
+  assert.equal((await page.textContent('[data-multiparts] .multiparts__scope')).trim(), 'Under uploads/');
+  await page.click('[data-multipart-abort-older]');
+  await confirmAbort(page);
+  await until(page, () => document.querySelector('[data-multipart-message]')?.dataset.tone === 'ok');
+  await waitForVolume(() => !volumeFS.existsSync(volumeFile(stale)));
+  await until(page, () => !document.querySelector('[data-multiparts] tr[data-upload-id]'));
+  // The seed file comes back for the next runs of this test.
+  volumeFS.writeFileSync(volumeFile(stale), Buffer.alloc(4096, 's'));
+  volumeFS.chownSync(volumeFile(stale), VOLUMES.files.uid, VOLUMES.files.uid);
+  const old = new Date(Date.now() - 3 * 24 * 3600 * 1000);
+  volumeFS.utimesSync(volumeFile(stale), old, old);
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+test('volumes: the usage is the size of the file system, in the selector, its tooltip, and the banner of a full volume', async () => {
+  const page = await newPage();
+  const usage = await (await page.request.get(`${BASE}api/usage?instance=files`)).json();
+  assert.equal(usage.supported, true);
+  assert.equal(usage.available, true);
+  assert.equal(usage.source, 'statfs');
+  assert.equal(usage.approximate, false);
+  assert.ok(usage.limitBytes > 0 && usage.usedBytes >= 0 && usage.usedBytes <= usage.limitBytes, JSON.stringify(usage));
+  await open(page, VOLUME);
+  await page.waitForSelector('#storageSwitcherFacts [data-fact="usage"] .usageMeter');
+  assert.match(await page.textContent('#storageSwitcherFacts .bucketUsage__text'), /^[\d.]+ (B|KB|MB|GB|TB) of [\d.]+ (KB|MB|GB|TB|PB)$/);
+  const title = await page.getAttribute('#storageSwitcherFacts [data-fact="usage"]', 'title');
+  assert.match(title, /^Usage of the file system of the volume files\nThe numbers are for the whole file system/);
+  assert.match(title, /Source: the file system of the server \(statfs\)/);
+  assert.doesNotMatch(title, /Approximate/);
+  // A file system at 95 %: the banner, the mark and the tooltip of the upload name the volume.
+  await page.route(/\/api\/usage\?instance=files/, route => route.fulfill({ json: { ...usage, usedBytes: Math.floor(usage.limitBytes * 0.95), percent: 95, level: 'error' } }));
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.waitForSelector('#usageBanner:not([hidden])');
+  assert.match(await page.textContent('#usageBanner'), /^This volume is 95 % full: [\d.]+ (KB|MB|GB|TB) used of [\d.]+ (KB|MB|GB|TB|PB)\. New uploads can fail\.$/);
+  assert.match(await page.getAttribute('#uploadButton', 'title'), /^This volume is 95 % full/);
+  // The selector groups the volume under the host word "volume".
+  await page.click('.storageSwitcher__trigger');
+  await page.waitForSelector('.storageHost__row[data-host="volume"]');
+  assert.match(await page.textContent('.storageHost__row[data-host="volume"]'), /volume\s*Folders of the server · 1 volume/);
+  assert.match(await page.getAttribute('.storageBucket[data-instance="files"]', 'title'), /volume: files\nprovider: a folder of the server \(FS\)/);
   assert.deepEqual(page.errors, []);
   await page.context().close();
 });

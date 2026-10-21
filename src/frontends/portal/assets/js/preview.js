@@ -189,8 +189,13 @@
     byId('docSize').textContent = Number.isFinite(Number(size)) ? formatBytes(size) : '';
     byId('docSize').hidden = !byId('docSize').textContent;
     byId('instanceMeta').textContent = currentInstance ? currentInstance.name : '';
+    // A volume (a folder of the server) has the icon of a folder, a bucket the icon of a database.
+    byId('instanceMeta').previousElementSibling?.classList.toggle('ic-folder-open', currentInstance?.provider === 'fs');
+    byId('instanceMeta').previousElementSibling?.classList.toggle('ic-database', currentInstance?.provider !== 'fs');
     byId('instanceMeta').title = currentInstance
-      ? `${currentInstance.name}: ${String(currentInstance.provider || '').toUpperCase()} bucket ${currentInstance.bucket}`
+      ? (currentInstance.provider === 'fs'
+        ? `${currentInstance.name}: volume ${currentInstance.bucket} (a folder of the server)`
+        : `${currentInstance.name}: ${String(currentInstance.provider || '').toUpperCase()} bucket ${currentInstance.bucket}`)
       : '';
     const back = byId('backBtn');
     const backLabel = folders.length ? folders[folders.length - 1] : (currentInstance?.name || 'Folder');

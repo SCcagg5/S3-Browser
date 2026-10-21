@@ -1,7 +1,10 @@
-// Puts the test objects in the buckets of the three providers through the API of S3-Browser (PUT /s3).
+// Puts the test objects in the buckets of the three providers through the API of S3-Browser (PUT /s3), and the test
+// files of the volume "files": through the API, and through the Docker volume for the links and the old temporary file.
 const { request } = require('playwright');
-const { PROVIDERS, LOCKED, ENCRYPTED } = require('./providers');
+const { PROVIDERS, LOCKED, ENCRYPTED, VOLUMES } = require('./providers');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const { s3, SEED_LIFECYCLE } = require('./s3');
 const BASE = process.env.BASE;
 
@@ -48,6 +51,46 @@ const json = JSON.stringify({ service: 'ingest', version: 3, replicas: 2, limits
 const rows = JSON.stringify(Array.from({ length: 12000 }, (_, i) => ({ id: i, name: `row-${i}`, tags: ['a', 'b'], ok: i % 2 === 0 })), null, 1);
 const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="#1d2b44"/><circle cx="420" cy="150" r="90" fill="#356fe6"/><rect x="80" y="220" width="300" height="60" rx="12" fill="#93b4ff"/></svg>';
 const go = 'package main\n\nimport "fmt"\n\n// main prints a greeting.\nfunc main() {\n\tfmt.Println("hello, bucket")\n}\n';
+
+// The files of the volume "files" that the seed writes through the API: folders, a nested folder, a Markdown file, a CSV
+// file, an image and a JSON document for the previews.
+const VOLUME_FILES = {
+  'docs/readme.md': md,
+  'docs/report.txt': `${'0123456789'.repeat(8)}\nThe report of the volume.\n`,
+  'docs/nested/deep/note.txt': 'A note in a nested folder.\n',
+  'data/orders.csv': csv,
+  'data/config.json': json,
+  'images/banner.svg': svg,
+};
+
+// The test files that the API cannot make: a hidden file, an empty folder, a link to a folder of the volume, a link to
+// a file of the volume, a link that leaves the volume, and a temporary file of an upload that stopped three days ago.
+// They belong to the user of S3-Browser, as the files of the API.
+function seedVolumeFiles(volume) {
+  const root = volume.mount;
+  const own = target => fs.lchownSync(target, volume.uid, volume.uid);
+  const mkdir = relative => {
+    const target = path.join(root, relative);
+    fs.mkdirSync(target, { recursive: true });
+    own(target);
+    return target;
+  };
+  fs.writeFileSync(path.join(root, '.hidden-settings'), 'hidden=true\n');
+  own(path.join(root, '.hidden-settings'));
+  mkdir('empty');
+  mkdir('links');
+  for (const [name, target] of Object.entries({ inside: '../docs', note: '../docs/report.txt', escape: '/etc' })) {
+    const link = path.join(root, 'links', name);
+    fs.rmSync(link, { force: true });
+    fs.symlinkSync(target, link);
+    own(link);
+  }
+  const stale = path.join(mkdir('uploads'), '.s3b-tmp-5eed0000000000000000000000000001-stale.bin');
+  fs.writeFileSync(stale, Buffer.alloc(4096, 's'));
+  own(stale);
+  const old = new Date(Date.now() - 3 * 24 * 3600 * 1000);
+  fs.utimesSync(stale, old, old);
+}
 
 const objects = {
   'seaweedfs-main': {
@@ -194,6 +237,13 @@ async function seedIncompleteUploads(instance) {
   }
   await s3('minio-main', 'PUT', '/default/enc/kms.txt', '', Buffer.from('An object with SSE-KMS.\n'), { 'content-type': 'text/plain', 'x-amz-server-side-encryption': 'aws:kms' });
   await s3('seaweedfs-main', 'PUT', '/default', 'lifecycle=', Buffer.from(SEED_LIFECYCLE));
+  for (const [instance, volume] of Object.entries(VOLUMES)) {
+    for (const [key, body] of Object.entries(VOLUME_FILES)) {
+      const res = await api.put(`s3?instance=${encodeURIComponent(instance)}&key=${encodeURIComponent(key)}`, { data: Buffer.from(body), headers: { 'Content-Type': 'application/octet-stream' } });
+      if (!res.ok()) throw new Error(`${instance}/${key}: ${res.status()} ${await res.text()}`);
+    }
+    seedVolumeFiles(volume);
+  }
   console.log('seeded');
   await api.dispose();
 })().catch(e => { console.error(e); process.exit(1); });

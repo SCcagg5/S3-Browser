@@ -224,6 +224,13 @@ BB.cfg = config;
     return state.instances.find(instance => instance.id === state.instanceId) || null;
   }
 
+  // A volume (provider fs) is a folder of the server: its folders are real, and it has no tags, versions, lifecycle
+  // rules, Object Lock or encryption of S3. The page names it a volume, not a bucket.
+  const isVolume = instance => String(instance?.provider || '') === 'fs';
+  const storageNoun = instance => (isVolume(instance) ? 'volume' : 'bucket');
+  const capitalized = text => text.charAt(0).toUpperCase() + text.slice(1);
+  const storageIcon = instance => (isVolume(instance) ? 'folder-open' : 'database');
+
   // The access policy can refuse a write or a delete in the listed folder only.
   const folderAccessNeeds = {
     upload: ['write'], overwrite: ['write'], createFolder: ['write'], copy: ['write'],
@@ -426,8 +433,8 @@ BB.cfg = config;
       storageName(instance),
       `id: ${instance.id}`,
       `host: ${instance.host}`,
-      `bucket: ${instance.rootPrefix ? `${instance.bucket}/${instance.rootPrefix}` : instance.bucket}`,
-      `provider: ${String(instance.provider || '').toUpperCase()}`,
+      `${storageNoun(instance)}: ${instance.rootPrefix ? `${instance.bucket}/${instance.rootPrefix}` : instance.bucket}`,
+      isVolume(instance) ? 'provider: a folder of the server (FS)' : `provider: ${String(instance.provider || '').toUpperCase()}`,
       permissionSummary(instance),
       ...factLines(instance),
       BB.usage?.selectorLine(BB.usage.cached(instance.id)) || null
@@ -476,8 +483,8 @@ BB.cfg = config;
   function permissionsGroup(instance, multiple) {
     return h('div', { class: 'storageSwitcher__permsGroup', onclick: passClick(multiple) },
       h('button', {
-        type: 'button', class: 'storageSwitcher__perms', 'aria-label': 'Permissions of this bucket',
-        title: `Permissions of this bucket: ${permissionSummary(instance)}`,
+        type: 'button', class: 'storageSwitcher__perms', 'aria-label': `Permissions of this ${storageNoun(instance)}`,
+        title: `Permissions of this ${storageNoun(instance)}: ${permissionSummary(instance)}`,
         onclick: event => { event.stopPropagation(); closeSwitcher(false); showPermissions(); }
       }, permissionDots(instance, { title: false })),
       h('span', { id: 'storageSwitcherVersioning', class: 'storageSwitcher__versioning' }));
@@ -505,7 +512,7 @@ BB.cfg = config;
             h('small', {}, state.loadError ? 'The list of buckets cannot be loaded' : 'No bucket is visible to you'))));
       } else if (!multiple) {
         root.replaceChildren(h('div', { class: 'storageSwitcher__trigger is-static', title: storageDetails(instance), 'aria-describedby': 'storageSwitcherVersioning storageSwitcherFacts' },
-          ic('database', 'storageSwitcher__icon'), switcherCopy(instance)), permissionsGroup(instance, false), switcherFacts(false));
+          ic(storageIcon(instance), 'storageSwitcher__icon'), switcherCopy(instance)), permissionsGroup(instance, false), switcherFacts(false));
       } else {
         const trigger = h('button', {
           type: 'button',
@@ -519,7 +526,7 @@ BB.cfg = config;
           onkeydown: event => {
             if (event.key === 'ArrowDown') { event.preventDefault(); openSwitcher(true); }
           }
-        }, ic('database', 'storageSwitcher__icon'), switcherCopy(instance), ic('chevron-down', 'storageSwitcher__chevron'));
+        }, ic(storageIcon(instance), 'storageSwitcher__icon'), switcherCopy(instance), ic('chevron-down', 'storageSwitcher__chevron'));
         const menu = h('div', {
           id: 'storageSwitcherMenu', class: 'storageSwitcher__menu', role: 'listbox', 'aria-label': 'Storage hosts and buckets', hidden: true,
           onclick: event => event.stopPropagation(),
@@ -549,9 +556,11 @@ BB.cfg = config;
               row.setAttribute('aria-expanded', String(open));
               list.hidden = !open;
             }
-          }, ic('chevron-right', 'storageHost__chevron'), ic('database'),
+          }, ic('chevron-right', 'storageHost__chevron'), ic(storageIcon(host)),
           h('span', { class: 'storageHost__copy' }, h('strong', {}, host.id),
-            h('small', {}, `${host.provider.toUpperCase()} · ${plural(host.instances.length, 'bucket')}`)));
+            h('small', {}, isVolume(host)
+              ? `Folders of the server · ${plural(host.instances.length, 'volume')}`
+              : `${host.provider.toUpperCase()} · ${plural(host.instances.length, 'bucket')}`)));
           return h('section', { class: 'storageHost', 'data-host': host.id }, row, list);
         }));
         root.replaceChildren(trigger, permissionsGroup(instance, true), switcherFacts(true), menu);
@@ -631,11 +640,11 @@ BB.cfg = config;
       type: 'button',
       class: 'crumb crumb--root',
       'aria-current': atRoot ? 'page' : null,
-      'aria-label': `${instance.name}, bucket root`,
+      'aria-label': `${instance.name}, ${storageNoun(instance)} root`,
       title: `Root of ${instance.name} (${where})`,
       'data-crumb': 'root',
       onclick: () => { if (!atRoot) goToPrefix(''); }
-    }, ic('database')), separator()];
+    }, ic(storageIcon(instance))), separator()];
 
     // A deep path keeps the root, a menu for the hidden parents, and the last CRUMB_EDGE folders.
     const hidden = list.length > CRUMB_EDGE + 1 ? list.slice(0, list.length - CRUMB_EDGE) : [];
@@ -672,7 +681,7 @@ BB.cfg = config;
     if (!state.isInitializing && !instance) title = state.loadError ? 'The buckets cannot be loaded' : 'No bucket';
     else if (instance) title = list.length ? list[list.length - 1].name : instance.name;
     // The heading is for screen readers: the crumbs show the place on the screen.
-    const heading = instance ? `${title}${list.length ? `, in ${instance.name}` : ', bucket root'}` : title;
+    const heading = instance ? `${title}${list.length ? `, in ${instance.name}` : `, ${storageNoun(instance)} root`}` : title;
     if (ui.title.textContent !== heading) ui.title.textContent = heading;
     document.title = instance ? `${title} - ${instance.name} - Object storage` : 'Object storage';
   }
@@ -744,7 +753,7 @@ BB.cfg = config;
     const remove = canDelete();
     if (write && remove) return null;
     const folder = state.folderAccess && (state.folderAccess.write === false || state.folderAccess.delete === false);
-    if (!write && !remove) return { text: 'Read only', title: folder ? 'The access policy lets you read this folder only.' : 'You can read this bucket but not change it.' };
+    if (!write && !remove) return { text: 'Read only', title: folder ? 'The access policy lets you read this folder only.' : `You can read this ${storageNoun(instance)} but not change it.` };
     if (!write) return { text: 'No upload', title: 'You cannot write in this folder.' };
     return { text: 'No delete', title: 'You cannot delete in this folder.' };
   }
@@ -757,7 +766,9 @@ BB.cfg = config;
     ui.actionsButton.disabled = !instance;
     ui.zipItem.disabled = !canDownloadAll();
     ui.insightsItem.disabled = !read || Boolean(state.listError);
-    ui.insightsItem.querySelector('span').textContent = state.pathPrefix ? 'Folder insights' : 'Bucket insights';
+    ui.insightsItem.querySelector('span').textContent = state.pathPrefix ? 'Folder insights' : `${capitalized(storageNoun(instance))} insights`;
+    ui.newFolderItem.hidden = !isVolume(instance);
+    ui.newFolderItem.disabled = !read || !canWrite() || Boolean(state.listError);
     ui.uploadWrap.hidden = !instance || !canWrite() || Boolean(state.listError);
     ui.folderTagsItem.hidden = state.tagsUnsupported;
     ui.folderTagsItem.querySelector('span').textContent = state.pathPrefix ? 'Tag this folder' : 'Tag this bucket';
@@ -773,7 +784,7 @@ BB.cfg = config;
       ui.accessBadge.title = badge.title;
     }
     const folderName = crumbs().slice(-1)[0]?.name;
-    const label = folderName ? `Open a prefix in ${folderName}` : 'Open a prefix in this bucket';
+    const label = folderName ? `Open a prefix in ${folderName}` : `Open a prefix in this ${storageNoun(instance)}`;
     if (ui.searchInput.placeholder !== label) {
       ui.searchInput.placeholder = label;
       ui.searchLabel.textContent = label;
@@ -839,7 +850,7 @@ BB.cfg = config;
           break;
         case 'error-forbidden':
           content = emptyBox('lock', 'You cannot open this folder', 'The access policy does not let you read it.',
-            state.pathPrefix && h('button', { type: 'button', class: 'button', onclick: () => goToPrefix('') }, ic('database'), 'Go to the bucket root'));
+            state.pathPrefix && h('button', { type: 'button', class: 'button', onclick: () => goToPrefix('') }, ic(storageIcon(currentInstance())), `Go to the ${storageNoun(currentInstance())} root`));
           break;
         case 'error-signin':
           // The notice at the top of the page gives the message and the "Reload" button.
@@ -1005,7 +1016,7 @@ BB.cfg = config;
       if (BB.usage.shown(usage)) {
         items.push(usageFact(usage));
       } else if (!usage && BB.usage.loading(instance.id)) {
-        items.push(h('span', { class: 'bucketFact bucketUsage is-loading', 'data-fact': 'usage', 'data-level': 'loading', title: 'Reading the usage of the bucket' }, '…'));
+        items.push(h('span', { class: 'bucketFact bucketUsage is-loading', 'data-fact': 'usage', 'data-level': 'loading', title: `Reading the usage of the ${storageNoun(instance)}` }, '…'));
       } else if (usage?.supported === true && trigger) {
         // A failed read shows no number: the tooltip says why. A bucket of the menu shows nothing.
         const node = bucketFact('usage', 'database', 'Usage unavailable', BB.usage.title(usage), { tone: 'muted' });
@@ -1209,7 +1220,23 @@ BB.cfg = config;
     }, ic('git-commit'), row.versionCount.toLocaleString('en-US'));
   }
 
+  // An entry of a volume that the server does not read: no link, no size, no action, and a tooltip that says why.
+  function buildUnreadableRow(row) {
+    const reason = 'S3-Browser does not read this entry: it is a symbolic link that leaves the volume or that does not resolve, or it is not a regular file.';
+    const tr = h('tr', { 'data-name': row.name, 'data-type': row.type, 'data-unreadable': 'true', class: 'is-unreadable' },
+      h('td', {}, h('div', { class: 'nameCell is-unreadable', title: reason },
+        ic('ban'), h('span', { class: 'nameText' }, row.name), h('span', { class: 'visually-hidden' }, ` (${reason})`))),
+      h('td', { class: 'col-tags' }),
+      h('td', { class: 'col-versions' }),
+      h('td', { class: 'num col-size' }),
+      h('td', { class: 'col-modified' }),
+      h('td', { class: 'col-menu' }));
+    row.element = tr;
+    return tr;
+  }
+
   function buildRow(row) {
+    if (row.unreadable) return buildUnreadableRow(row);
     const isContent = row.type === 'content';
     const name = h('div', { class: ['nameCell', !isContent && 'is-folder'] },
       isContent ? mdi(fileIcon(row)) : ic('folder'),
@@ -1343,6 +1370,8 @@ BB.cfg = config;
     // The server reads the default encryption of the bucket at start: the details show it only when the read worked.
     config.bucketEncryptionSupported = instance.bucketEncryptionSupported === true;
     config.rootPrefix = instance.rootPrefix || '';
+    // The provider: "fs" for a volume. The windows of the Actions menu use its words.
+    config.provider = String(instance.provider || '');
     // The facts of the bucket in the selector: the versioning, the lifecycle rules and the usage of the bucket.
     loadStatus(instance);
   }
@@ -1517,6 +1546,8 @@ BB.cfg = config;
           dateModified: item.lastModified ? new Date(item.lastModified) : null,
           contentType: item.contentType || '',
           etag: item.etag || '',
+          // An entry of a volume that the server does not read: a link that leaves the volume, or not a regular file.
+          unreadable: item.unreadable === true,
           versionCount: null
         };
       }).filter(row => !config.keyExcludePatterns.some(pattern => pattern.test(String((row.type === 'prefix' ? row.prefix : row.key) || ''))));
@@ -1636,6 +1667,7 @@ BB.cfg = config;
     ui.settingsMenu.querySelector('#uploadTagsSetting').hidden = state.tagsUnsupported;
     ui.settingsMenu.querySelector('#uploadTagsSeparator').hidden = state.tagsUnsupported;
     ui.encryptionToggle.checked = marksShown();
+    ui.settingsMenu.querySelector('#encryptionSetting').hidden = isVolume(currentInstance());
   }
 
   // The tags of the new uploads: saved when the field changes, with the reason when a tag is wrong.
@@ -1734,7 +1766,8 @@ BB.cfg = config;
   // A listing does not give the encryption or the lock of a file: the page reads both from one HEAD request for the
   // files on the page, as for the tags. The setting "Encryption and lock" is on for each bucket, until the person sets
   // it off for the bucket. The saved choice of each bucket keeps its old name (encryption).
-  const marksShown = () => state.encryptionChoice[state.instanceId] !== false;
+  // A volume has no encryption and no Object Lock of S3: its files get no mark and no HEAD request.
+  const marksShown = () => !isVolume(currentInstance()) && state.encryptionChoice[state.instanceId] !== false;
 
   // The answers stay for the ETag and the date of the file: a new listing does not read an unchanged file again. A
   // change of the lock keeps the ETag and the date: the event of the change removes the answers of the file.
@@ -1821,7 +1854,7 @@ BB.cfg = config;
   }
 
   function openPreview(row) {
-    if (!canRead()) return;
+    if (!canRead() || row.unreadable) return;
     window.location.href = BB.api.previewPageURL(row.key, { instance: state.instanceId });
   }
 
@@ -1840,6 +1873,32 @@ BB.cfg = config;
   async function onPrefixCopy(row) { if (await BB.actions.copyPrefix(row.prefix)) await refreshAfterChange(); }
   async function onPrefixRename(row) { if (await BB.actions.renamePrefix(row.prefix)) await refreshAfterChange(); }
   async function onPrefixDelete(row) { if (await BB.actions.deletePrefix(row.prefix)) await refreshAfterChange(); }
+
+  // A new folder of a volume: a real folder of the server, in the listed folder. The name is one part of a path. The
+  // server checks the name again.
+  async function makeFolder() {
+    if (!canWrite() || !isVolume(currentInstance())) return;
+    const where = state.pathPrefix ? `the folder ${state.pathPrefix}` : 'the root of the volume';
+    const value = await BB.ui.prompt({ title: 'New folder', message: `The name of the new folder in ${where}.`, defaultValue: '' });
+    if (value === null) return;
+    const name = value.trim();
+    let problem = '';
+    if (!name) problem = 'The name is empty.';
+    else if (name.includes('/')) problem = 'A name cannot have a "/".';
+    else if (name === '.' || name === '..') problem = 'The name cannot be "." or "..".';
+    else if (name.startsWith('.s3b-tmp-')) problem = 'The names that start with ".s3b-tmp-" are for the temporary files of S3-Browser.';
+    if (problem) {
+      BB.ui.toast(`The folder is not made. ${problem}`, { status: 'error', duration: 6500 });
+      return;
+    }
+    try {
+      await BB.api.putBlob(`${state.pathPrefix}${name}/`, new Blob([]), 'application/x-directory', { instance: state.instanceId });
+      BB.ui.toast(`The folder ${name} is made.`, { duration: 4000 });
+      await refreshAfterChange();
+    } catch (error) {
+      BB.ui.toast(`The folder is not made: ${String(error?.message || error)}`, { status: 'error', duration: 6500 });
+    }
+  }
 
   // A change of the objects: the listing, and later the usage of the bucket.
   function refreshAfterChange() {
@@ -1891,9 +1950,9 @@ BB.cfg = config;
     }).join('');
     const provider = Array.from(caps.permissions || []).map(String).join(', ') || 'not reported';
     await BB.ui.alert({
-      title: 'Bucket permissions',
+      title: `${capitalized(storageNoun(instance))} permissions`,
       html: `<div class="permissions">
-        <p class="part__lede">${escapeHTML(instance.name)}: bucket <code>${escapeHTML(instance.bucket)}</code> on <code>${escapeHTML(instance.host)}</code>.
+        <p class="part__lede">${escapeHTML(instance.name)}: ${storageNoun(instance)} <code>${escapeHTML(instance.bucket)}</code> on <code>${escapeHTML(instance.host)}</code>.
         The page hides what you cannot do. The server checks each request again.</p>
         <ul class="permList">${rows}</ul>
         <p class="part__lede">Permissions of the configuration: <code>${escapeHTML(provider)}</code>.</p>
@@ -2058,6 +2117,7 @@ BB.cfg = config;
       insightsItem: 'insightsItem', accessBadge: 'accessBadge', uploadWrap: 'uploadWrap',
       uploadButton: 'uploadButton', uploadMenu: 'uploadMenu', uploadFilesItem: 'uploadFilesItem',
       uploadFolderItem: 'uploadFolderItem', uploadTagsInput: 'uploadTagsInput', uploadTagsMessage: 'uploadTagsMessage', folderTagsItem: 'folderTagsItem', multipartsItem: 'multipartsItem',
+      newFolderItem: 'newFolderItem',
       tagFilterWrap: 'tagFilterWrap', settingsButton: 'settingsButton', settingsMenu: 'settingsMenu', settingsReset: 'settingsReset',
       tagFilterToggle: 'tagFilterToggle', encryptionToggle: 'encryptionToggle', tagFilter: 'tagFilter', tagStatus: 'tagStatus', listing: 'listing', dropOverlay: 'dropOverlay', dropTarget: 'dropTarget',
       uploadDock: 'uploadDock', fileInput: 'fileInput', dirInput: 'dirInput'
@@ -2084,6 +2144,7 @@ BB.cfg = config;
     ui.settingsMenu.addEventListener('change', onSettingsChange);
     ui.folderTagsItem.addEventListener('click', () => { if (canWrite()) void tagFolder(state.pathPrefix); });
     ui.multipartsItem.addEventListener('click', () => { if (canRead()) BB.multiparts.open({ prefix: state.pathPrefix, canWrite: canWrite() }); });
+    ui.newFolderItem.addEventListener('click', () => { void makeFolder(); });
     ui.tagFilter.addEventListener('input', () => { state.tagFilter = ui.tagFilter.value; applyTagFilter(); });
     document.addEventListener('bb:tags-changed', event => forgetTags(event.detail?.key));
     // A save of the metadata changes the date and the versions of the object: the listing reads them again.
