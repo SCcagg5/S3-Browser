@@ -781,8 +781,16 @@ func (m *jobManager) execute(ctx context.Context, job *jobState) error {
 				return err
 			}
 		}
-		return m.runObjectJob(ctx, job, instance, func(ctx context.Context, object objectInfo, relative string) error {
+		err := m.runObjectJob(ctx, job, instance, func(ctx context.Context, object objectInfo, relative string) error {
 			destination := job.Target + strings.TrimPrefix(relative, job.Source)
+			if instance.movesObjects() {
+				// A volume moves each file with one rename.
+				if err := instance.Move(ctx, instance.fullKey(relative), instance.fullKey(destination)); err != nil {
+					return err
+				}
+				job.CopiedBytes += object.Size
+				return nil
+			}
 			if err := m.copyCounted(ctx, job, instance, relative, destination, object.Size); err != nil {
 				return err
 			}
@@ -795,6 +803,11 @@ func (m *jobManager) execute(ctx context.Context, job *jobState) error {
 			}
 			return nil
 		})
+		if err != nil {
+			return err
+		}
+		// A volume keeps the folders of the moved files: the move removes the folders that it emptied.
+		return instance.removeEmptyFolders(ctx, instance.fullKey(job.Source))
 	case jobTypeCopyObject, jobTypeMoveObject:
 		permissions := []string{permissionRead, permissionWrite}
 		if job.Type == jobTypeMoveObject {
@@ -812,7 +825,11 @@ func (m *jobManager) execute(ctx context.Context, job *jobState) error {
 				return err
 			}
 		}
-		return m.runDeleteJob(ctx, job, instance)
+		if err := m.runDeleteJob(ctx, job, instance); err != nil {
+			return err
+		}
+		// A volume keeps the folders of the deleted files: the delete of a folder removes them.
+		return instance.removeEmptyFolders(ctx, instance.fullKey(job.Prefix))
 	case jobTypeTagPrefix:
 		for _, permission := range []string{permissionRead, permissionWrite} {
 			if err := requirePermission(instance, permission); err != nil {

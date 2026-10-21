@@ -803,6 +803,10 @@ func (a *application) startLargeCopy(ctx context.Context, instance *storageInsta
 	if _, ok := instance.backend.(ObjectMultipartCopier); !ok {
 		return jobState{}, false, nil
 	}
+	if move && instance.movesObjects() {
+		// One rename moves the object: no job.
+		return jobState{}, false, nil
+	}
 	source, target = cleanRelativeKey(source), cleanRelativeKey(target)
 	if source == "" || target == "" || source == target {
 		// copyOrMove gives the error.
@@ -847,6 +851,12 @@ func copyOrMove(ctx context.Context, instance *storageInstance, source, target s
 	}
 
 	if !isPrefix {
+		if move && instance.movesObjects() {
+			if err := instance.Move(ctx, instance.fullKey(source), instance.fullKey(target)); err != nil {
+				return 0, err
+			}
+			return 1, nil
+		}
 		if err := instance.Copy(ctx, instance.fullKey(source), instance.fullKey(target)); err != nil {
 			return 0, err
 		}
@@ -872,6 +882,16 @@ func copyOrMove(ctx context.Context, instance *storageInstance, source, target s
 		return 0, apiError{Status: http.StatusNotFound, Code: "empty_prefix", Message: "source prefix contains no objects"}
 	}
 	copied := 0
+	if move && instance.movesObjects() {
+		for _, key := range keys {
+			destination := target + strings.TrimPrefix(key, source)
+			if err := instance.Move(ctx, instance.fullKey(key), instance.fullKey(destination)); err != nil {
+				return copied, fmt.Errorf("move %q to %q after %d object(s): %w", key, destination, copied, err)
+			}
+			copied++
+		}
+		return copied, instance.removeEmptyFolders(ctx, instance.fullKey(source))
+	}
 	for index, key := range keys {
 		relativeSuffix := strings.TrimPrefix(key, source)
 		destination := target + relativeSuffix

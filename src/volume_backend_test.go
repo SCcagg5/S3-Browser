@@ -398,7 +398,7 @@ func TestVolumeInstanceHidesTheFeaturesOfS3(t *testing.T) {
 	for name, want := range map[string]any{
 		"id": "vol", "host": volumeHostID, "provider": providerVolume, "versioningSupported": false, "tagsSupported": false,
 		"metadataEditSupported": false, "lifecycleSupported": false, "objectLockSupported": false,
-		"bucketEncryptionSupported": false, "multipartUploadsSupported": false, "usageSupported": volumeUsageSupported,
+		"bucketEncryptionSupported": false, "multipartUploadsSupported": true, "usageSupported": volumeUsageSupported,
 		"versioningState": "off",
 	} {
 		if info[name] != want {

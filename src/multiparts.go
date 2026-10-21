@@ -55,6 +55,12 @@ type MultipartUploadLister interface {
 	MultipartUploadParts(ctx context.Context, key, uploadID string, maximum int) (multipartPartsSummary, error)
 }
 
+// IncompleteUploadRemover is optional: a backend without S3 multipart uploads that removes one incomplete upload of its
+// list. A volume removes the temporary file of the upload.
+type IncompleteUploadRemover interface {
+	RemoveIncompleteUpload(ctx context.Context, key, uploadID string) error
+}
+
 // multipartUpload is one incomplete upload with the full key of the provider. Initiated is zero when the provider
 // gives no date.
 type multipartUpload struct {
@@ -209,7 +215,8 @@ func (s *storageInstance) multipartUploadsAvailable() bool {
 // failure (denied, timeout) leaves the answer at yes. An instance without the read permission is not probed.
 func (s *storageInstance) probeMultipartUploads(ctx context.Context) {
 	lister, ok := s.backend.(MultipartUploadLister)
-	if !ok || !s.permitted(permissionRead) {
+	// A volume always lists its temporary files, and the probe would read its tree at start.
+	if !ok || !s.permitted(permissionRead) || s.cfg.Provider == providerVolume {
 		return
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -297,8 +304,15 @@ func (m *uploadManager) activeProviderUploads(instance string) map[string]bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	for _, upload := range m.uploads {
-		if upload.Instance == instance && upload.Status == uploadStatusUploading && upload.ProviderUploadID != "" {
+		if upload.Instance != instance || upload.Status != uploadStatusUploading {
+			continue
+		}
+		switch {
+		case upload.ProviderUploadID != "":
 			active[upload.ProviderUploadID] = true
+		case upload.Provider == providerVolume && upload.SessionURL != "":
+			// The list of a volume gives the name of the temporary file as the upload id.
+			active[volumeSessionUploadID(upload.SessionURL)] = true
 		}
 	}
 	return active

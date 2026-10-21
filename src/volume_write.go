@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"syscall"
 )
 
 // The writes of a volume. Each write of a file goes to a temporary file in the folder of the target, is synchronized
@@ -236,10 +237,20 @@ func isVolumeFolderNotEmpty(err error) bool {
 // Copy copies a file to a temporary file, then gives it the name of the destination. A folder key copies to a new
 // empty folder.
 func (b *volumeBackend) Copy(ctx context.Context, source, destination string) error {
-	return b.copyFile(ctx, source, destination)
+	return b.copyFile(ctx, source, destination, nil)
 }
 
-func (b *volumeBackend) copyFile(ctx context.Context, source, destination string) error {
+// CopyMultipart copies a large file with the same stream as Copy, and gives the progress of the copy. A volume has no
+// versions, no metadata and no tags: an option that names them is refused. It lets the jobs of S3-Browser copy a large
+// file with progress and cancel.
+func (b *volumeBackend) CopyMultipart(ctx context.Context, source, destination string, options multipartCopyOptions) error {
+	if options.SourceVersion != "" || options.SourceETag != "" || options.ReplaceMetadata || options.ReplaceTags || len(options.ExtraHeaders) > 0 {
+		return apiError{Status: http.StatusNotImplemented, Code: "volume_unsupported", Message: "a volume has no versions, no metadata and no tags"}
+	}
+	return b.copyFile(ctx, source, destination, options.Progress)
+}
+
+func (b *volumeBackend) copyFile(ctx context.Context, source, destination string, progress func(int64)) error {
 	from, err := b.parse(source, false)
 	if err != nil {
 		return err
@@ -270,5 +281,155 @@ func (b *volumeBackend) copyFile(ctx context.Context, source, destination string
 	if target == real {
 		return nil
 	}
-	return b.writeFile(ctx, target, file, object.Size, nil, false)
+	reader := io.Reader(file)
+	if progress != nil {
+		reader = &volumeProgressReader{reader: file, report: progress}
+	}
+	err = b.writeFile(ctx, target, reader, object.Size, nil, false)
+	if counter, ok := reader.(*volumeProgressReader); ok && err == nil {
+		counter.flush()
+	}
+	return err
+}
+
+// volumeProgressReader reports the bytes that a copy read, each volumeCopyProgressStep bytes.
+type volumeProgressReader struct {
+	reader  io.Reader
+	report  func(int64)
+	pending int64
+}
+
+func (r *volumeProgressReader) Read(buffer []byte) (int, error) {
+	count, err := r.reader.Read(buffer)
+	r.pending += int64(count)
+	if r.pending >= volumeCopyProgressStep {
+		r.flush()
+	}
+	return count, err
+}
+
+func (r *volumeProgressReader) flush() {
+	if r.pending > 0 {
+		r.report(r.pending)
+		r.pending = 0
+	}
+}
+
+// Move gives a file the name of the destination with one rename. A rename to an other file system (EXDEV), and the
+// move of a symbolic link, copy the content and remove the source. A folder key makes the destination folder and
+// removes the source folder when it is empty.
+func (b *volumeBackend) Move(ctx context.Context, source, destination string) error {
+	from, err := b.parse(source, true)
+	if err != nil {
+		return err
+	}
+	to, err := b.parse(destination, true)
+	if err != nil {
+		return err
+	}
+	if from.folder != to.folder || len(from.parts) == 0 {
+		return invalidVolumeKey("a move goes from a folder to a folder, or from a file to a file")
+	}
+	if from.folder {
+		if _, _, err := b.stat(source); err != nil {
+			return err
+		}
+		if err := b.makeFolder(to); err != nil {
+			return err
+		}
+		return b.Delete(ctx, source)
+	}
+	folder, err := b.resolveFolder(from.parent(), false)
+	if err != nil {
+		return err
+	}
+	entry := filepath.Join(folder, from.name())
+	info, err := os.Lstat(entry)
+	if err != nil {
+		return volumeError(err)
+	}
+	if !info.Mode().IsRegular() {
+		if err := b.copyFile(ctx, source, destination, nil); err != nil {
+			return err
+		}
+		return b.Delete(ctx, source)
+	}
+	target, err := b.writeTarget(to)
+	if err != nil {
+		return err
+	}
+	if target == entry {
+		return nil
+	}
+	if err := os.Rename(entry, target); err != nil {
+		var errno syscall.Errno
+		if errors.As(err, &errno) && errno == syscall.EXDEV {
+			if err := b.copyFile(ctx, source, destination, nil); err != nil {
+				return err
+			}
+			return b.Delete(ctx, source)
+		}
+		return volumeError(err)
+	}
+	syncFolder(folder)
+	syncFolder(filepath.Dir(target))
+	return nil
+}
+
+// RemoveEmptyFolders removes the folder of prefix and each folder below it that has no file, from the bottom. A folder
+// with a file stays: a delete of the folders never removes a file. The root of the volume stays.
+func (b *volumeBackend) RemoveEmptyFolders(ctx context.Context, full string) error {
+	key, err := b.parse(full, false)
+	if err != nil {
+		return err
+	}
+	if !key.folder || len(key.parts) == 0 {
+		return nil
+	}
+	folder, err := b.resolveFolder(key.parent(), false)
+	if isStorageNotFound(err) || isVolumeNotFolder(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	real := filepath.Join(folder, key.name())
+	info, err := os.Lstat(real)
+	if err != nil || !info.IsDir() {
+		return nil
+	}
+	return removeEmptyTree(ctx, real)
+}
+
+func removeEmptyTree(ctx context.Context, real string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(real)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return volumeError(err)
+	}
+	for _, entry := range entries {
+		if entry.Type().IsDir() {
+			if err := removeEmptyTree(ctx, filepath.Join(real, entry.Name())); err != nil {
+				return err
+			}
+		}
+	}
+	if err := os.Remove(real); err != nil {
+		mapped := volumeError(err)
+		if isVolumeFolderNotEmpty(mapped) || isStorageNotFound(mapped) {
+			return nil
+		}
+		var errno syscall.Errno
+		if errors.As(err, &errno) && errno == syscall.EEXIST {
+			return nil
+		}
+		return mapped
+	}
+	syncFolder(filepath.Dir(real))
+	return nil
 }

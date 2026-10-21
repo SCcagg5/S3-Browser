@@ -470,7 +470,7 @@ func (m *uploadManager) create(ctx context.Context, request createUploadRequest)
 			return uploadSession{}, err
 		}
 		upload.ProviderUploadID = uploadID
-	case "gcs":
+	case "gcs", providerVolume:
 		sessionURL, err := instance.InitiateResumable(ctx, fullKey, request.Size, contentType)
 		if err != nil {
 			return uploadSession{}, err
@@ -540,7 +540,7 @@ func (m *uploadManager) abortProvider(ctx context.Context, instance *storageInst
 			return nil
 		}
 		return instance.AbortMultipart(ctx, instance.fullKey(upload.Key), upload.ProviderUploadID)
-	case "gcs":
+	case "gcs", providerVolume:
 		if upload.SessionURL == "" {
 			return nil
 		}
@@ -614,7 +614,7 @@ func (m *uploadManager) uploadChunk(ctx context.Context, id string, request *htt
 
 	if start != upload.UploadedBytes {
 		switch upload.Provider {
-		case "gcs":
+		case "gcs", providerVolume:
 			if err := m.synchronizeGCSOffset(ctx, instance, &upload); err != nil {
 				return uploadSession{}, err
 			}
@@ -682,7 +682,7 @@ func (m *uploadManager) uploadChunk(ctx context.Context, id string, request *htt
 				return uploadSession{}, err
 			}
 		}
-	case "gcs":
+	case "gcs", providerVolume:
 		next, complete, err := instance.UploadResumableChunk(ctx, upload.SessionURL, body, start, size, total, upload.ContentType)
 		if err != nil {
 			upload.Error = publicStorageError(err)
@@ -870,7 +870,7 @@ func (m *uploadManager) status(ctx context.Context, id string) (uploadSession, e
 	}
 	if upload.Status == uploadStatusUploading {
 		switch upload.Provider {
-		case "gcs":
+		case "gcs", providerVolume:
 			if err := m.synchronizeGCSOffset(ctx, instance, &upload); err != nil {
 				// Preserve the last in-memory offset when the provider is temporarily unavailable.
 				upload.Error = publicStorageError(err)

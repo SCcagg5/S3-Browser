@@ -423,6 +423,49 @@ func (s *storageInstance) Copy(ctx context.Context, source, destination string) 
 	return err
 }
 
+// movesObjects tells if the backend moves an object with one rename.
+func (s *storageInstance) movesObjects() bool {
+	_, ok := s.backend.(ObjectMover)
+	return ok
+}
+
+// Move moves one object with one rename. The caller checks movesObjects first.
+func (s *storageInstance) Move(ctx context.Context, source, destination string) error {
+	mover, ok := s.backend.(ObjectMover)
+	if !ok {
+		return apiError{Status: http.StatusNotImplemented, Code: "move_unsupported", Message: "this storage provider does not move objects with a rename"}
+	}
+	release, err := s.beginStorageRequest(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	err = mover.Move(ctx, source, destination)
+	if err == nil {
+		for _, permission := range []string{permissionRead, permissionWrite, permissionDelete} {
+			s.observePermission(permission, nil)
+		}
+	} else {
+		s.observePermission(permissionWrite, err)
+	}
+	return err
+}
+
+// removeEmptyFolders removes the folders under prefix (a full key) that have no file, for a backend with real folders.
+// Other backends have no folders: it does nothing.
+func (s *storageInstance) removeEmptyFolders(ctx context.Context, prefix string) error {
+	remover, ok := s.backend.(FolderRemover)
+	if !ok {
+		return nil
+	}
+	release, err := s.beginStorageRequest(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	return remover.RemoveEmptyFolders(ctx, prefix)
+}
+
 // CopySized copies one object whose size the caller knows. From multipartCopyThreshold up, a backend that copies in
 // parts gets a copy in parts. Other copies are one CopyObject request. Progress receives the size of each copied part.
 func (s *storageInstance) CopySized(ctx context.Context, source, destination string, size int64, progress func(int64)) error {
@@ -517,6 +560,16 @@ func (s *storageInstance) CompleteMultipart(ctx context.Context, key, uploadID s
 }
 
 func (s *storageInstance) AbortMultipart(ctx context.Context, key, uploadID string) error {
+	if remover, ok := s.backend.(IncompleteUploadRemover); ok {
+		release, err := s.beginStorageRequest(ctx)
+		if err != nil {
+			return err
+		}
+		defer release()
+		err = remover.RemoveIncompleteUpload(ctx, key, uploadID)
+		s.observePermission(permissionWrite, err)
+		return err
+	}
 	backend, ok := s.backend.(s3MultipartAPI)
 	if !ok {
 		return errors.New("s3 backend does not support multipart uploads")

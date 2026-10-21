@@ -265,6 +265,19 @@ type ObjectMultipartCopier interface {
 type ObjectCopier interface {
 	Copy(context.Context, string, string) error
 }
+
+// ObjectMover is optional: a backend that moves an object with one rename (a volume). Without it, a move is a copy and
+// a delete.
+type ObjectMover interface {
+	Move(context.Context, string, string) error
+}
+
+// FolderRemover is optional: a backend with real folders (a volume). After a delete or a move of a folder, it removes
+// the folders that have no file.
+type FolderRemover interface {
+	RemoveEmptyFolders(context.Context, string) error
+}
+
 type CapabilityDiscoverer interface {
 	DiscoverCapabilities(context.Context) (discoveredCapabilities, error)
 }
