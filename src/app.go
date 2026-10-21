@@ -145,6 +145,11 @@ func (a *application) probeVersioningSupport() {
 			defer wg.Done()
 			instance.probeBucketEncryption(ctx)
 		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			instance.probeUsage(ctx)
+		}()
 	}
 	wg.Wait()
 }
@@ -188,6 +193,7 @@ func (a *application) routes() http.Handler {
 	mux.HandleFunc("/api/metadata", a.handleMetadata)
 	mux.HandleFunc("/api/lifecycle", a.handleLifecycle)
 	mux.HandleFunc("/api/encryption", a.handleEncryption)
+	mux.HandleFunc("/api/usage", a.handleUsage)
 	mux.HandleFunc("/api/object-lock", a.handleObjectLock)
 	mux.HandleFunc("/api/multiparts", a.handleMultiparts)
 	mux.HandleFunc("/api/multiparts/abort", a.handleMultipartAbort)

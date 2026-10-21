@@ -186,7 +186,8 @@
   // Tags section of the file details
   // ---------------------------------------------------------------------------------------------------------------
 
-  async function mountEditor(host, { key, size = 0, instance = null, version = '', canWrite = false, rootPrefix = '' }) {
+  // onState gets the saved tags after the read and after each save (the summary of the details counts them).
+  async function mountEditor(host, { key, size = 0, instance = null, version = '', canWrite = false, rootPrefix = '', onState = null }) {
     const editButton = h('button', { type: 'button', class: 'iconButton detailsEditButton', 'data-tag-edit': '', title: 'Edit the tags', 'aria-label': 'Edit the tags', 'aria-pressed': 'false', hidden: true }, icon('pencil-outline'));
     const body = h('div', { class: 'tagEditor' }, h('span', { class: 'tagEditor__state' }, 'Loading the tags…'));
     host.replaceChildren(h('div', { class: 'bb-details-section-title' }, icon('tag-multiple-outline'), ' Tags', editButton), body);
@@ -196,6 +197,7 @@
       const response = await BB.api.tags(key, { instance, version });
       saved = response.tags || [];
       limit = Number(response.maxTags) || MAX_TAGS;
+      if (onState) onState(saved);
     } catch (error) {
       if (error?.status === 501 || error?.code === 'tagging_unsupported') {
         host.remove();
@@ -281,6 +283,7 @@
         draft = saved.map(tag => ({ ...tag }));
         editing = false;
         say('The tags are saved.', 'ok');
+        if (onState) onState(saved);
         document.dispatchEvent(new CustomEvent('bb:tags-changed', { detail: { key } }));
       } catch (error) {
         say(error?.status === 403 ? 'You cannot change the tags of this object.' : `The tags are not saved: ${error?.message || error}`, 'error');

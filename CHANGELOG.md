@@ -160,6 +160,40 @@ This document uses ASD-STE100 Simplified Technical English.
   the client (SSE-C). The browser cannot read it without that key." The title was "Loading" and the message
   "HTTP 400". The link to the original and the downloads give the same message.
 
+### Usage and quota of a bucket
+
+- New optional block `usage` in an `s3` auth block: `source` (`garage`, `seaweedfs` or `minio`), `endpoint`,
+  `filer_endpoint` (SeaweedFS only) and the secret `token` (Garage only, `token_env` or `token_file`). The server never
+  guesses the source. A key of another source, a `usage` block in a `gcs` auth block, and `minio` with the mode
+  `anonymous` stop the start. `print-config` shows the URLs and hides the token. Refer to the section "Usage and quota
+  of a bucket" of [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+- New key `quota_bytes` of the `bucket` block: a size limit that the interface shows when the provider gives no
+  limit. It needs a `usage` block in the auth block. The server does not enforce it.
+- New route `GET /api/usage` (action `objects.read`): the used bytes, the objects, the limit, the used part and its
+  level (`ok`, `warning` from 80 %, `error` from 95 %). The numbers are for the whole bucket. A failed read answers
+  `200` with `available: false` and the reason. `/api/instances` gives `usageSupported`.
+- The readers: the admin API v2 of Garage (`GetBucketInfo`, with the admin token), the master and the filer of SeaweedFS
+  (the sizes of the volumes and the quota of the bucket), and the admin API of MinIO (`get-bucket-quota` and
+  `datausageinfo`, signed with the S3 credentials). The numbers of SeaweedFS and MinIO are approximate. AWS S3 has no
+  quota: give no block.
+- Each admin request is a `GET` with a time limit of 5 seconds and a size limit for its answer. The server keeps the
+  result of each instance for 60 seconds (a failure for 10 seconds), and one read at a time runs for an instance. The
+  token and the URLs of the admin API never go into an answer or into a log line.
+
+### Interface `portal`: status line and summary of the details
+
+- The listing has a status line at the right of its totals: `Versioning`, `Encrypted: SSE-S3` (a key), `Object Lock`
+  (a padlock, with the default retention), `N lifecycle rules` (a click opens the rules) and the usage, for example
+  `12.3 GB of 20 GB` with a thin bar or `12.3 GB used`. Each piece has a tooltip and shows only when its fact is true.
+  An approximate number starts with `~`. The bar has the colour of a warning from 80 % and of an error from 95 %.
+- The page reads the usage when a bucket opens, after a change of the objects, and after a click on the reload icon. A
+  failed read shows no number: the tooltip of the totals gives the reason.
+- The tooltip of each bucket in the bucket selector has its usage.
+- The details of a file start with a strip of pills: the version (`v5 of 5`), the encryption, the lock and the number
+  of tags. A click on a pill opens its section, or the version picker. The sections other than "Storage object" and
+  "Tags" start closed. A chevron button opens and closes each section, with the mouse or the keyboard. The browser
+  keeps the choice of each section.
+
 ### Uploads and deletes
 
 - An S3 upload can carry a SHA-256 checksum. The browser computes the digest of each chunk. The provider refuses a part
@@ -207,6 +241,13 @@ This document uses ASD-STE100 Simplified Technical English.
   1366x768 and 1280x720.
 - A test opens the popover of suggestions of the metadata editor, and chooses a value with the mouse and with the
   keyboard. It also types a free value.
+- The test stack gives the bucket `default` of each provider a quota of 20 GiB (Garage also 100000 objects): the
+  entrypoints of Garage (admin token in `test/secrets/garage_admin_token`), SeaweedFS (`s3.bucket.quota`) and MinIO
+  (`set-bucket-quota`). The Garage admin API listens on the network of the stack. `config.hcl` has a `usage` block in
+  each auth block, and `seaweedfs-archive` has `quota_bytes`. The browser tests check the status line on each provider,
+  a bucket with no quota, the limit of `quota_bytes`, an instance without usage, a failed read, the growth of the
+  usage after an upload on Garage and SeaweedFS, the tooltips of the selector, the pills of the details and the
+  sections that close with the keyboard.
 - The test image takes the build arguments `MULTIPART_COPY_THRESHOLD` and `MULTIPART_COPY_PART_SIZE`. The portal test
   stack copies in parts from 8 KiB up, in parts of 5 MiB. A browser test copies and renames a file of 11 MiB on each
   provider and compares the SHA-256 of the result. A second test restores a large version on SeaweedFS and MinIO.

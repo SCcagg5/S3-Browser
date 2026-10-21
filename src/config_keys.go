@@ -43,6 +43,7 @@ type configBlock struct {
 var configBlocks = []configBlock{
 	{"server", "server { ... }", "Zero or one block. The listener, the logs and the limits of the process."},
 	{"auth", `auth "<id>" { ... }`, "One or more blocks. A credential set and an endpoint that one or more buckets use."},
+	{"auth.usage", `auth "<id>" { usage { ... } }`, "Zero or one block in an auth block with provider \"s3\". The admin API that gives the usage and the quota of the buckets of the auth block (docs/ARCHITECTURE.md, \"Usage and quota of a bucket\"). Without it, the interface shows no usage and no quota."},
 	{"bucket", `bucket "<id>" { ... }`, "One or more blocks. One bucket that the browser shows. The label is the id of the bucket for the URL and for the access policy."},
 	{"access", "access { ... }", "Exactly one block. It is mandatory. The access of humans: `open` or `authzen` (docs/ACCESS.md)."},
 	{"access.identity", "access { identity { ... } }", "Exactly one block with `mode = \"authzen\"`. None with `mode = \"open\"`. The identity token of the access gateway."},
@@ -78,6 +79,11 @@ var configKeys = []configKey{
 	{"auth", "credentials_file", "file path", "(none)", "gcs service_account mode only", formValue, false, "The JSON file of a GCS service account. A relative path starts at the directory of the configuration file."},
 	{"auth", "insecure_skip_verify", "boolean", "false", "", formValue, false, "Do not verify the TLS certificate of the provider. Use it only for a test."},
 
+	{"auth.usage", "source", "text", "(required)", "garage, seaweedfs or minio, exact (lower case)", formValue, false, "The reader of the usage and of the quota. The server never guesses it from the provider."},
+	{"auth.usage", "endpoint", "URL", "garage: (required), the admin API. seaweedfs: (required), the master. minio: the endpoint of the auth block", "http or https, without credentials, query or fragment, and without a \"/\" at the end", formValue, false, "The base URL of the admin API. print-config and the effective configuration in the log show it. The answers of the server and the error messages never show it."},
+	{"auth.usage", "filer_endpoint", "URL", "seaweedfs: (required). Other sources: (none)", "seaweedfs only. http or https, without credentials, query or fragment, and without a \"/\" at the end", formValue, false, "The base URL of the filer of SeaweedFS. The filer gives the quota of a bucket."},
+	{"auth.usage", "token", "text", "garage: (required). Other sources: (none)", "garage only; 1 to 4096 bytes, no space and no control character", formEnv | formFile, true, "The admin token of Garage. It is a secret: the form in clear text stops the start. minio signs with the S3 credentials of the auth block. seaweedfs sends no credential."},
+
 	{"bucket", "name", "text", "the label of the block", "", formValue, false, "The name that the user interface shows."},
 	{"bucket", "auth", "text", "(required)", "the label of an auth block", formValue, false, "The auth block that this bucket uses."},
 	{"bucket", "bucket", "text", "(required)", "", formValue, false, "The name of the bucket at the provider."},
@@ -85,6 +91,7 @@ var configKeys = []configKey{
 	{"bucket", "root_prefix", "text", `""`, "\"\", or a prefix that ends with \"/\" and does not start with \"/\"", formValue, false, "The part of the bucket that the browser shows. The keys are relative to it."},
 	{"bucket", "max_scan_pages", "integer", "1", "0 to 1000000", formValue, false, "The 1000-entry provider pages that one listing combines. 0 = no limit."},
 	{"bucket", "encryption", "text", `""`, "\"\" or sse-s3, exact (lower case). SSE-C and SSE-KMS are not supported. Only for an s3 auth block", formValue, false, "The server-side encryption that the server asks for each object that it writes: upload, copy, move, rename, metadata edit, restore of a version, extraction. sse-s3 sends x-amz-server-side-encryption: AES256. \"\" sends no encryption header: the default encryption of the bucket applies."},
+	{"bucket", "quota_bytes", "integer", "(none: the limit of the provider, or no limit)", "1 to 1152921504606846976. Only with a usage block in the auth block", formValue, false, "The size limit of the bucket that the interface shows when the provider gives no limit. The server does not enforce it."},
 
 	{"access", "mode", "text", "(required)", "authzen or open", formValue, false, "authzen: verify the identity token and ask the PDP for each action. open: no check of identity or permission. The server writes a warning at each start."},
 
@@ -248,11 +255,7 @@ type effectiveSetting struct {
 // source. It hides each secret.
 func effectiveConfiguration(cfg appConfig) []effectiveSetting {
 	out := make([]effectiveSetting, 0, 96)
-	add := func(path string, values map[string]string) {
-		blockType := path
-		if index := strings.IndexByte(path, ' '); index >= 0 {
-			blockType = path[:index]
-		}
+	addBlock := func(path, blockType string, values map[string]string) {
 		for _, key := range keysOfBlock(blockType) {
 			value, ok := values[key.Name]
 			if !ok {
@@ -264,6 +267,13 @@ func effectiveConfiguration(cfg appConfig) []effectiveSetting {
 			}
 			out = append(out, effectiveSetting{Name: path + "." + key.Name, Value: value, Source: source})
 		}
+	}
+	add := func(path string, values map[string]string) {
+		blockType := path
+		if index := strings.IndexByte(path, ' '); index >= 0 {
+			blockType = path[:index]
+		}
+		addBlock(path, blockType, values)
 	}
 	runtime := cfg.Runtime
 	add("server", map[string]string{
@@ -308,6 +318,14 @@ func effectiveConfiguration(cfg appConfig) []effectiveSetting {
 			values["credentials_file"] = strconv.Quote(auth.CredentialsFile)
 		}
 		add("auth "+strconv.Quote(auth.ID), values)
+		if usage := auth.Usage; usage != nil {
+			addBlock("auth "+strconv.Quote(auth.ID)+".usage", "auth.usage", map[string]string{
+				"source":         strconv.Quote(usage.Source),
+				"endpoint":       strconv.Quote(usage.Endpoint),
+				"filer_endpoint": quotedOrNone(usage.FilerEndpoint),
+				"token":          hidden(usage.Token),
+			})
+		}
 	}
 	for _, bucket := range cfg.Buckets {
 		values := map[string]string{
@@ -320,6 +338,9 @@ func effectiveConfiguration(cfg appConfig) []effectiveSetting {
 		}
 		if bucket.PermissionsDefined {
 			values["permissions"] = quotedList(bucket.Permissions)
+		}
+		if bucket.QuotaBytes != 0 {
+			values["quota_bytes"] = strconv.FormatInt(bucket.QuotaBytes, 10)
 		}
 		add("bucket "+strconv.Quote(bucket.ID), values)
 	}

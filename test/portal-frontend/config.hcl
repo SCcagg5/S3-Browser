@@ -19,6 +19,14 @@ auth "seaweedfs" {
   access_key_id          = "GK0123456789abcdef01234567"
   # A secret accepts only _env and _file. The test compose and scratch-runtime.sh mount test/secrets here.
   secret_access_key_file = "/config/secrets/s3_secret_access_key"
+
+  # The usage of the buckets: the master gives the sizes of the volumes, the filer gives the quota. The bucket "default"
+  # has a quota of 20 GiB (test/seaweedfs/scripts/entrypoint.sh). The other buckets have no quota.
+  usage {
+    source         = "seaweedfs"
+    endpoint       = "http://seaweedfs:9333"
+    filer_endpoint = "http://seaweedfs:8888"
+  }
 }
 
 bucket "seaweedfs-main" {
@@ -29,12 +37,14 @@ bucket "seaweedfs-main" {
   max_scan_pages = 15
 }
 
+# quota_bytes: the bucket "archive" has no quota at the provider, so the interface shows this limit (10 GiB).
 bucket "seaweedfs-archive" {
   name           = "SeaweedFS - archive"
   auth           = "seaweedfs"
   bucket         = "archive"
   permissions    = ["read", "write", "delete"]
   max_scan_pages = 15
+  quota_bytes    = 10737418240
 }
 
 # The bucket "locked" has Object Lock (test/seaweedfs/scripts/entrypoint.sh). The tests of Object Lock use it.
@@ -64,6 +74,12 @@ auth "minio" {
   region                 = "us-east-1"
   access_key_id          = "GK0123456789abcdef01234567"
   secret_access_key_file = "/config/secrets/s3_secret_access_key"
+
+  # The admin API of MinIO, on the S3 endpoint, signed with the key of this block (the root user of the test MinIO).
+  # The bucket "default" has a hard quota of 20 GiB (test/minio/scripts/entrypoint.sh).
+  usage {
+    source = "minio"
+  }
 }
 
 bucket "minio-main" {
@@ -101,6 +117,14 @@ auth "garage" {
   region                 = "garage"
   access_key_id          = "GK0123456789abcdef01234567"
   secret_access_key_file = "/config/secrets/s3_secret_access_key"
+
+  # The admin API of Garage. The admin token is a test value in test/secrets, which the Garage entrypoint also reads.
+  # The bucket "default" has a quota of 20 GiB and 100000 objects (test/garage/scripts/entrypoint.sh).
+  usage {
+    source     = "garage"
+    endpoint   = "http://garage:3903"
+    token_file = "/config/secrets/garage_admin_token"
+  }
 }
 
 bucket "garage-main" {

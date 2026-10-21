@@ -308,6 +308,10 @@ type storageInstance struct {
 	// encryption is the state of the default encryption of the bucket: set when the probe could read it.
 	encryption encryptionCapability
 
+	// usage is the reader of the usage and of the quota of the bucket, and its cache. Its reader is nil without a usage
+	// block in the auth block.
+	usage usageCapability
+
 	// batchDeleteOff is set when the provider refused the batch delete once: later deletes go one by one.
 	batchDeleteOff atomic.Bool
 }
@@ -343,6 +347,9 @@ func newStorageInstance(cfg bucketConfig, auth *sharedAuthentication, policy run
 		concurrency: concurrency, gate: make(chan struct{}, perStorage),
 	}
 	instance.caps = initialCapabilities(cfg, instance.forceReadOnly)
+	if auth.usage != nil && auth.cfg.Usage != nil {
+		instance.usage.reader, instance.usage.source = auth.usage, auth.cfg.Usage.Source
+	}
 	return instance, nil
 }
 
@@ -526,6 +533,7 @@ func (s *storageInstance) publicInfo() instanceInfo {
 		Encryption:          s.cfg.Encryption,
 		DefaultEncryption:   defaultEncryption,
 		EncryptionApplied:   encryptionApplied,
+		Usage:               s.usageAvailable(),
 		Capabilities:        s.capabilities(),
 		Operations:          s.operationCapabilities(),
 	}
@@ -555,9 +563,11 @@ type instanceInfo struct {
 	DefaultEncryption string `json:"defaultEncryption"`
 	// EncryptionApplied tells if the provider applies encryption = "sse-s3": "yes", "no" or "unknown". It is empty
 	// without the key.
-	EncryptionApplied string                     `json:"encryptionApplied,omitempty"`
-	Capabilities      capabilities               `json:"capabilities"`
-	Operations        map[string]capabilityState `json:"operations"`
+	EncryptionApplied string `json:"encryptionApplied,omitempty"`
+	// Usage tells that GET /api/usage reads the usage of the bucket: the auth block has a usage block.
+	Usage        bool                       `json:"usageSupported"`
+	Capabilities capabilities               `json:"capabilities"`
+	Operations   map[string]capabilityState `json:"operations"`
 }
 
 type upstreamError struct {

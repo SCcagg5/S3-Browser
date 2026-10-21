@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -39,6 +40,20 @@ type authConfig struct {
 	SessionToken       string
 	CredentialsFile    string
 	InsecureSkipVerify bool
+	// Usage is the usage block: the admin API that gives the usage and the quota of the buckets. Nil: no block.
+	Usage *usageConfig
+}
+
+// usageConfig is the usage block of an auth block (refer to usage.go).
+type usageConfig struct {
+	// Source is usageSourceGarage, usageSourceSeaweedFS or usageSourceMinIO.
+	Source string
+	// Endpoint is the admin API of Garage, the master of SeaweedFS, or the S3 endpoint of MinIO.
+	Endpoint string
+	// FilerEndpoint is the filer of SeaweedFS. It is empty for the other sources.
+	FilerEndpoint string
+	// Token is the admin token of Garage. It is a secret. It is empty for the other sources.
+	Token string
 }
 
 type bucketConfig struct {
@@ -54,11 +69,17 @@ type bucketConfig struct {
 	MaxScanPages       int
 	// Encryption is "" (no encryption header) or encryptionSSES3 (x-amz-server-side-encryption: AES256 on each write).
 	Encryption string
+	// QuotaBytes is the limit of the bucket that the operator sets. 0: no such limit.
+	QuotaBytes int64
 }
 
 const (
 	maxConfigurationBytes = int64(4 << 20)
 	maxSecretFileBytes    = int64(1 << 20)
+	// maxUsageTokenBytes is the longest admin token of a usage block.
+	maxUsageTokenBytes = 4096
+	// maxQuotaBytes is the largest value of bucket.quota_bytes (1 EiB).
+	maxQuotaBytes = int64(1 << 60)
 )
 
 func loadConfig(filename string) (appConfig, error) {
@@ -156,6 +177,9 @@ func decodeConfig(data, sourceName, sourceDir string) (appConfig, error) {
 				return appConfig{}, err
 			}
 			recordSources(&cfg, "auth "+strconv.Quote(auth.ID), "auth", block, sourceDir)
+			if usageBlock, _ := authUsageBlock(block); usageBlock != nil {
+				recordSources(&cfg, "auth "+strconv.Quote(auth.ID)+".usage", "auth.usage", *usageBlock, sourceDir)
+			}
 			if _, exists := authByID[auth.ID]; exists {
 				return appConfig{}, block.errorf("duplicate auth id %q", auth.ID)
 			}
@@ -384,8 +408,9 @@ func decodeAuthBlock(block hclBlock, baseDir string) (authConfig, error) {
 	if err := requireAttrKinds(block, kinds); err != nil {
 		return authConfig{}, err
 	}
-	if len(block.Blocks) != 0 {
-		return authConfig{}, block.errorf("nested blocks are not supported inside auth")
+	usageBlock, err := authUsageBlock(block)
+	if err != nil {
+		return authConfig{}, err
 	}
 
 	auth := authConfig{ID: block.Labels[0]}
@@ -507,7 +532,144 @@ func decodeAuthBlock(block hclBlock, baseDir string) (authConfig, error) {
 	if _, err := parseStorageEndpoint(auth.Provider, auth.Endpoint); err != nil {
 		return authConfig{}, block.errorf("%s.endpoint: %v, got %q", path, err, auth.Endpoint)
 	}
+	if usageBlock != nil {
+		if auth.Usage, err = decodeUsageBlock(*usageBlock, auth, baseDir); err != nil {
+			return authConfig{}, err
+		}
+	}
 	return auth, nil
+}
+
+// authUsageBlock gives the usage block of an auth block, or nil. The usage block is the only nested block of auth,
+// and it can be there one time.
+func authUsageBlock(block hclBlock) (*hclBlock, error) {
+	var usage *hclBlock
+	for index := range block.Blocks {
+		nested := &block.Blocks[index]
+		if nested.Type != "usage" {
+			return nil, nested.errorf("unknown block %q in auth; the only block is usage", nested.Type)
+		}
+		if usage != nil {
+			return nil, nested.errorf("only one usage block is allowed in auth %q", block.Labels[0])
+		}
+		usage = nested
+	}
+	return usage, nil
+}
+
+// decodeUsageBlock reads the usage block of an auth block. The source is explicit: the server never guesses it. Each
+// source has its own keys, and a key of another source is a contradiction.
+func decodeUsageBlock(block hclBlock, auth authConfig, baseDir string) (*usageConfig, error) {
+	path := "auth " + strconv.Quote(auth.ID) + ".usage"
+	if len(block.Labels) != 0 {
+		return nil, block.errorf("%s block does not accept labels", path)
+	}
+	if len(block.Blocks) != 0 {
+		return nil, block.errorf("nested blocks are not supported inside %s", path)
+	}
+	if err := rejectClearSecrets(block, path, "auth.usage"); err != nil {
+		return nil, err
+	}
+	if err := rejectUnknownAttrs(block, attributeNames("auth.usage")...); err != nil {
+		return nil, err
+	}
+	if err := requireStringAttrs(block); err != nil {
+		return nil, err
+	}
+	usage := &usageConfig{}
+	source, defined, err := textAttr(block, path, "source")
+	if err != nil {
+		return nil, err
+	}
+	if !defined {
+		return nil, block.errorf("%s.source is required: %q, %q or %q", path, usageSourceGarage, usageSourceSeaweedFS, usageSourceMinIO)
+	}
+	switch source {
+	case usageSourceGarage, usageSourceSeaweedFS, usageSourceMinIO:
+	default:
+		return nil, block.errorf("%s.source must be %q, %q or %q (lower case), got %q", path, usageSourceGarage, usageSourceSeaweedFS, usageSourceMinIO, source)
+	}
+	usage.Source = source
+	if auth.Provider != "s3" {
+		return nil, block.errorf("%s: a usage block needs provider \"s3\", but auth %q has provider %q; remove the block", path, auth.ID, auth.Provider)
+	}
+	endpoint, endpointDefined, err := textAttr(block, path, "endpoint")
+	if err != nil {
+		return nil, err
+	}
+	filer, filerDefined, err := textAttr(block, path, "filer_endpoint")
+	if err != nil {
+		return nil, err
+	}
+	for _, field := range []struct{ name, value string }{{"endpoint", endpoint}, {"filer_endpoint", filer}} {
+		if field.value == "" {
+			continue
+		}
+		if err := validateUsageEndpoint(field.value); err != nil {
+			// A URL with user information can hold a password: the error does not show such a value.
+			if parsed, parseErr := url.Parse(field.value); parseErr == nil && parsed.User != nil {
+				return nil, block.errorf("%s.%s: %v", path, field.name, err)
+			}
+			return nil, block.errorf("%s.%s: %v, got %q", path, field.name, err, field.value)
+		}
+	}
+	token, tokenDefined, err := resolveValueSource(block, path, "token", baseDir, formEnv|formFile)
+	if err != nil {
+		return nil, err
+	}
+	if tokenDefined && (len(token) > maxUsageTokenBytes || strings.ContainsFunc(token, func(r rune) bool { return r <= ' ' || r == 0x7f })) {
+		// The error never shows the token.
+		return nil, block.errorf("%s.token must have 1 to %d bytes without a space or a control character", path, maxUsageTokenBytes)
+	}
+	switch source {
+	case usageSourceGarage:
+		if !endpointDefined {
+			return nil, block.errorf("%s.endpoint is required with source %q: the URL of the admin API of Garage (port 3903 by default)", path, source)
+		}
+		if !tokenDefined {
+			return nil, block.errorf("%s.token is required with source %q: give token_env or token_file (the admin token of Garage)", path, source)
+		}
+		if filerDefined {
+			return nil, block.errorf("%s.filer_endpoint is only for source %q; remove it for source %q", path, usageSourceSeaweedFS, source)
+		}
+	case usageSourceSeaweedFS:
+		if !endpointDefined {
+			return nil, block.errorf("%s.endpoint is required with source %q: the URL of the master of SeaweedFS (port 9333 by default)", path, source)
+		}
+		if !filerDefined {
+			return nil, block.errorf("%s.filer_endpoint is required with source %q: the URL of the filer of SeaweedFS (port 8888 by default)", path, source)
+		}
+		if tokenDefined {
+			return nil, block.errorf("%s.token is only for source %q; remove it for source %q", path, usageSourceGarage, source)
+		}
+	case usageSourceMinIO:
+		if filerDefined {
+			return nil, block.errorf("%s.filer_endpoint is only for source %q; remove it for source %q", path, usageSourceSeaweedFS, source)
+		}
+		if tokenDefined {
+			return nil, block.errorf("%s.token is only for source %q; source %q signs with the S3 credentials of auth %q", path, usageSourceGarage, source, auth.ID)
+		}
+		if auth.Mode != "access_key" {
+			return nil, block.errorf("%s: source %q needs auth %q with mode \"access_key\" (the admin API of MinIO refuses anonymous requests), got mode %q", path, source, auth.ID, auth.Mode)
+		}
+		if !endpointDefined {
+			endpoint = auth.Endpoint
+		}
+	}
+	usage.Endpoint, usage.FilerEndpoint, usage.Token = endpoint, filer, token
+	return usage, nil
+}
+
+// validateUsageEndpoint checks the URL of an admin API: http or https, a host, no credentials, no query, no fragment,
+// and no "/" at the end.
+func validateUsageEndpoint(value string) error {
+	if _, err := parseStorageEndpoint("usage", value); err != nil {
+		return err
+	}
+	if strings.HasSuffix(value, "/") {
+		return fmt.Errorf("must not end with \"/\"")
+	}
+	return nil
 }
 
 func decodeBucketBlock(block hclBlock, authByID map[string]authConfig) (bucketConfig, error) {
@@ -520,6 +682,7 @@ func decodeBucketBlock(block hclBlock, authByID map[string]authConfig) (bucketCo
 	kinds := map[string]hclValueKind{
 		"name": hclString, "auth": hclString, "bucket": hclString,
 		"permissions": hclList, "root_prefix": hclString, "max_scan_pages": hclNumber, "encryption": hclString,
+		"quota_bytes": hclNumber,
 	}
 	if err := requireAttrKinds(block, kinds); err != nil {
 		return bucketConfig{}, err
@@ -569,6 +732,12 @@ func decodeBucketBlock(block hclBlock, authByID map[string]authConfig) (bucketCo
 		}
 		bucket.Encryption = value
 	}
+	if value, ok := block.intAttr("quota_bytes"); ok {
+		if value < 1 || value > maxQuotaBytes {
+			return bucketConfig{}, block.errorf("%s.quota_bytes must be between 1 and %d, got %d; remove the key for no limit", path, int64(maxQuotaBytes), value)
+		}
+		bucket.QuotaBytes = value
+	}
 	if values, ok := block.stringListAttr("permissions"); ok {
 		bucket.PermissionsDefined = true
 		for _, value := range values {
@@ -598,6 +767,10 @@ func decodeBucketBlock(block hclBlock, authByID map[string]authConfig) (bucketCo
 	// The GCS API has no x-amz-server-side-encryption header: the two keys contradict each other.
 	if bucket.Encryption != "" && bucket.Provider != "s3" {
 		return bucketConfig{}, block.errorf("%s.encryption = %q needs an auth block with provider \"s3\", but auth %q has provider %q; remove the key for this bucket", path, bucket.Encryption, bucket.AuthID, bucket.Provider)
+	}
+	// The limit of the operator needs the used bytes, and only a usage block gives them.
+	if bucket.QuotaBytes != 0 && auth.Usage == nil {
+		return bucketConfig{}, block.errorf("%s.quota_bytes needs a usage block in auth %q: without it, the server cannot read the used bytes; add the block or remove the key", path, bucket.AuthID)
 	}
 	return bucket, nil
 }

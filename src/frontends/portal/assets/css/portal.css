@@ -4816,3 +4816,186 @@ button.versionCount:focus-visible {
     display: none;
   }
 }
+
+/* Status line of the bucket ------------------------------------------------------------------------------------------- */
+
+/* Under the listing, at the right of the totals: small pieces of text, each with a tooltip. One line on a desktop; the
+   pieces wrap on a phone. */
+.bucketStatus {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.bucketStatus[hidden] {
+  display: none;
+}
+
+/* On a desktop, thin lines separate the status of the bucket from the totals and from the range of the page. */
+@media (min-width: 701px) {
+  .tableFoot > .bucketStatus {
+    padding: 0 12px;
+    border-right: 1px solid var(--border-strong);
+    border-left: 1px solid var(--border-strong);
+  }
+
+  .tableFoot--status > .bucketStatus {
+    padding-left: 0;
+    border: 0;
+  }
+}
+
+.bucketStatus__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  white-space: nowrap;
+}
+
+.bucketStatus__item .ic {
+  --icon-size: 14px;
+}
+
+button.bucketStatus__item {
+  cursor: pointer;
+  transition: color var(--dur-quick) var(--ease);
+}
+
+button.bucketStatus__item:hover,
+button.bucketStatus__item:focus-visible {
+  color: var(--accent-text);
+}
+
+.bucketStatus__item.is-warning {
+  color: var(--warning);
+}
+
+.bucketUsage {
+  font-variant-numeric: tabular-nums;
+}
+
+/* The thin bar of the used part of the limit: the colour of a warning from 80 %, of an error from 95 %. */
+.usageMeter {
+  position: relative;
+  flex: none;
+  width: 56px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--track);
+}
+
+.usageMeter__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--accent-fill);
+}
+
+.bucketUsage.is-warning {
+  color: var(--warning);
+}
+
+.bucketUsage.is-warning .usageMeter__fill {
+  background: var(--warning);
+}
+
+.bucketUsage.is-error {
+  color: var(--danger);
+}
+
+.bucketUsage.is-error .usageMeter__fill {
+  background: var(--danger);
+}
+
+.tableFoot--status:has(.bucketStatus[hidden]) {
+  display: none;
+}
+
+/* Summary strip and sections that close in the details of a file ------------------------------------------------------- */
+
+.detailsSummary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-bottom: 2px;
+}
+
+.detailsSummary[hidden],
+.detailsPill[hidden] {
+  display: none;
+}
+
+.detailsPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--muted) 8%, transparent);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--dur-quick) var(--ease), border-color var(--dur-quick) var(--ease);
+}
+
+.detailsPill .mdi {
+  --icon-size: 14px;
+  color: var(--muted);
+}
+
+.detailsPill:hover,
+.detailsPill:focus-visible {
+  border-color: var(--accent-fill);
+  color: var(--accent-text);
+}
+
+.detailsPill:hover .mdi,
+.detailsPill:focus-visible .mdi {
+  color: inherit;
+}
+
+/* A closed section keeps its title (with the chevron and the Edit button) and hides the rest. */
+.bb-details-section.is-collapsible > .bb-details-section-title {
+  cursor: pointer;
+}
+
+.bb-details-section.is-collapsed > :not(.bb-details-section-title) {
+  display: none !important;
+}
+
+.bb-details-section-title .detailsToggle {
+  width: 20px;
+  height: 20px;
+  margin: -2px -2px -2px -4px;
+}
+
+.bb-details-section-title .detailsToggle .mdi {
+  color: inherit;
+  font-size: 1rem;
+  transition: transform var(--dur-quick) var(--ease);
+}
+
+.bb-details-section.is-collapsed .detailsToggle .mdi {
+  transform: rotate(-90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bb-details-section-title .detailsToggle .mdi {
+    transition: none;
+  }
+}

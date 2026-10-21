@@ -404,6 +404,13 @@
       return response.json();
     },
 
+    // The usage and the quota of the bucket of an instance. fresh asks the server to read the provider again (it does so
+    // only when its value is older than 10 seconds). A failed read answers 200 with available false and the reason.
+    async usage(instance = null, { fresh = false } = {}) {
+      const response = await request(withInstance('/api/usage', { fresh: fresh ? '1' : null }, instance));
+      return response.json();
+    },
+
     // The lock of one version: the retention, the legal hold and the default retention of the bucket. Without a version
     // the answer is for the current version, and it names that version.
     async objectLock(key, { version = '', instance = null } = {}) {

@@ -4,7 +4,8 @@
 // parts on each provider, 7 the edit of the metadata on each provider, 8 the cleanup of the incomplete multipart
 // uploads on each provider, 9 the editor of the lifecycle rules on each provider, 10 Object Lock (retention and legal
 // hold) on the providers with a bucket with Object Lock, 11 encryption (SSE-S3 of the writes, and the display of SSE-S3,
-// SSE-KMS, SSE-C and the default encryption of the bucket).
+// SSE-KMS, SSE-C and the default encryption of the bucket), 12 the usage and the quota of a bucket (the status line under
+// the listing and the tooltips of the selector) and the summary strip of the details with its sections that close.
 // run.sh starts S3-Browser and the three providers, puts the test objects (seed.js) and runs this file in the
 // Playwright container. The tests of parts 1 to 4 use SeaweedFS.
 // The tests change the answers of the server with page.route where a case needs it (403, 401, no answer, access).
@@ -20,8 +21,18 @@ const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
 let browser;
 
-async function newPage(options = {}) {
+// The sections of the details of a file start closed, except "Storage object" and "Tags", and the browser keeps the
+// choice of the person. The pages of the tests open them all, as a person who opened them before (the choice in the
+// browser), so that each test sees the content of the sections. sections: 'default' gives the first visit.
+const OPEN_SECTIONS = JSON.stringify({ storage: true, encryption: true, metadata: true, custom: true, tags: true, retention: true, file: true, count: true });
+
+async function newPage({ sections = 'open', ...options } = {}) {
   const context = await browser.newContext({ viewport: { width: 1280, height: 860 }, colorScheme: 'dark', ...options });
+  if (sections === 'open') {
+    await context.addInitScript(value => {
+      try { if (!window.localStorage.getItem('portal.details.sections')) window.localStorage.setItem('portal.details.sections', value); } catch (_) {}
+    }, OPEN_SECTIONS);
+  }
   const page = await context.newPage();
   page.errors = [];
   page.on('pageerror', error => page.errors.push(error.message));
@@ -4105,6 +4116,258 @@ for (const [instance, provider] of Object.entries(ENCRYPTED)) {
     await page.context().close();
   });
 }
+
+// ------------------------------------------------------------------------------------------------------------------
+// 12. Usage and quota of a bucket: the status line under the listing (versioning, encryption, Object Lock, lifecycle
+// rules and usage), the usage in the tooltips of the selector, and the summary strip of the details with its sections
+// that close. The usage blocks of config.hcl read the admin API of each provider. The bucket "default" of each provider
+// has a quota of 20 GiB (Garage also 100000 objects); seaweedfs-archive has quota_bytes = 10 GiB; the other buckets
+// have no quota.
+// ------------------------------------------------------------------------------------------------------------------
+
+const QUOTA_BYTES = 21474836480;
+const usageItem = page => page.locator('.bucketStatus [data-status="usage"]');
+const apiUsage = async (page, instance, fresh = false) => (await page.request.get(`${BASE}api/usage?instance=${instance}${fresh ? '&fresh=1' : ''}`)).json();
+
+for (const [instance, provider] of Object.entries(PROVIDERS)) {
+  test(`usage: ${provider.name}: the status line shows the used bytes and the quota of the bucket, with a bar and a tooltip`, async () => {
+    const page = await newPage();
+    const answer = await apiUsage(page, instance);
+    assert.equal(answer.supported, true);
+    assert.equal(answer.available, true, JSON.stringify(answer));
+    assert.equal(answer.limitBytes, QUOTA_BYTES);
+    assert.equal(answer.limitSource, 'provider');
+    assert.equal(answer.level, 'ok');
+    assert.equal(answer.source, instance.split('-')[0]);
+    // The answer never names the admin API or its token.
+    assert.doesNotMatch(JSON.stringify(answer), /3903|9333|8888|admin-token|minio\/admin/);
+    await open(page, `-/${instance.split('-')[0]}/${instance}/`);
+    await page.waitForSelector('.bucketStatus [data-status="usage"]');
+    const text = (await usageItem(page).locator('.bucketStatus__text').textContent()).trim();
+    assert.match(text, /^~?[\d.]+ (B|KB|MB|GB) of 20 GB$/);
+    // SeaweedFS and MinIO count with a delay: the number has a "~" and the tooltip says why.
+    assert.equal(text.startsWith('~'), answer.approximate === true);
+    const title = await usageItem(page).getAttribute('title');
+    assert.match(title, /^Usage of the whole bucket default\n/);
+    assert.match(title, /Limit: 20 GB \(21,474,836,480 bytes\)/);
+    if (answer.approximate) assert.match(title, /~ Approximate: /);
+    if (instance === 'garage-main') assert.match(title, /Objects: [\d,]+ of 100,000/);
+    assert.equal(await usageItem(page).locator('.usageMeter[role="meter"]').count(), 1);
+    assert.equal(await usageItem(page).getAttribute('data-level'), 'ok');
+    // The status line has one line on a desktop, at the right of the totals.
+    const box = await page.locator('.tableFoot').boundingBox();
+    const count = await page.locator('#folderCount').boundingBox();
+    const status = await page.locator('.tableFoot .bucketStatus').boundingBox();
+    assert.ok(status.x > count.x + count.width - 1 && Math.abs(status.y + status.height / 2 - (count.y + count.height / 2)) < 4, JSON.stringify({ box, count, status }));
+    // Versioning shows where the bucket has it on.
+    assert.equal(await page.locator('.bucketStatus [data-status="versioning"]').count(), provider.versioning ? 1 : 0);
+    assert.deepEqual(page.errors, []);
+    await page.context().close();
+  });
+}
+
+test('usage: a bucket without quota says "used", quota_bytes gives the limit, and a bucket without usage shows nothing', async () => {
+  const page = await newPage();
+  await open(page, '-/seaweedfs/seaweedfs-locked/');
+  await page.waitForSelector('.bucketStatus [data-status="usage"]');
+  assert.match(await usageItem(page).textContent(), /^~[\d.]+ (B|KB|MB) used/);
+  assert.equal(await usageItem(page).locator('.usageMeter').count(), 0);
+  assert.match(await usageItem(page).getAttribute('title'), /\nNo limit\n/);
+  assert.equal(await usageItem(page).getAttribute('data-level'), 'none');
+  // Object Lock shows in the status line of the locked bucket.
+  assert.match(await page.textContent('.bucketStatus [data-status="object-lock"]'), /^Object Lock/);
+
+  await open(page, '-/seaweedfs/seaweedfs-archive/');
+  await page.waitForSelector('.bucketStatus [data-status="usage"]');
+  assert.match(await usageItem(page).locator('.bucketStatus__text').textContent(), / of 10 GB$/);
+  assert.match(await usageItem(page).getAttribute('title'), /The configuration of S3-Browser sets this limit\. The provider does not enforce it\./);
+  assert.equal((await apiUsage(page, 'seaweedfs-archive')).limitSource, 'config');
+
+  // An instance without a usage block: no usage in the status line, and no request to /api/usage.
+  const second = await newPage();
+  let usageRequests = 0;
+  await second.route(/\/api\/instances(\?|$)/, async route => {
+    const response = await route.fetch();
+    const body = await response.json();
+    for (const item of body.instances) item.usageSupported = false;
+    await route.fulfill({ response, json: body });
+  });
+  await second.route(/\/api\/usage\?/, route => { usageRequests += 1; return route.continue(); });
+  await open(second, MAIN);
+  await second.waitForSelector('.bucketStatus [data-status="versioning"]');
+  await sleep(500);
+  assert.equal(await second.locator('.bucketStatus [data-status="usage"]').count(), 0);
+  assert.equal(usageRequests, 0);
+  assert.deepEqual(page.errors, []);
+  assert.deepEqual(second.errors, []);
+  await page.context().close();
+  await second.context().close();
+});
+
+test('usage: a failed read shows no number, the tooltip says that the usage is unavailable, and the page keeps working', async () => {
+  const page = await newPage();
+  const message = 'The usage of the bucket is unavailable: GetBucketInfo: the admin API refused the credentials (HTTP 403).';
+  await page.route(/\/api\/usage\?/, route => route.fulfill({ json: { supported: true, available: false, instance: 'seaweedfs-main', source: 'seaweedfs', error: { code: 'usage_unavailable', message } } }));
+  await open(page, MAIN);
+  await page.waitForSelector('.bucketStatus[data-usage="unavailable"]', { state: 'attached' });
+  assert.equal(await page.locator('.bucketStatus [data-status="usage"]').count(), 0);
+  assert.equal(await page.getAttribute('#folderCount', 'title'), message);
+  // No notice of a server that does not answer: the listing stays as it is.
+  assert.equal(await page.locator('#notices > *').count(), 0);
+  assert.ok(await page.locator('tr[data-name="README.md"]').count() === 1);
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+// The usage grows after an upload. SeaweedFS and Garage count a write after a few seconds. MinIO counts in a scan of
+// about one minute: its number is checked in the first test only.
+for (const instance of ['garage-main', 'seaweedfs-main']) {
+  test(`usage: ${PROVIDERS[instance].name}: the usage grows after an upload, with no reload of the page`, async () => {
+    const page = await newPage();
+    const host = instance.split('-')[0];
+    const key = `usage-${Date.now()}.bin`;
+    await open(page, `-/${host}/${instance}/`);
+    await page.waitForSelector('.bucketStatus [data-status="usage"]');
+    const before = Number(await usageItem(page).getAttribute('data-used-bytes'));
+    const requests = [];
+    page.on('request', request => { if (/\/api\/usage\?/.test(request.url())) requests.push(request.url()); });
+    await uploadWithPage(page, key, require('crypto').randomBytes(3 << 20));
+    // The page reads the usage again after the upload; the reload icon reads it again too.
+    const end = Date.now() + 60000;
+    let after = before;
+    while (after < before + (3 << 20) * 0.9 && Date.now() < end) {
+      await sleep(2000);
+      after = Number(await usageItem(page).getAttribute('data-used-bytes'));
+      if (after < before + (3 << 20) * 0.9 && requests.length >= 2) await page.click('#refreshButton');
+    }
+    assert.ok(after >= before + (3 << 20) * 0.9, `before ${before}, after ${after}`);
+    assert.ok(requests.some(url => /fresh=1/.test(url)), requests.join('\n'));
+    await page.request.delete(`${BASE}s3?instance=${instance}&key=${encodeURIComponent(key)}`);
+    assert.deepEqual(page.errors, []);
+    await page.context().close();
+  });
+}
+
+test('usage: the tooltip of a bucket in the selector has its usage', async () => {
+  const page = await newPage();
+  await open(page, MAIN);
+  await page.waitForSelector('.bucketStatus [data-status="usage"]');
+  assert.match(await page.getAttribute('.storageSwitcher__trigger', 'title'), /\nusage: ~[\d.]+ (B|KB|MB|GB) of 20 GB \([\d.]+ %\)$/);
+  await page.click('.storageSwitcher__trigger');
+  await until(page, () => /usage: [\d.]+ (B|KB|MB|GB) of 20 GB/.test(document.querySelector('.storageBucket[data-instance="garage-main"]')?.title || ''));
+  await until(page, () => /usage: ~[\d.]+ (B|KB|MB) used$/.test(document.querySelector('.storageBucket[data-instance="minio-locked"]')?.title || ''));
+  // The menu stays open while the tooltips change.
+  assert.equal(await page.isVisible('#storageSwitcherMenu'), true);
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+test('usage: the status line wraps on a phone and stays in one line at 1280x720', async () => {
+  for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 720 }]) {
+    const page = await newPage({ viewport });
+    await open(page, MAIN);
+    await page.waitForSelector('.bucketStatus [data-status="usage"]');
+    const widths = await page.evaluate(() => ({ page: document.documentElement.scrollWidth, view: window.innerWidth }));
+    assert.ok(widths.page <= widths.view, JSON.stringify(widths));
+    const items = await page.locator('.bucketStatus__item').evaluateAll(nodes => nodes.map(node => node.getBoundingClientRect().top));
+    if (viewport.width > 700) assert.ok(Math.max(...items) - Math.min(...items) < 2, JSON.stringify(items));
+    assert.deepEqual(page.errors, []);
+    await page.context().close();
+  }
+});
+
+// The details of a file: the pills of the summary strip, and the sections that start closed.
+test('details: the summary strip shows the version and the tags, and the sections other than "Storage object" and "Tags" start closed', async () => {
+  const page = await newPage({ sections: 'default' });
+  await open(page, `${MAIN}versions/`);
+  await openDetails(page, 'report.txt');
+  await page.waitForSelector('[data-details-summary] [data-pill="version"]:not([hidden])');
+  assert.equal((await page.textContent('[data-pill="version"]')).trim(), 'v3 of 3');
+  // The last version of versions/report.txt has the tags status=final and team=data.
+  await page.waitForSelector('[data-details-summary] [data-pill="tags"]:not([hidden])');
+  assert.equal((await page.textContent('[data-pill="tags"]')).trim(), '2 tags');
+  assert.equal(await page.isHidden('[data-pill="encryption"]'), true);
+  assert.equal(await page.isHidden('[data-pill="lock"]'), true);
+  const expanded = name => page.getAttribute(`[data-section-toggle="${name}"]`, 'aria-expanded');
+  assert.equal(await expanded('storage'), 'true');
+  assert.equal(await expanded('tags'), 'true');
+  await page.waitForSelector('[data-section-toggle="metadata"]');
+  assert.equal(await expanded('metadata'), 'false');
+  assert.equal(await page.isHidden('[data-metadata-section] .metaEditor__view'), true);
+  // The content of a closed section stays in the page: only its display is off.
+  assert.equal(await page.locator('[data-metadata-section] .metaEditor__view').count(), 1);
+  // The pill of the version opens the version picker.
+  await page.click('[data-pill="version"]');
+  await page.waitForSelector('.versionPicker__item', { state: 'visible' });
+  await page.keyboard.press('Escape');
+  // The pill of the tags moves to the section Tags.
+  await page.click('[data-pill="tags"]');
+  assert.equal(await expanded('tags'), 'true');
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+test('details: a closed section opens and closes with the keyboard, its Edit button opens it, and the browser keeps the choice', async () => {
+  const page = await newPage({ sections: 'default' });
+  await open(page, MAIN);
+  await openDetails(page, 'README.md');
+  await page.waitForSelector('[data-section-toggle="metadata"]');
+  await page.focus('[data-section-toggle="metadata"]');
+  await page.keyboard.press('Enter');
+  assert.equal(await page.getAttribute('[data-section-toggle="metadata"]', 'aria-expanded'), 'true');
+  await page.waitForSelector('[data-metadata-section] .metaEditor__view', { state: 'visible' });
+  await page.keyboard.press('Space');
+  assert.equal(await page.getAttribute('[data-section-toggle="metadata"]', 'aria-expanded'), 'false');
+  assert.equal(await page.isHidden('[data-metadata-section] .metaEditor__view'), true);
+  // The Edit button of a closed section opens it with the form.
+  await page.click('[data-metadata-edit]');
+  await page.waitForSelector('[data-metadata-section] .metaEditor__form', { state: 'visible' });
+  assert.equal(await page.getAttribute('[data-section-toggle="metadata"]', 'aria-expanded'), 'true');
+  // A click on the title of the section File metadata opens it too.
+  if (await page.locator('[data-section="file"]').count()) {
+    await page.click('[data-section="file"] .bb-details-section-title');
+    assert.equal(await page.getAttribute('[data-section-toggle="file"]', 'aria-expanded'), 'true');
+  }
+  await closeWindow(page);
+  // The next details keep the open section.
+  await openDetails(page, 'README.md');
+  await page.waitForSelector('[data-section-toggle="metadata"][aria-expanded="true"]');
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+test('details: the pills of the encryption and of the lock open their sections', async () => {
+  const page = await newPage({ sections: 'default' });
+  // An object with SSE-S3: the server asks for it on the instance seaweedfs-encrypted.
+  const encryptedKey = `summary/enc-${Date.now()}.txt`;
+  await putWithServer(page, 'seaweedfs-encrypted', encryptedKey, 'summary of an encrypted object\n');
+  await open(page, '-/seaweedfs/seaweedfs-encrypted/summary/');
+  await openDetails(page, encryptedKey.split('/').pop());
+  await page.waitForSelector('[data-pill="encryption"]:not([hidden])');
+  assert.equal((await page.textContent('[data-pill="encryption"]')).trim(), 'SSE-S3');
+  await page.waitForSelector('[data-section-toggle="encryption"][aria-expanded="false"]');
+  await page.click('[data-pill="encryption"]');
+  await page.waitForSelector('[data-encryption-section] [data-encryption-field="object"]', { state: 'visible' });
+  await closeWindow(page);
+  await deleteEncrypted(page, 'seaweedfs-encrypted', encryptedKey);
+
+  // A version with a legal hold: the pill says it and opens the section Retention.
+  const lockedKey = `summary/hold-${Date.now()}.txt`;
+  await makeLockedObject('seaweedfs-locked', lockedKey);
+  const version = (await apiVersions(page, 'seaweedfs-locked', lockedKey))[0].version;
+  assert.equal((await putLock(page, 'seaweedfs-locked', lockedKey, version, { legalHold: true })).status(), 200);
+  await open(page, '-/seaweedfs/seaweedfs-locked/summary/');
+  await openDetails(page, lockedKey.split('/').pop());
+  await page.waitForSelector('[data-pill="lock"]:not([hidden])');
+  assert.equal((await page.textContent('[data-pill="lock"]')).trim(), 'legal hold');
+  await page.click('[data-pill="lock"]');
+  await page.waitForSelector('[data-lock-section] [data-lock-field="legalHold"]', { state: 'visible' });
+  await closeWindow(page);
+  assert.equal((await putLock(page, 'seaweedfs-locked', lockedKey, version, { legalHold: false })).status(), 200);
+  await purgeVersions(page, 'seaweedfs-locked', lockedKey);
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
 
 (async () => {
   browser = await chromium.launch();

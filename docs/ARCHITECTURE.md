@@ -494,6 +494,70 @@ The setting "Show the encryption and the lock of the objects" of the listing sta
 
 The bar of the preview page shows the key and the padlock of the version on the page, next to its size, with the tooltips of the listing. The marks come from the HEAD request that the preview sends for the version: a version in `?version=` shows its own encryption and its own lock. An SSE-C object gets the key with the tooltip "Encrypted with a key of the client (SSE-C)". An entry of an archive and the comparison of two versions show no mark.
 
+## Usage and quota of a bucket
+
+The code is in `src/usage.go`, with one reader for each source: `src/usage_garage.go`, `src/usage_seaweedfs.go` and `src/usage_minio.go`. The S3 API gives no usage and no quota of a bucket. Each provider gives them in its own admin API. The `usage` block of an `auth` block names the source and its URLs. The server never guesses the source from the provider. Refer to [CONFIGURATION.md](CONFIGURATION.md).
+
+### Sources
+
+| Source | Requests | Used bytes | Objects | Limit |
+| --- | --- | --- | --- | --- |
+| `garage` (v2.4.1) | `GET <endpoint>/v2/GetBucketInfo?globalAlias=<bucket>` with `Authorization: Bearer <token>` | `bytes` | `objects` | `quotas.maxSize` and `quotas.maxObjects`. `null` is no limit |
+| `seaweedfs` (4.41) | `GET <endpoint>/vol/status` (the master) and `GET <filer_endpoint>/buckets/<bucket>?metadata=true` (the filer), with no credential | The sum of `Size - DeletedByteCount` of the volumes whose `Collection` is the bucket, one time for each volume id | Unknown | `Quota` of the entry of the bucket. 0 or a negative value is no limit |
+| `minio` (RELEASE.2025-10-15T17-29-55Z) | `GET <endpoint>/minio/admin/v3/get-bucket-quota?bucket=<bucket>` and `GET <endpoint>/minio/admin/v3/datausageinfo`, signed with SigV4 (service `s3`) and the S3 credentials of the `auth` block | `bucketsUsageInfo.<bucket>.size` | `bucketsUsageInfo.<bucket>.objectsCount` | `size`, else `quota`, of the quota of the bucket. 0 is no limit |
+
+AWS S3 has no quota of a bucket: give no `usage` block. GCS has no reader: a `usage` block in a `gcs` auth block stops the start.
+
+These facts come from the test stack:
+
+- Garage counts a write at once on one node. In a cluster, the counters follow after a short delay. A wrong token gives `403`, and an unknown bucket gives `404`. `garage bucket set-quotas <bucket> --max-size 20GiB --max-objects 100000` sets the quota.
+- SeaweedFS gives the size of its volumes, not the size of the objects. The bytes of a deleted file stay in its volume until a compaction, and the reader subtracts them. Each volume adds 8 bytes. The volume servers send their sizes to the master every few seconds. `weed shell` with `s3.bucket.quota -name=<bucket> -op=set -sizeMB=<n>` sets the quota, and `s3.bucket.quota.enforce -apply` makes a bucket over its quota read only. The reader expects the buckets in the folder `/buckets` of the filer (the default). The master and the filer have no credential in this reader: keep them on a closed network.
+- MinIO counts the usage in a background scan, about one time each minute on a small server. A zero `lastUpdate` is a server that has not counted yet: the read fails. The quota works in this release: `PUT /minio/admin/v3/set-bucket-quota?bucket=<bucket>` with `{"quota": <bytes>, "quotatype": "hard"}` sets it, and MinIO refuses a write over it. A bucket without a quota gives `200` with `"quota": 0`. Older releases answer `404 XMinioAdminBucketQuotaNotConfigured`: the reader takes it as no limit. The credentials need the admin actions `admin:GetBucketQuota` and `admin:DataUsageInfo` (for example the policy `consoleAdmin`, or the root user).
+
+The numbers of SeaweedFS and MinIO are approximate. The numbers are for the whole bucket, also for an instance with a root prefix.
+
+### Cost and safety
+
+- The server makes an admin request only for an instance whose `auth` block has a `usage` block. The probe at start makes no admin request.
+- Each request is a `GET`. One read has a time limit of 5 seconds for all its requests. Each answer has a size limit: 1 MiB for Garage and for the filer, 16 MiB for `/vol/status` and `datausageinfo`, 64 KiB for the quota of MinIO.
+- The server keeps the result of each instance for 60 seconds, and a failure for 10 seconds. One read at a time runs for an instance: the other requests wait for its result. The read does not stop when the request that started it stops.
+- `fresh=1` reads again a result that is older than 10 seconds. The page sends it after a change and after a click on the reload icon.
+- The token and the URLs of the admin API never go into an answer or into a log line. An error names the step and the HTTP status only. `print-config` and the effective configuration in the log show the URLs and hide the token.
+- A failure does not break the page. The page shows no number, and the tooltip of the totals gives the reason.
+- At start, the server compares the source with the provider that the lifecycle probe found. A different known provider gives a warning in the log. The source of the file applies.
+
+### Route
+
+`GET /api/usage?instance=<id>[&fresh=1]` needs the read permission of the instance and `objects.read` on the bucket. `/api/instances` gives `usageSupported` for each instance. The answer has these forms:
+
+- An instance without a `usage` block: `{"supported": false}`.
+- A read that works: `supported` and `available` are `true`, with `instance`, `bucket`, `rootPrefix`, `source`, `usedBytes`, `usedObjects` (`-1` when unknown), `limitBytes` and `limitObjects` (`0` is no limit), `limitSource`, `approximate`, `approximateReason`, `asOf`, `percent` and `level`.
+- A read that fails: `200` with `available: false` and `error` (`code` `usage_unavailable` and `message`). An answer `502` would tell the page that the server does not answer.
+
+`limitSource` is `provider`, `config` or `""`. The key `quota_bytes` of a bucket block gives the limit when the source gives no byte limit. The server does not enforce this limit. `percent` is the used part of the limit in percent, with one decimal. The server cuts the next decimals: 99.99 % gives 99.9. With a byte limit and an object limit, the larger part applies. `level` is `""` without a limit, `ok`, `warning` from 80 %, and `error` from 95 %.
+
+### The status line
+
+The listing has a status line at the right of its totals (for example `5 files, 521 B`). An empty folder shows it under its message. Each piece has a tooltip, and each piece shows only when its fact is true:
+
+| Piece | Source of the fact |
+| --- | --- |
+| `Versioning` (or `Versioning suspended`) | The versioning status in `GET /api/lifecycle` |
+| `Encrypted: SSE-S3` (a key) | `encryption`, `defaultEncryption` and `encryptionApplied` of `/api/instances`. Garage with `"sse-s3"` gets `SSE-S3 not applied` in the colour of a warning |
+| `Object Lock` (a padlock), with the default retention | `objectLockSupported` and `objectLockDefault` of `/api/instances` |
+| `N lifecycle rules` | The rules in `GET /api/lifecycle`. A click opens the window of the rules |
+| `12.3 GB of 20 GB` with a thin bar, or `12.3 GB used` | `GET /api/usage` |
+
+An approximate number starts with `~`. The bar has the colour of a warning from 80 % and the colour of an error from 95 %. The tooltip of the usage names the bucket, the used bytes, the limit and its source, the objects, the source and the time of the count, and the reason of an approximate number. The line stays on one line on a desktop. It wraps on a phone.
+
+The page reads the status when an instance opens. It reads the usage again (`fresh=1`) 1.5 seconds and 12 seconds after a change: an upload, a delete, a copy, a move, a rename, a metadata edit, a restore or the end of a job. A group of changes gives one read. A click on the reload icon reads the status again. The bucket selector puts the usage of each bucket in its tooltip when the menu opens. The page and the server keep each answer for 60 seconds.
+
+### The summary of the details
+
+The details of a file start with a strip of pills: the version (`v5 of 5`, only for a file with more than one version), the encryption (a key and `SSE-S3`, `SSE-KMS` or `Key of the client`), the lock (a padlock and the retention or `legal hold`) and the number of tags. A pill shows only when its fact is true. A click on the pill of the version opens the version picker. A click on another pill opens its section and moves to it.
+
+The sections keep all their content. The sections "Storage object" and "Tags" start open. The other sections start closed. A chevron button at the left of each title opens or closes the section. A click on the title or on its "Edit" button also opens it. The browser keeps the choice of each section in `portal.details.sections`.
+
 ## Insights treemap normalization
 
 The statistics worker builds the semantic treemap on the backend after the complete Insights scan finishes. The backend:

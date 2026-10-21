@@ -103,6 +103,34 @@ Since 2.0.0, the server never changes a value to make it fit. It does not remove
 
 The endpoint must use HTTP or HTTPS and may not contain credentials, a query string, or a fragment. Redirects and process environment proxies are disabled.
 
+## Usage of the buckets
+
+A `usage` block in an `s3` auth block gives the usage and the quota of its buckets. The status line under the listing shows them, and the tooltip of each bucket in the bucket selector. Without the block, the server makes no admin request and the interface shows no usage. Refer to "Usage and quota of a bucket" in [ARCHITECTURE.md](ARCHITECTURE.md).
+
+```hcl
+auth "garage" {
+  provider               = "s3"
+  endpoint               = "https://garage.example.internal"
+  region                 = "garage"
+  access_key_id_file     = "/run/secrets/garage-key-id"
+  secret_access_key_file = "/run/secrets/garage-secret"
+
+  usage {
+    source     = "garage"
+    endpoint   = "http://garage.example.internal:3903"
+    token_file = "/run/secrets/garage-admin-token"
+  }
+}
+```
+
+| Source | `endpoint` | `filer_endpoint` | `token` | Credentials |
+|---|---|---|---|---|
+| `garage` | Required: the admin API (port 3903 by default) | Not allowed | Required, `token_env` or `token_file` only: the admin token | The bearer token |
+| `seaweedfs` | Required: the master (port 9333 by default) | Required: the filer (port 8888 by default) | Not allowed | None: keep the master and the filer on a closed network |
+| `minio` | Optional: the endpoint of the auth block by default | Not allowed | Not allowed | The S3 credentials of the auth block, mode `access_key` only. They need `admin:GetBucketQuota` and `admin:DataUsageInfo` |
+
+Write `source` in lower case: the server does not change its case. A key that another source needs is a contradiction and stops the start. A `usage` block in a `gcs` auth block also stops the start. AWS S3 has no quota: give no block. The URLs use HTTP or HTTPS, without credentials, query, fragment or a `/` at the end. `print-config` shows the URLs and hides the token.
+
 ## GCS authentication
 
 ```hcl
@@ -141,6 +169,7 @@ bucket "archive" {
 | `root_prefix` | empty | Virtual root exposed by the application. |
 | `permissions` | omitted | Optional application ceiling containing `read`, `write`, and/or `delete`. |
 | `max_scan_pages` | `1` | Maximum 1,000-entry provider listing pages combined in navigation. `0` means no page-count limit. |
+| `quota_bytes` | omitted | A size limit (1 to 2^60 bytes) that the interface shows when the provider gives no limit. It needs a `usage` block in the auth block. The server does not enforce it. |
 | `encryption` | `""` | `""` sends no encryption header. `"sse-s3"` sends `x-amz-server-side-encryption: AES256` with each write of an object (upload, copy, move, rename, metadata edit, restore). SSE-C and SSE-KMS are not supported. Not for a `gcs` bucket. Refer to the section "Encryption" of [ARCHITECTURE.md](ARCHITECTURE.md). |
 
 `read` permits list, preview, details, inspection, version listing, and download. `write` permits upload, destination-side object creation, and the edit of the tags and the metadata of an object. `delete` permits deletion and the source side of move/rename. Provider policy and retention rules still apply.

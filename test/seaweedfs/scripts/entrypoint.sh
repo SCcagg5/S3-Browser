@@ -4,10 +4,13 @@ set -eu
 # One SeaweedFS process for the tests: master, volume, filer and S3 API. The identity comes from the HCL file of the
 # browser, as for the browser itself. The script creates the buckets, and then writes the ready file. The buckets of
 # LOCKED_BUCKETS have Object Lock (and so versioning): a bucket gets Object Lock only at its creation. The bucket
-# "encrypted" is for the instance with encryption = "sse-s3".
+# "encrypted" is for the instance with encryption = "sse-s3". The bucket "default" gets a quota (QUOTA_MB), large, so no
+# test reaches it. The quota is not enforced: "s3.bucket.quota.enforce" is not run.
 CONFIG_FILE="/config/config.hcl"
 BUCKETS="default archive encrypted"
 LOCKED_BUCKETS="locked"
+QUOTA_BUCKET="default"
+QUOTA_MB="20480"
 READY_FILE="/tmp/ready"
 
 if [ ! -r "$CONFIG_FILE" ]; then
@@ -89,6 +92,12 @@ done
 for bucket in $LOCKED_BUCKETS; do
   create_bucket "$bucket" "-withLock"
 done
+printf 's3.bucket.quota -name=%s -op=set -sizeMB=%s\n' "$QUOTA_BUCKET" "$QUOTA_MB" | weed shell -master=127.0.0.1:9333 >/tmp/quota.log 2>&1
+grep -q "updated quota" /tmp/quota.log || {
+  cat /tmp/quota.log >&2 || true
+  echo "Cannot set the quota of the bucket $QUOTA_BUCKET" >&2
+  exit 1
+}
 touch "$READY_FILE"
 
 wait "$SERVER_PID"

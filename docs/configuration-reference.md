@@ -79,6 +79,17 @@ Syntax: `auth "<id>" { ... }`. One or more blocks. A credential set and an endpo
 | `credentials_file` | file path | (none) | gcs service_account mode only | value | no | The JSON file of a GCS service account. A relative path starts at the directory of the configuration file. |
 | `insecure_skip_verify` | boolean | false |   | value | no | Do not verify the TLS certificate of the provider. Use it only for a test. |
 
+## `auth.usage`
+
+Syntax: `auth "<id>" { usage { ... } }`. Zero or one block in an auth block with provider "s3". The admin API that gives the usage and the quota of the buckets of the auth block (docs/ARCHITECTURE.md, "Usage and quota of a bucket"). Without it, the interface shows no usage and no quota.
+
+| Key | Type | Default | Range | Forms | Secret | Use |
+|---|---|---|---|---|---|---|
+| `source` | text | (required) | garage, seaweedfs or minio, exact (lower case) | value | no | The reader of the usage and of the quota. The server never guesses it from the provider. |
+| `endpoint` | URL | garage: (required), the admin API. seaweedfs: (required), the master. minio: the endpoint of the auth block | http or https, without credentials, query or fragment, and without a "/" at the end | value | no | The base URL of the admin API. print-config and the effective configuration in the log show it. The answers of the server and the error messages never show it. |
+| `filer_endpoint` | URL | seaweedfs: (required). Other sources: (none) | seaweedfs only. http or https, without credentials, query or fragment, and without a "/" at the end | value | no | The base URL of the filer of SeaweedFS. The filer gives the quota of a bucket. |
+| `token` | text | garage: (required). Other sources: (none) | garage only; 1 to 4096 bytes, no space and no control character | `_env`, `_file` | yes | The admin token of Garage. It is a secret: the form in clear text stops the start. minio signs with the S3 credentials of the auth block. seaweedfs sends no credential. |
+
 ## `bucket`
 
 Syntax: `bucket "<id>" { ... }`. One or more blocks. One bucket that the browser shows. The label is the id of the bucket for the URL and for the access policy.
@@ -92,6 +103,7 @@ Syntax: `bucket "<id>" { ... }`. One or more blocks. One bucket that the browser
 | `root_prefix` | text | "" | "", or a prefix that ends with "/" and does not start with "/" | value | no | The part of the bucket that the browser shows. The keys are relative to it. |
 | `max_scan_pages` | integer | 1 | 0 to 1000000 | value | no | The 1000-entry provider pages that one listing combines. 0 = no limit. |
 | `encryption` | text | "" | "" or sse-s3, exact (lower case). SSE-C and SSE-KMS are not supported. Only for an s3 auth block | value | no | The server-side encryption that the server asks for each object that it writes: upload, copy, move, rename, metadata edit, restore of a version, extraction. sse-s3 sends x-amz-server-side-encryption: AES256. "" sends no encryption header: the default encryption of the bucket applies. |
+| `quota_bytes` | integer | (none: the limit of the provider, or no limit) | 1 to 1152921504606846976. Only with a usage block in the auth block | value | no | The size limit of the bucket that the interface shows when the provider gives no limit. The server does not enforce it. |
 
 ## `access`
 

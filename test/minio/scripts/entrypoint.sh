@@ -4,10 +4,13 @@ set -eu
 # One MinIO server with one drive for the tests. The identity comes from the HCL file of the browser, as for the
 # browser itself. The script creates the buckets through the S3 API and then writes the ready file. The buckets of
 # LOCKED_BUCKETS have Object Lock (and so versioning): a bucket gets Object Lock only at its creation. The bucket
-# "encrypted" is for the instance with encryption = "sse-s3".
+# "encrypted" is for the instance with encryption = "sse-s3". The bucket "default" gets a hard quota through the admin
+# API (QUOTA_BYTES, 20 GiB), large, so no test reaches it.
 CONFIG_FILE="/config/config.hcl"
 BUCKETS="default encrypted"
 LOCKED_BUCKETS="locked"
+QUOTA_BUCKET="default"
+QUOTA_BYTES="21474836480"
 READY_FILE="/tmp/ready"
 
 if [ ! -r "$CONFIG_FILE" ]; then
@@ -71,6 +74,12 @@ done
 for bucket in $LOCKED_BUCKETS; do
   create_bucket "$bucket" true
 done
+printf 'user = "%s:%s"\n' "$KEY_ID" "$KEY_SECRET" \
+  | curl -fsS -K - --aws-sigv4 "aws:amz:us-east-1:s3" -X PUT --data "{\"quota\":$QUOTA_BYTES,\"quotatype\":\"hard\"}" \
+    -o /dev/null "http://127.0.0.1:9000/minio/admin/v3/set-bucket-quota?bucket=$QUOTA_BUCKET" || {
+    echo "Cannot set the quota of the bucket $QUOTA_BUCKET" >&2
+    exit 1
+  }
 touch "$READY_FILE"
 
 wait "$SERVER_PID"

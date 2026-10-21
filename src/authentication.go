@@ -16,6 +16,8 @@ type sharedAuthentication struct {
 	client   *http.Client
 	s3Creds  s3Credentials
 	gcsToken *gcsTokenSource
+	// usage reads the usage and the quota of the buckets. It is nil without a usage block.
+	usage BucketUsageReader
 }
 
 func newSharedAuthentication(cfg authConfig) (*sharedAuthentication, error) {
@@ -50,6 +52,12 @@ func newSharedAuthentication(cfg authConfig) (*sharedAuthentication, error) {
 		closeHTTPClient(client)
 		return nil, fmt.Errorf("auth %q uses unsupported provider %q", cfg.ID, cfg.Provider)
 	}
+	usage, err := newBucketUsageReader(cfg, client, auth.s3Creds)
+	if err != nil {
+		closeHTTPClient(client)
+		return nil, err
+	}
+	auth.usage = usage
 	return auth, nil
 }
 

@@ -67,8 +67,9 @@
   // Retention section of the file details
   // ---------------------------------------------------------------------------------------------------------------
 
-  // onChanged gets the new state after a save.
-  async function mountSection(host, { key, instance = null, version = '', canWrite = false, onChanged = null }) {
+  // onChanged gets the new state after a save. onState gets the state after the read and after each save (the summary
+  // of the details shows the lock).
+  async function mountSection(host, { key, instance = null, version = '', canWrite = false, onChanged = null, onState = null }) {
     const editButton = h('button', { type: 'button', class: 'iconButton detailsEditButton', 'data-lock-edit': '', title: 'Edit the retention', 'aria-label': 'Edit the retention', 'aria-pressed': 'false', hidden: true }, icon('pencil-outline'));
     const body = h('div', { class: 'metaEditor lockEditor' }, h('span', { class: 'metaEditor__state' }, 'Loading the retention…'));
     host.replaceChildren(h('div', { class: 'bb-details-section-title' }, icon('lock-outline'), ' Retention', editButton), body);
@@ -83,6 +84,7 @@
     };
     try {
       await load();
+      if (onState) onState(saved);
     } catch (error) {
       if (error?.status === 501 || error?.code === 'object_lock_unsupported') {
         host.remove();
@@ -265,6 +267,7 @@
         if (!Number.isFinite(skew)) skew = 0;
         stopEdit();
         say('The retention is saved.', 'ok');
+        if (onState) onState(response);
         document.dispatchEvent(new CustomEvent('bb:object-lock-changed', { detail: { key } }));
         if (onChanged) onChanged(response);
       } catch (failure) {
@@ -317,5 +320,5 @@
     return instance.objectLockDefault ? `Object Lock is on. Default retention: ${bucketDefaultText(instance.objectLockDefault)}` : 'Object Lock is on';
   }
 
-  BB.objectLock = { mountSection, lockFromHeaders, lockTitle, bucketLockTitle };
+  BB.objectLock = { mountSection, lockFromHeaders, lockTitle, bucketLockTitle, defaultText: bucketDefaultText };
 })();

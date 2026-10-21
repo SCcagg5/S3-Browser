@@ -3,13 +3,18 @@ set -eu
 
 # One Garage node for the tests. The identity comes from the HCL file of the browser, as for the browser itself.
 # Garage needs a key ID "GK" with 24 hexadecimal characters and a secret of 64 hexadecimal characters.
-# The script gives the node its layout, creates the buckets and the key, and then writes the ready file.
+# The script gives the node its layout, creates the buckets and the key, sets the quota of the bucket "default", and
+# then writes the ready file. The quota is large, so no test reaches it.
 CONFIG_FILE="/config/config.hcl"
 BUCKETS="default"
+QUOTA_BUCKET="default"
+QUOTA_SIZE="20GiB"
+QUOTA_OBJECTS="100000"
 READY_FILE="/tmp/ready"
-# The RPC secret and the admin token protect a node that has no published port. They are test values.
+# The RPC secret protects a node that has no published port. It is a test value.
 RPC_SECRET="b0a2d8f1a0e9b7c44c0b5aa9b18d8d29d9ab188f28e1c5f8c3a5d7e9f0123456"
-ADMIN_TOKEN="local-test-admin-token"
+# The admin token is a test value in test/secrets. The usage block of the browser reads the same file (token_file).
+ADMIN_TOKEN_FILE="/config/secrets/garage_admin_token"
 
 if [ ! -r "$CONFIG_FILE" ]; then
   echo "Browser HCL config is not readable: $CONFIG_FILE" >&2
@@ -30,6 +35,14 @@ if [ -n "$KEY_SECRET_FILE" ] && [ -r "$KEY_SECRET_FILE" ]; then
 fi
 if [ -z "$KEY_ID" ] || [ -z "$KEY_SECRET" ]; then
   echo "The S3 auth block in $CONFIG_FILE must define access_key_id and a readable secret_access_key_file" >&2
+  exit 1
+fi
+ADMIN_TOKEN=""
+if [ -r "$ADMIN_TOKEN_FILE" ]; then
+  ADMIN_TOKEN="$(head -n 1 "$ADMIN_TOKEN_FILE")"
+fi
+if [ -z "$ADMIN_TOKEN" ]; then
+  echo "The admin token file $ADMIN_TOKEN_FILE is not readable or is empty" >&2
   exit 1
 fi
 printf '%s' "$KEY_ID" | grep -Eq '^GK[0-9a-f]{24}$' || {
@@ -56,8 +69,9 @@ api_bind_addr = "0.0.0.0:3900"
 s3_region = "garage"
 root_domain = ".garage"
 
+# The admin API listens on the network of the stack: the usage block of the browser reads the usage and the quota.
 [admin]
-api_bind_addr = "127.0.0.1:3903"
+api_bind_addr = "0.0.0.0:3903"
 admin_token = "${ADMIN_TOKEN}"
 EOF_CONFIG
 
@@ -85,6 +99,7 @@ for bucket in $BUCKETS; do
   garage bucket create "$bucket" >/dev/null
   garage bucket allow --read --write --owner "$bucket" --key browser >/dev/null
 done
+garage bucket set-quotas "$QUOTA_BUCKET" --max-size "$QUOTA_SIZE" --max-objects "$QUOTA_OBJECTS" >/dev/null
 touch "$READY_FILE"
 
 wait "$SERVER_PID"

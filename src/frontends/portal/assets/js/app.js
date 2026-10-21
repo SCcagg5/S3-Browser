@@ -195,7 +195,9 @@ BB.cfg = config;
     // The encryption of the files: the choice of the settings for each bucket, and the reads of the files on the page.
     encryptionChoice: loadListing().encryption,
     encryptionRequest: 0,
-    encryptionSignature: ''
+    encryptionSignature: '',
+    // The status line of the bucket: the versioning status and the lifecycle rules of each instance (GET /api/lifecycle).
+    bucketInfo: {}
   };
 
   const ui = {};
@@ -408,8 +410,21 @@ BB.cfg = config;
       `host: ${instance.host}`,
       `bucket: ${instance.rootPrefix ? `${instance.bucket}/${instance.rootPrefix}` : instance.bucket}`,
       `provider: ${String(instance.provider || '').toUpperCase()}`,
-      permissionSummary(instance)
-    ].join('\n');
+      permissionSummary(instance),
+      BB.usage?.selectorLine(BB.usage.cached(instance.id)) || null
+    ].filter(Boolean).join('\n');
+  }
+
+  // The tooltips of the selector get the usage of a bucket when the page has read it. The selector stays as it is: an
+  // open menu stays open.
+  function refreshSwitcherTitles() {
+    const instance = currentInstance();
+    const trigger = ui.switcher?.querySelector('.storageSwitcher__trigger');
+    if (instance && trigger && !trigger.dataset.empty) trigger.title = storageDetails(instance);
+    for (const node of ui.switcherMenu?.querySelectorAll('.storageBucket[data-instance]') || []) {
+      const entry = state.instances.find(item => item.id === node.dataset.instance);
+      if (entry) node.title = storageDetails(entry);
+    }
   }
 
   // The key next to the name of a bucket that encrypts, with the reason in its tooltip. A key in the colour of a warning
@@ -530,6 +545,10 @@ BB.cfg = config;
     }
     ui.switcherMenu.hidden = false;
     ui.switcher.classList.add('is-open');
+    // The usage of each bucket goes into its tooltip. The page and the server keep each answer for 60 seconds.
+    for (const entry of state.instances) {
+      if (entry.usageSupported === true && can('list', entry)) void BB.usage.load(entry).then(refreshSwitcherTitles);
+    }
     ui.switcherTrigger.setAttribute('aria-expanded', 'true');
     if (focus) (ui.switcherMenu.querySelector('.storageBucket[aria-selected="true"]') || switcherItems()[0])?.focus();
   }
@@ -821,11 +840,11 @@ BB.cfg = config;
             h('button', { type: 'button', class: 'button', onclick: () => manualRefresh() }, ic('refresh'), 'Try again'));
           break;
         case 'empty-writable':
-          content = emptyBox('folder-open', 'This folder is empty', 'Drop files on the page, or upload files or a folder.',
-            h('button', { type: 'button', class: 'button button--primary', onclick: triggerUploadFiles }, ic('upload'), 'Upload files'));
+          content = withStatus(emptyBox('folder-open', 'This folder is empty', 'Drop files on the page, or upload files or a folder.',
+            h('button', { type: 'button', class: 'button button--primary', onclick: triggerUploadFiles }, ic('upload'), 'Upload files')));
           break;
         case 'empty':
-          content = emptyBox('folder-open', 'This folder is empty', '');
+          content = withStatus(emptyBox('folder-open', 'This folder is empty', ''));
           break;
         default:
           content = buildTable();
@@ -833,6 +852,128 @@ BB.cfg = config;
       ui.listing.replaceChildren(content);
     }
     if (mode === 'table') renderTable();
+  }
+
+  // ---------------------------------------------------------------------------------------------------------------
+  // Status line of the bucket, under the listing: versioning, encryption, Object Lock, lifecycle rules and usage
+  // ---------------------------------------------------------------------------------------------------------------
+
+  // An empty folder keeps the status line under its message.
+  function withStatus(box) {
+    return h('div', { class: 'listing' }, box, h('div', { class: 'tableFoot tableFoot--status' }, ui.status));
+  }
+
+  // The answer of GET /api/lifecycle gives the versioning status and the rules of the bucket in one read.
+  async function loadBucketInfo(instance, { force = false } = {}) {
+    if (!instance || instance.lifecycleSupported === false || !can('list', instance)) return;
+    if (state.bucketInfo[instance.id] && !force) return;
+    try {
+      const answer = await BB.api.lifecycle(instance.id);
+      state.bucketInfo = { ...state.bucketInfo, [instance.id]: { versioning: String(answer?.editor?.versioning || ''), rules: Array.isArray(answer?.rules) ? answer.rules : [] } };
+    } catch (error) {
+      console.warn('Unable to load the lifecycle rules for the status line', error);
+      return;
+    }
+    renderStatus();
+  }
+
+  function loadUsage(instance, { fresh = false } = {}) {
+    if (instance?.usageSupported !== true || !can('list', instance)) return;
+    void BB.usage.load(instance, { fresh }).then(() => {
+      renderStatus();
+      refreshSwitcherTitles();
+    });
+  }
+
+  // The page reads the status when an instance opens, and reads it again (fresh) after a click on the reload icon.
+  function loadStatus(instance, { fresh = false } = {}) {
+    void loadBucketInfo(instance, { force: fresh });
+    loadUsage(instance, { fresh });
+  }
+
+  const usageTimers = [];
+
+  // A change of the objects (an upload, a delete, a copy, a restore, the end of a job): the usage is read again after
+  // a pause, one time for a group of changes, and one more time after 12 seconds. The server reads the provider again
+  // only for a value older than 10 seconds, and SeaweedFS and Garage count a write after a few seconds.
+  function noteChange() {
+    usageTimers.splice(0).forEach(timer => window.clearTimeout(timer));
+    for (const wait of [1500, 12000]) usageTimers.push(window.setTimeout(() => loadUsage(currentInstance(), { fresh: true }), wait));
+  }
+
+  function statusItem(name, iconName, label, detail, { onclick = null, tone = '' } = {}) {
+    return h(onclick ? 'button' : 'span', {
+      type: onclick ? 'button' : null, class: ['bucketStatus__item', tone && `is-${tone}`], 'data-status': name, title: detail, onclick
+    }, iconName ? ic(iconName) : null, h('span', { class: 'bucketStatus__text' }, label), h('span', { class: 'visually-hidden' }, `. ${detail}`));
+  }
+
+  const ENCRYPTION_NAMES = { AES256: 'SSE-S3', 'aws:kms': 'SSE-KMS', 'aws:kms:dsse': 'DSSE-KMS' };
+
+  function statusItems(instance) {
+    const items = [];
+    const info = state.bucketInfo[instance.id];
+    if (info?.versioning === 'Enabled') {
+      items.push(statusItem('versioning', 'git-commit', 'Versioning', 'Versioning is on: a change or a delete keeps the older versions of a file.'));
+    } else if (info?.versioning === 'Suspended') {
+      items.push(statusItem('versioning', 'git-commit', 'Versioning suspended', 'Versioning is suspended: the bucket keeps the older versions that it has, and makes no new ones.'));
+    }
+    const lock = BB.encryption?.bucketLock(instance);
+    if (lock) {
+      const algorithm = instance.encryption === 'sse-s3' ? 'AES256' : String(instance.defaultEncryption || '');
+      const name = ENCRYPTION_NAMES[algorithm] || algorithm;
+      items.push(lock.tone === 'warn'
+        ? statusItem('encryption', 'key', `${name} not applied`, lock.title, { tone: 'warning' })
+        : statusItem('encryption', 'key', `Encrypted: ${name}`, lock.title));
+    }
+    const lockTitle = BB.objectLock?.bucketLockTitle(instance);
+    if (lockTitle) {
+      const retention = instance.objectLockDefault ? `: ${BB.objectLock.defaultText(instance.objectLockDefault)}` : '';
+      items.push(statusItem('object-lock', 'lock', `Object Lock${retention}`, lockTitle));
+    }
+    if (info?.rules?.length && instance.lifecycleSupported !== false) {
+      const enabled = info.rules.filter(rule => rule.enabled).length;
+      items.push(statusItem('lifecycle', 'hourglass', plural(info.rules.length, 'lifecycle rule'),
+        `${plural(enabled, 'rule')} on. Open the lifecycle rules of the bucket.`,
+        { onclick: () => { if (canRead()) BB.lifecycle.open({ prefix: state.pathPrefix, canWrite: canWrite() }); } }));
+    }
+    const usage = instance.usageSupported === true ? BB.usage.cached(instance.id) : null;
+    if (BB.usage.shown(usage)) {
+      const title = BB.usage.title(usage);
+      const limited = Number(usage.limitBytes) > 0;
+      const meter = limited
+        ? h('span', { class: 'usageMeter', role: 'meter', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(usage.percent), 'aria-label': 'Used part of the limit' },
+          h('span', { class: 'usageMeter__fill' }))
+        : null;
+      if (meter) meter.firstChild.style.width = `${Math.min(100, Math.max(Number(usage.percent) || 0, usage.usedBytes > 0 ? 2 : 0))}%`;
+      const node = h('span', { class: ['bucketStatus__item', 'bucketUsage', usage.level && `is-${usage.level}`], 'data-status': 'usage', 'data-level': usage.level || 'none', 'data-used-bytes': String(usage.usedBytes), title },
+        ic('database'), h('span', { class: 'bucketStatus__text' }, BB.usage.text(usage)), meter, h('span', { class: 'visually-hidden' }, `. ${title}`));
+      items.push(node);
+    }
+    return items;
+  }
+
+  function renderStatus() {
+    const instance = currentInstance();
+    if (!ui.status) return;
+    const usage = instance?.usageSupported === true ? BB.usage.cached(instance.id) : null;
+    const unavailable = usage?.supported === true && usage.available !== true;
+    const signature = JSON.stringify([instance?.id, state.bucketInfo[instance?.id], usage, instance?.encryption, instance?.defaultEncryption,
+      instance?.encryptionApplied, instance?.objectLockSupported, instance?.objectLockDefault, state.pathPrefix]);
+    if (ui.statusSignature === signature) return;
+    ui.statusSignature = signature;
+    const items = instance && canRead() ? statusItems(instance) : [];
+    ui.status.replaceChildren(...items);
+    ui.status.hidden = !items.length;
+    // A failed read of the usage shows no number: the tooltip of the totals says why.
+    ui.status.dataset.usage = unavailable ? 'unavailable' : (BB.usage.shown(usage) ? 'shown' : 'none');
+    const reason = unavailable ? BB.usage.title(usage) : '';
+    if (reason) ui.status.title = reason;
+    else ui.status.removeAttribute('title');
+    ui.usageReason = reason;
+    if (ui.table?.count) {
+      if (reason) ui.table.count.title = reason;
+      else ui.table.count.removeAttribute('title');
+    }
   }
 
   function sortHead(field, label) {
@@ -869,9 +1010,10 @@ BB.cfg = config;
     const previous = h('button', { type: 'button', class: 'button button--small button--icon', 'aria-label': 'Previous page', title: 'Previous page', onclick: () => previousPage() }, ic('chevron-left'));
     const next = h('button', { type: 'button', class: 'button button--small button--icon', 'aria-label': 'Next page', title: 'Next page', onclick: () => nextPage() }, ic('chevron-right'));
     const pager = h('div', { class: 'tableFoot__pager' }, previous, next);
-    const count = h('span', { id: 'folderCount', class: 'tableFoot__count' }, ui.countText || '');
+    const count = h('span', { id: 'folderCount', class: 'tableFoot__count', title: ui.usageReason || null }, ui.countText || '');
     const foot = h('div', { class: 'tableFoot' },
       count,
+      ui.status,
       range,
       h('label', {}, 'Rows', h('span', { class: 'select' }, pageSize)),
       pager);
@@ -1003,6 +1145,7 @@ BB.cfg = config;
     renderTitle();
     renderToolbar();
     renderListing();
+    renderStatus();
     renderDropOverlay();
   }
 
@@ -1088,6 +1231,8 @@ BB.cfg = config;
     // The server reads the default encryption of the bucket at start: the details show it only when the read worked.
     config.bucketEncryptionSupported = instance.bucketEncryptionSupported === true;
     config.rootPrefix = instance.rootPrefix || '';
+    // The status line under the listing: the versioning, the lifecycle rules and the usage of the bucket.
+    loadStatus(instance);
   }
 
   function resetPagination() {
@@ -1167,6 +1312,7 @@ BB.cfg = config;
   function manualRefresh() {
     resetPagination();
     refresh();
+    loadStatus(currentInstance(), { fresh: true });
   }
 
   function toggleSort(field) {
@@ -1576,13 +1722,19 @@ BB.cfg = config;
     BB.actions.showMetadata(row.key, { size: row.size, mime: row.contentType, etag: row.etag, lastModified: row.dateModified?.toUTCString?.() || '' });
   }
   function onRowDownload(row) { BB.actions.downloadObject(row.key, row.name); }
-  async function onRowCopy(row) { if (await BB.actions.copyObject(row.key)) await refresh(); }
-  async function onRowRename(row) { if (await BB.actions.renameObject(row.key)) await refresh(); }
-  async function onRowDelete(row) { if (await BB.actions.deleteObject(row.key)) await refresh(); }
+  async function onRowCopy(row) { if (await BB.actions.copyObject(row.key)) await refreshAfterChange(); }
+  async function onRowRename(row) { if (await BB.actions.renameObject(row.key)) await refreshAfterChange(); }
+  async function onRowDelete(row) { if (await BB.actions.deleteObject(row.key)) await refreshAfterChange(); }
   function onPrefixInsights(row) { BB.actions.showPrefixInsights(row.prefix); }
-  async function onPrefixCopy(row) { if (await BB.actions.copyPrefix(row.prefix)) await refresh(); }
-  async function onPrefixRename(row) { if (await BB.actions.renamePrefix(row.prefix)) await refresh(); }
-  async function onPrefixDelete(row) { if (await BB.actions.deletePrefix(row.prefix)) await refresh(); }
+  async function onPrefixCopy(row) { if (await BB.actions.copyPrefix(row.prefix)) await refreshAfterChange(); }
+  async function onPrefixRename(row) { if (await BB.actions.renamePrefix(row.prefix)) await refreshAfterChange(); }
+  async function onPrefixDelete(row) { if (await BB.actions.deletePrefix(row.prefix)) await refreshAfterChange(); }
+
+  // A change of the objects: the listing, and later the usage of the bucket.
+  function refreshAfterChange() {
+    noteChange();
+    return refresh();
+  }
 
   function onRowContextMenu(event) {
     const row = event.target?.closest?.('.dataTable tbody tr');
@@ -1647,6 +1799,7 @@ BB.cfg = config;
 
   // A file that arrives in the listed folder shows after a short delay: one refresh every 2.5 s at most.
   function scheduleUploadRefresh(destination, immediate = false) {
+    if (destination.instanceId === state.instanceId) noteChange();
     if (destination.instanceId !== state.instanceId || destination.prefix !== state.pathPrefix) return;
     clearTimeout(refreshTimer);
     const wait = immediate ? 300 : Math.max(800, 2500 - (Date.now() - lastUploadRefresh));
@@ -1799,6 +1952,8 @@ BB.cfg = config;
       uploadDock: 'uploadDock', fileInput: 'fileInput', dirInput: 'dirInput'
     })) ui[name] = byId(id);
     ui.searchLabel = document.querySelector('label[for="searchInput"]');
+    // The status line of the bucket moves between the foot of the table and the foot of an empty folder.
+    ui.status = h('div', { class: 'bucketStatus', role: 'group', 'aria-label': 'Status of the bucket', hidden: true });
   }
 
   function bindEvents() {
@@ -1825,10 +1980,12 @@ BB.cfg = config;
     ui.tagFilter.addEventListener('input', () => { state.tagFilter = ui.tagFilter.value; applyTagFilter(); });
     document.addEventListener('bb:tags-changed', event => forgetTags(event.detail?.key));
     // A save of the metadata changes the date and the versions of the object: the listing reads them again.
-    document.addEventListener('bb:metadata-changed', () => { void refresh(); });
+    document.addEventListener('bb:metadata-changed', () => { void refreshAfterChange(); });
     document.addEventListener('bb:object-lock-changed', event => forgetMarks(event.detail?.key));
     // A restore or a delete of a version changes the date, the size and the count of the versions of the file.
-    document.addEventListener('bb:versions-changed', () => { void refresh(); });
+    document.addEventListener('bb:versions-changed', () => { void refreshAfterChange(); });
+    // A save of the lifecycle rules changes the count of the rules in the status line.
+    document.addEventListener('bb:lifecycle-changed', () => { void loadBucketInfo(currentInstance(), { force: true }); });
     ui.fileInput.addEventListener('change', onFileInput);
     ui.dirInput.addEventListener('change', onDirInput);
     window.addEventListener('popstate', updateFromLocation);

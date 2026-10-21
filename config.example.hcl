@@ -37,6 +37,26 @@ auth "primary-s3" {
   region                 = "eu-west-1"
   access_key_id_file     = "/run/secrets/s3-access-key-id"
   secret_access_key_file = "/run/secrets/s3-secret-access-key"
+
+  # The usage and the quota of the buckets of this block, from the admin API of the provider
+  # (docs/ARCHITECTURE.md, "Usage and quota of a bucket"). Give one block for Garage, SeaweedFS or
+  # MinIO. Give no block for AWS S3: it has no quota. The source is never guessed. For Garage:
+  # usage {
+  #   source     = "garage"
+  #   endpoint   = "http://garage.example.internal:3903"
+  #   token_file = "/run/secrets/garage-admin-token"
+  # }
+  # For SeaweedFS: the master gives the size of the volumes, the filer gives the quota.
+  # usage {
+  #   source         = "seaweedfs"
+  #   endpoint       = "http://seaweedfs-master.example.internal:9333"
+  #   filer_endpoint = "http://seaweedfs-filer.example.internal:8888"
+  # }
+  # For MinIO: the admin API on the S3 endpoint, signed with the credentials of this block. They
+  # need the admin actions admin:GetBucketQuota and admin:DataUsageInfo.
+  # usage {
+  #   source = "minio"
+  # }
 }
 
 bucket "documents" {
@@ -57,6 +77,9 @@ bucket "archive" {
   permissions    = ["read"]
   root_prefix    = "published/"
   max_scan_pages = 0
+  # A size limit that the interface shows when the provider gives none. It needs a usage block in
+  # the auth block. The server does not enforce it.
+  # quota_bytes  = 107374182400
 }
 
 # A separate authentication may use another provider.
