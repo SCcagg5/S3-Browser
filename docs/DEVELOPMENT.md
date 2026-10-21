@@ -52,7 +52,7 @@ The test frontend under `src/frontends/portal` follows the same rules. To use it
 
 ### Browser tests of the portal frontend
 
-`test/portal-frontend/run.sh` starts three S3 providers (SeaweedFS, MinIO and Garage) and S3-Browser with `frontend = "portal"`. It uses Docker Compose with the project name `s3-portal-tests`. Then it puts test objects in the buckets and runs `browser-tests.js` in the Playwright container. The tests cover the theme selector, the header, the bucket selector, the breadcrumb and the toolbar row, the bulk upload and the access behaviour on SeaweedFS. A smoke test and a test of the copy in parts run on each provider. The image of this stack copies in parts from 8 KiB up: refer to the section "Copy in parts" of [ARCHITECTURE.md](ARCHITECTURE.md). At the end, the script stops the stack.
+`test/portal-frontend/run.sh` starts three S3 providers (SeaweedFS, MinIO and Garage) and S3-Browser with `frontend = "portal"`. S3-Browser also shows the Docker volume `volume-data` as the volume `files`: the Playwright container mounts the same Docker volume at `/volume`, so that the tests can read the real files. It uses Docker Compose with the project name `s3-portal-tests`. Then it puts test objects in the buckets and runs `browser-tests.js` in the Playwright container. The tests cover the theme selector, the header, the bucket selector, the breadcrumb and the toolbar row, the bulk upload and the access behaviour on SeaweedFS. A smoke test and a test of the copy in parts run on each provider. The image of this stack copies in parts from 8 KiB up: refer to the section "Copy in parts" of [ARCHITECTURE.md](ARCHITECTURE.md). At the end, the script stops the stack.
 
 `test/portal-frontend/providers.js` tells which provider has versions and tags. `test/portal-frontend/s3.js` sends signed S3 requests to the providers, for the seed and for the checks of the tests. Refer to [test/README.md](../test/README.md) for the functions of each provider. Two runs at the same time on one machine need two project names: set `PORTAL_TEST_PROJECT`.
 
@@ -61,6 +61,25 @@ The test frontend under `src/frontends/portal` follows the same rules. To use it
 ```
 
 The Playwright container installs the `playwright` package one time, in a Docker volume. To use a copy that is already on disk, set `PLAYWRIGHT_NODE_MODULES` to its `node_modules` directory. To run some tests only, set `ONLY` to a part of their names.
+
+## FUSE test of the volumes
+
+`test/volume-fuse/run.sh` is the real test of a volume on a FUSE mount of SeaweedFS (`weed mount`). It starts the
+SeaweedFS of the tests and one container with `weed mount`, the Go toolchain and S3-Browser, under the project name
+`s3-volmount`. Only this container gets `/dev/fuse`, `SYS_ADMIN` and no AppArmor profile. The script runs the Go tests
+of the volumes in a folder of the mount, then a browser smoke test. At the end, it removes the stack.
+
+```sh
+./test/volume-fuse/run.sh
+```
+
+The Go tests of the volumes take the flag `-volume-dir`: with it, each test makes its folders in a new folder of that
+folder, not in a temporary folder of the system. Use it to run the tests on an other mount:
+
+```sh
+cd src
+go test -count=1 -run TestVolume . -args -volume-dir=/mnt/nfs/s3-browser-tests
+```
 
 ## Filesystem-write check
 
@@ -82,7 +101,7 @@ Tests may create fixtures inside their temporary test directories.
 ## Shell syntax
 
 ```sh
-for file in test/*.sh test/seaweedfs/scripts/*.sh test/minio/scripts/*.sh test/garage/scripts/*.sh; do
+for file in test/*.sh test/seaweedfs/scripts/*.sh test/minio/scripts/*.sh test/garage/scripts/*.sh test/portal-frontend/*.sh test/volume-fuse/*.sh test/volume-fuse/scripts/*.sh; do
   [ -e "$file" ] || continue
   sh -n "$file"
 done

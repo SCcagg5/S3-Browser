@@ -1,13 +1,13 @@
 # Object Storage Browser
 
-Object Storage Browser is a self-contained Go application for browsing and operating on S3-compatible storage and Google Cloud Storage. It is designed for hosts with a small memory budget and for objects that can be hundreds of gigabytes.
+Object Storage Browser is a self-contained Go application for browsing and operating on S3-compatible storage and Google Cloud Storage. It can also show a folder of the server, for example a FUSE mount of SeaweedFS, as a bucket (a volume). It is designed for hosts with a small memory budget and for objects that can be hundreds of gigabytes.
 
 Core properties:
 
 - one statically linked Go binary;
 - HCL configuration only;
 - no application configuration or provider credentials from environment variables, except a variable that the HCL file names with an `_env` attribute;
-- no local database, cache directory, temporary file, or persisted job state;
+- no local database, cache directory, temporary file, or persisted job state (a volume is the exception: its uploads write a temporary file in the volume);
 - no hidden control objects, indexes, or checkpoints in connected buckets;
 - compatible with a read-only root filesystem;
 - shared authentication definitions that can serve multiple independently configured buckets;
@@ -26,7 +26,7 @@ CGO_ENABLED=0 go build -trimpath -o s3-browser .
 ./s3-browser -c ../config.hcl
 ```
 
-The configuration must contain at least one `auth` block, one `bucket` block and the `access` block (see [Access of humans](docs/ACCESS.md)).
+The configuration must contain the `access` block (see [Access of humans](docs/ACCESS.md)), and one `bucket` block or one `volume` block at least. A `bucket` block needs an `auth` block.
 
 ## Shared authentication and bucket-specific policy
 
@@ -68,11 +68,28 @@ See [Configuration](docs/CONFIGURATION.md) for all fields.
 
 ## Stateless runtime
 
-The server never writes application state to the local filesystem. Background jobs, preview sessions, permission observations, and active upload sessions exist only in bounded process memory and disappear on restart.
+The server never writes application state to the local filesystem. The files of a `volume` block are the only local files that it writes: they are the data of the volume, not state of the application. Background jobs, preview sessions, permission observations, and active upload sessions exist only in bounded process memory and disappear on restart.
 
 Resumable uploads use an encrypted, authenticated token returned to the client. The token contains the provider-side multipart or resumable-session coordinates. A fresh server process using the same configured credentials can reconstruct the provider upload state from that token; the server does not store the token or a checkpoint file.
 
 Completed and canceled uploads are removed from server memory. The process tracks at most four active upload sessions. Background jobs are limited to four active or queued operations and a small configurable in-memory terminal history.
+
+## Volumes
+
+A `volume` block shows a folder of the server as a bucket: a Docker volume, an NFS or CephFS mount, or a FUSE mount such
+as `weed mount` of SeaweedFS. The browser reads and writes its files with the identity of the process. Each write goes
+to a temporary file and replaces the target with one rename. A symbolic link that leaves the folder is not followed.
+
+```hcl
+volume "shared" {
+  name        = "Shared files"
+  path        = "/data/shared"
+  permissions = ["read", "write", "delete"]
+}
+```
+
+The address of a volume is `/-/volume/<id>/`. Refer to [docs/CONFIGURATION.md](docs/CONFIGURATION.md) and to the
+section "Volumes" of [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Version support
 

@@ -82,6 +82,60 @@ The browser tests start each page with all the sections of the details open (the
 
 The smoke test of each provider lists `smoke/`, uploads a file with its SHA-256 checksum, downloads it and deletes it. It checks the versions and the tags where the provider has them. Where the provider does not have them, it checks that the page hides them. `portal-frontend/providers.js` has the flags of each provider.
 
+## Volume of the portal test stack
+
+The portal test stack also has the volume `files`: the Docker volume `volume-data` at `/data/volume` of the browser
+container. The root file system of the browser container stays read only. The one-shot service `volume-init` gives the
+Docker volume to the user of S3-Browser (65532) before S3-Browser starts, because the start checks that the process can
+write in the folder. `portal-frontend/run.sh` also mounts the Docker volume at `/volume` of the Playwright container.
+`portal-frontend/providers.js` lists the volume in `VOLUMES`.
+
+The seed writes the files of the volume through the API: `docs/` with a nested folder, `data/` with a CSV file and a
+JSON file, and `images/` with an image. It also writes, through `/volume`, the files that the API cannot make: a hidden
+file, an empty folder, three symbolic links in `links/` (to a folder of the volume, to a file of the volume, and to
+`/etc`, which leaves the volume), and a temporary file of an upload with a date three days ago in `uploads/`.
+
+The tests of the volume check the address `/-/volume/files/`, the real and empty folders, the hidden file, the nested
+folders and the hidden functions of S3 (tags, versions, lifecycle rules, Object Lock, encryption, edit of the
+metadata). They check the links (the unreadable link has no action, and the API refuses it with `403`), and `..` in a
+key (`400`). They make a folder with "New folder", upload a small file with its SHA-256, copy, rename (the same inode)
+and delete a file, and copy, rename and delete a folder with an empty folder. An upload of 40 MiB loses its second
+chunk and resumes: the test sees the temporary file in the folder during the upload, and no temporary file at the end.
+It reads a range and the weak ETag. Other tests check the previews, the Insights, the prefix search, the window
+"Incomplete uploads" (the date of the last write, no parts, the abort by age), and the usage of the file system with
+the banner of a full volume.
+
+## FUSE test of the volumes
+
+`volume-fuse/run.sh` is the real test of a volume on a FUSE mount of SeaweedFS. Refer to
+[docs/DEVELOPMENT.md](../docs/DEVELOPMENT.md#fuse-test-of-the-volumes).
+
+- The service `seaweedfs` is the SeaweedFS 4.41 of the portal tests, with its configuration.
+- The service `mount` (`volume-fuse/Dockerfile`) has the same pinned `weed` binary, FUSE 3, the Go toolchain and
+  S3-Browser. Only this container has `/dev/fuse`, `SYS_ADMIN` and `apparmor:unconfined`. Its entrypoint runs `weed
+  mount -filer=seaweedfs:8888 -filer.path=/ -dir=/mnt/sw -volumeServerAccess=filerProxy`. The volume servers of the
+  service `seaweedfs` listen on their own address only, so the data goes through the filer. S3-Browser then starts
+  with the volume `sw` on `/mnt/sw/s3b` (`volume-fuse/config.hcl`).
+- `run.sh` runs the Go tests of the volumes on the mount (`go test -run TestVolume -args -volume-dir=/mnt/sw/s3b-go`),
+  then `volume-fuse/smoke.js` in the Playwright container: the list, a folder, an upload with SHA-256, a rename, a
+  copy, a range read, a resumed upload of 40 MiB, and the copy, the move and the delete of a folder.
+
+These facts come from the run of 2026-10-21 on a Debian 13 host (Linux 6.12, Docker 29.9, `/dev/fuse` present):
+
+- FUSE works in Docker on this host with these three options. The mount is `fuse.seaweedfs` with `allow_other`.
+- The 22 Go tests of the volumes pass on the mount, also the symbolic links, the rename that keeps the inode, the
+  dates of the files (`os.Chtimes`), `O_EXCL`, `fsync` and the hard links. The test of a folder that the process cannot
+  write is skipped, because the process is root.
+- The six steps of the browser smoke test pass. The writes of S3-Browser are visible at once through the mount.
+- `statfs` of the mount gives the capacity of the volume servers: 30 volumes of 64 MiB (2013265920 bytes). The used
+  bytes follow with a delay: two runs gave 0 bytes after the first writes, and 0 or 256512 bytes after an upload of
+  40 MiB and its delete. The
+  server finds the type FUSE in the answer of `statfs`: the usage of the volume is approximate, and the page shows it
+  with `~` and the reason.
+
+When a host refuses FUSE in Docker (no `/dev/fuse`, or a security profile that refuses the mount), `run.sh` stops with
+the log of `weed mount` and a message. The tests of the portal stack then cover a volume on a plain Docker volume.
+
 ## Functions of each provider
 
 These facts come from S3 requests to the three providers of the portal test stack, with a check of the effect by a second request. "Yes" means that the request works and has its effect. "Dropped" means that the provider answers 200 but does not keep the setting. Other cells give the HTTP status and the S3 error code.

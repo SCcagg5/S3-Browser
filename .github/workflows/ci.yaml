@@ -36,7 +36,7 @@ jobs:
       - name: Shell syntax
         working-directory: .
         run: |
-          for file in test/*.sh test/seaweedfs/scripts/*.sh test/minio/scripts/*.sh test/garage/scripts/*.sh; do
+          for file in test/*.sh test/seaweedfs/scripts/*.sh test/minio/scripts/*.sh test/garage/scripts/*.sh test/portal-frontend/*.sh test/volume-fuse/*.sh test/volume-fuse/scripts/*.sh; do
             [ -e "$file" ] || continue
             sh -n "$file"
           done

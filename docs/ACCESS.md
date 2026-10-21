@@ -119,8 +119,8 @@ S3-Browser publishes its actions at `GET /.well-known/access-actions`, without a
 {
   "server": "infra-s3",
   "resource_types": [
-    { "name": "bucket", "parent": "service", "description": "One bucket block of the configuration. ..." },
-    { "name": "prefix", "parent": "bucket",  "description": "One top-level folder of a bucket. ..." }
+    { "name": "bucket", "parent": "service", "description": "One bucket block or one volume block of the configuration. ..." },
+    { "name": "prefix", "parent": "bucket",  "description": "One top-level folder of a bucket or of a volume. ..." }
   ],
   "actions": [
     { "name": "objects.read",   "resource_types": ["service", "bucket", "prefix"], "description": "..." },
@@ -142,6 +142,9 @@ service (identity.audience, for example "infra-s3")
 
 - The id of a `bucket` is the label of its `bucket` block, not the name of the bucket at the provider. Two blocks
   that show the same provider bucket with two `root_prefix` values are two resources.
+- A `volume` block (a folder of the server, since 2.2.0) is also a resource of the type `bucket`, with the label of its
+  block as id. Its top-level folders are `prefix` resources, and each route asks the same actions as for a bucket.
+  The labels of the `bucket` and `volume` blocks are one set: two blocks cannot have the same label.
 - The id of a `prefix` is the first segment of the object key, below `root_prefix`, without the `/`. For the key
   `reports/2026/q1.csv`, the prefix is `reports`.
 - A key without `/` (an object at the root of the bucket) has no prefix. Its resource is the bucket.
@@ -217,7 +220,7 @@ top-level folder, else the bucket.
 | `GET /api/encryption` | `objects.read` | The bucket. |
 | `GET /api/usage` | `objects.read` | The bucket. The numbers are for the whole bucket, also for a bucket block with a root prefix. |
 | `GET /api/multiparts` | `objects.read` | The node of `prefix`. The root of the bucket is the bucket. |
-| `POST /api/multiparts/abort` with `uploads` | `objects.write` | The node of each `key`. |
+| `POST /api/multiparts/abort` with `uploads` | `objects.write` | The node of each `key`. On a volume, the abort removes the temporary file of the upload. |
 | `POST /api/multiparts/abort` with `olderThanDays` | `objects.read` and `objects.write` | The node of `prefix`. The root of the bucket is the bucket. |
 | `GET /api/lifecycle` | `objects.read` | The bucket. |
 | `PUT /api/lifecycle` | `objects.read`; `objects.write`; `objects.delete` | `objects.read` on the bucket. `objects.write` on the node of the prefix of each rule that the save adds, changes or removes. `objects.delete` on the node of the prefix of each new or changed enabled rule that deletes objects, versions or delete markers. A rule without a prefix is the bucket. |

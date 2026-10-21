@@ -2,7 +2,7 @@
 
 ## Runtime shape
 
-The application is one static Go binary with embedded frontend assets. It does not execute helper processes, require CGO, or write application state to disk.
+The application is one static Go binary with embedded frontend assets. It does not execute helper processes, require CGO, or write application state to disk. The only files that it writes on the local disk are the files of a `volume` block, in the folder of that block (refer to "Volumes").
 
 The runtime can be placed in a scratch container with a read-only root filesystem. Only the HCL file and any credential files need to be mounted read-only.
 
@@ -34,7 +34,7 @@ Provider redirects and environment-derived proxies are disabled.
 
 ## Stateless state model
 
-The server has no local database, cache directory, checkpoint directory, or temporary-file contract.
+The server has no local database, cache directory, checkpoint directory, or temporary-file contract. A volume is the only exception: an upload to a volume writes a temporary file in the folder of the target, in the volume (refer to "Volumes").
 
 Process memory contains only bounded live state:
 
@@ -55,7 +55,8 @@ A resumable upload creates a provider-side S3 multipart upload or GCS resumable 
 The token key is derived from the configured provider credential material when available. This allows another process with the same HCL credentials to open the token without a server-side record. The server then reconciles the actual provider state:
 
 - S3: lists uploaded parts and validates contiguous part numbers and sizes;
-- GCS: queries the resumable-session offset.
+- GCS: queries the resumable-session offset;
+- volume: reads the size of the temporary file of the upload (refer to "Volumes").
 
 The process tracks at most four active upload sessions. Completed and canceled sessions are removed from process memory. Cancel also aborts the provider session when supported.
 
@@ -611,6 +612,140 @@ The details of a file start with a strip of pills: the version (`v5 of 5`, only 
 The sections keep all their content. The sections "Storage object" and "Tags" start open. The other sections start closed. A chevron button at the left of each title opens or closes the section. A click on the title or on its "Edit" button also opens it. The browser keeps the choice of each section in `portal.details.sections`.
 
 The body of the details of a file is a container (`container-type: inline-size`). When the body is 820 px wide or more, the sections are in two columns (`.bb-details-column`). The first column has the object: "Storage object", "Encryption" and "Metadata". The second column has the facts that describe it: "Tags", "Retention", "File metadata" and "Document dimensions". A narrower window or a phone shows one column. The page order of the sections is the reading order and the tab order in the two layouts. Each column has its own height, so a section never moves to the other column when a section opens or closes. An open editor stays in its column. The summary strip, the header and the tool cards "Verify integrity" and "Inspect file" use the full width.
+
+## Volumes
+
+A `volume` block shows a folder of the server as the browser shows a bucket. The folder can be a Docker volume, an NFS
+or CephFS mount, or a FUSE mount such as `weed mount` of SeaweedFS. The server reads and writes the files with the
+system calls of its process, under the identity of the process. The code is in the files `src/volume_*.go`. These files
+are the only files of the program that write to the local file system: the CI checks it (refer to
+[DEVELOPMENT.md](DEVELOPMENT.md)). The configuration is in [CONFIGURATION.md](CONFIGURATION.md), section "Volume
+block". The test with a real `weed mount` is in [test/README.md](../test/README.md).
+
+### Instance and address
+
+- A volume is a storage instance with the provider `fs`. `/api/instances` gives it with `"provider": "fs"` and
+  `"host": "volume"`. The address of a volume in the interface is `/-/volume/<id>/`.
+- The labels of the `bucket` blocks and of the `volume` blocks are one set of ids: two blocks with the same label stop
+  the start. An `auth` block with the label `volume` stops the start when the file has a `volume` block, because the
+  two addresses would be the same.
+- The list of the interface gives the buckets first, then the volumes, each in the order of the file.
+- The access policy names a volume as a bucket: the resource `bucket:<id>` with the label of the block, and the
+  resource `prefix:<name>` for a top-level folder. Refer to [ACCESS.md](ACCESS.md).
+
+### Checks at start
+
+- `path` must be absolute, without `/` at the end and without an empty, `.` or `..` part. The folder must exist, and
+  the process must read it. `print-config` does these checks too.
+- `root_prefix` must be a relative folder path that ends with `/`. The folder must exist in `path`. The root of the
+  volume is then `path/root_prefix`, after the symbolic links.
+- When the server can change the files (the permissions include `write` or `delete`, or the block has no
+  `permissions`), the start makes and removes a temporary file in the root. A folder that the process cannot write
+  stops the start. Give `permissions = ["read"]` for a folder that is read only. `server.access_mode =
+  "force_read_only"` makes no such check.
+
+### Keys and paths
+
+- A key is a path relative to the root of the volume. The server refuses a key with an empty, `.` or `..` part, a NUL
+  byte, or a part of more than 255 bytes (`400 invalid_key`).
+- The server resolves each part of a path, one after the other. A symbolic link to a place inside the root is
+  followed. A symbolic link that leaves the root, or that does not resolve, stops the operation with
+  `403 volume_link_refused`. The listing with a delimiter shows such a link as an entry with `"unreadable": true`.
+  The interface shows it with a ban icon and no action. A delete of such a link is also refused.
+- A file that is not a regular file (a device, a socket, a pipe) is also unreadable. The server never opens it.
+- Hidden files (a name that starts with `.`) are visible. The names keep the case that the file system gives.
+- A name that is not valid UTF-8 shows with the replacement character. The server cannot read, write or delete it.
+  A key of a write must be valid UTF-8.
+- The names that start with `.s3b-tmp-` are for the temporary files of S3-Browser. A write with such a name is
+  refused, and the listings do not show these files.
+- Limit: a process outside S3-Browser that changes a symbolic link between the check and the use of a path can race
+  the check. The API of S3-Browser cannot make a symbolic link.
+
+### Listing
+
+- With the delimiter `/`, the server reads one folder. The subfolders are the prefixes, also an empty folder and a
+  symbolic link to a folder of the root. The other entries are the objects.
+- Without a delimiter, the server reads the tree: the files, and each empty folder as the key `<folder>/` with size 0
+  (as the folder objects of S3). It does not follow a symbolic link to a folder, because a link can make a loop.
+- The order is the order of the keys of S3 (bytes of UTF-8). The page token is the last key of the page. A token
+  stays valid when the folder changes: the next page starts after that key.
+- A page has 1000 keys at most. `max_scan_pages` of the block combines pages as for a bucket.
+- A folder with more than 250000 entries gives `422 volume_folder_too_large`: the server reads and sorts each folder
+  of a listing in memory.
+- The size and the date of a file come from `stat`. The content type comes from the extension of the name.
+
+### Reads
+
+- The ETag of a file is the weak validator `W/"<size>-<modification time in nanoseconds>"`. A file has no MD5.
+- `HEAD` and `GET` give `Content-Length`, `Content-Type`, `ETag`, `Last-Modified` and `Accept-Ranges: bytes`.
+- One byte range gives `206` with `Content-Range`. A range after the end gives `416`. A Range header that is not one
+  valid byte range gives the whole file, as RFC 9110 lets a server do. An empty file has no range.
+- `If-Match` and `If-Unmodified-Since` give `412`. `If-None-Match` and `If-Modified-Since` give `304`. The comparison
+  of an ETag is weak. An `If-Range` with an ETag never matches, because the ETag is weak: the answer is the whole
+  file. An `If-Range` with a date compares the date to the second.
+- The range readers of the previews send `If-Match` with the ETag of the file. A file that changes during a preview
+  thus gives `412`, as an object of S3.
+- The previews, the Insights, the search, the integrity check and the ZIP download read a volume through the same
+  interface as a bucket.
+
+### Writes
+
+- A write of a file goes to a new temporary file `.s3b-tmp-<random>` in the folder of the target. The server writes
+  the bytes, synchronizes the file to the disk (`fsync`), and gives it the name of the target with one rename. A
+  reader sees the old file or the new file, never a part. An existing file is replaced. A folder with the name of the
+  target stops the write (`409 volume_folder_exists`).
+- A write with the header `X-Checksum-Sha256` compares the SHA-256 of the received bytes with the digest of the
+  client. A different digest stops the write (`400 bad_digest`), and the target does not change.
+- A write makes the missing folders of the path. A part of the path that is a file stops the write (`409`).
+- A write through a symbolic link to a file of the root writes the target file. The link stays.
+- A key that ends with `/` and has no content makes a folder (`mkdir`). The Actions menu of the interface has the
+  item "New folder" for a volume.
+- A delete of a file removes the file. A delete of a folder key (`<folder>/`) removes the folder when it is empty. A
+  key that does not exist, and a folder that is not empty, give no error: a delete of S3 does the same.
+- A copy reads the source and writes the destination as a write of a file. From the threshold of the copy in parts
+  up (refer to "Copy in parts"), the copy is a job that shows the copied bytes and can stop.
+- A move and a rename of a file are one rename. A rename to an other file system (`EXDEV`) copies the file and
+  removes the source. A move of a folder moves each file with one rename, then removes the folders that it emptied.
+- A delete of a folder (the job `delete_prefix`) deletes the files of the tree, then removes the empty folders from
+  the bottom. A folder that keeps a file (for example a symbolic link that leaves the root) stays.
+- A full file system gives `507 volume_full`. A read-only file system gives `403 volume_read_only`.
+
+### Uploads and incomplete uploads
+
+- A resumable upload (`/api/uploads`) writes its chunks to a temporary file in the folder of the target:
+  `.s3b-tmp-<random>-<name of the target>`. The next chunk starts at the size of the temporary file, so a client can
+  resume after a lost connection. The last chunk synchronizes the file and gives it the name of the target.
+- The resume token holds the path of the temporary file and the key of the target, encrypted and authenticated. A
+  volume has no credential: the key of the token is a random key of the process. Thus a token does not stay valid
+  after a restart of the server. The temporary file stays.
+- The window "Incomplete uploads" lists the temporary files of the volume: the key of the target, the last write to
+  the file (as the date) and its size. The abort of an upload removes its temporary file. The abort by age keeps a file
+  younger than 24 hours, and no abort touches a file of an upload that this process sends now.
+- One page of this list reads at most 20000 entries of the tree. The list does not follow a symbolic link.
+
+### Functions of S3 that a volume does not have
+
+A volume has no versions, no tags, no metadata of S3, no lifecycle rules, no Object Lock and no encryption of S3. The
+backend does not have these interfaces, so the server answers `501` to their routes. `/api/instances` gives `false`
+for `versioningSupported`, `tagsSupported`, `metadataEditSupported`, `lifecycleSupported`, `objectLockSupported` and
+`bucketEncryptionSupported`. The interface hides their controls, and reads no HEAD for the marks of the listing.
+
+### Usage
+
+`GET /api/usage` of a volume gives the size of its file system (`statfs`) with the source `statfs`: the used bytes are
+the size minus the available bytes, and the limit is the size. The number of objects is unknown (`-1`).
+`approximate` is `true` on a FUSE, NFS, CephFS, SMB 2 or CIFS file system (the type of the answer of `statfs`): such a
+file system can count the used bytes with a delay. On an other file system, it is `false`. The numbers are for the whole file system, also for the other folders on it. The warning of a full
+bucket applies to a volume from 90 %. Only a Linux build reads `statfs`: on an other system, a volume has no usage.
+
+### File systems
+
+- The server needs a file system with rename in a folder, `fsync`, and `O_EXCL`. A hard link (for the archive
+  extraction that must not replace a file) is optional: without it, the server checks the target and renames.
+- The test with a real `weed mount` of SeaweedFS 4.41 (test/volume-fuse) passes: the Go tests of the volumes and a
+  browser smoke test run on the mount. The facts of that test are in [test/README.md](../test/README.md).
+- A network file system can show a change of an other client with a delay. A listing can then be old by a few
+  seconds. The writes of S3-Browser through the same mount are visible at once.
 
 ## Insights treemap normalization
 

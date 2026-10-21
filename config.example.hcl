@@ -97,6 +97,19 @@ bucket "gcs-backups" {
   max_scan_pages = 1
 }
 
+# A volume: a folder of the server that the browser shows as a bucket, for example a Docker
+# volume, an NFS or CephFS mount, or a FUSE mount of SeaweedFS (weed mount). It needs no auth
+# block. The folder must exist at start (docs/CONFIGURATION.md, "Volume block"). With write or
+# delete in permissions, the start writes and removes a test file: give ["read"] for a folder
+# that the process cannot write. The address in the interface is /-/volume/shared/.
+# volume "shared" {
+#   name           = "Shared files"
+#   path           = "/data/shared"
+#   permissions    = ["read", "write", "delete"]
+#   root_prefix    = "published/"
+#   max_scan_pages = 15
+# }
+
 # The access of humans (docs/ACCESS.md). The block is mandatory.
 # "open": the server checks no identity and no permission. Use it only on a
 # closed network. "authzen": an access gateway gives a signed identity token,

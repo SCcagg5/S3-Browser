@@ -2,6 +2,42 @@
 
 This document uses ASD-STE100 Simplified Technical English.
 
+## Unreleased
+
+### Volumes
+
+A new block `volume "<id>" { path = "..." }` shows a folder of the server as a bucket: a Docker volume, an NFS or
+CephFS mount, or a FUSE mount such as `weed mount` of SeaweedFS. A configuration file of 2.1.0 starts without any
+change. Refer to the section "Volume block" of [docs/CONFIGURATION.md](docs/CONFIGURATION.md) and to the section
+"Volumes" of [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+- Configuration: the keys `name`, `path`, `permissions`, `root_prefix` and `max_scan_pages`. The folder must exist and
+  the process must read it at start. With `write` or `delete` (or without `permissions`), the start writes and
+  removes a test file: a folder that the process cannot write stops the start. A `volume` block and a `bucket` block
+  cannot have the same label. An `auth` block cannot have the label `volume` in a file with a volume. A file needs
+  one `bucket` block or one `volume` block, and an `auth` block only for a `bucket` block. `print-config` and the
+  generated reference have the new keys.
+- Address: `/-/volume/<id>/`. `/api/instances` gives a volume with `"provider": "fs"` and `"host": "volume"`. The
+  access policy names a volume as a bucket (`bucket:<id>`, and `prefix:<name>` for a top-level folder).
+- Listing: real folders, also empty folders, and hidden files. The order of the keys of S3, and the last key as the
+  page token. A symbolic link to a place inside the volume is followed. A link that leaves the volume, or that does
+  not resolve, is refused (`403 volume_link_refused`) and shows as unreadable (`"unreadable": true` in `/api/list`). A
+  key with `..` is refused (`400`).
+- Reads: the weak ETag `W/"<size>-<modification time in nanoseconds>"`, the content type from the extension, ranges,
+  and the conditions of HTTP.
+- Writes: each write goes to a temporary file in the folder of the target, is synchronized to the disk, and replaces
+  the target with one rename. The SHA-256 of the client is checked. A move and a rename are one rename. The delete
+  and the move of a folder remove the folders that they empty. A key `<folder>/` makes a folder.
+- Uploads: a resumable upload writes a temporary file and resumes at its size. The window "Incomplete uploads" lists
+  and removes the temporary files of the stopped uploads.
+- Usage: the size of the file system (`statfs`), in the selector and in the warning of a full volume.
+- Interface `portal`: the item "New folder" of the Actions menu for a volume, the words "volume" and "folder of the
+  server", a folder icon, the unreadable entries, and no control for tags, versions, lifecycle rules, Object Lock,
+  encryption and the edit of the metadata.
+- CI: only the files `src/volume_*.go` can write to the local file system.
+- Tests: the Go tests of the volumes, a volume in the portal test stack, and the real test on a FUSE mount of
+  SeaweedFS (`test/volume-fuse/run.sh`). Refer to [test/README.md](test/README.md).
+
 ## 2.1.0
 
 Version 2.1.0 adds the test interface `portal`, many functions for S3 buckets and a first set of tests on three

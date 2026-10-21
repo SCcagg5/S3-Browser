@@ -7,9 +7,12 @@ The application accepts one HCL file through `-c <path>` or `-config <path>`. Ru
 Supported top-level blocks:
 
 - zero or one `server` block;
-- one or more `auth "id"` blocks;
-- one or more `bucket "id"` blocks;
+- zero or more `auth "id"` blocks;
+- zero or more `bucket "id"` blocks. Each `bucket` block needs an `auth` block;
+- zero or more `volume "id"` blocks: a folder of the server that the browser shows as a bucket (since 2.2.0);
 - exactly one `access` block (since 2.0.0). It is mandatory.
+
+A file needs one `bucket` block or one `volume` block at least.
 
 Unknown blocks, attributes, nested blocks, and wrong value types are rejected. The HCL file is limited to 4 MiB. Individual secret files are limited to 1 MiB; a GCS service-account file is bounded separately by the provider parser.
 
@@ -174,6 +177,45 @@ bucket "archive" {
 
 `read` permits list, preview, details, inspection, version listing, and download. `write` permits upload, destination-side object creation, and the edit of the tags and the metadata of an object. `delete` permits deletion and the source side of move/rename. Provider policy and retention rules still apply.
 
+## Volume block
+
+A `volume` block shows a folder of the server as a bucket: a Docker volume, an NFS or CephFS mount, or a FUSE mount
+such as `weed mount` of SeaweedFS. It needs no `auth` block. The section "Volumes" of
+[ARCHITECTURE.md](ARCHITECTURE.md) gives the rules of the paths, the listings, the writes and the uploads.
+
+```hcl
+volume "shared" {
+  name           = "Shared files"
+  path           = "/data/shared"
+  root_prefix    = "published/"
+  permissions    = ["read", "write", "delete"]
+  max_scan_pages = 15
+}
+```
+
+| Attribute | Default | Description |
+|---|---:|---|
+| `name` | block id | The name that the interface shows. |
+| `path` | required | The absolute path of the folder, without `/` at the end and without an empty, `.` or `..` part. The server does not clean the value. The folder must exist at start, and the process must read it. |
+| `permissions` | omitted | The ceiling of the operations: `read`, `write` and `delete`. Without the key, the three apply. |
+| `root_prefix` | empty | The folder of `path` that the browser shows: a relative path that ends with `/`. It must exist at start. A symbolic link that leaves it is not followed. |
+| `max_scan_pages` | `1` | The 1000-entry pages of a folder that one listing combines. `0` means no limit. |
+
+These rules stop the start:
+
+- A folder that does not exist, a file in place of the folder, or a folder that the process cannot read.
+- A folder that the process cannot write when the permissions include `write` or `delete`, or when the block has no
+  `permissions`. The start makes and removes a temporary file to check it. Give `permissions = ["read"]` for a folder
+  that is read only. With `server.access_mode = "force_read_only"`, the start makes no such check.
+- A `volume` block and a `bucket` block with the same label.
+- An `auth` block with the label `volume` in a file with a `volume` block: `volume` is the address word of the
+  volumes in the interface (`/-/volume/<id>/`).
+
+The address of a volume in the interface is `/-/volume/<id>/`. The access policy names it as a bucket: the resource
+`bucket:<id>`, and `prefix:<name>` for a top-level folder (refer to [ACCESS.md](ACCESS.md)). The process of S3-Browser
+reads and writes the files: give it the owner or the group of the folder. In a container, mount the folder with
+write access, and keep the root file system read only.
+
 ## Access block
 
 ```hcl
@@ -203,7 +245,7 @@ A file without the `access` block stops the start. [ACCESS.md](ACCESS.md) gives 
 
 ## Version capability probe
 
-A single bounded version-list request is made for every bucket when the application starts. Any error marks version browsing unavailable for that bucket. This includes providers such as Garage that return HTTP 501 for the version-list API. The result is process-local and is exposed only as a boolean capability; the HCL file does not need a versioning flag.
+A single bounded version-list request is made for every bucket when the application starts. A volume has no versions and gets no request. Any error marks version browsing unavailable for that bucket. This includes providers such as Garage that return HTTP 501 for the version-list API. The result is process-local and is exposed only as a boolean capability; the HCL file does not need a versioning flag.
 
 ## Public path
 
