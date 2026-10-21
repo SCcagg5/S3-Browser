@@ -197,7 +197,7 @@ This document uses ASD-STE100 Simplified Technical English.
 - The versioning icon (Tabler `git-commit`, the tooltip says "Versioning: on" or "Versioning: suspended") is directly
   after the read, write and delete icons of the bucket, in the trigger and in each bucket of the list. It is not a part
   of the button of the permissions, and it does not act. A bucket that never had versioning shows no versioning icon.
-- From 1100 px up, the trigger of the selector is one line of 40 px: the name, the permission and versioning icons, the
+- From 1100 px up, the trigger of the selector is one line of 28 px: the name, the permission and versioning icons, the
   facts and the chevron. The selector is 620 px wide (less when the header has less space), and the list is as wide.
   The name keeps 120 px at least, and the facts never wrap: the usage text gets an ellipsis first. Each bucket of the
   list is one line too, with its root prefix under the name when it has one. Below 1100 px, the trigger and each
@@ -226,6 +226,21 @@ This document uses ASD-STE100 Simplified Technical English.
   Encryption and Metadata. The second column has Tags, Retention, File metadata and Document dimensions. A narrow
   window or a phone shows one column. The tool cards Verify integrity and Inspect file keep the full width under the
   columns. The tab order does not change.
+
+### Interface `portal`: height of the header, opaque menus
+
+- The header has the height of the header of ClickHouse Dash: 45 px from 1100 px up (44 px and its border line), and
+  57 px on a coarse pointer. A measurement of the Dash header in a browser, with its own stylesheet, gives these
+  values. The bucket selector and the theme button are 28 px high, as the host picker of ClickHouse Dash (44 px on a
+  coarse pointer). The trigger stays one line, with its permission icons, its facts and its usage bar.
+- Below 1100 px the header does not change: one row of 59 px from 761 px, two rows on a phone.
+- The menus open with a short move and no fade, so the page never shows through a menu, also in its first frame. This
+  applies to the theme menu, the list of the buckets, the menus Actions and settings, the version picker and the
+  suggestions of the metadata editor. Each menu has the opaque colour `--panel`.
+- An open menu of the header is above the upload dock.
+- New browser tests: the header is 45 px at 1440 and 1280 px (57 px on a coarse pointer) in the two themes, with no
+  horizontal scroll. The background of each menu has an alpha of 1, the menu has an opacity of 1 in its first frame,
+  and no element of the page is over it, in the two themes.
 
 ### Uploads and deletes
 

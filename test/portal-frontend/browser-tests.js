@@ -1785,6 +1785,146 @@ test('header: the brand and the version of ClickHouse Dash, in the centred colum
   await page.context().close();
 });
 
+// The height of the header of ClickHouse Dash, measured in a browser with its own stylesheet and the markup of its
+// header: 45 px with its border line (controls of 28 px), and 57 px on a coarse pointer (controls of 40 px).
+const DASH_HEADER = 45;
+const DASH_HEADER_COARSE = 57;
+
+test('header: from 1100 px up the header has the height of the header of ClickHouse Dash, in the light and the dark theme, with no horizontal scroll', async () => {
+  const cases = [
+    { viewport: { width: 1440, height: 900 }, header: DASH_HEADER },
+    { viewport: { width: 1280, height: 720 }, header: DASH_HEADER },
+    { viewport: { width: 1440, height: 900 }, header: DASH_HEADER_COARSE, coarse: true }
+  ];
+  for (const item of cases) {
+    for (const colorScheme of ['light', 'dark']) {
+      const page = await newPage({ viewport: item.viewport, colorScheme, ...(item.coarse ? { isMobile: true, hasTouch: true } : {}) });
+      await open(page, MAIN);
+      await page.waitForSelector(`${FACTS} [data-fact="usage"][data-used-bytes]`);
+      const box = await page.evaluate(() => {
+        const height = selector => document.querySelector(selector).getBoundingClientRect().height;
+        return { header: height('.appHeader'), trigger: height('.storageSwitcher__trigger'), theme: height('.themeSelect__button'),
+          scroll: document.documentElement.scrollWidth - window.innerWidth };
+      });
+      const where = `${item.viewport.width}${item.coarse ? ' coarse' : ''} ${colorScheme}: ${JSON.stringify(box)}`;
+      assert.ok(Math.abs(box.header - item.header) <= 1, where);
+      // The controls of the header: 28 px as the host picker of ClickHouse Dash, 44 px on a coarse pointer.
+      assert.equal(box.trigger, item.coarse ? 44 : 28, where);
+      assert.equal(box.theme, item.coarse ? 44 : 28, where);
+      assert.ok(box.scroll <= 0, where);
+      assert.deepEqual(page.errors, []);
+      await page.context().close();
+    }
+  }
+});
+
+// The look of an open menu: the alpha of its background colour (rgb(), rgba(), rgb( / ) and color(srgb / ) forms), the
+// opacity of the menu and of its parents at the first frame of its animation, its backdrop filter, and the elements
+// of the page over it (points inside its rounded corners).
+function menuSurface(page, selector) {
+  return page.evaluate(target => {
+    const menu = Array.from(document.querySelectorAll(target)).find(node => node.getClientRects().length);
+    if (!menu) return { missing: target };
+    const alpha = value => {
+      const match = /\/\s*([\d.]+)(%?)\s*\)$/.exec(value) || /^rgba\([^,]+,[^,]+,[^,]+,\s*([\d.]+)()\s*\)$/.exec(value);
+      if (!match) return /^(rgb|color)\(/.test(value) ? 1 : 0;
+      return match[2] ? Number(match[1]) / 100 : Number(match[1]);
+    };
+    const animations = menu.getAnimations();
+    for (const animation of animations) {
+      animation.pause();
+      animation.currentTime = 0;
+    }
+    let opacity = 1;
+    for (let node = menu; node; node = node.parentElement) opacity *= Number(getComputedStyle(node).opacity);
+    for (const animation of animations) animation.finish();
+    const style = getComputedStyle(menu);
+    const rect = menu.getBoundingClientRect();
+    const covered = [];
+    for (let i = 1; i < 6; i += 1) {
+      for (let j = 1; j < 6; j += 1) {
+        const x = rect.left + 8 + ((rect.width - 16) * i) / 6;
+        const y = rect.top + 8 + ((rect.height - 16) * j) / 6;
+        const node = document.elementFromPoint(x, y);
+        if (node && !menu.contains(node)) covered.push(node.className || node.tagName);
+      }
+    }
+    return { background: style.backgroundColor, alpha: alpha(style.backgroundColor), opacity, backdrop: style.backdropFilter, covered: [...new Set(covered)] };
+  }, selector);
+}
+
+async function assertOpaqueMenu(page, selector, where) {
+  const surface = await menuSurface(page, selector);
+  const text = `${where} ${selector}: ${JSON.stringify(surface)}`;
+  assert.equal(surface.missing, undefined, text);
+  assert.equal(surface.alpha, 1, text);
+  assert.equal(surface.opacity, 1, text);
+  assert.ok(surface.backdrop === 'none' || surface.backdrop === '', text);
+  assert.deepEqual(surface.covered, [], text);
+}
+
+// Closes the open menu: Escape, then a click on the brand of the header (or the title of the preview).
+async function closeMenu(page) {
+  await page.keyboard.press('Escape');
+  await page.click('.appBrand__name, .previewTitle .doc-name');
+}
+
+test('menus: the theme menu and every other menu of the portal are opaque from their first frame, in the light and the dark theme', async () => {
+  const instance = 'seaweedfs-main';
+  const name = `opaque-${Date.now()}.txt`;
+  for (const colorScheme of ['light', 'dark']) {
+    for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+      const page = await newPage({ viewport, colorScheme });
+      const where = `${colorScheme} ${viewport.width}`;
+      await open(page, MAIN);
+      // The menus of the header: the theme and the buckets.
+      await page.click('[data-theme-trigger]');
+      await assertOpaqueMenu(page, '#themeMenu', where);
+      await closeMenu(page);
+      await page.click('.storageSwitcher__trigger .storageSwitcher__icon');
+      await assertOpaqueMenu(page, '#storageSwitcherMenu', where);
+      await closeMenu(page);
+      if (viewport.width === 390) {
+        await page.context().close();
+        continue;
+      }
+      // The menus of the toolbar and the menu of a row.
+      await page.click('#actionsButton');
+      await assertOpaqueMenu(page, '#actionsMenu', where);
+      await closeMenu(page);
+      await page.click('#settingsButton');
+      await assertOpaqueMenu(page, '#settingsMenu', where);
+      await closeMenu(page);
+      await page.click('tr[data-name] .bb-kebab >> nth=0');
+      await assertOpaqueMenu(page, '.bb-menu.is-open .bb-menu-popover', where);
+      await closeMenu(page);
+      // The popover of the suggestions of the metadata editor.
+      if (colorScheme === 'light') await putWithServer(page, instance, `meta/${name}`, 'opaque\n', { 'Content-Type': 'application/octet-stream' });
+      await open(page, `${MAIN}meta/`);
+      await openMetadataForm(page, name);
+      await page.focus('[data-metadata-header="contentType"]');
+      await page.waitForSelector('.suggest__menu');
+      await assertOpaqueMenu(page, '.suggest__menu', where);
+      // The preview page: the theme menu, the menu of the actions and the version picker.
+      await page.goto(`${BASE}${MAIN}versions/report.txt`, { waitUntil: 'networkidle' });
+      await page.waitForSelector('.versionPicker__button');
+      await page.click('[data-theme-trigger]');
+      await assertOpaqueMenu(page, '#themeMenu', `${where} preview`);
+      await closeMenu(page);
+      await page.click('#previewKebabBtn');
+      await assertOpaqueMenu(page, '#previewMenu .bb-menu-popover', `${where} preview`);
+      await closeMenu(page);
+      await page.click('.versionPicker__button');
+      await assertOpaqueMenu(page, '.versionPicker__menu:not([hidden])', `${where} preview`);
+      assert.deepEqual(page.errors, []);
+      await page.context().close();
+    }
+  }
+  const page = await newPage();
+  await page.request.delete(`${BASE}s3?instance=${instance}&key=${encodeURIComponent(`meta/${name}`)}`);
+  await page.context().close();
+});
+
 test('selector: the bucket selector of the default interface, by host, with the permissions', async () => {
   const page = await newPage();
   await open(page, MAIN);
@@ -4618,7 +4758,7 @@ const spread = values => Math.max(...values) - Math.min(...values);
 // encryption, no versioning.
 const LINE_INSTANCES = ['seaweedfs-main', 'seaweedfs-locked', 'seaweedfs-encrypted', 'garage-main', 'minio-main'];
 
-test('selector: on a wide window (1440 and 1280) the trigger is one line, the facts of each bucket are fully visible, and the header keeps its height', async () => {
+test('selector: on a wide window (1440 and 1280) the trigger is one line of 28 px, the facts of each bucket are fully visible, and the header has the height of ClickHouse Dash', async () => {
   for (const viewport of [{ width: 1440, height: 900 }, { width: 1280, height: 720 }]) {
     const page = await newPage({ viewport });
     for (const instance of LINE_INSTANCES) {
@@ -4629,7 +4769,7 @@ test('selector: on a wide window (1440 and 1280) the trigger is one line, the fa
       const where = `${instance} at ${viewport.width}: ${JSON.stringify(box)}`;
       // One line: the name, the permission icons, the facts and the chevron have the same vertical centre.
       assert.ok(spread(box.centres) <= 3 && box.centres.every(Number.isInteger), where);
-      assert.ok(box.height <= 44, where);
+      assert.equal(box.height, 28, where);
       assert.ok(box.width >= 560 && box.width <= 640, where);
       assert.ok(box.name >= 60, where);
       // The facts never wrap and are never cut.
@@ -4637,8 +4777,8 @@ test('selector: on a wide window (1440 and 1280) the trigger is one line, the fa
       assert.equal(box.inside, true, where);
       assert.equal(box.factRows, 1, where);
       assert.ok(box.usage > 1, where);
-      // The header keeps one row and its height of round 6 at most (59 px); the page has no horizontal scroll.
-      assert.ok(box.header <= 59.5 && spread(box.row) <= 3, where);
+      // The header keeps one row and the height of the header of ClickHouse Dash; the page has no horizontal scroll.
+      assert.ok(Math.abs(box.header - DASH_HEADER) <= 1 && spread(box.row) <= 3, where);
       assert.ok(box.page <= box.view, where);
     }
     assert.deepEqual(page.errors, []);
@@ -4730,9 +4870,10 @@ test('selector: the versioning icon follows the trash icon, in the trigger and i
 });
 
 test('selector: below 1100 px the trigger keeps its two lines, with no horizontal scroll and no higher header at 1099, 900, 760 and 390', async () => {
-  // The heights of the header in round 6: one row of 59 px from 761 px up, two rows below.
+  // The heights of the header: the header of ClickHouse Dash from 1100 px up, one row of 59 px from 761 px up, two rows
+  // below.
   const cases = [
-    { viewport: { width: 1100, height: 800 }, lines: 1, header: 59.5 },
+    { viewport: { width: 1100, height: 800 }, lines: 1, header: DASH_HEADER + 0.5 },
     { viewport: { width: 1099, height: 800 }, lines: 2, header: 59.5 },
     { viewport: { width: 900, height: 800 }, lines: 2, header: 59.5 },
     { viewport: { width: 760, height: 800 }, lines: 2, header: 99.5 },
@@ -4751,7 +4892,7 @@ test('selector: below 1100 px the trigger keeps its two lines, with no horizonta
     assert.equal(box.inside, true, where);
     assert.equal(box.factRows, 1, where);
     if (item.lines === 1) {
-      assert.ok(spread(box.centres) <= 3 && box.height <= 44, where);
+      assert.ok(spread(box.centres) <= 3 && box.height === 28, where);
     } else {
       assert.equal(box.under, true, where);
       assert.ok(Math.abs(box.height - 46) < 1, where);

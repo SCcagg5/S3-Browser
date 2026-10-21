@@ -1,10 +1,11 @@
 /* S3-Browser, "portal" interface: the main stylesheet of every page.
 
    Design rules. The tokens below write them down; the components only name tokens.
-   1. Header of ClickHouse Dash in the 1400 px column of the page: the mark, the name and the version at the left (with
-      "Back to panel" behind a path prefix), the bucket selector of the default interface and the theme selector at
-      the right. The page is made of parts of the portal: 14 px corners, on --panel with a hairline edge. In the part
-      of the browser, the crumbs and the toolbar share one row when they fit; the crumbs are the bucket mark, a slash and the folders.
+   1. Header of ClickHouse Dash in the 1400 px column of the page, 45 px high from 1100 px up with controls of 28 px, as
+      in ClickHouse Dash: the mark, the name and the version at the left (with "Back to panel" behind a path prefix), the
+      bucket selector of the default interface and the theme selector at the right. The page is made of parts of the
+      portal: 14 px corners, on --panel with a hairline edge. In the part of the browser, the crumbs and the toolbar
+      share one row when they fit; the crumbs are the bucket mark, a slash and the folders.
    2. Data of ClickHouse Dash. Tables are dense: 32 px rows (26 px compact), 13 px text, 12 px semibold muted heads,
       hairline dividers, a blue tint under the pointer. Measures (sizes, counts, times) use the sans face with
       tabular figures. Mono is only for what a person reads character by character: keys, paths, ids.
@@ -242,7 +243,8 @@
   --radius-pill: 999px;
   --control-h: 32px;
   --control-h-sm: 28px;
-  --header-h: 56px;
+  /* The header of ClickHouse Dash: 44 px and its border line. */
+  --header-h: 44px;
   --row: 32px;
   --row-compact: 26px;
   --cell-x: 10px;
@@ -407,6 +409,11 @@ a {
   background: color-mix(in srgb, var(--panel) 92%, transparent);
 }
 
+/* An open menu of the header is above the upload dock, and under the dialogs. */
+.appHeader:has(.themeSelect.is-open, .storageSwitcher.is-open) {
+  z-index: calc(var(--z-dock) + 1);
+}
+
 .appHeader__inner {
   display: flex;
   align-items: center;
@@ -414,7 +421,8 @@ a {
   max-width: var(--page-width);
   min-height: var(--header-h);
   margin: 0 auto;
-  /* The bucket selector is 46 px high (40 px on a wide window): the header keeps one line. */
+  /* Below 1100 px the bucket selector is 46 px high, so the header has 6 px over it and under it. On a wide window the
+     controls are 28 px high and the header has no padding: refer to the section "Facts of a bucket in the selector". */
   padding: 6px var(--gutter);
 }
 
@@ -574,9 +582,9 @@ html[data-theme-mode="light"] .themeSelect__current > .themeIcon--light {
   display: none;
 }
 
+/* A menu is opaque from its first frame: the motion moves it and does not fade it, so the page never shows through. */
 @keyframes drop-in {
   from {
-    opacity: 0;
     transform: translateY(-6px) scaleY(0.98);
   }
 }
@@ -1421,9 +1429,9 @@ button.storageSwitcher__trigger:hover,
   display: none;
 }
 
+/* As drop-in: no fade. */
 @keyframes pop-in {
   from {
-    opacity: 0;
     transform: translateY(-4px) scale(0.98);
   }
 }
@@ -5096,10 +5104,21 @@ button.bucketFact:focus-visible {
    selector, so the elements over it share its columns. The facts never wrap: the usage text gets an ellipsis before the
    name gets less than 120 px. The menu is as wide as the selector. */
 @media (min-width: 1100px) {
+  /* The header of ClickHouse Dash: 45 px with its border line, and the controls of its host picker (28 px). */
+  .appHeader__inner {
+    padding-block: 0;
+  }
+
+  /* The theme button of ClickHouse Dash: 34 px wide as its menu, 28 px high. */
+  .appHeader .themeSelect__button {
+    width: 34px;
+    height: 28px;
+  }
+
   .storageSwitcher {
     flex: 0 1 620px;
     grid-template-columns: [icon] max-content [name] minmax(120px, 1fr) [perms] max-content [facts] auto [chevron] max-content;
-    grid-template-rows: 40px;
+    grid-template-rows: 28px;
     column-gap: 10px;
   }
 
@@ -5109,7 +5128,8 @@ button.bucketFact:focus-visible {
     grid-template-columns: subgrid;
     width: auto;
     min-width: 0;
-    height: 40px;
+    height: 28px;
+    padding-block: 0;
   }
 
   .storageSwitcher__icon {
@@ -5178,6 +5198,27 @@ button.bucketFact:focus-visible {
 
   .storageBucket__copy small {
     grid-column: 1;
+  }
+}
+
+/* A wide window with a coarse pointer: the controls of the header reach 44 px, and the header is 57 px with its border
+   line, as the header of ClickHouse Dash on a coarse pointer. */
+@media (min-width: 1100px) and (pointer: coarse) {
+  .appHeader__inner {
+    padding-block: 6px;
+  }
+
+  .appHeader .themeSelect__button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .storageSwitcher {
+    grid-template-rows: 44px;
+  }
+
+  .storageSwitcher > .storageSwitcher__trigger {
+    height: 44px;
   }
 }
 

@@ -577,7 +577,7 @@ A click on the rest of the selector, also on the versioning icon, opens the list
 
 The layout depends on the width of the window:
 
-- From 1100 px up, the trigger is one line of 40 px. The selector is a grid with five columns: the icon, the name, the permission and versioning icons, the facts and the chevron. The trigger is a subgrid that spans the five columns, so the elements over it share its columns. The selector is 620 px wide, and less when the header has less space. The name keeps 120 px at least, with an ellipsis. The facts never wrap and are never cut: the usage text gets an ellipsis first, and the bar stays. The header keeps one row of 57 px.
+- From 1100 px up, the trigger is one line of 28 px, as the host picker of ClickHouse Dash. The selector is a grid with five columns: the icon, the name, the permission and versioning icons, the facts and the chevron. The trigger is a subgrid that spans the five columns, so the elements over it share its columns. The selector is 620 px wide, and less when the header has less space. The name keeps 120 px at least, with an ellipsis. The facts never wrap and are never cut: the usage text gets an ellipsis first, and the bar stays. The header keeps one row of 45 px, as the header of ClickHouse Dash.
 - From 1100 px up, each entry of the list is one line: the name, the facts, then the permission and versioning icons at the right end. The versioning icon keeps its place also when it does not show, so the permission icons make one column. An entry with a root prefix has a second line with the prefix under the name. The list is as wide as the selector.
 - Below 1100 px, the trigger has two lines in 46 px. The first line has the name, the permission icons and the versioning icon. The second line has the facts, under the name. The trigger keeps a place for each element over it. Each entry of the list has the same two lines. From 761 px to 1099 px the header keeps one row of 59 px. On a phone, the header has two rows, and the page has no horizontal scroll.
 
@@ -675,6 +675,17 @@ The `portal` tree contains its own pages and scripts:
 - `assets/js/app.js` is the browser page. `uploads.js` is the bulk upload. `tags.js` and `metadata.js` are the sections of the details that edit the tags and the metadata. `theme.js` applies the theme before the first paint. `session.js` gives one message for an ended sign-in (401) or a server that does not answer.
 - `assets/css/dialogs.css` and `assets/css/viewers.css` have the rules of the default tree for the dialogs and the previews. Each colour is a token of `portal.css`, so these rules follow the theme.
 - `assets/icons/tabler/` has one Tabler icon (MIT) for each name. `assets/css/icons.css` gives the icon for each `mdi-*` name of the shared scripts.
+
+The header of the portal has the height of the header of ClickHouse Dash. The content of the Dash header sets that height: no rule of Dash gives a height. A measurement in Chromium gives the values below. The page of the measurement has the stylesheet and the header markup of ClickHouse Dash, at 1440, 1280, 1100, 900 and 390 px, in the two themes:
+
+| Pointer | Header of ClickHouse Dash | Header of the portal |
+| --- | --- | --- |
+| Fine | 45 px: 44 px and the border line. The controls are 28 px high, with 8 px over them and under them | 45 px from 1100 px up. The bucket selector and the theme button are 28 px high (`--header-h` is 44 px) |
+| Coarse | 57 px: the controls are 40 px high | 57 px from 1100 px up: the controls are 44 px high, with 6 px over them and under them |
+
+Below 1100 px the bucket selector has two lines of 46 px, so the header of the portal is higher. From 761 px to 1099 px it has one row of 59 px. On a phone it has two rows: 99 px with a fine pointer, 111 px with a coarse pointer. The preview page has its own header, with the name and the path of the file: 61 px on a wide window.
+
+Each menu and popover of the portal has the opaque colour `--panel`, with no backdrop filter: the menus of the header (theme, buckets), the menus Actions and settings, the menus of the rows and of the preview, the version picker and the suggestions of the metadata editor. A menu opens with a short move and no fade, so the page never shows through it, also in its first frame. An open menu of the header puts the header above the upload dock.
 
 The tree does not contain `assets/vendor/`: a small overlay file system (`src/frontend.go`) gives that directory from the default tree, so the binary contains the vendored libraries one time. No other file of the default tree is visible through the overlay.
 
