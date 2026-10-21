@@ -8,6 +8,6 @@ import "errors"
 // shows no usage for a volume. The release builds are for Linux only.
 const volumeUsageSupported = false
 
-func volumeStatfs(string) (uint64, uint64, error) {
-	return 0, 0, errors.New("statfs is not available on this system")
+func volumeStatfs(string) (uint64, uint64, bool, error) {
+	return 0, 0, false, errors.New("statfs is not available on this system")
 }

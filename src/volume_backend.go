@@ -617,11 +617,13 @@ func (b *volumeBackend) DiscoverCapabilities(_ context.Context) (discoveredCapab
 }
 
 // volumeUsageReader gives the usage of the file system of a volume (statfs): used = size - available, limit = size.
-// The numbers are exact at the time of the read, and for the whole file system, not only for the folder.
+// The numbers are for the whole file system, not only for the folder. They are exact at the time of the read, except
+// on a FUSE or network file system, which can count with a delay: the numbers are then approximate.
 type volumeUsageReader struct {
 	root string
-	// statfs gives the size and the available bytes of a file system. Nil is volumeStatfs. Tests set it.
-	statfs func(string) (uint64, uint64, error)
+	// statfs gives the size and the available bytes of a file system, and tells if it counts with a delay. Nil is
+	// volumeStatfs. Tests set it.
+	statfs func(string) (uint64, uint64, bool, error)
 }
 
 func (r *volumeUsageReader) BucketUsage(_ context.Context, _ string) (bucketUsage, error) {
@@ -629,7 +631,7 @@ func (r *volumeUsageReader) BucketUsage(_ context.Context, _ string) (bucketUsag
 	if statfs == nil {
 		statfs = volumeStatfs
 	}
-	total, available, err := statfs(r.root)
+	total, available, delayed, err := statfs(r.root)
 	if err != nil {
 		var errno syscall.Errno
 		if errors.As(err, &errno) {
@@ -641,7 +643,7 @@ func (r *volumeUsageReader) BucketUsage(_ context.Context, _ string) (bucketUsag
 	if total > available {
 		used = total - available
 	}
-	return bucketUsage{UsedBytes: clampToInt64(used), UsedObjects: -1, LimitBytes: clampToInt64(total), AsOf: timeNowUTC()}, nil
+	return bucketUsage{UsedBytes: clampToInt64(used), UsedObjects: -1, LimitBytes: clampToInt64(total), Approximate: delayed, AsOf: timeNowUTC()}, nil
 }
 
 // clampToInt64 gives value, or the largest int64 for a larger value (a file system of more than 8 EiB).

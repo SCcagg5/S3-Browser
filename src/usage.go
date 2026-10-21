@@ -80,6 +80,7 @@ type BucketUsageReader interface {
 var usageApproximateReasons = map[string]string{
 	usageSourceSeaweedFS: "SeaweedFS gives the size of the volumes of the bucket, with a delay of some seconds. The number of objects is not known.",
 	usageSourceMinIO:     "MinIO counts the usage in a background scan, about one time each minute or less often on a large server.",
+	usageSourceStatfs:    "The volume is on a FUSE or network file system: it can count the used bytes with a delay.",
 }
 
 // newBucketUsageReader makes the reader of the usage block of an auth block. It gives nil without a usage block.

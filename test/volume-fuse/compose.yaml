@@ -1,0 +1,31 @@
+# The real test of a volume on a FUSE mount of SeaweedFS (weed mount). run.sh starts it under its own project name
+# (s3-volmount). The service "seaweedfs" is the SeaweedFS of the portal tests: it reads its identity from the portal
+# configuration. Only the service "mount" has /dev/fuse, SYS_ADMIN and no AppArmor profile: it needs them for the
+# mount. No port is published: the Playwright container joins the network of the service "mount".
+services:
+  seaweedfs:
+    build:
+      context: ../seaweedfs
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    volumes:
+      - ../portal-frontend/config.hcl:/config/config.hcl:ro
+      - ../secrets:/config/secrets:ro
+
+  mount:
+    build:
+      context: ../..
+      dockerfile: test/volume-fuse/Dockerfile
+    devices:
+      - /dev/fuse
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+    volumes:
+      - ./config.hcl:/config/config.hcl:ro
+    depends_on:
+      seaweedfs:
+        condition: service_healthy

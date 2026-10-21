@@ -20,7 +20,7 @@ func decodeVolumeConfig(t *testing.T, text string) (appConfig, error) {
 
 func TestVolumeBlockDecodesAndPrintsItsKeys(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
+	root := volumeTempDir(t)
 	if err := os.Mkdir(filepath.Join(root, "published"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ max_scan_pages = 3`))
 
 func TestVolumeBlockDefaults(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
+	root := volumeTempDir(t)
 	cfg, err := decodeVolumeConfig(t, volumeConfigText(`path = "`+root+`"`))
 	if err != nil {
 		t.Fatal(err)
@@ -85,7 +85,7 @@ func TestVolumeBlockDefaults(t *testing.T) {
 // TestVolumeBlockValuesStopTheStart: a value that does not fit stops the start. The error names the key and the value.
 func TestVolumeBlockValuesStopTheStart(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
+	root := volumeTempDir(t)
 	file := filepath.Join(root, "a-file")
 	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
@@ -127,7 +127,7 @@ func TestVolumeBlockValuesStopTheStart(t *testing.T) {
 
 func TestVolumeBlockWithBuckets(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
+	root := volumeTempDir(t)
 	auth := "auth \"s3\" {\n  provider = \"s3\"\n  endpoint = \"http://localhost:9000\"\n  region = \"test\"\n}\n"
 	bucket := "bucket \"b\" {\n  auth = \"s3\"\n  bucket = \"b\"\n}\n"
 	volume := "volume \"vol\" {\n  path = \"" + root + "\"\n}\n"
@@ -151,7 +151,7 @@ func TestVolumeStartRefusesAFolderThatTheProcessCannotWrite(t *testing.T) {
 		t.Skip("root writes in each folder")
 	}
 	t.Parallel()
-	root := t.TempDir()
+	root := volumeTempDir(t)
 	if err := os.Chmod(root, 0o555); err != nil {
 		t.Fatal(err)
 	}

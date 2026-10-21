@@ -154,7 +154,7 @@ func decodeJob(t *testing.T, recorder *httptest.ResponseRecorder) publicJob {
 
 func TestVolumeCopyMoveAndDeleteOfFilesAndFolders(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
+	root := volumeTempDir(t)
 	writeVolumeFile(t, root, "docs/a.txt", "a")
 	writeVolumeFile(t, root, "docs/sub/b.txt", "bb")
 	if err := os.MkdirAll(filepath.Join(root, "docs", "sub", "void"), 0o755); err != nil {
@@ -219,7 +219,7 @@ func TestVolumeCopyMoveAndDeleteOfFilesAndFolders(t *testing.T) {
 
 func TestVolumeDeleteOfAFolderKeepsALinkThatLeavesTheRoot(t *testing.T) {
 	t.Parallel()
-	base := t.TempDir()
+	base := volumeTempDir(t)
 	root := filepath.Join(base, "volume")
 	writeVolumeFile(t, base, "outside/secret.txt", "secret")
 	writeVolumeFile(t, root, "mixed/file.txt", "file")
@@ -243,7 +243,7 @@ func TestVolumeLargeCopyIsAJobWithProgress(t *testing.T) {
 	threshold := multipartCopyThreshold
 	multipartCopyThreshold = 1024
 	t.Cleanup(func() { multipartCopyThreshold = threshold })
-	root := t.TempDir()
+	root := volumeTempDir(t)
 	content := bytes.Repeat([]byte("0123456789abcdef"), 1<<20)
 	writeVolumeFile(t, root, "big.bin", string(content))
 	app := volumeTestApplication(t, root, "")
@@ -260,7 +260,7 @@ func TestVolumeLargeCopyIsAJobWithProgress(t *testing.T) {
 
 func TestVolumeResumableUploadWritesATemporaryFile(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
+	root := volumeTempDir(t)
 	app := volumeTestApplication(t, root, "")
 	content := bytes.Repeat([]byte("upload-"), (9<<20)/7+11)
 	total := int64(len(content))
@@ -326,7 +326,7 @@ func TestVolumeResumableUploadWritesATemporaryFile(t *testing.T) {
 
 func TestVolumeIncompleteUploadsAbortByAgeKeepsRecentFiles(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
+	root := volumeTempDir(t)
 	now := time.Now()
 	files := map[string]time.Duration{
 		"logs/.s3b-tmp-00000000000000000000000000000001-old.log": 72 * time.Hour,
@@ -407,7 +407,7 @@ func startMultipartAbortJobOf(t *testing.T, app *application, body map[string]an
 
 func TestVolumePermissionsAreACeiling(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
+	root := volumeTempDir(t)
 	writeVolumeFile(t, root, "file.txt", "file")
 	app := volumeTestApplication(t, root, `permissions = ["read"]`)
 	for _, method := range []string{http.MethodPut, http.MethodDelete} {
@@ -428,7 +428,7 @@ func TestVolumePermissionsAreACeiling(t *testing.T) {
 
 func TestVolumeAccessPolicyNamesTheVolumeAsABucket(t *testing.T) {
 	env := newAccessEnv(t, 0)
-	root := t.TempDir()
+	root := volumeTempDir(t)
 	writeVolumeFile(t, root, "reports/q1.csv", "a,b\n")
 	writeVolumeFile(t, root, "private/secret.txt", "secret")
 	instance, err := newVolumeInstance(volumeConfig{ID: "vol", Name: "vol", Path: root, MaxScanPages: 1}, defaultRuntimePolicy(), nil)

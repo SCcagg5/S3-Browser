@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,25 @@ import (
 	"strings"
 	"testing"
 )
+
+// volumeDirFlag runs the tests of the volumes in a folder of a real mount, for example a FUSE mount of SeaweedFS
+// (test/volume-fuse/run.sh): each test then makes its folders in a new folder of it, not in a temporary folder of the
+// system.
+var volumeDirFlag = flag.String("volume-dir", "", "run the tests of the volumes in a new folder of this folder (for example a FUSE mount)")
+
+// volumeTempDir gives a new empty folder for a test of the volumes. The test removes it at the end.
+func volumeTempDir(t *testing.T) string {
+	t.Helper()
+	if *volumeDirFlag == "" {
+		return t.TempDir()
+	}
+	dir, err := os.MkdirTemp(*volumeDirFlag, "go-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
 
 // volumeTestApplication starts the server with one volume block "vol" on the folder root. extra holds more attribute
 // lines of the block.
@@ -43,7 +63,7 @@ func writeVolumeFile(t *testing.T, root, relative, content string) {
 // volumeTree makes the test tree of a volume, and a folder outside it with a secret file. It gives the root.
 func volumeTree(t *testing.T) string {
 	t.Helper()
-	base := t.TempDir()
+	base := volumeTempDir(t)
 	root := filepath.Join(base, "volume")
 	outside := filepath.Join(base, "outside")
 	writeVolumeFile(t, outside, "secret.txt", "secret")
@@ -359,7 +379,7 @@ func TestVolumeReadsHonourRangesAndConditions(t *testing.T) {
 
 func TestVolumeRootPrefixIsTheRootOfTheKeys(t *testing.T) {
 	t.Parallel()
-	base := t.TempDir()
+	base := volumeTempDir(t)
 	writeVolumeFile(t, base, "published/report.txt", "report")
 	writeVolumeFile(t, base, "private.txt", "private")
 	if err := os.Symlink("../private.txt", filepath.Join(base, "published", "up")); err != nil {
@@ -426,12 +446,12 @@ func TestVolumeInstanceHidesTheFeaturesOfS3(t *testing.T) {
 
 func TestVolumeUsageIsTheSizeOfTheFileSystem(t *testing.T) {
 	t.Parallel()
-	reader := &volumeUsageReader{root: "/x", statfs: func(string) (uint64, uint64, error) { return 1000, 40, nil }}
+	reader := &volumeUsageReader{root: "/x", statfs: func(string) (uint64, uint64, bool, error) { return 1000, 40, false, nil }}
 	value, err := reader.BucketUsage(context.Background(), "")
 	if err != nil || value.UsedBytes != 960 || value.LimitBytes != 1000 || value.UsedObjects != -1 || value.LimitObjects != 0 || value.Approximate {
 		t.Fatalf("usage = %+v, %v", value, err)
 	}
-	app := volumeTestApplication(t, t.TempDir(), "")
+	app := volumeTestApplication(t, volumeTempDir(t), "")
 	instance, _ := volumeInstance(t, app)
 	instance.usage.reader = reader
 	value.Source = usageSourceStatfs
@@ -439,14 +459,20 @@ func TestVolumeUsageIsTheSizeOfTheFileSystem(t *testing.T) {
 	if answer.Percent != 96 || answer.Level != "error" || answer.LimitSource != "provider" || answer.Approximate {
 		t.Fatalf("answer = %+v", answer)
 	}
-	failing := &volumeUsageReader{root: "/x", statfs: func(string) (uint64, uint64, error) { return 0, 0, os.ErrPermission }}
+	delayed := &volumeUsageReader{root: "/x", statfs: func(string) (uint64, uint64, bool, error) { return 1000, 40, true, nil }}
+	if value, err := delayed.BucketUsage(context.Background(), ""); err != nil || !value.Approximate {
+		t.Fatalf("usage of a FUSE file system = %+v, %v", value, err)
+	} else if value.Source = usageSourceStatfs; usageAnswer(instance, value).ApproximateReason == "" {
+		t.Fatal("an approximate usage of a volume has no reason")
+	}
+	failing := &volumeUsageReader{root: "/x", statfs: func(string) (uint64, uint64, bool, error) { return 0, 0, false, os.ErrPermission }}
 	if _, err := failing.BucketUsage(context.Background(), ""); err == nil || strings.Contains(err.Error(), "/x") {
 		t.Fatalf("error = %v", err)
 	}
 	if !volumeUsageSupported {
 		return
 	}
-	real := volumeTestApplication(t, t.TempDir(), "")
+	real := volumeTestApplication(t, volumeTempDir(t), "")
 	recorder := doJSON(real, http.MethodGet, "/api/usage?instance=vol", nil)
 	var response usageResponse
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil || !response.Supported || !response.Available ||
@@ -457,7 +483,7 @@ func TestVolumeUsageIsTheSizeOfTheFileSystem(t *testing.T) {
 
 func TestVolumeReaderClosesTheFile(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
+	root := volumeTempDir(t)
 	writeVolumeFile(t, root, "f.txt", "content")
 	app := volumeTestApplication(t, root, "")
 	_, backend := volumeInstance(t, app)
