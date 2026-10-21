@@ -152,6 +152,9 @@ func (a *application) probeVersioningSupport() {
 		}()
 	}
 	wg.Wait()
+	for _, instance := range a.instances {
+		instance.markBucketFactsRead()
+	}
 }
 
 func (a *application) closeAuthentications() {
@@ -258,6 +261,7 @@ func (a *application) handleInstances(w http.ResponseWriter, r *http.Request) {
 	instances := make([]instanceInfo, 0, len(visible))
 	for _, instance := range visible {
 		instances = append(instances, withAccessCapabilities(instance.publicInfo(), decisions[instance.cfg.ID]))
+		instance.refreshBucketFacts()
 	}
 	defaultID := ""
 	if len(visible) > 0 {

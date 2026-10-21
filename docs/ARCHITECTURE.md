@@ -143,7 +143,7 @@ The listing has no totals at its foot. The foot has the range of the page, the r
 
 ## Permissions of a bucket
 
-The trigger of the bucket selector shows the read, write and delete icons of the current bucket. The icons are a button of their own, above the trigger and in its grid cell, between the name and the chevron. The trigger keeps a place for them. A click on the icons, or Enter and Space on them, opens the window "Bucket permissions". The rest of the trigger opens the list of the buckets. The button has the accessible name "Permissions of this bucket", and its tooltip names each permission. The entries of the list keep their icons as a mark only.
+The trigger of the bucket selector shows the read, write and delete icons of the current bucket. The icons are a button of their own, above the trigger and in its grid cell, on the line of the name, before the chevron. The trigger keeps a place for them. A click on the icons, or Enter and Space on them, opens the window "Bucket permissions". The rest of the trigger opens the list of the buckets. The button has the accessible name "Permissions of this bucket", and its tooltip names each permission. The entries of the list keep their icons as a mark only.
 
 ## Tags in the listing
 
@@ -442,7 +442,7 @@ The HEAD answer of a version gives its lock: `x-amz-object-lock-mode`, `x-amz-ob
 
 The page makes the tooltip at each drawing. A retention whose date is past does not count. A change of the lock in the section "Retention" makes the listing read that file again: the change keeps the ETag and the date of the file.
 
-The bucket selector shows a closed padlock next to a bucket with `objectLockSupported`. The tooltip says "Object Lock is on". The probe at start also reads the default retention of the bucket. `/api/instances` gives it in `objectLockDefault` (`mode`, and `days` or `years`), and the tooltip then adds "Default retention: Governance, 30 days". A change of the default retention after the start shows after the next start. The bar of the preview page shows the padlock of the version on the page, from the HEAD request of the preview.
+The bucket selector shows a closed padlock on the second line of a bucket with `objectLockSupported`. The tooltip says "Object Lock is on". The probe at start also reads the default retention of the bucket. `/api/instances` gives it in `objectLockDefault` (`mode`, and `days` or `years`), and the tooltip then adds "Default retention: Governance, 30 days". A change of the default retention after the start shows after the next start. The bar of the preview page shows the padlock of the version on the page, from the HEAD request of the preview.
 
 On AWS S3, the HEAD answer has the lock headers only for a caller with `s3:GetObjectRetention` and `s3:GetObjectLegalHold`. Without them, the listing shows no padlock.
 
@@ -507,7 +507,7 @@ The preview page of an SSE-C object shows the name and the path of the object, a
 | `defaultEncryption` | The algorithm of the default encryption of the bucket at start (`AES256`, `aws:kms`), or `""` |
 | `encryptionApplied` | For `"sse-s3"` only: `"yes"` on AWS S3, MinIO and SeaweedFS, `"no"` on Garage, `"unknown"` for a provider that S3-Browser does not know |
 
-The mark of the encryption is a key (Tabler `key`). The mark of Object Lock is a closed padlock (Tabler `lock`). The bucket selector shows a key next to the name of a bucket that encrypts. The tooltip says "Encrypted: SSE-S3 for each new object" or "Default encryption of the bucket: AES256". The key tells the truth of the provider. Garage accepts the header and does not encrypt, so a Garage bucket with `"sse-s3"` gets a key in the colour of a warning. For a provider that S3-Browser does not know, the tooltip says "SSE-S3 requested; the provider may not encrypt". A bucket with Object Lock also gets its padlock: the two marks are separate, and each shows only when it is true.
+The mark of the encryption is a key (Tabler `key`). The mark of Object Lock is a closed padlock (Tabler `lock`). The bucket selector shows a key on the second line of a bucket that encrypts. The tooltip says "Encrypted: SSE-S3 for each new object" or "Default encryption of the bucket: AES256". The key tells the truth of the provider. Garage accepts the header and does not encrypt, so a Garage bucket with `"sse-s3"` gets a key in the colour of a warning. For a provider that S3-Browser does not know, the tooltip says "SSE-S3 requested; the provider may not encrypt". A bucket with Object Lock also gets its padlock: the two marks are separate, and each shows only when it is true.
 
 A listing does not give the encryption of an object. Thus the listing reads it with a HEAD request for each file on the page, as it reads the tags: 4 requests at the same time, 100 files at most. A file waits with a mark, and an answer stays for the ETag and the date of the file. An encrypted file gets a small key at the right of its name, in the cell of the name. The padlock of a lock follows the key. The tooltip of the key names the encryption: SSE-S3, SSE-KMS with its key, or "key of the client" (SSE-C). A HEAD request of an SSE-C object fails with `400`, and `GET /api/media-info` then confirms the key of the client. Such a file gets no padlock, because its HEAD answer gives no header. A file without an encryption gets no key.
 
@@ -544,7 +544,7 @@ The numbers of SeaweedFS and MinIO are approximate. The numbers are for the whol
 - The server keeps the result of each instance for 60 seconds, and a failure for 10 seconds. One read at a time runs for an instance: the other requests wait for its result. The read does not stop when the request that started it stops.
 - `fresh=1` reads again a result that is older than 10 seconds. The page sends it after a change and after a click on the reload icon.
 - The token and the URLs of the admin API never go into an answer or into a log line. An error names the step and the HTTP status only. `print-config` and the effective configuration in the log show the URLs and hide the token.
-- A failure does not break the page. The chip of the usage shows no number, and its tooltip gives the reason.
+- A failure does not break the page. The usage of the bucket selector shows no number, and the tooltip gives the reason.
 - At start, the server compares the source with the provider that the lifecycle probe found. A different known provider gives a warning in the log. The source of the file applies.
 
 ### Route
@@ -557,29 +557,52 @@ The numbers of SeaweedFS and MinIO are approximate. The numbers are for the whol
 
 `limitSource` is `provider`, `config` or `""`. The key `quota_bytes` of a bucket block gives the limit when the source gives no byte limit. The server does not enforce this limit. `percent` is the used part of the limit in percent, with one decimal. The server cuts the next decimals: 99.99 % gives 99.9. With a byte limit and an object limit, the larger part applies. `level` is `""` without a limit, `ok`, `warning` from 80 %, and `error` from 95 %.
 
-### The chips of the bucket in the header
+### The facts of the buckets in the bucket selector
 
-The header has a cluster of small chips at the left of the bucket selector, in one row. Each chip is an icon with a tooltip, and each chip shows only when its fact is true:
+The trigger of the bucket selector has two lines. The first line has the name of the current bucket and its permission icons. The second line has the facts of the bucket, in small muted text. Each entry of the list of the buckets has the same second line, with the facts of that bucket. Each fact is an icon with a tooltip, and each fact shows only when it is true:
 
-| Chip | Source of the fact |
+| Fact | Source of the fact |
 | --- | --- |
-| Versioning (Tabler `git-commit`), or "Versioning suspended" | The versioning status in `GET /api/lifecycle` |
+| Versioning (Tabler `git-commit`). The tooltip says "Versioning: on" or "Versioning: suspended" | The current bucket: the versioning status in `GET /api/lifecycle`. The other buckets: `versioningState` of `/api/instances` |
 | Encryption (a key): "Encrypted: SSE-S3 for each new object" or the default encryption of the bucket | `encryption`, `defaultEncryption` and `encryptionApplied` of `/api/instances`. Garage with `"sse-s3"` gets "SSE-S3 not applied" in the colour of a warning |
 | Object Lock (a padlock), with the default retention | `objectLockSupported` and `objectLockDefault` of `/api/instances` |
-| The lifecycle rules (an hourglass and the count) | The rules in `GET /api/lifecycle`. The chip is a button: a click, Enter or Space opens the window of the rules |
-| The usage: `12.3 GB of 20 GB` with a thin bar, or `12.3 GB used` | `GET /api/usage`. A failed read gives the chip "Usage unavailable" with the reason in its tooltip |
+| The lifecycle rules (an hourglass and the count) | The current bucket: the rules in `GET /api/lifecycle`. The other buckets: `lifecycleRules` of `/api/instances` |
+| The usage: `12.3 GB of 20 GB` with a thin bar, or `12.3 GB used`, at the right of the line | `GET /api/usage` |
 
-An approximate number starts with `~`. The bar has the colour of a warning from 80 % and the colour of an error from 95 %. The tooltip of the usage names the bucket, the used bytes, the limit and its source, and the objects. It also gives the source, the time of the count and the reason of an approximate number. The numbers are for the whole bucket, also for an instance with a root prefix.
+A bucket that never had versioning gets no versioning icon: "off" is not a fact that the line shows. An approximate number starts with `~`. The bar has the colour of a warning from 80 % and the colour of an error from 95 %. The tooltip of the usage names the bucket, the used bytes, the limit and its source, and the objects. It also gives the source, the time of the count and the reason of an approximate number. The numbers are for the whole bucket, also for an instance with a root prefix.
 
-Each chip has a label for a screen reader. The cluster gets smaller before the selector, so the header keeps one row. On a window narrower than 1101 px, the chip of the usage shows its bar and no text. On a phone (760 px or less), an "i" button at the left of the theme selector replaces the cluster. The button opens a popover with one line for each chip, with its label. A click outside or Escape closes the popover. The trigger of the selector does not show the key and the padlock of the bucket again when the chips show them. On a phone, the trigger keeps them.
+The trigger is a button, and a button cannot hold a button. Thus the second line of the trigger is an element of its own, over the trigger and in its grid cell, as the permission icons. The trigger keeps a place for it. On this line, the lifecycle rules are a button: a click, Enter or Space opens the window of the rules. This button shows also for a bucket without rule ("0"): it is the way to add the first rule. The keyboard goes from the trigger to the permission icons, then to this button. A click on the rest of the line opens the list of the buckets, as a click on the trigger. A failed read of the usage of the current bucket gives a muted icon, with the reason in its tooltip. In the list, the second line is a part of the button of each bucket and has no button. It shows the lifecycle rules only for a bucket with rules.
 
-The page reads the chips when an instance opens. It reads the usage again (`fresh=1`) 1.5 seconds and 12 seconds after a change: an upload, a delete, a copy, a move, a rename, a metadata edit, a restore or the end of a job. A group of changes gives one read. A click on the reload icon reads the chips again. The bucket selector puts the usage of each bucket in its tooltip when the menu opens. The page and the server keep each answer for 60 seconds. The preview page has no chips.
+Each fact has a label for a screen reader, and the trigger names the line in `aria-describedby`. The trigger is 46 px high, and the header keeps its height of 56 px. On a phone, the second line keeps the icons, the text of the usage and the bar. The entries of the list keep their two lines. The page has no horizontal scroll.
+
+`/api/instances` gives two facts of each bucket for the list:
+
+| Field | Value |
+| --- | --- |
+| `versioningState` | `"enabled"`, `"suspended"` or `"off"` (also a provider without versions). Absent when the server could not read it |
+| `lifecycleRules` | The number of lifecycle rules of the bucket. Absent when the server could not read the rules, or for an instance without lifecycle rules |
+
+The probe at start reads them (`GetBucketVersioning` after the probe of the versions, and the configuration in the probe of the lifecycle). A failure hides the fact only and never stops the start. Each read of `GET /api/lifecycle` keeps the new values. A request of `/api/instances` reads them again in the background when they are older than 60 seconds: one read at a time for each instance, 5 seconds at most, inside the limits of the storage requests. The request does not wait for this read.
+
+The page reads the facts of the current bucket when it opens. It reads the usage again (`fresh=1`) 1.5 seconds and 12 seconds after a change: an upload, a delete, a copy, a move, a rename, a metadata edit, a restore or the end of a job. A group of changes gives one read. A click on the reload icon reads the facts again. At load, and again when the menu opens, the page reads the usage of each bucket with `usageSupported`. It sends 4 reads at the same time at most. An entry shows "…" while its read waits. A failed read of another bucket shows nothing. The page and the server keep each answer for 60 seconds. The tooltip of each bucket also has its usage. The preview page has no facts.
+
+### The warning of a full bucket
+
+A bucket is full when it uses 90 % or more of its limit of bytes: `percent >= 90` of `GET /api/usage`, with `limitBytes` more than 0. A bucket without a limit of bytes never gets the warning. The warning has these parts:
+
+- A banner at the top of the card of the listing, as wide as the listing, in the colours of an error, with the alert icon (Tabler `alert-triangle`). Its text is for example "This bucket is 93 % full: 18.6 GB used of 20 GB. New uploads can fail." From 100 %, the text is "This bucket is full: 20 GB used of 20 GB (100 %). New uploads fail." An approximate number has a `~` and the reason in a second sentence. The banner has `role="alert"`, so a screen reader reads it. It has no close button. It goes when the number goes down.
+- The trigger of the selector gets a border in the colour of an error and the alert icon after the name. The bar of the usage is red from 90 %.
+- In the list, a full bucket gets the alert icon after its name and a red bar.
+- When a bucket other than the current one is full, the trigger gets a small alert icon in the colour of a warning. The tooltip says "Another bucket is almost full: <name>".
+- The tooltip of the upload button gives the text of the banner. The upload stays possible.
 
 ### The summary of the details
 
 The details of a file start with a strip of pills: the version (`v5 of 5`, only for a file with more than one version), the encryption (a key and `SSE-S3`, `SSE-KMS` or `Key of the client`), the lock (a padlock and the retention or `legal hold`) and the number of tags. A pill shows only when its fact is true. A click on the pill of the version opens the version picker. A click on another pill opens its section and moves to it.
 
 The sections keep all their content. The sections "Storage object" and "Tags" start open. The other sections start closed. A chevron button at the left of each title opens or closes the section. A click on the title or on its "Edit" button also opens it. The browser keeps the choice of each section in `portal.details.sections`.
+
+The body of the details of a file is a container (`container-type: inline-size`). When the body is 820 px wide or more, the sections are in two columns (`.bb-details-column`). The first column has the object: "Storage object", "Encryption" and "Metadata". The second column has the facts that describe it: "Tags", "Retention", "File metadata" and "Document dimensions". A narrower window or a phone shows one column. The page order of the sections is the reading order and the tab order in the two layouts. Each column has its own height, so a section never moves to the other column when a section opens or closes. An open editor stays in its column. The summary strip, the header and the tool cards "Verify integrity" and "Inspect file" use the full width.
 
 ## Insights treemap normalization
 

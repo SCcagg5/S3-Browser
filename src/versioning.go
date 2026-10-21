@@ -352,7 +352,43 @@ func (s *storageInstance) probeVersioning(ctx context.Context) bool {
 	_, err := s.ListObjectVersions(probeCtx, s.cfg.RootPrefix, "", 1)
 	supported := err == nil
 	s.setVersioningAvailable(supported)
+	// The status of the bucket goes into /api/instances, so the bucket selector shows the versioning of each bucket.
+	// A failure of this read hides the status only.
+	if reader, ok := s.backend.(BucketVersioningReader); ok && supported {
+		if status, err := reader.BucketVersioningStatus(probeCtx); err == nil {
+			s.setVersioningStatus(status)
+		}
+	}
 	return supported
+}
+
+// setVersioningStatus keeps the last status of GetBucketVersioning that the server read.
+func (s *storageInstance) setVersioningStatus(status string) {
+	s.versioningMu.Lock()
+	s.versioningStatus, s.versioningStatusKnown = status, true
+	s.versioningMu.Unlock()
+}
+
+// versioningState gives the versioning of the bucket for /api/instances: "enabled", "suspended", "off", or "" when
+// the server has no status. A provider without versions is "off".
+func (s *storageInstance) versioningState() string {
+	if s == nil {
+		return ""
+	}
+	s.versioningMu.RLock()
+	defer s.versioningMu.RUnlock()
+	switch {
+	case s.versioningChecked && !s.versioningSupported:
+		return "off"
+	case !s.versioningStatusKnown:
+		return ""
+	case s.versioningStatus == "Enabled":
+		return "enabled"
+	case s.versioningStatus == "Suspended":
+		return "suspended"
+	default:
+		return "off"
+	}
 }
 
 // withoutVersionPreconditions removes If-Match and If-Unmodified-Since from the headers of a read that names a

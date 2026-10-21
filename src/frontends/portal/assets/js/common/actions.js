@@ -536,7 +536,11 @@
         : '';
       // The summary strip at the top: the version, the encryption, the lock and the tags (summary.js).
       const summaryStrip = BB.summary ? '<div class="detailsSummary" data-details-summary role="group" aria-label="Summary of the file" hidden></div>' : '';
-      const overviewSections = `${summaryStrip}${storageSection}${encryptionSection}${metadataSection}${customSection}${tagsSection}${lockSection}${fileSection}${countSection}`;
+      // The sections have two columns on a wide window and one column on a narrow window. The first column has the object
+      // (storage, encryption, metadata). The second column has what describes it (tags, retention, file, dimensions). The
+      // order of the sections in the page is the reading order and the tab order in both layouts.
+      const secondColumn = `${tagsSection}${lockSection}${fileSection}${countSection}`;
+      const overviewSections = `${summaryStrip}<div class="bb-details-columns"><div class="bb-details-column">${storageSection}${encryptionSection}${metadataSection}${customSection}</div>${secondColumn ? `<div class="bb-details-column">${secondColumn}</div>` : ''}</div>`;
       const advancedPanel = `<section class="bb-details-advanced">
         <article class="bb-details-tool-card is-idle" data-details-tool-card="integrity" aria-busy="false">
           <div class="bb-details-tool-card-head"><div class="bb-details-tool-heading"><span class="bb-details-tool-icon"><i class="mdi mdi-shield-key-outline"></i></span><div><strong>Verify integrity</strong><span>Calculate checksums for the complete object and compare them with values exposed by the provider.</span></div></div><button type="button" class="bb-btn bb-details-tool-run" data-details-integrity><i class="mdi mdi-play"></i><span>Run check</span></button></div>

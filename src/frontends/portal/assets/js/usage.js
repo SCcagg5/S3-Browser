@@ -4,8 +4,10 @@
  *   of the provider again (the server reads it again only when its value is older than 10 seconds);
  * - the texts: "12.3 GB of 20 GB" or "12.3 GB used", "~" for an approximate number, and the tooltip with the bucket,
  *   the objects, the source, the time of the count and the reason of an approximate number.
+ * - the warning of a full bucket: 90 % or more of the limit of bytes, with the text of the banner of the listing.
  * The numbers are for the whole bucket, also for an instance with a root prefix. The server reads the admin API only for
- * an instance with a usage block in its configuration (usageSupported of /api/instances).
+ * an instance with a usage block in its configuration (usageSupported of /api/instances). The page sends at most
+ * MAX_READS reads at the same time: the selector reads the usage of each bucket.
  */
 (function () {
   'use strict';
@@ -14,7 +16,27 @@
   const SOURCES = { garage: 'Garage', seaweedfs: 'SeaweedFS', minio: 'MinIO' };
   // The page reads an instance again after this time, also without a change.
   const PAGE_TTL_MS = 60000;
+  const MAX_READS = 4;
+  // A bucket is full from this part of its limit of bytes: the page shows a warning.
+  const FULL_PERCENT = 90;
   const answers = new Map();
+  const waiting = [];
+  let active = 0;
+
+  // Runs a read when fewer than MAX_READS reads are in flight, else when a read ends.
+  function limited(task) {
+    return new Promise((resolve, reject) => {
+      const run = () => {
+        active += 1;
+        task().then(resolve, reject).finally(() => {
+          active -= 1;
+          waiting.shift()?.();
+        });
+      };
+      if (active < MAX_READS) run();
+      else waiting.push(run);
+    });
+  }
 
   // Sizes in base 1024 with one decimal, as the listing shows them.
   function formatBytes(size) {
@@ -39,7 +61,7 @@
     const entry = answers.get(id);
     if (entry?.pending && !fresh) return entry.pending;
     if (entry?.answer && !fresh && Date.now() - entry.at < PAGE_TTL_MS) return Promise.resolve(entry.answer);
-    const pending = BB.api.usage(id, { fresh })
+    const pending = limited(() => BB.api.usage(id, { fresh }))
       .then(answer => {
         answers.set(id, { answer, at: Date.now() });
         return answer;
@@ -53,8 +75,9 @@
     return pending;
   }
 
-  // The last answer of an instance in the page, or null.
+  // The last answer of an instance in the page, or null. loading: a read of the instance is in flight.
   const cached = id => answers.get(String(id || ''))?.answer || null;
+  const loading = id => Boolean(answers.get(String(id || ''))?.pending);
   const shown = answer => answer?.supported === true && answer.available === true;
 
   // The short text of the chip of the header: "~12.3 GB of 20 GB" or "12.3 GB used".
@@ -99,5 +122,29 @@
     return `usage: ${text(answer)}${Number(answer.limitBytes) > 0 ? ` (${answer.percent} %)` : ''}`;
   }
 
-  BB.usage = { load, cached, shown, text, title, selectorLine, formatBytes };
+  // A full bucket: FULL_PERCENT or more of a limit of bytes. A bucket without a limit of bytes is never full.
+  const full = answer => shown(answer) && Number(answer.limitBytes) > 0 && Number(answer.percent) >= FULL_PERCENT;
+
+  // The text of the warning of a full bucket, or ''. The percent of the server is the larger part of the limit of bytes
+  // and of the limit of objects: the text names the objects when they fill the bucket first. note: the reason of an
+  // approximate number, as a second sentence.
+  function fullText(answer, { note = true } = {}) {
+    if (!full(answer)) return '';
+    const mark = answer.approximate ? '~' : '';
+    const percent = Math.floor(Number(answer.percent));
+    const objects = Number(answer.limitObjects) > 0 && Number(answer.usedObjects) >= 0
+      && Number(answer.usedObjects) / Number(answer.limitObjects) > Number(answer.usedBytes) / Number(answer.limitBytes);
+    const amount = objects
+      ? `${count(answer.usedObjects)} objects of ${count(answer.limitObjects)}`
+      : `${mark}${formatBytes(answer.usedBytes)} used of ${formatBytes(answer.limitBytes)}`;
+    const reason = note ? approximateNote(answer) : '';
+    return percent >= 100
+      ? `This bucket is full: ${amount} (${mark}${percent} %). New uploads fail.${reason ? ` ${reason}` : ''}`
+      : `This bucket is ${mark}${percent} % full: ${amount}. New uploads can fail.${reason ? ` ${reason}` : ''}`;
+  }
+
+  // The reason of an approximate number, or ''.
+  const approximateNote = answer => (answer?.approximate ? `The numbers are approximate: ${answer.approximateReason || 'the provider counts with a delay.'}` : '');
+
+  BB.usage = { load, cached, loading, shown, text, title, selectorLine, full, fullText, approximateNote, formatBytes };
 })();

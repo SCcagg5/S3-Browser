@@ -133,7 +133,7 @@
   // versions: { position, count } of the version that the details show (1 is the oldest), or null.
   function mount(overlay, { versions = null, headers = {}, customerKey = false } = {}) {
     const strip = overlay.querySelector('[data-details-summary]');
-    overlay.querySelectorAll('.bb-details-panel > .bb-details-section[data-section]').forEach(collapsible);
+    overlay.querySelectorAll('.bb-details-column > .bb-details-section[data-section]').forEach(collapsible);
     if (!strip) return { setTags() {}, setLock() {} };
     const pills = {};
     const pill = (name, iconName, onclick) => {

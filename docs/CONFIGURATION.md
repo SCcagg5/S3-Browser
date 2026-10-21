@@ -105,7 +105,7 @@ The endpoint must use HTTP or HTTPS and may not contain credentials, a query str
 
 ## Usage of the buckets
 
-A `usage` block in an `s3` auth block gives the usage and the quota of its buckets. A chip in the header of the `portal` interface shows them, and the tooltip of each bucket in the bucket selector. Without the block, the server makes no admin request and the interface shows no usage. Refer to "Usage and quota of a bucket" in [ARCHITECTURE.md](ARCHITECTURE.md).
+A `usage` block in an `s3` auth block gives the usage and the quota of its buckets. The bucket selector of the `portal` interface shows them on the second line of each bucket, and warns about a bucket that uses 90 % or more of its limit. Without the block, the server makes no admin request and the interface shows no usage. Refer to "Usage and quota of a bucket" in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ```hcl
 auth "garage" {

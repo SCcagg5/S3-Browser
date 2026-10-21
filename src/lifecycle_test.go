@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // fakeLifecycleS3 keeps the lifecycle configuration of one bucket as bytes. server is the Server header of each
@@ -502,6 +503,74 @@ func TestProbeLifecycleHidesTheEditorOfAProviderWithoutIt(t *testing.T) {
 	}
 	if _, ok := any(&gcsBackend{}).(BucketLifecycleWriter); ok {
 		t.Fatal("the GCS backend must answer unsupported")
+	}
+}
+
+func TestInstancesGiveTheVersioningAndTheNumberOfLifecycleRules(t *testing.T) {
+	app, fake := lifecycleApplication(t, "SeaweedFS 30GB 4.41", `<LifecycleConfiguration>`+keptOutside+keptTransition+`</LifecycleConfiguration>`)
+	fake.versioning = "Suspended"
+	instance := app.instances["rw"]
+	// No read in the background until the test asks for it.
+	instance.markBucketFactsRead()
+	// Before a read, the server tells nothing.
+	if info := instance.publicInfo(); info.VersioningState != "" || info.LifecycleRules != nil {
+		t.Fatalf("info before a read = %+v", info)
+	}
+	instance.probeLifecycle(context.Background())
+	if count := instance.publicInfo().LifecycleRules; count == nil || *count != 2 {
+		t.Fatalf("rules after the probe = %v", count)
+	}
+	// A read of the editor gives the versioning, and a later change of the rules gives the new count.
+	_ = getLifecycle(t, app, "rw")
+	recorder := doJSON(app, http.MethodGet, "/api/instances", nil)
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"versioningState":"suspended"`) || !strings.Contains(recorder.Body.String(), `"lifecycleRules":2`) {
+		t.Fatalf("instances = %d %s", recorder.Code, recorder.Body.String())
+	}
+	fake.mu.Lock()
+	fake.body = []byte(`<LifecycleConfiguration>` + keptOutside + `</LifecycleConfiguration>`)
+	fake.versioning = "Enabled"
+	fake.mu.Unlock()
+	_ = getLifecycle(t, app, "rw")
+	if count := instance.publicInfo().LifecycleRules; count == nil || *count != 1 {
+		t.Fatalf("rules after a new read = %v", count)
+	}
+	// A change outside S3-Browser: a request of /api/instances reads the facts again in the background, after
+	// bucketFactsTTL, one time.
+	fake.mu.Lock()
+	fake.body = nil
+	fake.versioning = "Suspended"
+	fake.mu.Unlock()
+	instance.markBucketFactsRead()
+	_ = doJSON(app, http.MethodGet, "/api/instances", nil)
+	if count := instance.publicInfo().LifecycleRules; *count != 1 {
+		t.Fatalf("a recent read must not run again: %d", *count)
+	}
+	instance.facts.mu.Lock()
+	instance.facts.at = time.Now().Add(-2 * bucketFactsTTL)
+	instance.facts.mu.Unlock()
+	_ = doJSON(app, http.MethodGet, "/api/instances", nil)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		count := instance.publicInfo().LifecycleRules
+		if *count == 0 && instance.versioningState() == "suspended" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the background read gave %d rules and %q", *count, instance.versioningState())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	for status, want := range map[string]string{"Enabled": "enabled", "Suspended": "suspended", "": "off"} {
+		instance.setVersioningStatus(status)
+		if got := instance.versioningState(); got != want {
+			t.Errorf("status %q gives %q, want %q", status, got, want)
+		}
+	}
+	// A provider without versions is off, and an instance without lifecycle rules gives no count.
+	instance.setVersioningAvailable(false)
+	instance.lifecycle.off.Store(true)
+	if info := instance.publicInfo(); info.VersioningState != "off" || info.LifecycleRules != nil {
+		t.Fatalf("info without versions and rules = %+v", info)
 	}
 }
 

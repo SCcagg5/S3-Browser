@@ -4,8 +4,8 @@
 // parts on each provider, 7 the edit of the metadata on each provider, 8 the cleanup of the incomplete multipart
 // uploads on each provider, 9 the editor of the lifecycle rules on each provider, 10 Object Lock (retention and legal
 // hold) on the providers with a bucket with Object Lock, 11 encryption (SSE-S3 of the writes, and the display of SSE-S3,
-// SSE-KMS, SSE-C and the default encryption of the bucket), 12 the usage and the quota of a bucket (the chips of the
-// bucket in the header and the tooltips of the selector) and the summary strip of the details with its sections that close.
+// SSE-KMS, SSE-C and the default encryption of the bucket), 12 the usage and the quota of a bucket (the facts of each
+// bucket in the selector, the warning of a full bucket, the tooltips) and the summary strip and the columns of the details.
 // run.sh starts S3-Browser and the three providers, puts the test objects (seed.js) and runs this file in the
 // Playwright container. The tests of parts 1 to 4 use SeaweedFS.
 // The tests change the answers of the server with page.route where a case needs it (403, 401, no answer, access).
@@ -2831,9 +2831,9 @@ const LIFECYCLE_FIELDS = {
   'garage-main': { tagFilter: false, noncurrentExpiration: false, abortMultipart: true, expiredDeleteMarker: false },
 };
 
-// Opens the window of the lifecycle rules from the Actions menu, and waits for the rules.
+// Opens the window of the lifecycle rules from the chip of the bucket selector, and waits for the rules.
 async function openLifecycle(page) {
-  await page.click('#bucketChips [data-chip="lifecycle"]');
+  await page.click('.storageSwitcher__facts [data-fact="lifecycle"]');
   await until(page, () => !document.querySelector('[data-lifecycle] .lifecycle__intro')?.hidden, null, 15000);
 }
 
@@ -3019,7 +3019,7 @@ test('lifecycle: the window shows what the provider changed, and a read-only edi
   }
 });
 
-test('actions: the tag item names the folder or the bucket, and the lifecycle editor opens from the chip of the header', async () => {
+test('actions: the tag item names the folder or the bucket, and the lifecycle editor opens from the chip of the selector', async () => {
   const page = await newPage();
   await open(page, MAIN);
   await page.click('#actionsButton');
@@ -3042,9 +3042,9 @@ test('actions: the tag item names the folder or the bucket, and the lifecycle ed
   await page.waitForSelector('.bb-overlay', { state: 'detached' });
   // A bucket without rule has the chip too: it is the way to add the first rule.
   await open(page, '-/minio/minio-main/');
-  await page.waitForSelector('#bucketChips [data-chip="lifecycle"]', { timeout: 15000 });
-  assert.match(await page.textContent('#bucketChips [data-chip="lifecycle"]'), /No lifecycle rule/);
-  await page.click('#bucketChips [data-chip="lifecycle"]');
+  await page.waitForSelector('.storageSwitcher__facts [data-fact="lifecycle"]', { timeout: 15000 });
+  assert.match(await page.getAttribute('.storageSwitcher__facts [data-fact="lifecycle"]', 'aria-label'), /^No lifecycle rule\. /);
+  await page.click('.storageSwitcher__facts [data-fact="lifecycle"]');
   await page.waitForSelector('[data-lifecycle]');
   assert.deepEqual(page.errors, []);
   await page.context().close();
@@ -3059,8 +3059,8 @@ test('lifecycle: the chip is hidden for an instance without lifecycle rules, and
     await route.fulfill({ response, json: body });
   });
   await open(page, MAIN);
-  await page.waitForSelector('#bucketChips [data-chip="usage"], #bucketChips .bucketChip', { timeout: 15000 }).catch(() => {});
-  assert.equal(await page.locator('#bucketChips [data-chip="lifecycle"]').count(), 0);
+  await page.waitForSelector('.storageSwitcher__facts .bucketFact', { timeout: 15000 }).catch(() => {});
+  assert.equal(await page.locator('.storageSwitcher__facts [data-fact="lifecycle"]').count(), 0);
   await page.click('#actionsButton');
   assert.equal(await page.locator('#lifecycleItem').count(), 0);
   assert.equal(await page.isVisible('#multipartsItem'), true);
@@ -3878,10 +3878,10 @@ test('encryption: an other answer 400 of the provider is not an SSE-C object: th
   await page.context().close();
 });
 
-// The key of a bucket in the bucket selector: the trigger and the entries of the menu.
+// The key of a bucket in the bucket selector: the line of the facts of the trigger and of the entries of the menu.
 const bucketLockOf = (page, instance) => page.evaluate(id => {
-  const node = document.querySelector(`.storageBucket[data-instance="${id}"] [data-bucket-lock]`);
-  return node ? { icon: node.dataset.bucketLock, title: node.title, tone: node.className } : null;
+  const node = document.querySelector(`.storageBucket[data-instance="${id}"] [data-fact="encryption"]`);
+  return node ? { icon: node.querySelector('.ic').className, title: node.title, tone: node.className } : null;
 }, instance);
 
 test('encryption: the bucket selector shows a key for a bucket that encrypts, and a key in the colour of a warning for Garage, which does not', async () => {
@@ -3894,17 +3894,17 @@ test('encryption: the bucket selector shows a key for a bucket that encrypts, an
   assert.deepEqual(facts['seaweedfs-main'], ['', '', '']);
   await open(page, MAIN);
   for (const instance of ['seaweedfs-encrypted', 'minio-encrypted']) {
-    assert.deepEqual(await bucketLockOf(page, instance), { icon: 'key', title: 'Encrypted: SSE-S3 for each new object', tone: 'bucketLock is-on' }, instance);
+    assert.deepEqual(await bucketLockOf(page, instance), { icon: 'ic ic-key', title: 'Encrypted: SSE-S3 for each new object', tone: 'bucketFact' }, instance);
   }
   for (const instance of ['seaweedfs-main', 'minio-main', 'garage-main', 'seaweedfs-locked']) assert.equal(await bucketLockOf(page, instance), null, instance);
   const garage = await bucketLockOf(page, 'garage-encrypted');
-  assert.deepEqual([garage.icon, garage.tone], ['key', 'bucketLock is-warn']);
+  assert.deepEqual([garage.icon, garage.tone], ['ic ic-key', 'bucketFact is-warning']);
   assert.match(garage.title, /^SSE-S3 requested; the provider does not encrypt/);
-  assert.equal(await page.locator('.storageSwitcher__trigger [data-bucket-lock]').count(), 0);
+  assert.equal(await page.locator('.storageSwitcher__facts [data-fact="encryption"]').count(), 0);
   // The trigger of the selector shows the lock of the open bucket.
   const info = instances.find(item => item.id === 'seaweedfs-encrypted');
   await open(page, `-/${info.host}/seaweedfs-encrypted/`);
-  assert.equal(await page.getAttribute('.storageSwitcher__trigger [data-bucket-lock]', 'title'), 'Encrypted: SSE-S3 for each new object');
+  assert.equal(await page.getAttribute('.storageSwitcher__facts [data-fact="encryption"]', 'title'), 'Encrypted: SSE-S3 for each new object');
   assert.deepEqual(page.errors, []);
   await page.context().close();
 });
@@ -4059,7 +4059,7 @@ test('encryption: a default encryption of the bucket gives the lock of the bucke
   });
   const heads = await watchHeads(page);
   await open(page, `${MAIN}enc/`);
-  assert.equal(await page.getAttribute('.storageSwitcher__trigger [data-bucket-lock]', 'title'), 'Default encryption of the bucket: AES256');
+  assert.equal(await page.getAttribute('.storageSwitcher__facts [data-fact="encryption"]', 'title'), 'Default encryption of the bucket: AES256');
   await noLockPending(page);
   assert.ok(heads.total >= 1);
   assert.equal(await fileLock(page, 'customer-key.txt'), 'Encrypted with a key of the client (SSE-C)');
@@ -4135,9 +4135,9 @@ for (const [instance, provider] of Object.entries(LOCKED)) {
     assert.equal(new Set(heads.keys).size, Object.keys(names).length);
     assert.equal(lockRequests, 0);
     // The bucket of the selector has its padlock. The bucket "default" of the same provider has none.
-    assert.equal(await page.getAttribute('.storageSwitcher__trigger [data-bucket-object-lock]', 'title'), 'Object Lock is on');
-    assert.equal(await page.locator('.storageSwitcher__trigger [data-bucket-object-lock] .ic-lock').count(), 1);
-    assert.equal(await page.locator('.storageSwitcher__trigger [data-bucket-lock]').count(), 0);
+    assert.equal(await page.getAttribute('.storageSwitcher__facts [data-fact="object-lock"]', 'title'), 'Object Lock is on');
+    assert.equal(await page.locator('.storageSwitcher__facts [data-fact="object-lock"] .ic-lock').count(), 1);
+    assert.equal(await page.locator('.storageSwitcher__facts [data-fact="encryption"]').count(), 0);
     // The preview shows the same marks next to the size, from its own HEAD, with no request for the lock.
     for (const [name, marks] of [[names.both, { encryption: 'Encrypted: SSE-S3', 'object-lock': `${lockTooltip('Governance', governanceUntil)}, legal hold` }],
       [names.compliance, { 'object-lock': lockTooltip('Compliance', complianceUntil) }], [names.plain, {}], [names.ended, {}]]) {
@@ -4186,7 +4186,7 @@ for (const [instance, provider] of Object.entries(LOCKED)) {
     // The bucket "default" of the provider has no Object Lock: no padlock.
     const main = await lockedHostOf(page, provider.provider);
     await open(page, `-/${main.host}/${provider.provider}/`);
-    assert.equal(await page.locator('.storageSwitcher__trigger [data-bucket-object-lock]').count(), 0);
+    assert.equal(await page.locator('.storageSwitcher__facts [data-fact="object-lock"]').count(), 0);
     assert.deepEqual(page.errors, []);
     // The end: the hold goes, the Governance retention goes with the bypass, the Compliance retention ends.
     await lock(names.both, { legalHold: false });
@@ -4211,10 +4211,10 @@ test('object lock: the padlock of a bucket gives its default retention, and a bu
   });
   const info = await lockedHostOf(page, 'seaweedfs-locked');
   await open(page, `-/${info.host}/seaweedfs-locked/`);
-  assert.equal(await page.getAttribute('.storageSwitcher__trigger [data-bucket-object-lock]', 'title'), 'Object Lock is on. Default retention: Governance, 30 days');
-  assert.equal(await page.getAttribute('.storageSwitcher__trigger [data-bucket-object-lock]', 'aria-label'), 'Object Lock is on. Default retention: Governance, 30 days');
+  assert.equal(await page.getAttribute('.storageSwitcher__facts [data-fact="object-lock"]', 'title'), 'Object Lock is on. Default retention: Governance, 30 days');
+  assert.equal(await page.textContent('.storageSwitcher__facts [data-fact="object-lock"] .visually-hidden'), 'Object Lock: Governance, 30 days. ');
   await open(page, MAIN);
-  assert.equal(await page.locator('.storageSwitcher__trigger [data-bucket-object-lock]').count(), 0);
+  assert.equal(await page.locator('.storageSwitcher__facts [data-fact="object-lock"]').count(), 0);
   assert.deepEqual(page.errors, []);
   await page.context().close();
 });
@@ -4263,20 +4263,30 @@ for (const [instance, provider] of Object.entries(ENCRYPTED)) {
 }
 
 // ------------------------------------------------------------------------------------------------------------------
-// 12. Usage and quota of a bucket: the chips of the bucket in the header (versioning, encryption, Object Lock, lifecycle
-// rules and usage), the usage in the tooltips of the selector, and the summary strip of the details with its sections
-// that close. The usage blocks of config.hcl read the admin API of each provider. The bucket "default" of each provider
-// has a quota of 20 GiB (Garage also 100000 objects); seaweedfs-archive has quota_bytes = 10 GiB; the other buckets
-// have no quota.
+// 12. Usage and quota of a bucket: the facts of each bucket in the bucket selector (versioning, encryption, Object
+// Lock, lifecycle rules and usage), the warning of a full bucket, the usage in the tooltips of the selector, and the
+// summary strip of the details with its sections that close. The usage blocks of config.hcl read the admin API of each
+// provider. The bucket "default" of each provider has a quota of 20 GiB (Garage also 100000 objects);
+// seaweedfs-archive has quota_bytes = 10 GiB; the other buckets have no quota.
 // ------------------------------------------------------------------------------------------------------------------
 
 const QUOTA_BYTES = 21474836480;
-const usageItem = page => page.locator('#bucketChips [data-chip="usage"]');
-const chipNames = page => page.locator('#bucketChips .bucketChip').evaluateAll(nodes => nodes.map(node => node.dataset.chip));
+const FACTS = '.storageSwitcher__facts';
+const usageItem = page => page.locator(`${FACTS} [data-fact="usage"]`);
+const factNames = (page, scope = FACTS) => page.locator(`${scope} .bucketFact`).evaluateAll(nodes => nodes.map(node => node.dataset.fact));
 const apiUsage = async (page, instance, fresh = false) => (await page.request.get(`${BASE}api/usage?instance=${instance}${fresh ? '&fresh=1' : ''}`)).json();
+const entryFacts = (page, instance) => factNames(page, `.storageBucket[data-instance="${instance}"] .bucketFacts`);
+
+// Opens the menu of the selector with every host open, and waits for the usage of each bucket.
+async function openAllBuckets(page) {
+  await page.click('.storageSwitcher__trigger');
+  while (await page.locator('.storageHost__row[aria-expanded="false"]').count()) await page.click('.storageHost__row[aria-expanded="false"]');
+  await until(page, () => document.querySelectorAll('.storageBucket [data-fact="usage"]').length === document.querySelectorAll('.storageBucket').length
+    && !document.querySelector('.storageBucket [data-level="loading"]'), null, 20000);
+}
 
 for (const [instance, provider] of Object.entries(PROVIDERS)) {
-  test(`usage: ${provider.name}: the chip of the header shows the used bytes and the quota of the bucket, with a bar and a tooltip`, async () => {
+  test(`usage: ${provider.name}: the second line of the selector shows the used bytes and the quota of the bucket, with a bar and a tooltip`, async () => {
     const page = await newPage();
     const answer = await apiUsage(page, instance);
     assert.equal(answer.supported, true);
@@ -4288,8 +4298,8 @@ for (const [instance, provider] of Object.entries(PROVIDERS)) {
     // The answer never names the admin API or its token.
     assert.doesNotMatch(JSON.stringify(answer), /3903|9333|8888|admin-token|minio\/admin/);
     await open(page, `-/${instance.split('-')[0]}/${instance}/`);
-    await page.waitForSelector('#bucketChips [data-chip="usage"]');
-    const text = (await usageItem(page).locator('.bucketChip__label').textContent()).trim();
+    await page.waitForSelector(`${FACTS} [data-fact="usage"][data-level="ok"]`);
+    const text = (await usageItem(page).locator('.bucketUsage__text').textContent()).trim();
     assert.match(text, /^~?[\d.]+ (B|KB|MB|GB) of 20 GB$/);
     // SeaweedFS and MinIO count with a delay: the number has a "~" and the tooltip says why.
     assert.equal(text.startsWith('~'), answer.approximate === true);
@@ -4299,20 +4309,26 @@ for (const [instance, provider] of Object.entries(PROVIDERS)) {
     if (answer.approximate) assert.match(title, /~ Approximate: /);
     if (instance === 'garage-main') assert.match(title, /Objects: [\d,]+ of 100,000/);
     assert.equal(await usageItem(page).locator('.usageMeter[role="meter"]').count(), 1);
-    assert.equal(await usageItem(page).getAttribute('data-level'), 'ok');
-    // The chips are in the header, at the left of the bucket selector, on its row.
-    const box = await page.evaluate(() => {
-      const chips = document.querySelector('#bucketChips').getBoundingClientRect();
-      const selector = document.querySelector('.storageSwitcher').getBoundingClientRect();
-      return { right: chips.right, selectorLeft: selector.left, middle: chips.top + chips.height / 2, selectorMiddle: selector.top + selector.height / 2,
-        inHeader: Boolean(document.querySelector('.appHeader #bucketChips')) };
-    });
-    assert.ok(box.inHeader && box.right <= box.selectorLeft && Math.abs(box.middle - box.selectorMiddle) < 3, JSON.stringify(box));
-    // Versioning shows where the bucket has it on. Garage shows the usage only.
-    assert.equal(await page.locator('#bucketChips [data-chip="versioning"]').count(), provider.versioning ? 1 : 0);
-    if (instance === 'garage-main') assert.deepEqual(await chipNames(page), ['lifecycle', 'usage']);
-    if (instance === 'seaweedfs-main') assert.deepEqual(await chipNames(page), ['versioning', 'lifecycle', 'usage']);
-    if (instance === 'minio-main') assert.deepEqual(await chipNames(page), ['versioning', 'lifecycle', 'usage']);
+    // The facts are the second line of the trigger of the selector, under the name: no chip in the header.
+    const box = await page.evaluate(selector => {
+      const rect = node => node.getBoundingClientRect();
+      const facts = rect(document.querySelector(selector));
+      const trigger = rect(document.querySelector('.storageSwitcher__trigger'));
+      const name = rect(document.querySelector('.storageSwitcher__trigger strong'));
+      return { under: facts.top >= name.bottom - 1, inside: facts.left > trigger.left && facts.right < trigger.right && facts.top > trigger.top && facts.bottom < trigger.bottom,
+        aligned: Math.abs(facts.left - name.left) <= 1, old: document.querySelectorAll('#bucketChips, #bucketInfo, #bucketInfoButton, .bucketChip').length };
+    }, FACTS);
+    assert.deepEqual(box, { under: true, inside: true, aligned: true, old: 0 });
+    // Versioning shows where the bucket has it on. Garage shows the usage only (and the way to the lifecycle rules).
+    assert.equal(await page.locator(`${FACTS} [data-fact="versioning"]`).count(), provider.versioning ? 1 : 0);
+    if (instance === 'garage-main') assert.deepEqual(await factNames(page), ['lifecycle', 'usage']);
+    if (instance === 'seaweedfs-main') assert.deepEqual(await factNames(page), ['versioning', 'lifecycle', 'usage']);
+    if (instance === 'minio-main') assert.deepEqual(await factNames(page), ['versioning', 'lifecycle', 'usage']);
+    if (provider.versioning) assert.match(await page.getAttribute(`${FACTS} [data-fact="versioning"]`, 'title'), /^Versioning: on\. /);
+    // The real usage of the test stack is far from the limit: no warning.
+    assert.equal(await page.isHidden('#usageBanner'), true);
+    assert.equal(await page.locator('.storageSwitcher.is-full, .bucketMark').count(), 0);
+    assert.equal(await page.getAttribute('#uploadButton', 'title'), null);
     // The listing has no totals at its foot: only the range of the page and the rows.
     assert.equal(await page.locator('#folderCount, .tableFoot__count, .bucketStatus').count(), 0);
     assert.match(await page.textContent('.tableFoot'), /^\d+ to \d+ of \d+\+?Rows/);
@@ -4322,44 +4338,43 @@ for (const [instance, provider] of Object.entries(PROVIDERS)) {
   });
 }
 
-test('usage: the chips of seaweedfs-locked, of the encrypted buckets and of a bucket without quota', async () => {
+test('usage: the facts of seaweedfs-locked, of the encrypted buckets and of a bucket without quota', async () => {
   const page = await newPage();
   await open(page, '-/seaweedfs/seaweedfs-locked/');
-  await page.waitForSelector('#bucketChips [data-chip="usage"]');
+  await page.waitForSelector(`${FACTS} [data-fact="usage"]:not([data-level="loading"])`);
   // A bucket with Object Lock has versioning and its padlock; it does not encrypt. The chip of the rules shows for a bucket without rule too.
-  assert.deepEqual(await chipNames(page), ['versioning', 'object-lock', 'lifecycle', 'usage']);
-  assert.equal(await page.getAttribute('#bucketChips [data-chip="versioning"]', 'title'), 'Versioning is on: a change or a delete keeps the older versions of a file.');
-  assert.equal(await page.locator('#bucketChips [data-chip="object-lock"] .ic-lock').count(), 1);
-  assert.match(await page.textContent('#bucketChips [data-chip="object-lock"] .bucketChip__label'), /^Object Lock/);
-  assert.equal(await page.getAttribute('#bucketChips [data-chip="object-lock"]', 'title'), 'Object Lock is on');
-  // Each chip is an icon with a tooltip: the label is for a screen reader, and the usage keeps its short text.
-  const looks = await page.locator('#bucketChips .bucketChip').evaluateAll(nodes => nodes.map(node => [node.dataset.chip, node.querySelector('.bucketChip__label').getBoundingClientRect().width > 1, Boolean(node.title)]));
-  assert.deepEqual(looks, [['versioning', false, true], ['object-lock', false, true], ['lifecycle', false, true], ['usage', true, true]]);
+  assert.deepEqual(await factNames(page), ['versioning', 'object-lock', 'lifecycle', 'usage']);
+  assert.equal(await page.getAttribute(`${FACTS} [data-fact="versioning"]`, 'title'), 'Versioning: on. A change or a delete keeps the older versions of a file.');
+  assert.equal(await page.locator(`${FACTS} [data-fact="object-lock"] .ic-lock`).count(), 1);
+  assert.match(await page.textContent(`${FACTS} [data-fact="object-lock"] .visually-hidden`), /^Object Lock/);
+  assert.equal(await page.getAttribute(`${FACTS} [data-fact="object-lock"]`, 'title'), 'Object Lock is on');
+  // Each fact is an icon with a tooltip; its label is for a screen reader. The usage shows its text.
+  const looks = await page.locator(`${FACTS} .bucketFact`).evaluateAll(nodes => nodes.map(node => [node.dataset.fact, Boolean(node.title), node.getBoundingClientRect().height <= 20]));
+  assert.deepEqual(looks, [['versioning', true, true], ['object-lock', true, true], ['lifecycle', true, true], ['usage', true, true]]);
+  assert.equal((await page.textContent(`${FACTS} [data-fact="lifecycle"] .bucketFact__short`)).trim(), '0');
   // No limit: "used", no bar.
-  assert.match(await usageItem(page).locator('.bucketChip__label').textContent(), /^~[\d.]+ (B|KB|MB) used$/);
+  assert.match(await usageItem(page).locator('.bucketUsage__text').textContent(), /^~[\d.]+ (B|KB|MB) used$/);
   assert.equal(await usageItem(page).locator('.usageMeter').count(), 0);
   assert.match(await usageItem(page).getAttribute('title'), /\nNo limit\n/);
   assert.equal(await usageItem(page).getAttribute('data-level'), 'none');
-  // The trigger of the selector does not show the padlock again next to the chips.
-  assert.equal(await page.locator('.storageSwitcher__trigger [data-bucket-object-lock]').isVisible(), false);
 
   // The key of an encrypted bucket; the key of Garage in the colour of a warning.
   await open(page, '-/seaweedfs/seaweedfs-encrypted/');
-  await page.waitForSelector('#bucketChips [data-chip="encryption"]');
-  assert.equal(await page.getAttribute('#bucketChips [data-chip="encryption"]', 'title'), 'Encrypted: SSE-S3 for each new object');
-  assert.equal(await page.textContent('#bucketChips [data-chip="encryption"] .bucketChip__label'), 'Encrypted: SSE-S3');
+  await page.waitForSelector(`${FACTS} [data-fact="encryption"]`);
+  assert.equal(await page.getAttribute(`${FACTS} [data-fact="encryption"]`, 'title'), 'Encrypted: SSE-S3 for each new object');
+  assert.equal(await page.textContent(`${FACTS} [data-fact="encryption"] .visually-hidden`), 'Encrypted: SSE-S3. ');
   await open(page, '-/garage/garage-encrypted/');
-  await page.waitForSelector('#bucketChips [data-chip="encryption"]');
-  assert.match(await page.getAttribute('#bucketChips [data-chip="encryption"]', 'class'), /is-warning/);
-  assert.equal(await page.textContent('#bucketChips [data-chip="encryption"] .bucketChip__label'), 'SSE-S3 not applied');
+  await page.waitForSelector(`${FACTS} [data-fact="encryption"]`);
+  assert.match(await page.getAttribute(`${FACTS} [data-fact="encryption"]`, 'class'), /is-warning/);
+  assert.equal(await page.textContent(`${FACTS} [data-fact="encryption"] .visually-hidden`), 'SSE-S3 not applied. ');
 
   await open(page, '-/seaweedfs/seaweedfs-archive/');
-  await page.waitForSelector('#bucketChips [data-chip="usage"]');
-  assert.match(await usageItem(page).locator('.bucketChip__label').textContent(), / of 10 GB$/);
+  await page.waitForSelector(`${FACTS} [data-fact="usage"]:not([data-level="loading"])`);
+  assert.match(await usageItem(page).locator('.bucketUsage__text').textContent(), / of 10 GB$/);
   assert.match(await usageItem(page).getAttribute('title'), /The configuration of S3-Browser sets this limit\. The provider does not enforce it\./);
   assert.equal((await apiUsage(page, 'seaweedfs-archive')).limitSource, 'config');
 
-  // An instance without a usage block: no usage chip, and no request to /api/usage.
+  // An instance without a usage block: no usage fact, and no request to /api/usage.
   const second = await newPage();
   let usageRequests = 0;
   await second.route(/\/api\/instances(\?|$)/, async route => {
@@ -4370,9 +4385,10 @@ test('usage: the chips of seaweedfs-locked, of the encrypted buckets and of a bu
   });
   await second.route(/\/api\/usage\?/, route => { usageRequests += 1; return route.continue(); });
   await open(second, MAIN);
-  await second.waitForSelector('#bucketChips [data-chip="versioning"]');
+  await second.waitForSelector(`${FACTS} [data-fact="versioning"]`);
+  await second.click('.storageSwitcher__trigger');
   await sleep(500);
-  assert.equal(await second.locator('#bucketChips [data-chip="usage"]').count(), 0);
+  assert.equal(await second.locator('[data-fact="usage"]').count(), 0);
   assert.equal(usageRequests, 0);
   assert.deepEqual(page.errors, []);
   assert.deepEqual(second.errors, []);
@@ -4380,40 +4396,143 @@ test('usage: the chips of seaweedfs-locked, of the encrypted buckets and of a bu
   await second.context().close();
 });
 
-test('usage: the chip of the lifecycle rules opens the window of the rules, with the mouse and the keyboard', async () => {
+test('usage: each bucket of the menu has the second line of its facts, from the server, and no button in its button', async () => {
   const page = await newPage();
+  // The server reads the facts of each bucket at start and again after 60 seconds: the seed changed them after the start.
+  const deadline = Date.now() + 90000;
+  let instances = [];
+  for (;;) {
+    instances = (await (await page.request.get(`${BASE}api/instances`)).json()).instances;
+    const main = instances.find(item => item.id === 'seaweedfs-main');
+    if (main.versioningState === 'enabled' && main.lifecycleRules === 1) break;
+    assert.ok(Date.now() < deadline, JSON.stringify(main));
+    await sleep(2000);
+  }
+  const byId = Object.fromEntries(instances.map(item => [item.id, item]));
+  assert.equal(byId['minio-main'].versioningState, 'enabled');
+  assert.equal(byId['garage-main'].versioningState, 'off');
+  assert.equal(byId['seaweedfs-locked'].versioningState, 'enabled');
   await open(page, MAIN);
-  const chip = page.locator('#bucketChips [data-chip="lifecycle"]');
-  await chip.waitFor();
-  assert.equal(await chip.evaluate(node => node.tagName), 'BUTTON');
-  assert.equal((await chip.locator('.bucketChip__short').textContent()).trim(), '1');
-  assert.equal(await chip.locator('.ic-hourglass').count(), 1);
-  assert.match(await chip.getAttribute('title'), /^1 lifecycle rule, 1 rule on\. Open the lifecycle rules of the bucket\.$/);
-  await chip.click();
-  await until(page, () => !document.querySelector('[data-lifecycle] .lifecycle__intro')?.hidden, null, 15000);
-  assert.ok(await page.locator('[data-lifecycle-rule], [data-lifecycle-kept]').count() >= 1);
-  await closeWindow(page);
-  await chip.focus();
-  await page.keyboard.press('Enter');
-  await until(page, () => !document.querySelector('[data-lifecycle] .lifecycle__intro')?.hidden, null, 15000);
-  await closeWindow(page);
+  await openAllBuckets(page);
+  assert.deepEqual(await entryFacts(page, 'seaweedfs-main'), ['versioning', 'lifecycle', 'usage']);
+  assert.equal((await page.textContent('.storageBucket[data-instance="seaweedfs-main"] [data-fact="lifecycle"] .bucketFact__short')).trim(), '1');
+  assert.deepEqual(await entryFacts(page, 'seaweedfs-locked'), ['versioning', 'object-lock', 'usage']);
+  assert.deepEqual(await entryFacts(page, 'minio-locked'), ['versioning', 'object-lock', 'usage']);
+  assert.deepEqual(await entryFacts(page, 'seaweedfs-encrypted'), ['versioning', 'encryption', 'usage']);
+  assert.deepEqual(await entryFacts(page, 'minio-encrypted'), ['versioning', 'encryption', 'usage']);
+  // Garage: the usage only (a rule count when the bucket has rules), and the key in the colour of a warning.
+  const garageRules = byId['garage-main'].lifecycleRules > 0 ? ['lifecycle'] : [];
+  assert.deepEqual(await entryFacts(page, 'garage-main'), [...garageRules, 'usage']);
+  assert.deepEqual(await entryFacts(page, 'garage-encrypted'), ['encryption', ...garageRules, 'usage']);
+  assert.match(await page.getAttribute('.storageBucket[data-instance="garage-encrypted"] [data-fact="encryption"]', 'class'), /is-warning/);
+  for (const id of ['seaweedfs-main', 'minio-main', 'garage-main', 'seaweedfs-archive']) {
+    assert.match(await page.textContent(`.storageBucket[data-instance="${id}"] .bucketUsage__text`), /^~?[\d.]+ (B|KB|MB|GB) of (10|20) GB$/, id);
+    assert.equal(await page.locator(`.storageBucket[data-instance="${id}"] .usageMeter`).count(), 1, id);
+  }
+  assert.match(await page.textContent('.storageBucket[data-instance="minio-locked"] .bucketUsage__text'), /^~?[\d.]+ (B|KB|MB) used$/);
+  // The line is under the name, in the button of the bucket, with no button: a button cannot hold a button.
+  assert.equal(await page.locator('.storageBucket button, .storageSwitcher__trigger button').count(), 0);
+  const line = await page.evaluate(() => {
+    const entry = document.querySelector('.storageBucket[data-instance="seaweedfs-locked"]');
+    const name = entry.querySelector('strong').getBoundingClientRect();
+    const facts = entry.querySelector('.bucketFacts').getBoundingClientRect();
+    return { under: facts.top >= name.bottom - 1, left: Math.abs(facts.left - name.left) <= 1, inside: facts.bottom <= entry.getBoundingClientRect().bottom };
+  });
+  assert.deepEqual(line, { under: true, left: true, inside: true });
+  // The highlight of the current bucket stays.
+  assert.equal(await page.getAttribute('.storageBucket[data-instance="seaweedfs-main"]', 'aria-selected'), 'true');
   assert.deepEqual(page.errors, []);
   await page.context().close();
 });
 
-test('usage: a failed read shows no number, the tooltip of the chip says that the usage is unavailable, and the page keeps working', async () => {
+test('usage: the menu reads the usage of the buckets at most 4 at a time, with a "…" while it loads, and a failed read shows nothing', async () => {
+  const page = await newPage();
+  const stats = { active: 0, max: 0, total: 0 };
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  await page.route(/\/api\/usage\?/, async route => {
+    const instance = new URL(route.request().url()).searchParams.get('instance');
+    stats.total += 1;
+    stats.active += 1;
+    stats.max = Math.max(stats.max, stats.active);
+    try {
+      if (instance !== 'seaweedfs-main') await gate;
+      if (instance === 'minio-locked') return await route.fulfill({ status: 502, json: { error: { code: 'usage_unavailable', message: 'no answer' } } });
+      return await route.continue();
+    } finally {
+      stats.active -= 1;
+    }
+  });
+  // The reads wait: the page is not idle, so it opens without waiting for the network.
+  await page.goto(BASE + MAIN);
+  await page.waitForSelector('.dataTable');
+  await page.click('.storageSwitcher__trigger');
+  while (await page.locator('.storageHost__row[aria-expanded="false"]').count()) await page.click('.storageHost__row[aria-expanded="false"]');
+  await page.waitForSelector('.storageBucket[data-instance="garage-main"] [data-fact="usage"][data-level="loading"]');
+  assert.equal((await page.textContent('.storageBucket[data-instance="garage-main"] [data-fact="usage"]')).trim(), '…');
+  await sleep(500);
+  assert.ok(stats.max <= 4, JSON.stringify(stats));
+  release();
+  await until(page, () => !document.querySelector('[data-level="loading"]'), null, 20000);
+  assert.ok(stats.max <= 4 && stats.total >= 9, JSON.stringify(stats));
+  // A failed read of another bucket shows nothing in its line.
+  assert.equal(await page.locator('.storageBucket[data-instance="minio-locked"] [data-fact="usage"]').count(), 0);
+  assert.equal(await page.isVisible('#storageSwitcherMenu'), true);
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+test('usage: the chip of the lifecycle rules opens the window of the rules, with the mouse and the keyboard', async () => {
+  const page = await newPage();
+  await open(page, MAIN);
+  const chip = page.locator(`${FACTS} [data-fact="lifecycle"]`);
+  await chip.waitFor();
+  // A button next to the trigger, in the same cell, and not in the button of the trigger.
+  assert.equal(await chip.evaluate(node => node.tagName), 'BUTTON');
+  assert.equal(await chip.evaluate(node => node.parentElement.closest('button')), null);
+  assert.equal((await chip.locator('.bucketFact__short').textContent()).trim(), '1');
+  assert.equal(await chip.locator('.ic-hourglass').count(), 1);
+  assert.match(await chip.getAttribute('title'), /^1 lifecycle rule, 1 rule on\. Open the lifecycle rules of the bucket\.$/);
+  assert.match(await chip.getAttribute('aria-label'), /^1 lifecycle rule\. 1 lifecycle rule, 1 rule on\./);
+  await chip.click();
+  await until(page, () => !document.querySelector('[data-lifecycle] .lifecycle__intro')?.hidden, null, 15000);
+  assert.equal(await page.isHidden('#storageSwitcherMenu'), true);
+  assert.ok(await page.locator('[data-lifecycle-rule], [data-lifecycle-kept]').count() >= 1);
+  await closeWindow(page);
+  // The keyboard: Tab goes from the trigger to the permission icons, then to the chip; Enter and Space open the rules.
+  for (const key of ['Enter', 'Space']) {
+    await page.focus('.storageSwitcher__trigger');
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Tab');
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.fact), 'lifecycle');
+    await page.keyboard.press(key);
+    await until(page, () => !document.querySelector('[data-lifecycle] .lifecycle__intro')?.hidden, null, 15000);
+    await closeWindow(page);
+  }
+  // A click on the line of the facts outside the chip opens the menu of the buckets, as a click on the trigger.
+  const usage = await usageItem(page).boundingBox();
+  await page.mouse.click(usage.x + 4, usage.y + usage.height / 2);
+  assert.equal(await page.isVisible('#storageSwitcherMenu'), true);
+  await page.mouse.click(usage.x + 4, usage.y + usage.height / 2);
+  assert.equal(await page.isHidden('#storageSwitcherMenu'), true);
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+test('usage: a failed read shows no number, the tooltip of the fact says that the usage is unavailable, and the page keeps working', async () => {
   const page = await newPage();
   const message = 'The usage of the bucket is unavailable: GetBucketInfo: the admin API refused the credentials (HTTP 403).';
   await page.route(/\/api\/usage\?/, route => route.fulfill({ json: { supported: true, available: false, instance: 'seaweedfs-main', source: 'seaweedfs', error: { code: 'usage_unavailable', message } } }));
   await open(page, MAIN);
-  await page.waitForSelector('#bucketChips [data-chip="usage"][data-level="unavailable"]');
+  await page.waitForSelector(`${FACTS} [data-fact="usage"][data-level="unavailable"]`);
   assert.equal(await usageItem(page).getAttribute('title'), message);
   assert.equal(await usageItem(page).locator('.usageMeter').count(), 0);
-  assert.equal((await usageItem(page).locator('.bucketChip__label').textContent()).trim(), 'Usage unavailable');
+  assert.equal(await usageItem(page).locator('.visually-hidden').textContent(), 'Usage unavailable. ');
   assert.doesNotMatch(await usageItem(page).textContent(), /\d+ (B|KB|MB|GB)/);
   // No notice of a server that does not answer: the listing stays as it is.
   assert.equal(await page.locator('#notices > *').count(), 0);
   assert.ok(await page.locator('tr[data-name="README.md"]').count() === 1);
+  assert.equal(await page.isHidden('#usageBanner'), true);
   assert.deepEqual(page.errors, []);
   await page.context().close();
 });
@@ -4421,12 +4540,12 @@ test('usage: a failed read shows no number, the tooltip of the chip says that th
 // The usage grows after an upload. SeaweedFS and Garage count a write after a few seconds. MinIO counts in a scan of
 // about one minute: its number is checked in the first test only.
 for (const instance of ['garage-main', 'seaweedfs-main']) {
-  test(`usage: ${PROVIDERS[instance].name}: the chip of the usage grows after an upload, with no reload of the page`, async () => {
+  test(`usage: ${PROVIDERS[instance].name}: the usage of the selector grows after an upload, with no reload of the page`, async () => {
     const page = await newPage();
     const host = instance.split('-')[0];
     const key = `usage-${Date.now()}.bin`;
     await open(page, `-/${host}/${instance}/`);
-    await page.waitForSelector('#bucketChips [data-chip="usage"]');
+    await page.waitForSelector(`${FACTS} [data-fact="usage"][data-used-bytes]`);
     const before = Number(await usageItem(page).getAttribute('data-used-bytes'));
     const requests = [];
     page.on('request', request => { if (/\/api\/usage\?/.test(request.url())) requests.push(request.url()); });
@@ -4450,82 +4569,157 @@ for (const instance of ['garage-main', 'seaweedfs-main']) {
 test('usage: the tooltip of a bucket in the selector has its usage', async () => {
   const page = await newPage();
   await open(page, MAIN);
-  await page.waitForSelector('#bucketChips [data-chip="usage"]');
+  await page.waitForSelector(`${FACTS} [data-fact="usage"][data-used-bytes]`);
   assert.match(await page.getAttribute('.storageSwitcher__trigger', 'title'), /\nusage: ~[\d.]+ (B|KB|MB|GB) of 20 GB \([\d.]+ %\)$/);
   await page.click('.storageSwitcher__trigger');
   await until(page, () => /usage: [\d.]+ (B|KB|MB|GB) of 20 GB/.test(document.querySelector('.storageBucket[data-instance="garage-main"]')?.title || ''));
   await until(page, () => /usage: ~[\d.]+ (B|KB|MB) used$/.test(document.querySelector('.storageBucket[data-instance="minio-locked"]')?.title || ''));
-  // The menu stays open while the tooltips change.
+  // The menu stays open while the lines change.
   assert.equal(await page.isVisible('#storageSwitcherMenu'), true);
   assert.deepEqual(page.errors, []);
   await page.context().close();
 });
 
-test('usage: the chips keep one row in the header at 1440 and 1280, lose the text of the usage on a short window, and go in a popover on a phone', async () => {
+test('usage: the header keeps its height with the two lines of the selector at 1440, 1280 and 900, and on a phone the second line stays', async () => {
   for (const viewport of [{ width: 1440, height: 900 }, { width: 1280, height: 720 }, { width: 900, height: 720 }]) {
     const page = await newPage({ viewport });
     await open(page, MAIN);
-    await page.waitForSelector('#bucketChips [data-chip="usage"]');
-    const box = await page.evaluate(() => {
-      const rect = selector => document.querySelector(selector).getBoundingClientRect();
-      const chips = Array.from(document.querySelectorAll('#bucketChips .bucketChip')).map(node => Math.round(node.getBoundingClientRect().top));
-      return { page: document.documentElement.scrollWidth, view: window.innerWidth, header: rect('.appHeader').height, chips,
-        selector: rect('.storageSwitcher__trigger').width, overflow: document.querySelector('#bucketChips').scrollWidth - document.querySelector('#bucketChips').clientWidth,
-        usageText: document.querySelector('[data-chip="usage"] .bucketChip__label').getBoundingClientRect().width,
-        meter: document.querySelector('[data-chip="usage"] .usageMeter').getBoundingClientRect().width, toggle: getComputedStyle(document.querySelector('#bucketInfoButton')).display };
-    });
-    // One row: the header keeps its height, the selector keeps its width, and no chip is cut.
+    await page.waitForSelector(`${FACTS} [data-fact="usage"][data-used-bytes]`);
+    const box = await page.evaluate(selector => {
+      const rect = node => node.getBoundingClientRect();
+      const facts = document.querySelector(selector);
+      return { page: document.documentElement.scrollWidth, view: window.innerWidth, header: rect(document.querySelector('.appHeader')).height,
+        trigger: rect(document.querySelector('.storageSwitcher__trigger')).height, width: rect(document.querySelector('.storageSwitcher__trigger')).width,
+        rows: new Set(Array.from(facts.querySelectorAll('.bucketFact')).map(node => Math.round(rect(node).top + rect(node).height / 2))).size,
+        overflow: rect(facts).right <= rect(document.querySelector('.storageSwitcher__chevron')).left,
+        usageText: rect(facts.querySelector('.bucketUsage__text')).width, meter: rect(facts.querySelector('.usageMeter')).width };
+    }, FACTS);
+    // One row in the header, as before the second line: 56 px and its border.
     assert.ok(box.page <= box.view, JSON.stringify(box));
-    assert.ok(box.header < 64, JSON.stringify(box));
-    assert.equal(new Set(box.chips).size, 1, JSON.stringify(box));
-    assert.ok(box.selector >= 292, JSON.stringify(box));
-    assert.equal(box.overflow, 0, JSON.stringify(box));
-    assert.equal(box.toggle, 'none');
-    // At 900 px the text of the usage goes, and its bar stays.
-    assert.equal(box.usageText > 1, viewport.width > 1100, JSON.stringify(box));
-    assert.ok(box.meter > 0, JSON.stringify(box));
+    assert.ok(box.header <= 59.5, JSON.stringify(box));
+    assert.ok(Math.abs(box.trigger - 46) < 1, JSON.stringify(box));
+    assert.ok(box.width >= 292, JSON.stringify(box));
+    assert.equal(box.rows, 1, JSON.stringify(box));
+    assert.equal(box.overflow, true, JSON.stringify(box));
+    assert.ok(box.usageText > 1 && box.meter > 0, JSON.stringify(box));
     assert.deepEqual(page.errors, []);
     await page.context().close();
   }
   const phone = await newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   await open(phone, '-/seaweedfs/seaweedfs-locked/');
-  await phone.waitForSelector('#bucketChips [data-chip="usage"]', { state: 'attached' });
-  // The chips are in a closed popover. The "i" button is on the row of the brand, at the left of the theme selector.
-  assert.equal(await phone.isVisible('#bucketChips'), false);
-  assert.equal(await phone.getAttribute('#bucketInfoButton', 'aria-label'), 'Information of the bucket');
-  assert.equal(await phone.getAttribute('#bucketInfoButton', 'aria-expanded'), 'false');
-  const row = await phone.evaluate(() => {
-    const rect = selector => document.querySelector(selector).getBoundingClientRect();
-    return { button: rect('#bucketInfoButton'), theme: rect('.themeSelect'), brand: rect('.appBrand'), page: document.documentElement.scrollWidth };
-  });
-  assert.ok(row.button.right <= row.theme.left && Math.abs(row.button.top + row.button.height / 2 - (row.theme.top + row.theme.height / 2)) < 3, JSON.stringify(row));
-  assert.ok(row.page <= 390, JSON.stringify(row));
-  await phone.tap('#bucketInfoButton');
-  assert.equal(await phone.isVisible('#bucketChips'), true);
-  assert.equal(await phone.getAttribute('#bucketInfoButton', 'aria-expanded'), 'true');
-  // One line for each chip, with its label; the popover stays in the window, above the selector.
-  const lines = await phone.locator('#bucketChips .bucketChip').evaluateAll(nodes => nodes.map(node => node.querySelector('.bucketChip__label').textContent));
-  assert.equal(lines.length, 4);
-  assert.deepEqual(lines.slice(0, 3), ['Versioning', 'Object Lock', 'No lifecycle rule']);
-  assert.match(lines[3], /^~[\d.]+ (B|KB|MB) used$/);
-  const pop = await phone.evaluate(() => {
-    const rect = document.querySelector('#bucketChips').getBoundingClientRect();
-    const tops = Array.from(document.querySelectorAll('#bucketChips .bucketChip')).map(node => node.getBoundingClientRect().top);
-    const hit = document.elementFromPoint(rect.left + rect.width - 20, rect.top + 20);
-    return { left: rect.left, right: rect.right, rows: new Set(tops.map(Math.round)).size, onTop: Boolean(hit?.closest('#bucketChips')) };
-  });
-  assert.ok(pop.left >= 0 && pop.right <= 390 && pop.rows === 4 && pop.onTop, JSON.stringify(pop));
-  // A tap outside closes it; Escape closes it too and gives the focus back to the button.
-  await phone.tap('.tableFoot__range');
-  assert.equal(await phone.isVisible('#bucketChips'), false);
-  await phone.focus('#bucketInfoButton');
-  await phone.keyboard.press('Enter');
-  assert.equal(await phone.isVisible('#bucketChips'), true);
-  await phone.keyboard.press('Escape');
-  assert.equal(await phone.isVisible('#bucketChips'), false);
-  assert.equal(await phone.evaluate(() => document.activeElement.id), 'bucketInfoButton');
+  await phone.waitForSelector(`${FACTS} [data-fact="usage"][data-used-bytes]`);
+  // No "i" button and no popover: the selector has the facts on its second line, inside the window.
+  assert.equal(await phone.locator('#bucketInfoButton, #bucketChips').count(), 0);
+  const row = await phone.evaluate(selector => {
+    const rect = node => node.getBoundingClientRect();
+    const facts = rect(document.querySelector(selector));
+    return { left: facts.left, right: facts.right, trigger: rect(document.querySelector('.storageSwitcher__trigger')),
+      header: rect(document.querySelector('.appHeader')).height, page: document.documentElement.scrollWidth,
+      shown: Array.from(document.querySelectorAll(`${selector} .bucketFact`)).filter(node => rect(node).width > 0).map(node => node.dataset.fact) };
+  }, FACTS);
+  assert.ok(row.left >= row.trigger.left && row.right <= row.trigger.right && row.page <= 390, JSON.stringify(row));
+  assert.ok(row.header <= 111.5, JSON.stringify(row));
+  assert.deepEqual(row.shown, ['versioning', 'object-lock', 'lifecycle', 'usage']);
+  // The menu: each bucket keeps its two lines, in the window.
+  await phone.tap('.storageSwitcher__trigger');
+  const menu = await phone.evaluate(() => Array.from(document.querySelectorAll('.storageHost[data-host="seaweedfs"] .storageBucket')).map(node => {
+    const facts = node.querySelector('.bucketFacts').getBoundingClientRect();
+    return facts.height > 0 && facts.right <= window.innerWidth && facts.top >= node.querySelector('strong').getBoundingClientRect().bottom - 1;
+  }));
+  assert.deepEqual(menu, [true, true, true, true]);
+  assert.ok(await phone.evaluate(() => document.documentElement.scrollWidth) <= 390);
   assert.deepEqual(phone.errors, []);
   await phone.context().close();
+});
+
+// The answer of /api/usage for a part of the limit of 20 GiB, as the server gives it.
+function usageAnswer(instance, percent, { approximate = false, limitBytes = QUOTA_BYTES, limitObjects = 0 } = {}) {
+  const usedBytes = Math.round(QUOTA_BYTES * percent / 100);
+  return { supported: true, available: true, instance, bucket: 'default', source: 'seaweedfs', usedBytes, usedObjects: 10, limitBytes, limitObjects,
+    limitSource: 'provider', percent, level: percent >= 95 ? 'error' : percent >= 80 ? 'warning' : 'ok', approximate,
+    approximateReason: approximate ? 'SeaweedFS counts the allocated bytes of its volumes.' : '', asOf: new Date().toISOString() };
+}
+
+// Answers /api/usage with the answers of plan (by instance); the other instances read the server.
+async function routeUsage(page, plan) {
+  await page.route(/\/api\/usage\?/, route => {
+    const instance = new URL(route.request().url()).searchParams.get('instance');
+    return plan[instance] ? route.fulfill({ json: plan[instance] }) : route.continue();
+  });
+}
+
+test('usage: a bucket at 90 % or more of its limit gives a banner, a mark on the selector and the tooltip of the upload; at 50 % nothing', async () => {
+  const page = await newPage();
+  const plan = { 'seaweedfs-main': usageAnswer('seaweedfs-main', 91) };
+  await routeUsage(page, plan);
+  await open(page, MAIN);
+  await page.waitForSelector('#usageBanner:not([hidden])');
+  const text = 'This bucket is 91 % full: 18.2 GB used of 20 GB. New uploads can fail.';
+  assert.equal(await page.getAttribute('#usageBanner', 'role'), 'alert');
+  assert.equal((await page.textContent('#usageBanner')).trim(), text);
+  assert.equal(await page.locator('#usageBanner .ic-alert-triangle').count(), 1);
+  // The banner is at the top of the card of the listing, as wide as the listing.
+  const box = await page.evaluate(() => {
+    const rect = selector => document.querySelector(selector).getBoundingClientRect();
+    return { first: document.querySelector('#browser').firstElementChild.id, banner: rect('#usageBanner'), crumbs: rect('.browserHead'), listing: rect('#listing') };
+  });
+  assert.equal(box.first, 'usageBanner');
+  assert.ok(box.banner.bottom <= box.crumbs.top && Math.abs(box.banner.width - box.listing.width) < 1, JSON.stringify(box));
+  // The selector: the coloured border and the alert icon on the trigger, a red bar, and the alert icon of the bucket in the menu.
+  assert.equal(await page.locator('.storageSwitcher.is-full').count(), 1);
+  assert.equal(await page.getAttribute('.storageSwitcher__trigger [data-mark="full"]', 'title'), text);
+  assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.storageSwitcher__trigger')).borderTopColor),
+    await page.evaluate(() => getComputedStyle(document.querySelector('.storageSwitcher__trigger [data-mark="full"]')).color));
+  assert.match(await usageItem(page).getAttribute('class'), /is-full/);
+  const red = await page.evaluate(() => getComputedStyle(document.querySelector('.storageSwitcher__facts .usageMeter__fill')).backgroundColor);
+  await page.click('.storageSwitcher__trigger');
+  assert.equal(await page.locator('.storageBucket[data-instance="seaweedfs-main"] [data-mark="full"] .ic-alert-triangle').count(), 1);
+  assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.storageBucket[data-instance="seaweedfs-main"] .usageMeter__fill')).backgroundColor), red);
+  await page.keyboard.press('Escape');
+  // The upload stays possible, with the warning in its tooltip.
+  assert.equal(await page.isDisabled('#uploadButton'), false);
+  assert.equal(await page.getAttribute('#uploadButton', 'title'), text);
+
+  // 100 %: a stronger text. The approximate numbers have a "~" and the reason.
+  plan['seaweedfs-main'] = usageAnswer('seaweedfs-main', 100, { approximate: true });
+  await page.click('#refreshButton');
+  await until(page, () => /^This bucket is full/.test(document.querySelector('#usageBanner').textContent));
+  assert.equal((await page.textContent('#usageBanner')).trim(),
+    'This bucket is full: ~20 GB used of 20 GB (~100 %). New uploads fail. The numbers are approximate: SeaweedFS counts the allocated bytes of its volumes.');
+  assert.equal(await page.textContent('#usageBanner strong'), 'This bucket is full: ~20 GB used of 20 GB (~100 %). New uploads fail.');
+
+  // The banner goes when the number goes down; nothing marks the bucket at 50 %.
+  plan['seaweedfs-main'] = usageAnswer('seaweedfs-main', 50);
+  await page.click('#refreshButton');
+  await page.waitForSelector('#usageBanner', { state: 'hidden' });
+  assert.equal(await page.locator('.storageSwitcher.is-full, .bucketMark').count(), 0);
+  assert.equal(await page.getAttribute('#uploadButton', 'title'), null);
+  assert.doesNotMatch(await usageItem(page).getAttribute('class'), /is-full/);
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+test('usage: a bucket without a limit of bytes never warns, and a full bucket other than the current one marks the selector', async () => {
+  const page = await newPage();
+  // No limit of bytes: a percent of the objects does not give the warning.
+  await routeUsage(page, { 'seaweedfs-main': usageAnswer('seaweedfs-main', 97, { limitBytes: 0, limitObjects: 10 }), 'seaweedfs-archive': usageAnswer('seaweedfs-archive', 96) });
+  await open(page, MAIN);
+  await page.waitForSelector('.storageSwitcher__trigger [data-mark="other"]');
+  assert.equal(await page.isHidden('#usageBanner'), true);
+  assert.equal(await page.locator('.storageSwitcher.is-full, .storageSwitcher__trigger [data-mark="full"]').count(), 0);
+  // The other bucket: a small mark on the trigger with its name, and the alert icon and a red bar in its entry.
+  assert.equal(await page.getAttribute('.storageSwitcher__trigger [data-mark="other"]', 'title'), 'Another bucket is almost full: SeaweedFS - archive');
+  await page.click('.storageSwitcher__trigger');
+  assert.equal(await page.locator('.storageBucket[data-instance="seaweedfs-archive"] [data-mark="full"]').count(), 1);
+  assert.match(await page.getAttribute('.storageBucket[data-instance="seaweedfs-archive"] [data-fact="usage"]', 'class'), /is-full/);
+  assert.equal(await page.locator('.storageBucket[data-instance="seaweedfs-main"] [data-mark]').count(), 0);
+  // The other bucket opens with its banner.
+  await page.click('.storageBucket[data-instance="seaweedfs-archive"]');
+  await page.waitForSelector('#usageBanner:not([hidden])');
+  assert.match(await page.textContent('#usageBanner'), /^This bucket is 96 % full: 19.2 GB used of 20 GB\. New uploads can fail\.$/);
+  assert.equal(await page.locator('.storageSwitcher__trigger [data-mark="other"]').count(), 0);
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
 });
 
 // The details of a file: the pills of the summary strip, and the sections that start closed.
@@ -4617,6 +4811,54 @@ test('details: the pills of the encryption and of the lock open their sections',
   await closeWindow(page);
   assert.equal((await putLock(page, 'seaweedfs-locked', lockedKey, version, { legalHold: false })).status(), 200);
   await purgeVersions(page, 'seaweedfs-locked', lockedKey);
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+// The sections of the details have two columns on a wide window and one column on a narrow window. The tool cards (integrity and
+// inspection) have the full width. The order of the sections in the page is the tab order in both layouts.
+test('details: on a desktop window the sections are in two columns, Storage object and Tags side by side; on a phone one column', async () => {
+  const page = await newPage({ viewport: { width: 1440, height: 900 } });
+  await open(page, MAIN);
+  await openDetails(page, 'README.md');
+  await page.waitForSelector('[data-tags-section] .tagEditor');
+  const measure = () => page.evaluate(() => {
+    const box = selector => { const rect = document.querySelector(selector).getBoundingClientRect(); return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width }; };
+    const body = document.querySelector('.bb-details-body');
+    const sections = [...document.querySelectorAll('.bb-details-body [data-section]')].filter(node => node.offsetParent).map(node => node.dataset.section);
+    return {
+      storage: box('[data-section="storage"]'), tags: box('[data-section="tags"]'), columns: box('.bb-details-columns'),
+      integrity: box('[data-details-tool-card="integrity"]'), inspection: box('[data-details-tool-card="inspection"]'),
+      sections, overflow: body.scrollWidth - body.clientWidth
+    };
+  });
+  const wide = await measure();
+  assert.ok(Math.abs(wide.tags.top - wide.storage.top) <= 3, `top ${wide.storage.top} and ${wide.tags.top}`);
+  assert.ok(wide.tags.left >= wide.storage.right, `Tags at ${wide.tags.left}px, Storage object ends at ${wide.storage.right}px`);
+  assert.ok(wide.storage.width >= 350 && wide.tags.width >= 350, `widths ${wide.storage.width} and ${wide.tags.width}`);
+  // The tool cards have the width of the two columns and come under them.
+  for (const card of [wide.integrity, wide.inspection]) {
+    assert.ok(Math.abs(card.width - wide.columns.width) <= 2, `card ${card.width}px, columns ${wide.columns.width}px`);
+    assert.ok(card.top >= wide.columns.bottom - 1, `card at ${card.top}px, columns end at ${wide.columns.bottom}px`);
+  }
+  assert.ok(wide.overflow <= 0, `overflow ${wide.overflow}px`);
+  // The order of the sections is the reading order: the same list in both layouts.
+  assert.deepEqual(wide.sections.filter(name => ['storage', 'metadata', 'tags', 'file'].includes(name)), ['storage', 'metadata', 'tags', 'file']);
+  // The window gets narrow: the sections go in one column.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await until(page, () => document.querySelector('[data-section="tags"]').getBoundingClientRect().left < 100);
+  const narrow = await measure();
+  assert.ok(narrow.tags.top >= narrow.storage.bottom - 1, `Tags at ${narrow.tags.top}px, Storage object ends at ${narrow.storage.bottom}px`);
+  assert.ok(Math.abs(narrow.tags.left - narrow.storage.left) <= 1, `left ${narrow.storage.left} and ${narrow.tags.left}`);
+  assert.ok(Math.abs(narrow.tags.width - narrow.storage.width) <= 1, `widths ${narrow.storage.width} and ${narrow.tags.width}`);
+  assert.deepEqual(narrow.sections, wide.sections);
+  assert.ok(Math.abs(narrow.integrity.width - narrow.columns.width) <= 2);
+  // A section that opens or closes does not move to the other column.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await until(page, () => document.querySelector('[data-section="tags"]').getBoundingClientRect().left > 400);
+  await page.click('[data-section-toggle="metadata"]');
+  const again = await measure();
+  assert.ok(again.tags.left >= again.storage.right);
   assert.deepEqual(page.errors, []);
   await page.context().close();
 });

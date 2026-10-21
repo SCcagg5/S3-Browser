@@ -111,8 +111,8 @@ This document uses ASD-STE100 Simplified Technical English.
 
 ### Menus of the header
 
-- The item "Lifecycle rules" is no longer in the menu Actions. The chip of the lifecycle rules in the header opens the
-  editor, and it shows also for a bucket without rule, to add the first one.
+- The item "Lifecycle rules" is no longer in the menu Actions. The chip of the lifecycle rules in the bucket selector
+  opens the editor, and it shows also for a bucket without rule, to add the first one.
 - The item of the folder tags reads "Tag this folder", and "Tag this bucket" at the root.
 - The list of the buckets has no check and no folder icon in front of a bucket. The highlight shows the current bucket,
   and the names have more room.
@@ -188,22 +188,38 @@ This document uses ASD-STE100 Simplified Technical English.
   result of each instance for 60 seconds (a failure for 10 seconds), and one read at a time runs for an instance. The
   token and the URLs of the admin API never go into an answer or into a log line.
 
-### Interface `portal`: chips of the bucket in the header and summary of the details
+### Interface `portal`: facts of the buckets in the selector, warning of a full bucket, summary of the details
 
-- The header has small chips at the left of the bucket selector, in one row. The chips are versioning (Tabler
-  `git-commit`), the encryption (a key), Object Lock (a padlock, with the default retention) and the lifecycle rules
-  (an hourglass and the count). A click on the lifecycle chip opens the rules. The last chip is the usage, for example
-  `12.3 GB of 20 GB` with a thin bar or `12.3 GB used`. Each chip has a tooltip and shows only when its fact is true.
-  An approximate number starts with `~`. The bar has the colour of a warning from 80 % and of an error from 95 %.
-- On a window narrower than 1101 px, the chip of the usage shows its bar and no text. On a phone, an "i" button at
-  the left of the theme selector opens the chips in a popover, one line each.
+- The trigger of the bucket selector has a second line with the facts of the current bucket: versioning (Tabler
+  `git-commit`, the tooltip says "Versioning: on" or "Versioning: suspended"), the encryption (a key), Object Lock (a
+  padlock, with the default retention), the lifecycle rules (an hourglass and the count) and the usage, for example
+  `12.3 GB of 20 GB` with a thin bar or `12.3 GB used`. Each fact has a tooltip and shows only when it is true. A bucket
+  that never had versioning shows no versioning icon. An approximate number starts with `~`. The bar has the colour of
+  a warning from 80 % and of an error from 95 %. The header keeps its height.
+- The chip of the lifecycle rules opens the rules. It is a button next to the trigger, not in it. The keyboard goes
+  from the trigger to the permission icons, then to this chip.
+- Each bucket in the list of the selector has the same second line, with the facts of that bucket. The page reads the
+  usage of every bucket at load and when the list opens, 4 at a time, with "…" while a read waits.
+- `/api/instances` gives `versioningState` (`enabled`, `suspended` or `off`) and `lifecycleRules` (the number of rules)
+  of each bucket. The probe at start reads them, and a request of `/api/instances` reads them again in the background
+  after 60 seconds. A failed read hides the fact and never stops the start.
+- The chips of the header and the "i" popover of a phone are removed: the selector has their facts.
 - The page reads the usage when a bucket opens, after a change of the objects, and after a click on the reload icon. A
-  failed read shows no number: the tooltip of the chip gives the reason.
+  failed read shows no number: the tooltip gives the reason.
+- A bucket that uses 90 % or more of its limit of bytes gets a warning: a banner at the top of the listing with
+  `role="alert"` ("This bucket is 93 % full: 18.6 GB used of 20 GB. New uploads can fail.", and "This bucket is full"
+  from 100 %), a red border and an alert icon on the trigger, the alert icon and a red bar in the list, and the text in
+  the tooltip of the upload button. The upload stays possible. A full bucket other than the current one puts a small
+  alert icon on the trigger: "Another bucket is almost full: <name>". A bucket without a limit never warns.
 - The tooltip of each bucket in the bucket selector has its usage.
 - The details of a file start with a strip of pills: the version (`v5 of 5`), the encryption, the lock and the number
   of tags. A click on a pill opens its section, or the version picker. The sections other than "Storage object" and
   "Tags" start closed. A chevron button opens and closes each section, with the mouse or the keyboard. The browser
   keeps the choice of each section.
+- On a wide window, the details of a file show the sections in two columns. The first column has Storage object,
+  Encryption and Metadata. The second column has Tags, Retention, File metadata and Document dimensions. A narrow
+  window or a phone shows one column. The tool cards Verify integrity and Inspect file keep the full width under the
+  columns. The tab order does not change.
 
 ### Uploads and deletes
 
@@ -255,12 +271,16 @@ This document uses ASD-STE100 Simplified Technical English.
 - The test stack gives the bucket `default` of each provider a quota of 20 GiB (Garage also 100000 objects): the
   entrypoints of Garage (admin token in `test/secrets/garage_admin_token`), SeaweedFS (`s3.bucket.quota`) and MinIO
   (`set-bucket-quota`). The Garage admin API listens on the network of the stack. `config.hcl` has a `usage` block in
-  each auth block, and `seaweedfs-archive` has `quota_bytes`. The browser tests check the chips of the header on each
-  provider, a bucket with no quota, the limit of `quota_bytes`, an instance without usage, a failed read, the growth of
+  each auth block, and `seaweedfs-archive` has `quota_bytes`. The browser tests check the facts of the bucket selector
+  on each provider, a bucket with no quota, the limit of `quota_bytes`, an instance without usage, a failed read, the growth of
   the usage after an upload on Garage and SeaweedFS, the tooltips of the selector, the pills of the details and the
   sections that close with the keyboard.
-- Other tests check the chips of `seaweedfs-locked` and of the encrypted buckets, the chip of the lifecycle rules (mouse
-  and keyboard), the chips at 1440, 1280 and 900 px, and the popover of a phone. The settings menu has no part wider
+- Other tests check the facts of `seaweedfs-locked` and of the encrypted buckets, the second line of each bucket in the
+  list, 4 reads of the usage at a time, the chip of the lifecycle rules (mouse and keyboard), the height of the header
+  at 1440, 1280 and 900 px, and the second line on a phone. Tests answer `/api/usage` with 91 %, 100 % and 50 % and
+  check the banner, its role, its texts, the marks of the selector, the mark of another full bucket, and no warning
+  without a limit. A test checks that Storage object and Tags are side by side in the details at 1440 px, and one under
+  the other at 390 px. The settings menu has no part wider
   than the menu at 390 and 1280 px. Each column is on by default on `seaweedfs-main`, and Garage hides Tags and
   Versions. A saved choice wins over the default. The permission icons of the selector open the permissions with the
   mouse, Enter and Space.

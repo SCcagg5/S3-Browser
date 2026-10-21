@@ -414,7 +414,8 @@ a {
   max-width: var(--page-width);
   min-height: var(--header-h);
   margin: 0 auto;
-  padding: 8px var(--gutter);
+  /* The bucket selector is 46 px high: the header keeps its height of 56 px and one line. */
+  padding: 6px var(--gutter);
 }
 
 .appHeader__left,
@@ -610,20 +611,24 @@ html[data-theme-mode="light"] .themeSelect__current > .themeIcon--light {
 
 /* The bucket selector of the default interface: the buckets of each host, with their permissions. ------------------ */
 
-/* The selector sits at the right of the header. The permission icons of the current bucket are a button of their own:
-   it shares the grid cell of the trigger, at its right end, and the trigger keeps a place for it. */
+/* The selector sits at the right of the header. The trigger has two lines: the name of the bucket, then its facts. The
+   permission icons and the line of the facts are elements of their own over the trigger: they share the grid of the
+   trigger, and the trigger keeps a place for them. The rows of the grid: the top edge, the name, the facts, the bottom
+   edge of the trigger (its border and its padding). */
 .storageSwitcher {
   --perms-width: 60px;
+  --facts-left: 41px;
   position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: 5px 22px 14px 5px;
   align-items: center;
   min-width: 0;
   margin-left: auto;
 }
 
 .storageSwitcher > .storageSwitcher__trigger {
-  grid-area: 1 / 1;
+  grid-area: 1 / 1 / -1 / 2;
 }
 
 .storageSwitcher__permsSlot {
@@ -636,11 +641,11 @@ html[data-theme-mode="light"] .themeSelect__current > .themeIcon--light {
   position: relative;
   z-index: calc(var(--z-menu) + 2);
   display: inline-grid;
-  grid-area: 1 / 1;
+  grid-area: 2 / 1;
   justify-self: end;
   place-items: center;
   width: var(--perms-width);
-  height: 30px;
+  height: 22px;
   /* The chevron of the trigger: its padding, its width and the gap before it. */
   margin-right: 36px;
   padding: 0;
@@ -666,7 +671,7 @@ html[data-theme-mode="light"] .themeSelect__current > .themeIcon--light {
   gap: 10px;
   width: min(380px, 100%);
   min-width: 292px;
-  min-height: 42px;
+  height: 46px;
   padding: 4px 10px 4px 12px;
   border: 1px solid var(--button-border);
   border-radius: var(--radius-control);
@@ -677,9 +682,17 @@ html[data-theme-mode="light"] .themeSelect__current > .themeIcon--light {
   transition: border-color var(--dur-quick) var(--ease), background-color var(--dur-quick) var(--ease);
 }
 
-button.storageSwitcher__trigger:hover {
+button.storageSwitcher__trigger:hover,
+.storageSwitcher:has(> .storageSwitcher__facts:hover) > button.storageSwitcher__trigger {
   border-color: var(--button-border-hover);
   background: var(--button-bg-hover);
+}
+
+/* A full bucket: the border and the alert icon of the trigger in the colour of an error. */
+.storageSwitcher.is-full > .storageSwitcher__trigger,
+.storageSwitcher.is-full:has(> .storageSwitcher__facts:hover) > button.storageSwitcher__trigger {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 7%, var(--button-bg));
 }
 
 .storageSwitcher__trigger.is-static {
@@ -709,6 +722,25 @@ button.storageSwitcher__trigger:hover {
   min-width: 0;
 }
 
+.storageSwitcher__copy:has(> .storageSwitcher__factsSlot) {
+  grid-template-rows: 22px 14px;
+  gap: 0;
+}
+
+.storageSwitcher__facts {
+  position: relative;
+  z-index: calc(var(--z-menu) + 2);
+  grid-area: 3 / 1;
+  /* The icon of the trigger, its gap and its padding at the left; the chevron at the right. */
+  margin: 0 36px 0 var(--facts-left);
+  cursor: pointer;
+}
+
+.storageSwitcher__trigger.is-static ~ .storageSwitcher__facts {
+  margin-right: 10px;
+  cursor: default;
+}
+
 .storageSwitcher__titleRow {
   display: flex;
   align-items: center;
@@ -732,20 +764,32 @@ button.storageSwitcher__trigger:hover {
   margin-left: auto;
 }
 
-/* The key of a bucket that encrypts, and the padlock of a bucket with Object Lock. A key in the colour of a warning: the
-   provider ignores the encryption. */
-.bucketLock {
-  display: inline-grid;
+/* The marks after the name of a bucket: the alert icon of a full bucket, and on the trigger the alert icon of another
+   bucket that is full. */
+.bucketMarks {
+  display: inline-flex;
   flex: none;
+  gap: 4px;
+}
+
+.bucketMarks:empty {
+  display: none;
+}
+
+.bucketMark {
+  display: inline-grid;
   place-items: center;
-  color: var(--muted);
 }
 
-.bucketLock .ic {
-  --icon-size: 14px;
+.bucketMark .ic {
+  --icon-size: 15px;
 }
 
-.bucketLock.is-warn {
+.bucketMark.is-full {
+  color: var(--danger);
+}
+
+.bucketMark.is-other {
   color: var(--warning);
 }
 
@@ -2757,8 +2801,7 @@ button.versionCount:focus-visible {
     gap: 8px;
   }
 
-  /* The brand, the information button of the bucket and the theme selector fill the first row; the selector has the
-     second row. */
+  /* The brand and the theme selector fill the first row; the bucket selector has the second row. */
   .appHeader__left {
     flex: 1 1 calc(100% - 100px);
   }
@@ -4662,6 +4705,49 @@ button.versionCount:focus-visible {
   border-top: 1px solid var(--border);
 }
 
+/* The sections of the details of a file: one column on a narrow window, two columns on a wide window. The window decides, not the
+   screen: the body of the details is the container. The two columns are two blocks in the page, so a section never moves from
+   one column to the other when a section opens or closes. The first column has the object (storage, encryption, metadata). The
+   second column has what describes it (tags, retention, file, dimensions). The tools below have the full width. */
+.bb-details--file .bb-details-body {
+  container: bb-details / inline-size;
+}
+
+.bb-details-columns {
+  display: grid;
+  gap: .5rem;
+  padding-top: .72rem;
+  border-top: 1px solid var(--bb-border);
+}
+
+.bb-details-column {
+  display: grid;
+  align-content: start;
+  gap: .5rem;
+  min-width: 0;
+}
+
+.bb-details-column + .bb-details-column {
+  padding-top: .72rem;
+  border-top: 1px solid var(--bb-border);
+}
+
+@container bb-details (min-width: 820px) {
+  .bb-details-columns {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 28px;
+  }
+
+  .bb-details-column {
+    gap: .72rem;
+  }
+
+  .bb-details-column + .bb-details-column {
+    padding: 0 0 0 28px;
+    border-top: 0;
+    border-left: 1px solid var(--bb-border);
+  }
+}
 
 /* Comparison in the bar of the preview: From, the statistics, and To (the picker of the versions, in its place). The bar has no
    extra row. ---------------------------------------------------------------------------------------------------------------- */
@@ -4817,105 +4903,96 @@ button.versionCount:focus-visible {
   }
 }
 
-/* Chips of the bucket in the header ------------------------------------------------------------------------------------ */
+/* Facts of a bucket in the selector ------------------------------------------------------------------------------------ */
 
-/* At the left of the bucket selector: a small chip for each fact of the bucket, an icon with a tooltip, in one row. The
-   cluster gets smaller before the selector does. The "i" button and the popover are for a phone. */
-.bucketInfo {
-  position: relative;
+/* The second line of the trigger and of each bucket of the menu: an icon with a tooltip for each fact that is true, then
+   the usage with its thin bar, at the right. The label of each icon is for a screen reader. */
+.bucketFacts {
   display: flex;
   align-items: center;
+  gap: 8px;
   min-width: 0;
-  margin-left: auto;
+  height: 14px;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  line-height: 14px;
+  white-space: nowrap;
 }
 
-.bucketInfo:not([hidden]) + .storageSwitcher {
-  margin-left: 0;
-}
-
-/* The chips give the key and the padlock of the current bucket: the trigger of the selector does not show them again. */
-@media (min-width: 761px) {
-  .bucketInfo:not([hidden]) + .storageSwitcher .storageSwitcher__trigger .bucketLock {
-    display: none;
-  }
-}
-
-.bucketInfo__toggle {
+.storageBucket .bucketFacts:empty {
   display: none;
 }
 
-.bucketChips {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.bucketChip {
+.bucketFact {
   display: inline-flex;
   flex: none;
   align-items: center;
-  gap: 5px;
+  gap: 3px;
   min-width: 0;
-  height: 26px;
-  padding: 0 7px;
+  padding: 0;
   border: 0;
-  border-radius: var(--radius-pill);
   background: none;
-  color: var(--muted);
+  color: inherit;
   font: inherit;
-  font-size: var(--fs-sm);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
 }
 
-.bucketChip .ic {
-  --icon-size: 15px;
+.bucketFact .ic {
+  --icon-size: 13px;
 }
 
-/* The label is for a screen reader and for the popover; a wide window shows the icon and the short text. */
-.bucketChip__label {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
-
-.bucketChip--wide .bucketChip__label {
-  position: static;
-  width: auto;
-  height: auto;
-  overflow: visible;
-  clip-path: none;
-}
-
-button.bucketChip {
+/* The button of the lifecycle rules: a larger target than its icon and its count. */
+button.bucketFact {
+  height: 20px;
+  margin: -3px -4px;
+  padding: 0 4px;
+  border-radius: var(--radius-inner);
   cursor: pointer;
   transition: color var(--dur-quick) var(--ease), background-color var(--dur-quick) var(--ease);
 }
 
-button.bucketChip:hover,
-button.bucketChip:focus-visible {
+button.bucketFact:hover,
+button.bucketFact:focus-visible {
   background: var(--row-hover);
   color: var(--accent-text);
 }
 
-.bucketChip.is-warning {
+.bucketFact.is-warning {
   color: var(--warning);
 }
 
-.bucketChip.is-muted {
+.bucketFact.is-muted {
   opacity: 0.7;
 }
 
-/* The thin bar of the used part of the limit: the colour of a warning from 80 %, of an error from 95 %. */
+.bucketUsage {
+  flex: 0 1 auto;
+  gap: 5px;
+  margin-left: auto;
+}
+
+.bucketUsage__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bucketUsage.is-loading {
+  letter-spacing: 1px;
+  animation: usage-wait 1.2s var(--ease) infinite alternate;
+}
+
+@keyframes usage-wait {
+  from {
+    opacity: 0.35;
+  }
+}
+
+/* The thin bar of the used part of the limit: the colour of a warning from 80 %, of an error from 95 %, and of an
+   error for a full bucket (90 %). */
 .usageMeter {
   position: relative;
   flex: none;
-  width: 48px;
+  width: 40px;
   height: 4px;
   overflow: hidden;
   border-radius: 2px;
@@ -4933,102 +5010,47 @@ button.bucketChip:focus-visible {
   background: var(--warning);
 }
 
-.bucketUsage.is-error {
+.bucketUsage.is-error,
+.bucketUsage.is-full {
   color: var(--danger);
 }
 
-.bucketUsage.is-error .usageMeter__fill {
+.bucketUsage.is-error .usageMeter__fill,
+.bucketUsage.is-full .usageMeter__fill {
   background: var(--danger);
 }
 
-/* A shorter window: the text of the usage goes first, and its bar stays. */
-@media (max-width: 1100px) {
-  .bucketChip--wide .bucketChip__label {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-  }
+/* The banner of a full bucket, at the top of the listing. */
+.usageBanner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--danger) 55%, transparent);
+  border-left-width: 4px;
+  border-radius: var(--radius-control);
+  background: var(--danger-bg);
+  color: var(--text);
+  line-height: 20px;
 }
 
-/* A phone: the "i" button at the left of the theme selector opens the chips in a popover, one line each. */
-@media (max-width: 760px) {
-  .bucketInfo {
-    order: 2;
-    margin-left: 0;
-  }
+.usageBanner strong {
+  font-weight: var(--fw-semibold);
+}
 
-  .bucketInfo__toggle {
-    display: inline-grid;
-  }
+.usageBanner[hidden] {
+  display: none;
+}
 
-  .bucketInfo.is-open .bucketInfo__toggle {
-    color: var(--text);
-  }
+.usageBanner .ic {
+  --icon-size: 20px;
+  flex: none;
+  color: var(--danger);
+}
 
-  .bucketChips {
-    position: absolute;
-    top: calc(100% + 6px);
-    right: 0;
-    /* Above the permission button of the selector. */
-    z-index: calc(var(--z-menu) + 3);
-    display: none;
-    width: max-content;
-    min-width: 200px;
-    max-width: calc(100vw - 2 * var(--gutter));
-    padding: 4px;
-    overflow: visible;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-pop);
-    background: var(--panel);
-    box-shadow: var(--shadow-overlay);
-    transform-origin: top right;
-    animation: pop-in var(--dur-base) var(--ease);
-  }
-
-  .bucketInfo.is-open .bucketChips {
-    display: grid;
-  }
-
-  .bucketChip {
-    gap: 10px;
-    width: 100%;
-    height: auto;
-    min-height: 36px;
-    padding: 6px 10px;
-    border-radius: var(--radius-control);
-    color: var(--text);
-    font-size: var(--fs-md);
-    text-align: left;
-    white-space: normal;
-  }
-
-  .bucketChip .ic {
-    color: var(--muted);
-  }
-
-  .bucketChip.is-warning,
-  .bucketChip.is-warning .ic {
-    color: var(--warning);
-  }
-
-  .bucketChip__short {
-    display: none;
-  }
-
-  .bucketChip .bucketChip__label,
-  .bucketChip--wide .bucketChip__label {
-    position: static;
-    width: auto;
-    height: auto;
-    overflow: visible;
-    clip-path: none;
-    white-space: normal;
-  }
-
-  .usageMeter {
-    margin-left: auto;
+@media (prefers-reduced-motion: reduce) {
+  .bucketUsage.is-loading {
+    animation: none;
   }
 }
 

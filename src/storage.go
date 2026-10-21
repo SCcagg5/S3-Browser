@@ -289,6 +289,12 @@ type storageInstance struct {
 	versioningMu        sync.RWMutex
 	versioningSupported bool
 	versioningChecked   bool
+	// versioningStatus is the last status of GetBucketVersioning: "Enabled", "Suspended", or "" for a bucket that never
+	// had versioning. versioningStatusKnown is set after the first read that worked.
+	versioningStatus      string
+	versioningStatusKnown bool
+	// facts is the time of the last read of the versioning status and of the lifecycle rules for /api/instances.
+	facts bucketFactsState
 
 	// tagsOff is set when a probe found that the provider does not know the tag requests.
 	tagsOff atomic.Bool
@@ -523,10 +529,12 @@ func (s *storageInstance) publicInfo() instanceInfo {
 		Region:              s.cfg.Region,
 		RootPrefix:          s.cfg.RootPrefix,
 		VersioningSupported: s.versioningAvailable(),
+		VersioningState:     s.versioningState(),
 		TagsSupported:       s.tagsAvailable(),
 		MetadataEditable:    s.metadataEditAvailable(),
 		MultipartUploads:    s.multipartUploadsAvailable(),
 		Lifecycle:           s.lifecycleAvailable(),
+		LifecycleRules:      s.lifecycleRuleCount(),
 		ObjectLock:          s.objectLockAvailable(),
 		ObjectLockDefault:   s.objectLockDefaultInfo(),
 		BucketEncryption:    s.bucketEncryptionAvailable(),
@@ -548,11 +556,17 @@ type instanceInfo struct {
 	Region              string `json:"region,omitempty"`
 	RootPrefix          string `json:"rootPrefix,omitempty"`
 	VersioningSupported bool   `json:"versioningSupported"`
-	TagsSupported       bool   `json:"tagsSupported"`
-	MetadataEditable    bool   `json:"metadataEditSupported"`
-	MultipartUploads    bool   `json:"multipartUploadsSupported"`
-	Lifecycle           bool   `json:"lifecycleSupported"`
-	ObjectLock          bool   `json:"objectLockSupported"`
+	// VersioningState is the versioning of the bucket: "enabled", "suspended" or "off". It is absent when the server
+	// could not read it.
+	VersioningState  string `json:"versioningState,omitempty"`
+	TagsSupported    bool   `json:"tagsSupported"`
+	MetadataEditable bool   `json:"metadataEditSupported"`
+	MultipartUploads bool   `json:"multipartUploadsSupported"`
+	Lifecycle        bool   `json:"lifecycleSupported"`
+	// LifecycleRules is the number of lifecycle rules of the bucket at the last read of this process. It is absent
+	// when the server could not read the rules.
+	LifecycleRules *int `json:"lifecycleRules,omitempty"`
+	ObjectLock     bool `json:"objectLockSupported"`
 	// ObjectLockDefault is the default retention of the bucket that the probe read at start. It is absent for a bucket
 	// without Object Lock or without a default retention.
 	ObjectLockDefault *objectLockDefaultJSON `json:"objectLockDefault,omitempty"`

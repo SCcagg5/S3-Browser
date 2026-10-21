@@ -29,10 +29,6 @@
           </span>
         </div>
       </div>
-      <div id="bucketInfo" class="bucketInfo" hidden>
-        <button id="bucketInfoButton" class="iconButton bucketInfo__toggle" type="button" aria-label="Information of the bucket" title="Information of the bucket" aria-expanded="false" aria-controls="bucketChips"><i class="ic ic-info-circle" aria-hidden="true"></i></button>
-        <div id="bucketChips" class="bucketChips" role="group" aria-label="Information of the bucket"></div>
-      </div>
       <div id="storageSwitcher" class="storageSwitcher is-loading" aria-label="Bucket">
         <div class="storageSwitcher__trigger is-static" aria-hidden="true">
           <span class="storageSwitcher__skeleton"></span>
@@ -57,6 +53,7 @@
     <div id="notices" class="notices" aria-live="polite"></div>
 
     <section id="browser" class="part browser" aria-labelledby="folderTitle">
+      <div id="usageBanner" class="usageBanner" role="alert" hidden></div>
       <div class="browserHead">
         <h1 id="folderTitle" class="visually-hidden">Loading the buckets</h1>
         <nav id="crumbs" class="crumbs" aria-label="Folder path"></nav>

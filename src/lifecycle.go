@@ -799,6 +799,10 @@ type lifecycleCapability struct {
 	writeRefusal string
 	// dropped has the fields that the provider dropped after a save in this process.
 	dropped map[string]bool
+	// ruleCount is the number of rules at the last read of the configuration. ruleCountKnown is set after the first
+	// read that worked. The bucket selector shows the count for each bucket.
+	ruleCount      int
+	ruleCountKnown bool
 }
 
 // lifecycleAvailable tells if the instance gives the lifecycle rules. Until the probe has run, the answer is yes for a
@@ -823,16 +827,104 @@ func (s *storageInstance) probeLifecycle(ctx context.Context) {
 	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	var err error
+	var rules []lifecycleRule
 	if writer, ok := s.backend.(BucketLifecycleWriter); ok {
-		_, err = writer.ReadBucketLifecycle(probeCtx)
+		var document lifecycleDocument
+		if document, err = writer.ReadBucketLifecycle(probeCtx); err == nil {
+			rules, err = parseLifecycleRules(document.Body)
+		}
 	} else {
-		_, err = s.backend.(BucketLifecycleReader).GetBucketLifecycle(probeCtx)
+		rules, err = s.backend.(BucketLifecycleReader).GetBucketLifecycle(probeCtx)
 	}
 	if providerRefusedFeature(err) {
 		s.lifecycle.off.Store(true)
 		return
 	}
+	if err == nil {
+		s.setLifecycleRuleCount(len(rules))
+	}
 	s.lifecycleFlavour(probeCtx)
+}
+
+// setLifecycleRuleCount keeps the number of rules of the last read of the configuration.
+func (s *storageInstance) setLifecycleRuleCount(count int) {
+	s.lifecycle.mu.Lock()
+	defer s.lifecycle.mu.Unlock()
+	s.lifecycle.ruleCount, s.lifecycle.ruleCountKnown = count, true
+}
+
+// lifecycleRuleCount gives the number of rules for /api/instances, or nil when the server has not read the rules or the
+// instance has no lifecycle rules.
+func (s *storageInstance) lifecycleRuleCount() *int {
+	if !s.lifecycleAvailable() {
+		return nil
+	}
+	s.lifecycle.mu.Lock()
+	defer s.lifecycle.mu.Unlock()
+	if !s.lifecycle.ruleCountKnown {
+		return nil
+	}
+	count := s.lifecycle.ruleCount
+	return &count
+}
+
+// bucketFactsTTL is the age of the versioning status and of the number of lifecycle rules after which a request of
+// /api/instances reads them again. The read is in the background: the request does not wait for it.
+const bucketFactsTTL = 60 * time.Second
+
+// bucketFactsState is the time of the last read of the facts of a bucket, and the read in flight.
+type bucketFactsState struct {
+	mu      sync.Mutex
+	at      time.Time
+	running bool
+}
+
+func (s *storageInstance) markBucketFactsRead() {
+	s.facts.mu.Lock()
+	defer s.facts.mu.Unlock()
+	s.facts.at = time.Now()
+}
+
+// refreshBucketFacts reads the versioning status and the lifecycle rules of the bucket again when the last read is
+// older than bucketFactsTTL. One read at a time for each instance, 5 seconds at most, inside the limits of the storage
+// requests. A failed read keeps the last values. Before the probe at start, nothing is read.
+func (s *storageInstance) refreshBucketFacts() {
+	if s == nil || !s.permitted(permissionRead) {
+		return
+	}
+	s.facts.mu.Lock()
+	if s.facts.running || s.facts.at.IsZero() || time.Since(s.facts.at) < bucketFactsTTL {
+		s.facts.mu.Unlock()
+		return
+	}
+	s.facts.running = true
+	s.facts.mu.Unlock()
+	go func() {
+		defer func() {
+			s.facts.mu.Lock()
+			s.facts.running, s.facts.at = false, time.Now()
+			s.facts.mu.Unlock()
+		}()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		s.bucketVersioning(ctx)
+		writer, err := s.lifecycleWriter()
+		if err != nil {
+			return
+		}
+		release, err := s.beginStorageRequest(ctx)
+		if err != nil {
+			return
+		}
+		document, err := writer.ReadBucketLifecycle(ctx)
+		release()
+		if err != nil {
+			return
+		}
+		if rules, err := parseLifecycleRules(document.Body); err == nil {
+			s.setLifecycleRuleCount(len(rules))
+		}
+	}()
 }
 
 // lifecycleFlavour gives the provider of the instance, and asks it one time.
@@ -992,6 +1084,7 @@ func (s *storageInstance) bucketVersioning(ctx context.Context) string {
 	if err != nil {
 		return ""
 	}
+	s.setVersioningStatus(status)
 	return status
 }
 
@@ -1022,6 +1115,7 @@ func (s *storageInstance) readLifecycleState(ctx context.Context) (lifecycleStat
 	if state.rules, err = parseLifecycleRules(document.Body); err != nil {
 		return lifecycleState{}, apiError{Status: http.StatusBadGateway, Code: "lifecycle_invalid", Message: err.Error()}
 	}
+	s.setLifecycleRuleCount(len(state.rules))
 	flavour := s.lifecycleFlavour(ctx)
 	versioning := s.bucketVersioning(ctx)
 	rootPrefix := s.cfg.RootPrefix
