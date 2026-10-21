@@ -2,7 +2,24 @@
 
 This document uses ASD-STE100 Simplified Technical English.
 
-## Unreleased
+## 2.1.0
+
+Version 2.1.0 adds the test interface `portal`, many functions for S3 buckets and a first set of tests on three
+providers (SeaweedFS, MinIO and Garage). Each new key of the configuration is optional. A configuration file of 2.0.0
+starts without any change. The new functions show only for a bucket whose provider keeps them: the page asks the
+provider at start, and hides what it does not know. A bucket of a provider that does not know a function (for example
+tags on Garage) works as before.
+
+The main additions are:
+
+- The interface `portal` (`server.frontend = "portal"`): tags and filters, versions and the comparison of two versions,
+  the edit of the metadata, lifecycle rules, Object Lock, the encryption, the usage and the quota of a bucket, the
+  cleanup of incomplete uploads, and the facts of each bucket in the selector.
+- Uploads with a SHA-256 checksum of each part, deletes in batches, and a copy in parts for objects above 5 GiB.
+- Tests in Docker on SeaweedFS, MinIO and Garage, with a table of what each provider supports in `test/README.md`.
+- New optional keys: `encryption` of the `bucket` block, `quota_bytes` of the `bucket` block, and the block `usage` of an
+  `auth` block. Refer to [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+
 
 ### Copy, move and rename
 
