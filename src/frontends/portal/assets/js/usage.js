@@ -57,7 +57,7 @@
   const cached = id => answers.get(String(id || ''))?.answer || null;
   const shown = answer => answer?.supported === true && answer.available === true;
 
-  // The short text of the status line: "~12.3 GB of 20 GB" or "12.3 GB used".
+  // The short text of the chip of the header: "~12.3 GB of 20 GB" or "12.3 GB used".
   function text(answer) {
     if (!shown(answer)) return '';
     const used = `${answer.approximate ? '~' : ''}${formatBytes(answer.usedBytes)}`;

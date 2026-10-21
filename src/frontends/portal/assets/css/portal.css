@@ -610,40 +610,54 @@ html[data-theme-mode="light"] .themeSelect__current > .themeIcon--light {
 
 /* The bucket selector of the default interface: the buckets of each host, with their permissions. ------------------ */
 
-/* The permission button and the selector sit at the right of the header: the button first, then the selector. */
-.button.permButton {
-  width: 42px;
-  height: 42px;
-  margin-left: auto;
-}
-
-.button.permButton {
-  border-color: transparent;
-  background: transparent;
-  color: var(--muted);
-  transition: color var(--dur-quick) var(--ease);
-}
-
-.button.permButton:not(:disabled):hover,
-.button.permButton:not(:disabled):active,
-.button.permButton:focus-visible {
-  border-color: transparent;
-  background: transparent;
-  color: var(--accent-text);
-}
-
-.button.permButton[hidden] {
-  display: none;
-}
-
-.permButton + .storageSwitcher {
-  margin-left: 0;
-}
-
+/* The selector sits at the right of the header. The permission icons of the current bucket are a button of their own:
+   it shares the grid cell of the trigger, at its right end, and the trigger keeps a place for it. */
 .storageSwitcher {
+  --perms-width: 60px;
   position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
   min-width: 0;
   margin-left: auto;
+}
+
+.storageSwitcher > .storageSwitcher__trigger {
+  grid-area: 1 / 1;
+}
+
+.storageSwitcher__permsSlot {
+  flex: none;
+  width: var(--perms-width);
+  margin-left: auto;
+}
+
+.storageSwitcher__perms {
+  position: relative;
+  z-index: calc(var(--z-menu) + 2);
+  display: inline-grid;
+  grid-area: 1 / 1;
+  justify-self: end;
+  place-items: center;
+  width: var(--perms-width);
+  height: 30px;
+  /* The chevron of the trigger: its padding, its width and the gap before it. */
+  margin-right: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  cursor: pointer;
+  transition: background-color var(--dur-quick) var(--ease);
+}
+
+.storageSwitcher__trigger.is-static ~ .storageSwitcher__perms {
+  margin-right: 10px;
+}
+
+.storageSwitcher__perms:hover,
+.storageSwitcher__perms:focus-visible {
+  background: var(--row-hover);
 }
 
 .storageSwitcher__trigger {
@@ -2761,18 +2775,14 @@ button.versionCount:focus-visible {
     gap: 8px;
   }
 
-  /* The brand and the theme selector fill the first row, so the permission button goes to the row of the selector. */
+  /* The brand, the information button of the bucket and the theme selector fill the first row; the selector has the
+     second row. */
   .appHeader__left {
-    flex: 1 1 calc(100% - 60px);
-  }
-
-  .button.permButton {
-    order: 3;
-    margin-left: 0;
+    flex: 1 1 calc(100% - 100px);
   }
 
   .storageSwitcher {
-    flex: 1 1 calc(100% - 50px);
+    flex: 1 1 100%;
     order: 3;
     margin-left: 0;
   }
@@ -2993,15 +3003,6 @@ button.versionCount:focus-visible {
 .listing {
   display: grid;
   gap: 10px;
-}
-
-.tableFoot__count {
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-}
-
-.tableFoot__count:empty {
-  display: none;
 }
 
 /* Tags ---------------------------------------------------------------------------------------------------------------- */
@@ -3855,9 +3856,25 @@ button.versionCount:focus-visible {
   margin-right: -6px;
 }
 
+/* The menu is as wide as its longest line needs, up to the window. A longer text wraps in the menu. */
 .menu--settings {
-  min-width: 300px;
+  grid-template-columns: minmax(0, 1fr);
+  width: max-content;
+  min-width: 220px;
+  max-width: min(300px, calc(100vw - 16px));
   padding: 6px;
+}
+
+.menu--settings .menu__item {
+  min-height: 32px;
+  padding-block: 6px;
+  white-space: normal;
+}
+
+.menu--settings .menu__title,
+.menu--settings .menu__message,
+.menu__check span {
+  overflow-wrap: anywhere;
 }
 
 .menu__title {
@@ -3884,6 +3901,7 @@ button.versionCount:focus-visible {
 }
 
 .menu__check input {
+  flex: none;
   accent-color: var(--accent-fill);
 }
 
@@ -4817,78 +4835,105 @@ button.versionCount:focus-visible {
   }
 }
 
-/* Status line of the bucket ------------------------------------------------------------------------------------------- */
+/* Chips of the bucket in the header ------------------------------------------------------------------------------------ */
 
-/* Under the listing, at the right of the totals: small pieces of text, each with a tooltip. One line on a desktop; the
-   pieces wrap on a phone. */
-.bucketStatus {
-  display: inline-flex;
-  flex-wrap: wrap;
+/* At the left of the bucket selector: a small chip for each fact of the bucket, an icon with a tooltip, in one row. The
+   cluster gets smaller before the selector does. The "i" button and the popover are for a phone. */
+.bucketInfo {
+  position: relative;
+  display: flex;
   align-items: center;
-  gap: 4px 14px;
   min-width: 0;
-  color: var(--muted);
-  font-size: var(--fs-sm);
+  margin-left: auto;
 }
 
-.bucketStatus[hidden] {
+.bucketInfo:not([hidden]) + .storageSwitcher {
+  margin-left: 0;
+}
+
+/* The chips give the key and the padlock of the current bucket: the trigger of the selector does not show them again. */
+@media (min-width: 761px) {
+  .bucketInfo:not([hidden]) + .storageSwitcher .storageSwitcher__trigger .bucketLock {
+    display: none;
+  }
+}
+
+.bucketInfo__toggle {
   display: none;
 }
 
-/* On a desktop, thin lines separate the status of the bucket from the totals and from the range of the page. */
-@media (min-width: 701px) {
-  .tableFoot > .bucketStatus {
-    padding: 0 12px;
-    border-right: 1px solid var(--border-strong);
-    border-left: 1px solid var(--border-strong);
-  }
-
-  .tableFoot--status > .bucketStatus {
-    padding-left: 0;
-    border: 0;
-  }
+.bucketChips {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
 }
 
-.bucketStatus__item {
+.bucketChip {
   display: inline-flex;
+  flex: none;
   align-items: center;
   gap: 5px;
   min-width: 0;
-  padding: 0;
+  height: 26px;
+  padding: 0 7px;
   border: 0;
+  border-radius: var(--radius-pill);
   background: none;
-  color: inherit;
+  color: var(--muted);
   font: inherit;
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
-.bucketStatus__item .ic {
-  --icon-size: 14px;
+.bucketChip .ic {
+  --icon-size: 15px;
 }
 
-button.bucketStatus__item {
+/* The label is for a screen reader and for the popover; a wide window shows the icon and the short text. */
+.bucketChip__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.bucketChip--wide .bucketChip__label {
+  position: static;
+  width: auto;
+  height: auto;
+  overflow: visible;
+  clip-path: none;
+}
+
+button.bucketChip {
   cursor: pointer;
-  transition: color var(--dur-quick) var(--ease);
+  transition: color var(--dur-quick) var(--ease), background-color var(--dur-quick) var(--ease);
 }
 
-button.bucketStatus__item:hover,
-button.bucketStatus__item:focus-visible {
+button.bucketChip:hover,
+button.bucketChip:focus-visible {
+  background: var(--row-hover);
   color: var(--accent-text);
 }
 
-.bucketStatus__item.is-warning {
+.bucketChip.is-warning {
   color: var(--warning);
 }
 
-.bucketUsage {
-  font-variant-numeric: tabular-nums;
+.bucketChip.is-muted {
+  opacity: 0.7;
 }
 
 /* The thin bar of the used part of the limit: the colour of a warning from 80 %, of an error from 95 %. */
 .usageMeter {
   position: relative;
   flex: none;
-  width: 56px;
+  width: 48px;
   height: 4px;
   overflow: hidden;
   border-radius: 2px;
@@ -4900,10 +4945,6 @@ button.bucketStatus__item:focus-visible {
   inset: 0 auto 0 0;
   border-radius: inherit;
   background: var(--accent-fill);
-}
-
-.bucketUsage.is-warning {
-  color: var(--warning);
 }
 
 .bucketUsage.is-warning .usageMeter__fill {
@@ -4918,8 +4959,95 @@ button.bucketStatus__item:focus-visible {
   background: var(--danger);
 }
 
-.tableFoot--status:has(.bucketStatus[hidden]) {
-  display: none;
+/* A shorter window: the text of the usage goes first, and its bar stays. */
+@media (max-width: 1100px) {
+  .bucketChip--wide .bucketChip__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+}
+
+/* A phone: the "i" button at the left of the theme selector opens the chips in a popover, one line each. */
+@media (max-width: 760px) {
+  .bucketInfo {
+    order: 2;
+    margin-left: 0;
+  }
+
+  .bucketInfo__toggle {
+    display: inline-grid;
+  }
+
+  .bucketInfo.is-open .bucketInfo__toggle {
+    color: var(--text);
+  }
+
+  .bucketChips {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    /* Above the permission button of the selector. */
+    z-index: calc(var(--z-menu) + 3);
+    display: none;
+    width: max-content;
+    min-width: 200px;
+    max-width: calc(100vw - 2 * var(--gutter));
+    padding: 4px;
+    overflow: visible;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-pop);
+    background: var(--panel);
+    box-shadow: var(--shadow-overlay);
+    transform-origin: top right;
+    animation: pop-in var(--dur-base) var(--ease);
+  }
+
+  .bucketInfo.is-open .bucketChips {
+    display: grid;
+  }
+
+  .bucketChip {
+    gap: 10px;
+    width: 100%;
+    height: auto;
+    min-height: 36px;
+    padding: 6px 10px;
+    border-radius: var(--radius-control);
+    color: var(--text);
+    font-size: var(--fs-md);
+    text-align: left;
+    white-space: normal;
+  }
+
+  .bucketChip .ic {
+    color: var(--muted);
+  }
+
+  .bucketChip.is-warning,
+  .bucketChip.is-warning .ic {
+    color: var(--warning);
+  }
+
+  .bucketChip__short {
+    display: none;
+  }
+
+  .bucketChip .bucketChip__label,
+  .bucketChip--wide .bucketChip__label {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip-path: none;
+    white-space: normal;
+  }
+
+  .usageMeter {
+    margin-left: auto;
+  }
 }
 
 /* Summary strip and sections that close in the details of a file ------------------------------------------------------- */

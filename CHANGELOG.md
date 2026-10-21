@@ -180,14 +180,17 @@ This document uses ASD-STE100 Simplified Technical English.
   result of each instance for 60 seconds (a failure for 10 seconds), and one read at a time runs for an instance. The
   token and the URLs of the admin API never go into an answer or into a log line.
 
-### Interface `portal`: status line and summary of the details
+### Interface `portal`: chips of the bucket in the header and summary of the details
 
-- The listing has a status line at the right of its totals: `Versioning`, `Encrypted: SSE-S3` (a key), `Object Lock`
-  (a padlock, with the default retention), `N lifecycle rules` (a click opens the rules) and the usage, for example
-  `12.3 GB of 20 GB` with a thin bar or `12.3 GB used`. Each piece has a tooltip and shows only when its fact is true.
+- The header has small chips at the left of the bucket selector, in one row. The chips are versioning (Tabler
+  `git-commit`), the encryption (a key), Object Lock (a padlock, with the default retention) and the lifecycle rules
+  (an hourglass and the count). A click on the lifecycle chip opens the rules. The last chip is the usage, for example
+  `12.3 GB of 20 GB` with a thin bar or `12.3 GB used`. Each chip has a tooltip and shows only when its fact is true.
   An approximate number starts with `~`. The bar has the colour of a warning from 80 % and of an error from 95 %.
+- On a window narrower than 1101 px, the chip of the usage shows its bar and no text. On a phone, an "i" button at
+  the left of the theme selector opens the chips in a popover, one line each.
 - The page reads the usage when a bucket opens, after a change of the objects, and after a click on the reload icon. A
-  failed read shows no number: the tooltip of the totals gives the reason.
+  failed read shows no number: the tooltip of the chip gives the reason.
 - The tooltip of each bucket in the bucket selector has its usage.
 - The details of a file start with a strip of pills: the version (`v5 of 5`), the encryption, the lock and the number
   of tags. A click on a pill opens its section, or the version picker. The sections other than "Storage object" and
@@ -244,10 +247,15 @@ This document uses ASD-STE100 Simplified Technical English.
 - The test stack gives the bucket `default` of each provider a quota of 20 GiB (Garage also 100000 objects): the
   entrypoints of Garage (admin token in `test/secrets/garage_admin_token`), SeaweedFS (`s3.bucket.quota`) and MinIO
   (`set-bucket-quota`). The Garage admin API listens on the network of the stack. `config.hcl` has a `usage` block in
-  each auth block, and `seaweedfs-archive` has `quota_bytes`. The browser tests check the status line on each provider,
-  a bucket with no quota, the limit of `quota_bytes`, an instance without usage, a failed read, the growth of the
-  usage after an upload on Garage and SeaweedFS, the tooltips of the selector, the pills of the details and the
+  each auth block, and `seaweedfs-archive` has `quota_bytes`. The browser tests check the chips of the header on each
+  provider, a bucket with no quota, the limit of `quota_bytes`, an instance without usage, a failed read, the growth of
+  the usage after an upload on Garage and SeaweedFS, the tooltips of the selector, the pills of the details and the
   sections that close with the keyboard.
+- Other tests check the chips of `seaweedfs-locked` and of the encrypted buckets, the chip of the lifecycle rules (mouse
+  and keyboard), the chips at 1440, 1280 and 900 px, and the popover of a phone. The settings menu has no part wider
+  than the menu at 390 and 1280 px. Each column is on by default on `seaweedfs-main`, and Garage hides Tags and
+  Versions. A saved choice wins over the default. The permission icons of the selector open the permissions with the
+  mouse, Enter and Space.
 - The test image takes the build arguments `MULTIPART_COPY_THRESHOLD` and `MULTIPART_COPY_PART_SIZE`. The portal test
   stack copies in parts from 8 KiB up, in parts of 5 MiB. A browser test copies and renames a file of 11 MiB on each
   provider and compares the SHA-256 of the result. A second test restores a large version on SeaweedFS and MinIO.
@@ -265,8 +273,11 @@ This document uses ASD-STE100 Simplified Technical English.
 
 ### Interface `portal`
 
-- The test interface `portal` shows the display name of a bucket only. The permissions of the bucket are in a button at
-  the left of the selector. The crumbs start with the mark of the bucket and a slash.
+- The test interface `portal` shows the display name of a bucket only. The crumbs start with the mark of the bucket and
+  a slash.
+- The read, write and delete icons of the bucket selector are a button of their own: a click, Enter or Space opens the
+  permissions of the bucket. Its tooltip names the permissions. The rest of the selector opens the list of the
+  buckets. The page has no shield button.
 - The details of a file show its tags. The person can add, remove and save them. The details tell which lifecycle rules
   apply to the object. A folder has the action "Tag objects".
 - The details of a file have the section "Metadata": the stored headers and the user metadata. A frameless "Edit" button
@@ -277,8 +288,14 @@ This document uses ASD-STE100 Simplified Technical English.
   icon and the count of versions for a file with more than one version. The clock that shows the exact times is at the
   left of Modified. The tag column has no title, and its tags follow the name, at the left.
 - The gear at the right of the search field opens a menu, as the menu Actions: the columns to show, the filter by tag
-  and the tags of the new uploads. The browser keeps the choice. The reload is an icon with no frame, as the gear.
-- The menu Actions has no item "Bucket permissions" any more: the button at the left of the bucket selector has them.
+  and the tags of the new uploads. The menu is as wide as its longest line needs, and a long text wraps in it. The
+  column "Encryption and lock" is in the same group as the other columns. The button "Reset to defaults" tells in its
+  tooltip what it resets. The reload is an icon with no frame, as the gear.
+- Each column is on by default: Tags, Versions, Size, Modified and "Encryption and lock". A column that the instance
+  cannot have stays hidden (Tags and Versions on Garage). The browser keeps only the choices of the person, in
+  `portal.listing` (version 2). A column that an older version kept with its old default takes the new default.
+- The listing has no totals at its foot. The range of the page and the rows stay.
+- The menu Actions has no item "Bucket permissions" any more: the permission icons of the bucket selector open them.
 - The tags of a row are badges with a coloured swatch, as the services of ClickHouse Dash, at the right, next to the
   versions. A click on a badge filters the page by this tag. The column of versions is narrow.
 - The details of a file have a picker of versions, with the date, the size and the change of size of each version.

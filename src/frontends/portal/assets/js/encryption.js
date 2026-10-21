@@ -119,11 +119,6 @@
     return null;
   }
 
-  // An instance is "encryption aware" when its bucket can encrypt: a default encryption, or the key on a provider that
-  // applies it or that S3-Browser does not know. The listing then reads the encryption of each file by default.
-  const encryptionAware = instance => Boolean(instance?.defaultEncryption)
-    || (instance?.encryption === 'sse-s3' && instance?.encryptionApplied !== 'no');
-
   // The encryption of a file from the headers of its HEAD answer, as a text for the tooltip. Empty: no encryption.
   function objectEncryptionTitle(headers) {
     if (header(headers, 'x-amz-server-side-encryption-customer-algorithm')) return 'Encrypted with a key of the client (SSE-C)';
@@ -148,5 +143,5 @@
     }
   }
 
-  BB.encryption = { mountSection, objectRows, CUSTOMER_KEY_TEXT, customerKeyRefusal, bucketLock, encryptionAware, objectEncryptionTitle, objectEncryption };
+  BB.encryption = { mountSection, objectRows, CUSTOMER_KEY_TEXT, customerKeyRefusal, bucketLock, objectEncryptionTitle, objectEncryption };
 })();

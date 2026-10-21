@@ -29,7 +29,10 @@
           </span>
         </div>
       </div>
-      <button id="permButton" type="button" class="button button--icon permButton" aria-label="Permissions of this bucket" title="Permissions of this bucket" hidden><i class="ic ic-shield-check" aria-hidden="true"></i></button>
+      <div id="bucketInfo" class="bucketInfo" hidden>
+        <button id="bucketInfoButton" class="iconButton bucketInfo__toggle" type="button" aria-label="Information of the bucket" title="Information of the bucket" aria-expanded="false" aria-controls="bucketChips"><i class="ic ic-info-circle" aria-hidden="true"></i></button>
+        <div id="bucketChips" class="bucketChips" role="group" aria-label="Information of the bucket"></div>
+      </div>
       <div id="storageSwitcher" class="storageSwitcher is-loading" aria-label="Bucket">
         <div class="storageSwitcher__trigger is-static" aria-hidden="true">
           <span class="storageSwitcher__skeleton"></span>
@@ -80,7 +83,7 @@
               <label class="menu__check" id="versionsSetting"><input type="checkbox" data-column="versions" /><span>Versions</span></label>
               <label class="menu__check"><input type="checkbox" data-column="size" /><span>Size</span></label>
               <label class="menu__check"><input type="checkbox" data-column="modified" /><span>Modified</span></label>
-              <label class="menu__check" id="encryptionSetting"><input type="checkbox" id="encryptionToggle" /><span>Show the encryption and the lock of the objects</span></label>
+              <label class="menu__check" id="encryptionSetting" title="A key and a padlock next to the name of a file: one HEAD request for each file on the page"><input type="checkbox" id="encryptionToggle" /><span>Encryption and lock</span></label>
               <div class="menu__sep" role="separator"></div>
               <p class="menu__title">Filters</p>
               <label class="menu__check" id="tagFilterSetting"><input type="checkbox" id="tagFilterToggle" /><span>Filter by tag</span></label>
@@ -91,7 +94,7 @@
                 <p id="uploadTagsMessage" class="menu__message" role="status"></p>
               </div>
               <div class="menu__sep" role="separator"></div>
-              <button id="settingsReset" class="menu__item" type="button"><i class="ic ic-rotate" aria-hidden="true"></i>Reset the columns, the filter, the encryption and the lock</button>
+              <button id="settingsReset" class="menu__item" type="button" title="Reset the columns, the tag filter, and the encryption and lock of each bucket"><i class="ic ic-rotate" aria-hidden="true"></i>Reset to defaults</button>
             </div>
           </div>
           <button id="refreshButton" class="iconButton" type="button" aria-label="Refresh" title="Refresh"><i class="ic ic-refresh" aria-hidden="true"></i></button>

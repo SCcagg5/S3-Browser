@@ -135,24 +135,39 @@ BB.cfg = config;
   // ---------------------------------------------------------------------------------------------------------------
 
   // The columns of the listing, the tag filter and the encryption of the files: the person's choice stays in this
-  // browser. The choice of the encryption is for each bucket: without a choice, it is on for a bucket that encrypts.
+  // browser. Every column is on by default, and the browser keeps only the choices that the person made. The choice of
+  // the encryption and the lock is for each bucket: without a choice, it is on.
   const LISTING_KEY = 'portal.listing';
-  const LISTING_DEFAULT = { columns: { tags: false, versions: true, size: true, modified: true }, tagFilterOn: false };
+  const LISTING_VERSION = 2;
+  const LISTING_DEFAULT = { columns: { tags: true, versions: true, size: true, modified: true }, tagFilterOn: false };
+  // Before version 2, the browser kept each column, also a column that the person did not change. A value equal to the
+  // default of that version (the tags off, the other columns on) is thus not a choice of the person.
+  const LISTING_V1_COLUMNS = { tags: false, versions: true, size: true, modified: true };
 
   function loadListing() {
-    const result = { columns: { ...LISTING_DEFAULT.columns }, tagFilterOn: LISTING_DEFAULT.tagFilterOn, encryption: {} };
+    const result = { columnChoice: {}, tagFilterOn: LISTING_DEFAULT.tagFilterOn, encryption: {} };
     try {
       const stored = JSON.parse(window.localStorage.getItem(LISTING_KEY) || '{}');
-      for (const name of Object.keys(result.columns)) if (typeof stored?.columns?.[name] === 'boolean') result.columns[name] = stored.columns[name];
+      const legacy = stored?.version !== LISTING_VERSION;
+      for (const name of Object.keys(LISTING_DEFAULT.columns)) {
+        const value = stored?.columns?.[name];
+        if (typeof value === 'boolean' && !(legacy && value === LISTING_V1_COLUMNS[name])) result.columnChoice[name] = value;
+      }
       if (typeof stored?.tagFilterOn === 'boolean') result.tagFilterOn = stored.tagFilterOn;
       for (const [id, value] of Object.entries(stored?.encryption || {})) if (typeof value === 'boolean') result.encryption[id] = value;
     } catch (_) {}
     return result;
   }
 
+  const listingColumns = choice => ({ ...LISTING_DEFAULT.columns, ...choice });
+
   function saveListing() {
-    try { window.localStorage.setItem(LISTING_KEY, JSON.stringify({ columns: state.columns, tagFilterOn: state.tagFilterOn, encryption: state.encryptionChoice })); } catch (_) {}
+    try {
+      window.localStorage.setItem(LISTING_KEY, JSON.stringify({ version: LISTING_VERSION, columns: state.columnChoice, tagFilterOn: state.tagFilterOn, encryption: state.encryptionChoice }));
+    } catch (_) {}
   }
+
+  const listing = loadListing();
 
   const state = {
     instances: [],
@@ -185,18 +200,21 @@ BB.cfg = config;
     isDragActive: false,
     versionCountRequest: 0,
     refreshRequest: 0,
-    // The tag column and the tag filter. A provider without tags (501) turns the tag controls off.
-    columns: loadListing().columns,
-    tagFilterOn: loadListing().tagFilterOn,
+    // The columns: the choices of the person, and the columns that apply. A provider without tags (501) turns the tag
+    // controls off.
+    columnChoice: listing.columnChoice,
+    columns: listingColumns(listing.columnChoice),
+    tagFilterOn: listing.tagFilterOn,
     tagFilter: '',
     tagRequest: 0,
     tagSignature: '',
     tagsUnsupported: false,
     // The encryption of the files: the choice of the settings for each bucket, and the reads of the files on the page.
-    encryptionChoice: loadListing().encryption,
+    encryptionChoice: listing.encryption,
     encryptionRequest: 0,
     encryptionSignature: '',
-    // The status line of the bucket: the versioning status and the lifecycle rules of each instance (GET /api/lifecycle).
+    // The chips of the bucket in the header: the versioning status and the lifecycle rules of each instance
+    // (GET /api/lifecycle).
     bucketInfo: {}
   };
 
@@ -389,8 +407,8 @@ BB.cfg = config;
     return permissionStates(instance).map(item => `${item.label}: ${BB.capabilities.stateLabel(item.state)}`).join(', ');
   }
 
-  function permissionDots(instance) {
-    return h('span', { class: 'permDots', title: permissionSummary(instance) },
+  function permissionDots(instance, { title = true } = {}) {
+    return h('span', { class: 'permDots', title: title ? permissionSummary(instance) : null },
       permissionStates(instance).map(item => {
         const name = BB.capabilities.normalizeState(item.state);
         return h('span', { class: ['permDot', `is-${name}`], 'data-permission': item.key, 'data-state': name },
@@ -443,9 +461,21 @@ BB.cfg = config;
     return h('span', { class: 'bucketLock is-on', role: 'img', title, 'aria-label': title, 'data-bucket-object-lock': '' }, ic('lock'));
   }
 
+  // The trigger keeps a place for the permission icons: they are a button of their own over the trigger.
   function switcherCopy(instance) {
     return h('span', { class: 'storageSwitcher__copy' },
-      h('span', { class: 'storageSwitcher__titleRow' }, h('strong', {}, storageName(instance)), bucketLock(instance), bucketObjectLock(instance), permissionDots(instance)));
+      h('span', { class: 'storageSwitcher__titleRow' }, h('strong', {}, storageName(instance)), bucketLock(instance), bucketObjectLock(instance),
+        h('span', { class: 'storageSwitcher__permsSlot', 'aria-hidden': 'true' })));
+  }
+
+  // The read, write and delete icons of the current bucket: a click, Enter or Space opens the permissions of the
+  // bucket. The rest of the selector opens the list of the buckets.
+  function permissionsButton(instance) {
+    return h('button', {
+      type: 'button', class: 'storageSwitcher__perms', 'aria-label': 'Permissions of this bucket',
+      title: `Permissions of this bucket: ${permissionSummary(instance)}`,
+      onclick: event => { event.stopPropagation(); closeSwitcher(false); showPermissions(); }
+    }, permissionDots(instance, { title: false }));
   }
 
   function renderSwitcher() {
@@ -456,8 +486,6 @@ BB.cfg = config;
         permissionStates(item).map(entry => BB.capabilities.normalizeState(entry.state))])]);
     if (ui.switcherSignature !== signature) {
       ui.switcherSignature = signature;
-      // The icon button at the left of the selector opens the permissions of the current bucket.
-      ui.permButton.hidden = state.isInitializing || !instance;
       ui.switcherMenu = null;
       ui.switcherTrigger = null;
       const root = ui.switcher;
@@ -472,7 +500,7 @@ BB.cfg = config;
             h('small', {}, state.loadError ? 'The list of buckets cannot be loaded' : 'No bucket is visible to you'))));
       } else if (!multiple) {
         root.replaceChildren(h('div', { class: 'storageSwitcher__trigger is-static', title: storageDetails(instance) },
-          ic('database', 'storageSwitcher__icon'), switcherCopy(instance)));
+          ic('database', 'storageSwitcher__icon'), switcherCopy(instance)), permissionsButton(instance));
       } else {
         const trigger = h('button', {
           type: 'button',
@@ -520,7 +548,7 @@ BB.cfg = config;
             h('small', {}, `${host.provider.toUpperCase()} · ${plural(host.instances.length, 'bucket')}`)));
           return h('section', { class: 'storageHost', 'data-host': host.id }, row, list);
         }));
-        root.replaceChildren(trigger, menu);
+        root.replaceChildren(trigger, permissionsButton(instance), menu);
         ui.switcherTrigger = trigger;
         ui.switcherMenu = menu;
       }
@@ -642,23 +670,6 @@ BB.cfg = config;
     // The heading is for screen readers: the crumbs show the place on the screen.
     const heading = instance ? `${title}${list.length ? `, in ${instance.name}` : ', bucket root'}` : title;
     if (ui.title.textContent !== heading) ui.title.textContent = heading;
-
-    let countText = '';
-    if (instance && !state.listError && canRead()) {
-      if (state.isRefreshing && !state.rows.length) countText = 'Loading';
-      else {
-        const folders = state.rows.filter(row => row.type === 'prefix').length;
-        const files = state.rows.length - folders;
-        const bytes = state.rows.reduce((sum, row) => sum + (row.type === 'content' ? row.size : 0), 0);
-        const parts = [];
-        if (folders) parts.push(plural(folders, 'folder'));
-        if (files || !folders) parts.push(plural(files, 'file'));
-        if (files) parts.push(formatBytes(bytes));
-        countText = parts.join(', ') + (state.nextContinuationToken || state.previousContinuationTokens.length ? ' in this page of the listing' : '');
-      }
-    }
-    ui.countText = countText;
-    if (ui.table?.count && ui.table.count.textContent !== countText) ui.table.count.textContent = countText;
     document.title = instance ? `${title} - ${instance.name} - Object storage` : 'Object storage';
   }
 
@@ -840,11 +851,11 @@ BB.cfg = config;
             h('button', { type: 'button', class: 'button', onclick: () => manualRefresh() }, ic('refresh'), 'Try again'));
           break;
         case 'empty-writable':
-          content = withStatus(emptyBox('folder-open', 'This folder is empty', 'Drop files on the page, or upload files or a folder.',
-            h('button', { type: 'button', class: 'button button--primary', onclick: triggerUploadFiles }, ic('upload'), 'Upload files')));
+          content = emptyBox('folder-open', 'This folder is empty', 'Drop files on the page, or upload files or a folder.',
+            h('button', { type: 'button', class: 'button button--primary', onclick: triggerUploadFiles }, ic('upload'), 'Upload files'));
           break;
         case 'empty':
-          content = withStatus(emptyBox('folder-open', 'This folder is empty', ''));
+          content = emptyBox('folder-open', 'This folder is empty', '');
           break;
         default:
           content = buildTable();
@@ -855,13 +866,8 @@ BB.cfg = config;
   }
 
   // ---------------------------------------------------------------------------------------------------------------
-  // Status line of the bucket, under the listing: versioning, encryption, Object Lock, lifecycle rules and usage
+  // Chips of the bucket in the header: versioning, encryption, Object Lock, lifecycle rules and usage
   // ---------------------------------------------------------------------------------------------------------------
-
-  // An empty folder keeps the status line under its message.
-  function withStatus(box) {
-    return h('div', { class: 'listing' }, box, h('div', { class: 'tableFoot tableFoot--status' }, ui.status));
-  }
 
   // The answer of GET /api/lifecycle gives the versioning status and the rules of the bucket in one read.
   async function loadBucketInfo(instance, { force = false } = {}) {
@@ -871,21 +877,21 @@ BB.cfg = config;
       const answer = await BB.api.lifecycle(instance.id);
       state.bucketInfo = { ...state.bucketInfo, [instance.id]: { versioning: String(answer?.editor?.versioning || ''), rules: Array.isArray(answer?.rules) ? answer.rules : [] } };
     } catch (error) {
-      console.warn('Unable to load the lifecycle rules for the status line', error);
+      console.warn('Unable to load the lifecycle rules for the chips of the bucket', error);
       return;
     }
-    renderStatus();
+    renderBucketChips();
   }
 
   function loadUsage(instance, { fresh = false } = {}) {
     if (instance?.usageSupported !== true || !can('list', instance)) return;
     void BB.usage.load(instance, { fresh }).then(() => {
-      renderStatus();
+      renderBucketChips();
       refreshSwitcherTitles();
     });
   }
 
-  // The page reads the status when an instance opens, and reads it again (fresh) after a click on the reload icon.
+  // The page reads the chips when an instance opens, and reads them again (fresh) after a click on the reload icon.
   function loadStatus(instance, { fresh = false } = {}) {
     void loadBucketInfo(instance, { force: fresh });
     loadUsage(instance, { fresh });
@@ -901,40 +907,43 @@ BB.cfg = config;
     for (const wait of [1500, 12000]) usageTimers.push(window.setTimeout(() => loadUsage(currentInstance(), { fresh: true }), wait));
   }
 
-  function statusItem(name, iconName, label, detail, { onclick = null, tone = '' } = {}) {
+  // A chip: an icon, an optional short text, and the label. A wide window shows the icon and the short text, with the
+  // detail in the tooltip. The popover of a phone shows the icon and the label. A chip that acts is a button.
+  function bucketChip(name, iconName, label, detail, { short = '', onclick = null, tone = '', wide = false } = {}) {
     return h(onclick ? 'button' : 'span', {
-      type: onclick ? 'button' : null, class: ['bucketStatus__item', tone && `is-${tone}`], 'data-status': name, title: detail, onclick
-    }, iconName ? ic(iconName) : null, h('span', { class: 'bucketStatus__text' }, label), h('span', { class: 'visually-hidden' }, `. ${detail}`));
+      type: onclick ? 'button' : null, class: ['bucketChip', tone && `is-${tone}`, wide && 'bucketChip--wide'], 'data-chip': name, title: detail, onclick
+    }, ic(iconName), short ? h('span', { class: 'bucketChip__short', 'aria-hidden': 'true' }, short) : null,
+    h('span', { class: 'bucketChip__label' }, label), h('span', { class: 'visually-hidden' }, `. ${detail}`));
   }
 
   const ENCRYPTION_NAMES = { AES256: 'SSE-S3', 'aws:kms': 'SSE-KMS', 'aws:kms:dsse': 'DSSE-KMS' };
 
-  function statusItems(instance) {
+  function bucketChips(instance) {
     const items = [];
     const info = state.bucketInfo[instance.id];
     if (info?.versioning === 'Enabled') {
-      items.push(statusItem('versioning', 'git-commit', 'Versioning', 'Versioning is on: a change or a delete keeps the older versions of a file.'));
+      items.push(bucketChip('versioning', 'git-commit', 'Versioning', 'Versioning is on: a change or a delete keeps the older versions of a file.'));
     } else if (info?.versioning === 'Suspended') {
-      items.push(statusItem('versioning', 'git-commit', 'Versioning suspended', 'Versioning is suspended: the bucket keeps the older versions that it has, and makes no new ones.'));
+      items.push(bucketChip('versioning', 'git-commit', 'Versioning suspended', 'Versioning is suspended: the bucket keeps the older versions that it has, and makes no new ones.', { tone: 'muted' }));
     }
     const lock = BB.encryption?.bucketLock(instance);
     if (lock) {
       const algorithm = instance.encryption === 'sse-s3' ? 'AES256' : String(instance.defaultEncryption || '');
       const name = ENCRYPTION_NAMES[algorithm] || algorithm;
       items.push(lock.tone === 'warn'
-        ? statusItem('encryption', 'key', `${name} not applied`, lock.title, { tone: 'warning' })
-        : statusItem('encryption', 'key', `Encrypted: ${name}`, lock.title));
+        ? bucketChip('encryption', 'key', `${name} not applied`, lock.title, { tone: 'warning' })
+        : bucketChip('encryption', 'key', `Encrypted: ${name}`, lock.title));
     }
     const lockTitle = BB.objectLock?.bucketLockTitle(instance);
     if (lockTitle) {
       const retention = instance.objectLockDefault ? `: ${BB.objectLock.defaultText(instance.objectLockDefault)}` : '';
-      items.push(statusItem('object-lock', 'lock', `Object Lock${retention}`, lockTitle));
+      items.push(bucketChip('object-lock', 'lock', `Object Lock${retention}`, lockTitle));
     }
     if (info?.rules?.length && instance.lifecycleSupported !== false) {
       const enabled = info.rules.filter(rule => rule.enabled).length;
-      items.push(statusItem('lifecycle', 'hourglass', plural(info.rules.length, 'lifecycle rule'),
-        `${plural(enabled, 'rule')} on. Open the lifecycle rules of the bucket.`,
-        { onclick: () => { if (canRead()) BB.lifecycle.open({ prefix: state.pathPrefix, canWrite: canWrite() }); } }));
+      items.push(bucketChip('lifecycle', 'hourglass', plural(info.rules.length, 'lifecycle rule'),
+        `${plural(info.rules.length, 'lifecycle rule')}, ${plural(enabled, 'rule')} on. Open the lifecycle rules of the bucket.`,
+        { short: info.rules.length.toLocaleString('en-US'), onclick: () => { closeBucketInfo(); if (canRead()) BB.lifecycle.open({ prefix: state.pathPrefix, canWrite: canWrite() }); } }));
     }
     const usage = instance.usageSupported === true ? BB.usage.cached(instance.id) : null;
     if (BB.usage.shown(usage)) {
@@ -945,35 +954,51 @@ BB.cfg = config;
           h('span', { class: 'usageMeter__fill' }))
         : null;
       if (meter) meter.firstChild.style.width = `${Math.min(100, Math.max(Number(usage.percent) || 0, usage.usedBytes > 0 ? 2 : 0))}%`;
-      const node = h('span', { class: ['bucketStatus__item', 'bucketUsage', usage.level && `is-${usage.level}`], 'data-status': 'usage', 'data-level': usage.level || 'none', 'data-used-bytes': String(usage.usedBytes), title },
-        ic('database'), h('span', { class: 'bucketStatus__text' }, BB.usage.text(usage)), meter, h('span', { class: 'visually-hidden' }, `. ${title}`));
+      const node = bucketChip('usage', 'database', BB.usage.text(usage), title, { tone: usage.level, wide: true });
+      node.classList.add('bucketUsage');
+      node.dataset.level = usage.level || 'none';
+      node.dataset.usedBytes = String(usage.usedBytes);
+      if (meter) node.lastChild.before(meter);
+      items.push(node);
+    } else if (usage?.supported === true) {
+      // A failed read shows no number: the tooltip of the chip says why.
+      const node = bucketChip('usage', 'database', 'Usage unavailable', BB.usage.title(usage), { tone: 'muted' });
+      node.dataset.level = 'unavailable';
       items.push(node);
     }
     return items;
   }
 
-  function renderStatus() {
+  function renderBucketChips() {
     const instance = currentInstance();
-    if (!ui.status) return;
+    if (!ui.bucketChips) return;
     const usage = instance?.usageSupported === true ? BB.usage.cached(instance.id) : null;
-    const unavailable = usage?.supported === true && usage.available !== true;
     const signature = JSON.stringify([instance?.id, state.bucketInfo[instance?.id], usage, instance?.encryption, instance?.defaultEncryption,
-      instance?.encryptionApplied, instance?.objectLockSupported, instance?.objectLockDefault, state.pathPrefix]);
-    if (ui.statusSignature === signature) return;
-    ui.statusSignature = signature;
-    const items = instance && canRead() ? statusItems(instance) : [];
-    ui.status.replaceChildren(...items);
-    ui.status.hidden = !items.length;
-    // A failed read of the usage shows no number: the tooltip of the totals says why.
-    ui.status.dataset.usage = unavailable ? 'unavailable' : (BB.usage.shown(usage) ? 'shown' : 'none');
-    const reason = unavailable ? BB.usage.title(usage) : '';
-    if (reason) ui.status.title = reason;
-    else ui.status.removeAttribute('title');
-    ui.usageReason = reason;
-    if (ui.table?.count) {
-      if (reason) ui.table.count.title = reason;
-      else ui.table.count.removeAttribute('title');
+      instance?.encryptionApplied, instance?.objectLockSupported, instance?.objectLockDefault, state.pathPrefix, canRead(), canWrite()]);
+    if (ui.chipsSignature === signature) return;
+    ui.chipsSignature = signature;
+    const items = instance && canRead() ? bucketChips(instance) : [];
+    ui.bucketChips.replaceChildren(...items);
+    ui.bucketInfo.hidden = !items.length;
+    if (!items.length) closeBucketInfo();
+  }
+
+  // On a phone, the chips are in a popover under the "i" button of the header.
+  function toggleBucketInfo() {
+    const open = !ui.bucketInfo.classList.contains('is-open');
+    if (open) {
+      closeMenu();
+      closeSwitcher(false);
     }
+    ui.bucketInfo.classList.toggle('is-open', open);
+    ui.bucketInfoButton.setAttribute('aria-expanded', String(open));
+  }
+
+  function closeBucketInfo({ focus = false } = {}) {
+    if (!ui.bucketInfo?.classList.contains('is-open')) return;
+    ui.bucketInfo.classList.remove('is-open');
+    ui.bucketInfoButton.setAttribute('aria-expanded', 'false');
+    if (focus) ui.bucketInfoButton.focus();
   }
 
   function sortHead(field, label) {
@@ -1010,14 +1035,11 @@ BB.cfg = config;
     const previous = h('button', { type: 'button', class: 'button button--small button--icon', 'aria-label': 'Previous page', title: 'Previous page', onclick: () => previousPage() }, ic('chevron-left'));
     const next = h('button', { type: 'button', class: 'button button--small button--icon', 'aria-label': 'Next page', title: 'Next page', onclick: () => nextPage() }, ic('chevron-right'));
     const pager = h('div', { class: 'tableFoot__pager' }, previous, next);
-    const count = h('span', { id: 'folderCount', class: 'tableFoot__count', title: ui.usageReason || null }, ui.countText || '');
     const foot = h('div', { class: 'tableFoot' },
-      count,
-      ui.status,
       range,
       h('label', {}, 'Rows', h('span', { class: 'select' }, pageSize)),
       pager);
-    ui.table = { sorts, timeToggle, tbody, box, range, count, pageSize, previous, next, pager, foot };
+    ui.table = { sorts, timeToggle, tbody, box, range, pageSize, previous, next, pager, foot };
     return h('div', { class: 'listing' }, box, foot);
   }
 
@@ -1145,7 +1167,7 @@ BB.cfg = config;
     renderTitle();
     renderToolbar();
     renderListing();
-    renderStatus();
+    renderBucketChips();
     renderDropOverlay();
   }
 
@@ -1231,7 +1253,7 @@ BB.cfg = config;
     // The server reads the default encryption of the bucket at start: the details show it only when the read worked.
     config.bucketEncryptionSupported = instance.bucketEncryptionSupported === true;
     config.rootPrefix = instance.rootPrefix || '';
-    // The status line under the listing: the versioning, the lifecycle rules and the usage of the bucket.
+    // The chips of the bucket in the header: the versioning, the lifecycle rules and the usage of the bucket.
     loadStatus(instance);
   }
 
@@ -1538,7 +1560,10 @@ BB.cfg = config;
   function onSettingsChange(event) {
     const input = event.target;
     if (!(input instanceof HTMLInputElement)) return;
-    if (input.dataset.column) state.columns = { ...state.columns, [input.dataset.column]: input.checked };
+    if (input.dataset.column) {
+      state.columnChoice = { ...state.columnChoice, [input.dataset.column]: input.checked };
+      state.columns = listingColumns(state.columnChoice);
+    }
     if (input === ui.tagFilterToggle) {
       state.tagFilterOn = input.checked;
       if (!state.tagFilterOn) { state.tagFilter = ''; ui.tagFilter.value = ''; }
@@ -1555,7 +1580,8 @@ BB.cfg = config;
   }
 
   function resetSettings() {
-    state.columns = { ...LISTING_DEFAULT.columns };
+    state.columnChoice = {};
+    state.columns = listingColumns(state.columnChoice);
     state.tagFilterOn = LISTING_DEFAULT.tagFilterOn;
     state.tagFilter = '';
     ui.tagFilter.value = '';
@@ -1616,14 +1642,9 @@ BB.cfg = config;
   // ---------------------------------------------------------------------------------------------------------------
 
   // A listing does not give the encryption or the lock of a file: the page reads both from one HEAD request for the
-  // files on the page, as for the tags. It does this for a bucket that encrypts or that has Object Lock, or when the
-  // person sets the setting for the bucket. The saved choice of each bucket keeps its old name (encryption).
-  const marksShown = () => {
-    const choice = state.encryptionChoice[state.instanceId];
-    if (typeof choice === 'boolean') return choice;
-    const instance = currentInstance();
-    return Boolean(BB.encryption?.encryptionAware(instance)) || instance?.objectLockSupported === true;
-  };
+  // files on the page, as for the tags. The setting "Encryption and lock" is on for each bucket, until the person sets
+  // it off for the bucket. The saved choice of each bucket keeps its old name (encryption).
+  const marksShown = () => state.encryptionChoice[state.instanceId] !== false;
 
   // The answers stay for the ETag and the date of the file: a new listing does not read an unchanged file again. A
   // change of the lock keeps the ETag and the date: the event of the change removes the answers of the file.
@@ -1941,7 +1962,7 @@ BB.cfg = config;
 
   function bindElements() {
     for (const [name, id] of Object.entries({
-      backLink: 'backLink', versionBadge: 'versionBadge', switcher: 'storageSwitcher', permButton: 'permButton', crumbs: 'crumbs',
+      backLink: 'backLink', versionBadge: 'versionBadge', switcher: 'storageSwitcher', bucketInfo: 'bucketInfo', bucketInfoButton: 'bucketInfoButton', bucketChips: 'bucketChips', crumbs: 'crumbs',
       title: 'folderTitle', searchForm: 'searchForm', searchInput: 'searchInput',
       refreshButton: 'refreshButton', actionsButton: 'actionsButton', actionsMenu: 'actionsMenu', zipItem: 'zipItem',
       insightsItem: 'insightsItem', accessBadge: 'accessBadge', uploadWrap: 'uploadWrap',
@@ -1952,8 +1973,6 @@ BB.cfg = config;
       uploadDock: 'uploadDock', fileInput: 'fileInput', dirInput: 'dirInput'
     })) ui[name] = byId(id);
     ui.searchLabel = document.querySelector('label[for="searchInput"]');
-    // The status line of the bucket moves between the foot of the table and the foot of an empty folder.
-    ui.status = h('div', { class: 'bucketStatus', role: 'group', 'aria-label': 'Status of the bucket', hidden: true });
   }
 
   function bindEvents() {
@@ -1966,7 +1985,7 @@ BB.cfg = config;
     bindMenu(ui.uploadButton, ui.uploadMenu);
     ui.zipItem.addEventListener('click', downloadAll);
     ui.insightsItem.addEventListener('click', () => { if (canRead()) BB.actions.showPrefixInsights(state.pathPrefix); });
-    ui.permButton.addEventListener('click', () => { closeSwitcher(false); showPermissions(); });
+    ui.bucketInfoButton.addEventListener('click', event => { event.stopPropagation(); toggleBucketInfo(); });
     ui.uploadFilesItem.addEventListener('click', triggerUploadFiles);
     ui.uploadFolderItem.addEventListener('click', triggerUploadFolder);
     ui.uploadTagsInput.addEventListener('change', saveUploadTags);
@@ -1984,7 +2003,7 @@ BB.cfg = config;
     document.addEventListener('bb:object-lock-changed', event => forgetMarks(event.detail?.key));
     // A restore or a delete of a version changes the date, the size and the count of the versions of the file.
     document.addEventListener('bb:versions-changed', () => { void refreshAfterChange(); });
-    // A save of the lifecycle rules changes the count of the rules in the status line.
+    // A save of the lifecycle rules changes the count of the rules in the chips of the bucket.
     document.addEventListener('bb:lifecycle-changed', () => { void loadBucketInfo(currentInstance(), { force: true }); });
     ui.fileInput.addEventListener('change', onFileInput);
     ui.dirInput.addEventListener('change', onDirInput);
@@ -1992,11 +2011,13 @@ BB.cfg = config;
     document.addEventListener('click', event => {
       if (openMenu && !openMenu.menu.contains(event.target) && !openMenu.trigger.contains(event.target)) closeMenu();
       if (ui.switcher && !ui.switcher.contains(event.target)) closeSwitcher(false);
+      if (!ui.bucketInfo.contains(event.target)) closeBucketInfo();
     });
     document.addEventListener('keydown', event => {
       if (event.key === 'Escape') {
         closeMenu({ focus: true });
         closeSwitcher(false);
+        closeBucketInfo({ focus: ui.bucketInfo.contains(document.activeElement) });
       }
       // "/" puts the focus in the prefix field, as in ClickHouse Dash.
       if (event.key === '/' && !event.ctrlKey && !event.metaKey && !event.altKey

@@ -4,8 +4,8 @@
 // parts on each provider, 7 the edit of the metadata on each provider, 8 the cleanup of the incomplete multipart
 // uploads on each provider, 9 the editor of the lifecycle rules on each provider, 10 Object Lock (retention and legal
 // hold) on the providers with a bucket with Object Lock, 11 encryption (SSE-S3 of the writes, and the display of SSE-S3,
-// SSE-KMS, SSE-C and the default encryption of the bucket), 12 the usage and the quota of a bucket (the status line under
-// the listing and the tooltips of the selector) and the summary strip of the details with its sections that close.
+// SSE-KMS, SSE-C and the default encryption of the bucket), 12 the usage and the quota of a bucket (the chips of the
+// bucket in the header and the tooltips of the selector) and the summary strip of the details with its sections that close.
 // run.sh starts S3-Browser and the three providers, puts the test objects (seed.js) and runs this file in the
 // Playwright container. The tests of parts 1 to 4 use SeaweedFS.
 // The tests change the answers of the server with page.route where a case needs it (403, 401, no answer, access).
@@ -478,8 +478,8 @@ test('tags: a provider without tags (501) has no tags section and no tag control
   assert.equal(await page.locator('[data-tags-section]').count(), 0);
   await page.click('.bb-modal-x');
   await page.waitForSelector('.bb-overlay', { state: 'detached' });
+  // The tag column is on by default: its first read gets the 501, and the tag controls go.
   await page.click('#settingsButton');
-  await page.check('[data-column="tags"]');
   await until(page, () => document.querySelector('[data-column="tags"]').closest('label').hidden === true);
   assert.equal(await page.locator('#tagFilterToggle').isHidden(), true);
   assert.equal(await page.locator('#tagFilterWrap').isHidden(), true);
@@ -491,8 +491,12 @@ test('tags: the tag column and the tag filter come from the settings of the list
   const page = await newPage();
   await open(page, `${MAIN}config/`);
   assert.equal(await page.isHidden('#tagFilterWrap'), true);
-  assert.equal(await page.locator('th.col-tags').isVisible(), false);
+  // The tag column is on by default. The settings turn it off and on again.
+  await page.waitForSelector('tr[data-name="ingest.json"] .tagChip');
+  assert.equal(await page.locator('th.col-tags').isVisible(), true);
   await page.click('#settingsButton');
+  await page.uncheck('[data-column="tags"]');
+  assert.equal(await page.locator('th.col-tags').isVisible(), false);
   await page.check('[data-column="tags"]');
   await page.waitForSelector('tr[data-name="ingest.json"] .tagChip');
   assert.equal(await page.locator('th.col-tags').isVisible(), true);
@@ -527,9 +531,6 @@ test('tags: the tag column and the tag filter come from the settings of the list
 test('tags: the tag column of versioned files shows no pending mark, and the details of an older version show its tags', async () => {
   const page = await newPage();
   await open(page, `${MAIN}versions/`);
-  await page.click('#settingsButton');
-  await page.check('[data-column="tags"]');
-  await page.keyboard.press('Escape');
   await page.waitForSelector('tr[data-name="report.txt"] .tagChip');
   await page.waitForSelector('tr[data-name="notes.txt"] .tagChip');
   const chipsOf = async name => (await page.locator(`tr[data-name="${name}"] .tagChip`).allInnerTexts()).map(item => item.replace(/\s+/g, ' ').trim()).sort();
@@ -556,9 +557,6 @@ test('tags: the tag column of versioned files shows no pending mark, and the det
 test('tags: the tags float at the right, next to the versions, and the column of versions is narrow', async () => {
   const page = await newPage();
   await open(page, `${MAIN}config/`);
-  await page.click('#settingsButton');
-  await page.check('[data-column="tags"]');
-  await page.keyboard.press('Escape');
   await page.waitForSelector('tr[data-name="ingest.json"] .tagChip');
   const boxes = await page.evaluate(() => {
     const row = document.querySelector('tr[data-name="ingest.json"]');
@@ -583,9 +581,6 @@ test('tags: the tags float at the right, next to the versions, and the column of
 test('tags: a row shows three tags and a count for the other ones', async () => {
   const page = await newPage();
   await open(page, `${MAIN}images/`);
-  await page.click('#settingsButton');
-  await page.check('[data-column="tags"]');
-  await page.keyboard.press('Escape');
   await page.waitForSelector('tr[data-name="banner.svg"] .tagChip');
   assert.equal(await page.locator('tr[data-name="banner.svg"] .tagChip').count(), 3);
   assert.equal((await page.textContent('tr[data-name="banner.svg"] .tagMore')).trim(), '+2');
@@ -601,9 +596,6 @@ test('tags: a row shows three tags and a count for the other ones', async () => 
 test('tags: a tag is a badge with a swatch whose colour comes from the key, and a click filters by the tag', async () => {
   const page = await newPage();
   await open(page, `${MAIN}config/`);
-  await page.click('#settingsButton');
-  await page.check('[data-column="tags"]');
-  await page.keyboard.press('Escape');
   await page.waitForSelector('tr[data-name="ingest.json"] .tagChip');
   // The swatch and the colour: the same key has the same colour, two keys have two colours (here: team and env).
   const colours = await page.locator('tr[data-name="ingest.json"] .tagChip').evaluateAll(chips => chips.map(chip => [chip.dataset.tag, getComputedStyle(chip.querySelector('.tagSwatch')).backgroundColor]));
@@ -642,9 +634,7 @@ test('tags: a value with spaces keeps its quotes in the filter', async () => {
   const page = await newPage();
   await open(page, `${MAIN}config/`);
   await setApiTags(page, 'config/app.yaml', [{ key: 'owner', value: 'data team' }]);
-  await page.click('#settingsButton');
-  await page.check('[data-column="tags"]');
-  await page.keyboard.press('Escape');
+  await page.reload({ waitUntil: 'networkidle' });
   await page.waitForSelector('tr[data-name="app.yaml"] .tagChip');
   await page.click('tr[data-name="app.yaml"] .tagChip .tagChip__pick');
   assert.equal(await page.inputValue('#tagFilter'), 'owner="data team"');
@@ -778,9 +768,6 @@ test('tags: an instance that keeps no tags gets no tag at upload, and the tag se
 test('listing: the columns are Name, Tags, Versions, Size and Modified, with the clock at the left of Modified', async () => {
   const page = await newPage();
   await open(page, `${MAIN}config/`);
-  await page.click('#settingsButton');
-  await page.check('[data-column="tags"]');
-  await page.keyboard.press('Escape');
   await page.waitForSelector('tr[data-name="ingest.json"] .tagChip');
   const heads = await page.locator('thead th').evaluateAll(nodes => nodes.filter(node => node.offsetParent !== null).map(node => node.textContent.replace(/\s+/g, ' ').trim()));
   assert.deepEqual(heads.slice(0, 5), ['Name', 'Tags', 'Versions', 'Size', 'Modified']);
@@ -848,7 +835,10 @@ test('listing: the settings are a menu under the gear, choose the columns, stay 
   assert.ok(place.menuTop >= place.gearBottom, `the menu under the gear: ${JSON.stringify(place)}`);
   assert.ok(place.menuRight <= place.width, `the menu in the window: ${JSON.stringify(place)}`);
   assert.deepEqual(await page.locator('#settingsMenu [data-column]').evaluateAll(nodes => nodes.map(node => `${node.dataset.column}:${node.checked}:${node.disabled}`)),
-    ['name:true:true', 'tags:false:false', 'versions:true:false', 'size:true:false', 'modified:true:false']);
+    ['name:true:true', 'tags:true:false', 'versions:true:false', 'size:true:false', 'modified:true:false']);
+  // "Encryption and lock" is a column of the same group, on by default.
+  assert.equal(await page.isChecked('#encryptionToggle'), true);
+  assert.equal((await page.textContent('#encryptionSetting')).trim(), 'Encryption and lock');
   // A click on a column keeps the menu open, like the fields of a form.
   await page.uncheck('[data-column="size"]');
   await page.uncheck('[data-column="modified"]');
@@ -877,7 +867,111 @@ test('listing: the settings are a menu under the gear, choose the columns, stay 
   await page.context().close();
 });
 
-test('listing: the menu Actions has no item of bucket permissions (the button at the left of the selector has them)', async () => {
+test('listing: nothing in the settings menu is wider than the menu at 390 and 1280 px, and the menu stays in the window', async () => {
+  for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 720 }]) {
+    const page = await newPage({ viewport });
+    await open(page, MAIN);
+    await page.click('#settingsButton');
+    // A long message of the tags of the uploads wraps in the menu too.
+    await page.fill('#uploadTagsInput', 'team=up, bad&key');
+    await page.press('#uploadTagsInput', 'Enter');
+    await until(page, () => document.querySelector('#uploadTagsMessage').textContent.length > 20);
+    const sizes = await page.evaluate(() => {
+      const menu = document.querySelector('#settingsMenu');
+      const rect = menu.getBoundingClientRect();
+      const parts = Array.from(menu.querySelectorAll('label, .menu__title, .menu__message, .menu__item, .input'))
+        .filter(node => node.getClientRects().length)
+        .map(node => ({ name: node.id || node.className || node.tagName, scroll: node.scrollWidth, client: node.clientWidth, right: node.getBoundingClientRect().right }));
+      return { menu: { scroll: menu.scrollWidth, client: menu.clientWidth, left: rect.left, right: rect.right }, parts, view: window.innerWidth };
+    });
+    assert.ok(sizes.menu.scroll <= sizes.menu.client, JSON.stringify(sizes.menu));
+    assert.ok(sizes.menu.left >= 0 && sizes.menu.right <= sizes.view, JSON.stringify(sizes.menu));
+    for (const part of sizes.parts) {
+      assert.ok(part.scroll <= part.client, `${viewport.width}: ${JSON.stringify(part)}`);
+      assert.ok(part.right <= sizes.menu.right, `${viewport.width}: ${JSON.stringify(part)}`);
+    }
+    // The labels are short; the reset button says what it resets in its tooltip.
+    assert.equal((await page.textContent('#encryptionSetting')).trim(), 'Encryption and lock');
+    assert.equal((await page.textContent('#settingsReset')).trim(), 'Reset to defaults');
+    assert.equal(await page.getAttribute('#settingsReset', 'title'), 'Reset the columns, the tag filter, and the encryption and lock of each bucket');
+    assert.deepEqual(page.errors, []);
+    await page.context().close();
+  }
+});
+
+// The columns that a person sees on a first visit, and the choices that stay.
+const columnState = page => page.evaluate(() => {
+  const menu = document.querySelector('#settingsMenu');
+  const table = document.querySelector('.dataTable');
+  const shown = name => Boolean(table.querySelector(`th.col-${name}`)?.getClientRects().length);
+  const setting = selector => { const input = menu.querySelector(selector); return input.closest('label').hidden ? 'hidden' : input.checked; };
+  return {
+    settings: { tags: setting('[data-column="tags"]'), versions: setting('[data-column="versions"]'), size: setting('[data-column="size"]'), modified: setting('[data-column="modified"]'), marks: setting('#encryptionToggle') },
+    table: { tags: shown('tags'), versions: shown('versions'), size: shown('size'), modified: shown('modified') }
+  };
+});
+
+test('listing: every column is on by default, also "Encryption and lock"; an instance without tags or versions hides them', async () => {
+  const page = await newPage();
+  const heads = await watchHeads(page);
+  await open(page, `${MAIN}config/`);
+  await page.waitForSelector('tr[data-name="ingest.json"] .tagChip');
+  await noLockPending(page);
+  assert.deepEqual(await columnState(page), {
+    settings: { tags: true, versions: true, size: true, modified: true, marks: true },
+    table: { tags: true, versions: true, size: true, modified: true }
+  });
+  // "Encryption and lock" reads one HEAD for each file of the page, and nothing more.
+  const files = await page.locator('.dataTable tbody tr[data-type="content"]').count();
+  assert.equal(heads.total, files);
+  // Garage has no tags and no versions: the two columns and their settings are hidden. The other columns are on.
+  const garage = await lockedHostOf(page, 'garage-main');
+  await open(page, `-/${garage.host}/garage-main/`);
+  await page.waitForSelector('.dataTable');
+  assert.deepEqual(await columnState(page), {
+    settings: { tags: 'hidden', versions: 'hidden', size: true, modified: true, marks: true },
+    table: { tags: false, versions: false, size: true, modified: true }
+  });
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+test('listing: a saved choice of the person wins, a choice that was never made takes the new default', async () => {
+  const page = await newPage();
+  // The settings of an older version: the browser kept every column, also the tags that were off by default. The size
+  // is off: a choice of the person. The encryption of seaweedfs-archive is off.
+  await page.addInitScript(() => {
+    if (!sessionStorage.getItem('seeded')) {
+      sessionStorage.setItem('seeded', '1');
+      localStorage.setItem('portal.listing', JSON.stringify({ columns: { tags: false, versions: true, size: false, modified: true }, tagFilterOn: false, encryption: { 'seaweedfs-archive': false } }));
+    }
+  });
+  await open(page, `${MAIN}config/`);
+  await page.waitForSelector('tr[data-name="ingest.json"] .tagChip');
+  assert.deepEqual((await columnState(page)).table, { tags: true, versions: true, size: false, modified: true });
+  assert.equal((await columnState(page)).settings.marks, true);
+  // The choice of the encryption stays for its bucket.
+  await open(page, '-/seaweedfs/seaweedfs-archive/');
+  assert.equal((await columnState(page)).settings.marks, false);
+  // A new choice: the tags off. The browser keeps the choices only, in version 2.
+  await open(page, `${MAIN}config/`);
+  await page.click('#settingsButton');
+  await page.uncheck('[data-column="tags"]');
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('portal.listing')));
+  assert.deepEqual(stored, { version: 2, columns: { size: false, tags: false }, tagFilterOn: false, encryption: { 'seaweedfs-archive': false } });
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.waitForSelector('.dataTable');
+  assert.deepEqual((await columnState(page)).table, { tags: false, versions: true, size: false, modified: true });
+  // The reset gives every default again.
+  await page.click('#settingsButton');
+  await page.click('#settingsReset');
+  assert.deepEqual((await columnState(page)).table, { tags: true, versions: true, size: true, modified: true });
+  assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('portal.listing'))), { version: 2, columns: {}, tagFilterOn: false, encryption: {} });
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+test('listing: the menu Actions has no item of bucket permissions (the icons of the selector have them)', async () => {
   const page = await newPage();
   await open(page, MAIN);
   await page.click('#actionsButton');
@@ -1698,7 +1792,7 @@ test('selector: the bucket selector of the default interface, by host, with the 
   assert.equal(await trigger.locator('strong').innerText(), 'SeaweedFS - primary');
   assert.equal(await trigger.locator('small').count(), 0);
   const edge = await page.evaluate(() => {
-    const dots = document.querySelector('.storageSwitcher__trigger .permDots').getBoundingClientRect();
+    const dots = document.querySelector('.storageSwitcher__perms .permDots').getBoundingClientRect();
     const chevron = document.querySelector('.storageSwitcher__chevron').getBoundingClientRect();
     const name = document.querySelector('.storageSwitcher__trigger strong').getBoundingClientRect();
     return { dotsRight: dots.right, chevronLeft: chevron.left, nameRight: name.right, dotsLeft: dots.left };
@@ -1708,7 +1802,9 @@ test('selector: the bucket selector of the default interface, by host, with the 
   assert.match(details, /id: seaweedfs-main/);
   assert.match(details, /host: seaweedfs/);
   assert.match(details, /bucket: default/);
-  assert.equal(await trigger.locator('.permDot').count(), 3);
+  // The permission icons are a button of their own over the trigger, not a part of it.
+  assert.equal(await trigger.locator('.permDot').count(), 0);
+  assert.equal(await page.locator('.storageSwitcher__perms .permDot').count(), 3);
   assert.equal(await page.isHidden('#storageSwitcherMenu'), true);
   await trigger.click();
   assert.equal(await trigger.getAttribute('aria-expanded'), 'true');
@@ -1758,57 +1854,83 @@ test('selector: the bucket selector of the default interface, by host, with the 
 // 3. Bulk upload of hundreds of files
 // ------------------------------------------------------------------------------------------------------------------
 
-test('selector: an icon button at the left of the selector opens the permissions; the menu has no foot', async () => {
+test('selector: the permission icons of the selector are a button that opens the permissions, with the mouse and the keyboard', async () => {
   const page = await newPage();
   await open(page, MAIN);
+  // No shield button: the icons of the selector open the permissions.
+  assert.equal(await page.locator('#permButton').count(), 0);
+  assert.equal(await page.locator('.ic-shield-check').count(), 0);
+  const perms = page.locator('.storageSwitcher__perms');
+  assert.equal(await perms.count(), 1);
+  assert.equal(await perms.evaluate(node => node.tagName), 'BUTTON');
+  assert.equal(await perms.getAttribute('aria-label'), 'Permissions of this bucket');
+  assert.match(await perms.getAttribute('title'), /^Permissions of this bucket: Read: [^,]+, Write: [^,]+, Delete: [^,]+$/);
+  assert.equal(await perms.locator('[title]').count(), 0);
+  // The button is in the trigger, between the name and the chevron, and not in the button of the trigger.
   const geometry = await page.evaluate(() => {
-    const button = document.querySelector('#permButton').getBoundingClientRect();
-    const trigger = document.querySelector('.storageSwitcher__trigger').getBoundingClientRect();
-    return { buttonRight: button.right, triggerLeft: trigger.left, buttonHeight: button.height, triggerHeight: trigger.height,
-      text: document.querySelector('#permButton').textContent.trim() };
+    const box = selector => document.querySelector(selector).getBoundingClientRect();
+    const perms = box('.storageSwitcher__perms');
+    const trigger = box('.storageSwitcher__trigger');
+    return { inside: perms.left > trigger.left && perms.right < box('.storageSwitcher__chevron').left && perms.top >= trigger.top && perms.bottom <= trigger.bottom,
+      afterName: perms.left >= box('.storageSwitcher__trigger strong').right, nested: Boolean(document.querySelector('.storageSwitcher__trigger .storageSwitcher__perms')) };
   });
-  assert.ok(geometry.buttonRight <= geometry.triggerLeft - 8, `the button at the left of the selector: ${JSON.stringify(geometry)}`);
-  assert.equal(geometry.text, '');
-  assert.equal(Math.round(geometry.buttonHeight), Math.round(geometry.triggerHeight));
-  assert.equal(await page.getAttribute('#permButton', 'aria-label'), 'Permissions of this bucket');
-  assert.equal(await page.locator('#permButton .ic-shield-check').count(), 1);
-  const look = () => page.locator('#permButton').evaluate(node => {
-    const style = getComputedStyle(node);
-    return { color: style.color, background: style.backgroundColor, border: style.borderTopColor };
-  });
-  const rest = await look();
-  assert.equal(rest.background, 'rgba(0, 0, 0, 0)');
-  assert.equal(rest.border, 'rgba(0, 0, 0, 0)');
-  await page.hover('#permButton');
-  await until(page, previous => getComputedStyle(document.querySelector('#permButton')).color !== previous, rest.color);
-  const hover = await look();
-  assert.notEqual(hover.color, rest.color);
-  assert.equal(hover.background, 'rgba(0, 0, 0, 0)');
-  assert.equal(hover.border, 'rgba(0, 0, 0, 0)');
-  await page.mouse.move(5, 400);
-  await page.click('.storageSwitcher__trigger');
-  assert.equal(await page.locator('.storageSwitcher__menu .button').count(), 0);
-  assert.equal(await page.locator('.storageSwitcher__menu', { hasText: 'Permissions of this bucket' }).count(), 0);
-  await page.keyboard.press('Escape');
-  await page.click('#permButton');
+  assert.deepEqual(geometry, { inside: true, afterName: true, nested: false });
+  // A click on the icons opens the permissions and not the menu of the buckets.
+  await perms.click();
   await page.waitForSelector('.permList');
+  assert.equal(await page.isHidden('#storageSwitcherMenu'), true);
   assert.match(await page.textContent('.permissions'), /SeaweedFS - primary/);
   assert.equal(await page.locator('.permRow').count(), 3);
+  await closeWindow(page);
+  // A click on the rest of the selector opens the menu. A click on the icons then closes it and opens the permissions.
+  await page.click('.storageSwitcher__trigger strong');
+  assert.equal(await page.isVisible('#storageSwitcherMenu'), true);
+  assert.equal(await page.locator('.storageSwitcher__menu .button').count(), 0);
+  assert.equal(await page.locator('.storageSwitcher__menu', { hasText: 'Permissions of this bucket' }).count(), 0);
+  await perms.click();
+  await page.waitForSelector('.permList');
+  assert.equal(await page.isHidden('#storageSwitcherMenu'), true);
+  await closeWindow(page);
+  // The keyboard: Tab goes from the trigger to the icons; Enter and Space open the permissions.
+  for (const key of ['Enter', 'Space']) {
+    await page.focus('.storageSwitcher__trigger');
+    await page.keyboard.press('Tab');
+    assert.equal(await page.evaluate(() => document.activeElement.className), 'storageSwitcher__perms');
+    await page.keyboard.press(key);
+    await page.waitForSelector('.permList');
+    assert.equal(await page.isHidden('#storageSwitcherMenu'), true, key);
+    await closeWindow(page);
+  }
+  // A bucket with one visible bucket has a static trigger: the icons stay a button.
+  await page.route(/\/api\/instances(\?|$)/, async route => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body.instances = body.instances.filter(item => item.id === 'seaweedfs-main');
+    await route.fulfill({ response, json: body });
+  });
+  await open(page, MAIN);
+  assert.equal(await page.locator('.storageSwitcher__trigger.is-static').count(), 1);
+  await page.click('.storageSwitcher__perms');
+  await page.waitForSelector('.permList');
+  await closeWindow(page);
+  assert.deepEqual(page.errors, []);
   await page.context().close();
 });
 
-test('selector: on a phone the permission button is at the left of the selector, on its row', async () => {
+test('selector: on a phone the permission icons stay in the selector, and the page has no horizontal scroll', async () => {
   const page = await newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   await open(page, MAIN);
   const box = await page.evaluate(() => {
-    const button = document.querySelector('#permButton').getBoundingClientRect();
+    const perms = document.querySelector('.storageSwitcher__perms').getBoundingClientRect();
     const trigger = document.querySelector('.storageSwitcher__trigger').getBoundingClientRect();
-    return { buttonRight: button.right, triggerLeft: trigger.left, buttonTop: button.top, triggerTop: trigger.top,
+    return { inside: perms.left > trigger.left && perms.right < trigger.right && perms.top >= trigger.top && perms.bottom <= trigger.bottom,
       overflow: document.scrollingElement.scrollWidth - window.innerWidth };
   });
-  assert.ok(box.buttonRight <= box.triggerLeft, `the button at the left: ${JSON.stringify(box)}`);
-  assert.ok(Math.abs(box.buttonTop - box.triggerTop) < 2, `the same row: ${JSON.stringify(box)}`);
+  assert.equal(box.inside, true, JSON.stringify(box));
   assert.ok(box.overflow <= 0);
+  await page.tap('.storageSwitcher__perms');
+  await page.waitForSelector('.permList');
+  assert.equal(await page.isHidden('#storageSwitcherMenu'), true);
   await page.context().close();
 });
 
@@ -1863,7 +1985,7 @@ test('upload: 300 files, bounded concurrency and rendering, progress, summary', 
   assert.ok((await page.locator('.uploadDock li').count()) <= 4);
   assert.equal((await listKeys(page, 'seaweedfs-main', 'bulk/')).length, 300);
   // The listing refreshes at the end of the batch.
-  await until(page, () => /300 files/.test(document.querySelector('#folderCount')?.textContent || ''));
+  await until(page, () => / of 300$/.test(document.querySelector('.tableFoot__range')?.textContent || ''));
   await page.click('.uploadDock .button >> text=Close');
   assert.equal(await page.isHidden('#uploadDock'), true);
   assert.deepEqual(page.errors, []);
@@ -2070,7 +2192,7 @@ test('access: a bucket that refuses write and delete shows it in the selector, a
     await route.fulfill({ response, json: body });
   });
   await open(page, '-/seaweedfs/seaweedfs-archive/');
-  const states = await page.locator('.storageSwitcher__trigger .permDot').evaluateAll(nodes => nodes.map(node => `${node.dataset.permission}:${node.dataset.state}`));
+  const states = await page.locator('.storageSwitcher__perms .permDot').evaluateAll(nodes => nodes.map(node => `${node.dataset.permission}:${node.dataset.state}`));
   assert.deepEqual(states.slice(1), ['write:denied', 'delete:denied']);
   await page.click('.storageSwitcher__trigger');
   const main = await page.locator('.storageBucket[data-instance="seaweedfs-main"] .permDot').evaluateAll(nodes => nodes.map(node => node.dataset.state));
@@ -3805,47 +3927,39 @@ for (const [instance, provider] of Object.entries(ENCRYPTED)) {
   });
 }
 
-test('encryption: the setting starts the locks of seaweedfs-main, stays in the browser, and shows SSE-C and SSE-KMS', async () => {
+test('encryption: the setting is on by default for seaweedfs-main, goes off for one bucket, stays in the browser, and shows SSE-C and SSE-KMS', async () => {
   const page = await newPage();
   const heads = await watchHeads(page);
   await open(page, `${MAIN}enc/`);
-  await sleep(500);
-  // An instance that does not encrypt: no request and no lock.
-  assert.equal(heads.total, 0);
-  assert.equal(await page.locator('.nameLock__icon, .nameLock__pending').count(), 0);
-  await page.click('#settingsButton');
-  assert.equal(await page.isChecked('#encryptionToggle'), false);
-  await page.check('#encryptionToggle');
-  await page.keyboard.press('Escape');
+  // An instance that does not encrypt reads the files too: the setting is on for each bucket by default.
   await noLockPending(page);
   // The HEAD of an SSE-C object fails with 400: the details confirm it.
   assert.equal(await fileLock(page, 'customer-key.txt'), 'Encrypted with a key of the client (SSE-C)');
   const files = await page.locator('.dataTable tbody tr[data-type="content"]').count();
   assert.ok(heads.total >= 1 && heads.total <= files, `${heads.total} HEAD for ${files} files`);
-  // The choice stays after a reload, for this bucket only.
+  await page.click('#settingsButton');
+  assert.equal(await page.isChecked('#encryptionToggle'), true);
+  await page.uncheck('#encryptionToggle');
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('.nameLock__icon, .nameLock__pending').count(), 0);
+  // The choice stays after a reload, for this bucket only: no new request.
+  const before = heads.total;
   await page.reload({ waitUntil: 'networkidle' });
   await page.waitForSelector('.dataTable');
-  await noLockPending(page);
-  assert.equal(await fileLock(page, 'customer-key.txt'), 'Encrypted with a key of the client (SSE-C)');
-  // MinIO gives the key of an SSE-KMS object.
+  await sleep(500);
+  assert.equal(heads.total, before);
+  assert.equal(await page.locator('.nameLock__icon, .nameLock__pending').count(), 0);
+  // MinIO gives the key of an SSE-KMS object. Its bucket keeps the default.
   const minio = await lockedHostOf(page, 'minio-main');
   await open(page, `-/${minio.host}/minio-main/enc/`);
-  await sleep(300);
-  assert.equal(await page.locator('.nameLock__icon, .nameLock__pending').count(), 0);
-  await page.click('#settingsButton');
-  await page.check('#encryptionToggle');
-  await page.keyboard.press('Escape');
   await noLockPending(page);
   assert.match(await fileLock(page, 'kms.txt'), /^Encrypted: SSE-KMS, key arn:aws:kms:s3-browser-test/);
-  // The setting goes off, and the reset gives the default again.
-  await page.click('#settingsButton');
-  await page.uncheck('#encryptionToggle');
-  assert.equal(await page.locator('.nameLock__icon').count(), 0);
+  // The reset gives the default again.
   await open(page, `${MAIN}enc/`);
   await page.click('#settingsButton');
   await page.click('#settingsReset');
-  await sleep(300);
-  assert.equal(await page.locator('.nameLock__icon, .nameLock__pending').count(), 0);
+  await noLockPending(page);
+  assert.equal(await fileLock(page, 'customer-key.txt'), 'Encrypted with a key of the client (SSE-C)');
   assert.deepEqual(page.errors, []);
   await page.context().close();
 });
@@ -3882,16 +3996,13 @@ test('encryption: the locks of the listing read at most 100 files, 4 at the same
   await page.context().close();
 });
 
-test('encryption: Garage: the setting is off for garage-encrypted, and on it shows no lock, because Garage does not encrypt', async () => {
+test('encryption: Garage: the setting is on for garage-encrypted, and shows no lock, because Garage does not encrypt', async () => {
   const page = await newPage();
   const info = await lockedHostOf(page, 'garage-encrypted');
   const heads = await watchHeads(page);
   await open(page, `-/${info.host}/garage-encrypted/enc/`);
-  await sleep(500);
-  assert.equal(heads.total, 0);
   await page.click('#settingsButton');
-  assert.equal(await page.isChecked('#encryptionToggle'), false);
-  await page.check('#encryptionToggle');
+  assert.equal(await page.isChecked('#encryptionToggle'), true);
   await page.keyboard.press('Escape');
   const name = `garage-lock-${encryptionStamp()}.txt`;
   await uploadWithPage(page, name, Buffer.from('uploaded to Garage\n'));
@@ -4013,8 +4124,9 @@ for (const [instance, provider] of Object.entries(LOCKED)) {
     assert.equal(heads.total, 2 * files);
     // The setting stops the marks and the requests, and starts them again from the answers that the page has.
     await page.click('#settingsButton');
-    assert.match(await page.textContent('#encryptionSetting'), /Show the encryption and the lock of the objects/);
-    assert.match(await page.textContent('#settingsReset'), /Reset the columns, the filter, the encryption and the lock/);
+    assert.equal((await page.textContent('#encryptionSetting')).trim(), 'Encryption and lock');
+    assert.equal((await page.textContent('#settingsReset')).trim(), 'Reset to defaults');
+    assert.match(await page.getAttribute('#settingsReset', 'title'), /columns.*tag filter.*encryption and lock/);
     assert.equal(await page.isChecked('#encryptionToggle'), true);
     await page.uncheck('#encryptionToggle');
     await page.keyboard.press('Escape');
@@ -4118,7 +4230,7 @@ for (const [instance, provider] of Object.entries(ENCRYPTED)) {
 }
 
 // ------------------------------------------------------------------------------------------------------------------
-// 12. Usage and quota of a bucket: the status line under the listing (versioning, encryption, Object Lock, lifecycle
+// 12. Usage and quota of a bucket: the chips of the bucket in the header (versioning, encryption, Object Lock, lifecycle
 // rules and usage), the usage in the tooltips of the selector, and the summary strip of the details with its sections
 // that close. The usage blocks of config.hcl read the admin API of each provider. The bucket "default" of each provider
 // has a quota of 20 GiB (Garage also 100000 objects); seaweedfs-archive has quota_bytes = 10 GiB; the other buckets
@@ -4126,11 +4238,12 @@ for (const [instance, provider] of Object.entries(ENCRYPTED)) {
 // ------------------------------------------------------------------------------------------------------------------
 
 const QUOTA_BYTES = 21474836480;
-const usageItem = page => page.locator('.bucketStatus [data-status="usage"]');
+const usageItem = page => page.locator('#bucketChips [data-chip="usage"]');
+const chipNames = page => page.locator('#bucketChips .bucketChip').evaluateAll(nodes => nodes.map(node => node.dataset.chip));
 const apiUsage = async (page, instance, fresh = false) => (await page.request.get(`${BASE}api/usage?instance=${instance}${fresh ? '&fresh=1' : ''}`)).json();
 
 for (const [instance, provider] of Object.entries(PROVIDERS)) {
-  test(`usage: ${provider.name}: the status line shows the used bytes and the quota of the bucket, with a bar and a tooltip`, async () => {
+  test(`usage: ${provider.name}: the chip of the header shows the used bytes and the quota of the bucket, with a bar and a tooltip`, async () => {
     const page = await newPage();
     const answer = await apiUsage(page, instance);
     assert.equal(answer.supported, true);
@@ -4142,8 +4255,8 @@ for (const [instance, provider] of Object.entries(PROVIDERS)) {
     // The answer never names the admin API or its token.
     assert.doesNotMatch(JSON.stringify(answer), /3903|9333|8888|admin-token|minio\/admin/);
     await open(page, `-/${instance.split('-')[0]}/${instance}/`);
-    await page.waitForSelector('.bucketStatus [data-status="usage"]');
-    const text = (await usageItem(page).locator('.bucketStatus__text').textContent()).trim();
+    await page.waitForSelector('#bucketChips [data-chip="usage"]');
+    const text = (await usageItem(page).locator('.bucketChip__label').textContent()).trim();
     assert.match(text, /^~?[\d.]+ (B|KB|MB|GB) of 20 GB$/);
     // SeaweedFS and MinIO count with a delay: the number has a "~" and the tooltip says why.
     assert.equal(text.startsWith('~'), answer.approximate === true);
@@ -4154,36 +4267,66 @@ for (const [instance, provider] of Object.entries(PROVIDERS)) {
     if (instance === 'garage-main') assert.match(title, /Objects: [\d,]+ of 100,000/);
     assert.equal(await usageItem(page).locator('.usageMeter[role="meter"]').count(), 1);
     assert.equal(await usageItem(page).getAttribute('data-level'), 'ok');
-    // The status line has one line on a desktop, at the right of the totals.
-    const box = await page.locator('.tableFoot').boundingBox();
-    const count = await page.locator('#folderCount').boundingBox();
-    const status = await page.locator('.tableFoot .bucketStatus').boundingBox();
-    assert.ok(status.x > count.x + count.width - 1 && Math.abs(status.y + status.height / 2 - (count.y + count.height / 2)) < 4, JSON.stringify({ box, count, status }));
-    // Versioning shows where the bucket has it on.
-    assert.equal(await page.locator('.bucketStatus [data-status="versioning"]').count(), provider.versioning ? 1 : 0);
+    // The chips are in the header, at the left of the bucket selector, on its row.
+    const box = await page.evaluate(() => {
+      const chips = document.querySelector('#bucketChips').getBoundingClientRect();
+      const selector = document.querySelector('.storageSwitcher').getBoundingClientRect();
+      return { right: chips.right, selectorLeft: selector.left, middle: chips.top + chips.height / 2, selectorMiddle: selector.top + selector.height / 2,
+        inHeader: Boolean(document.querySelector('.appHeader #bucketChips')) };
+    });
+    assert.ok(box.inHeader && box.right <= box.selectorLeft && Math.abs(box.middle - box.selectorMiddle) < 3, JSON.stringify(box));
+    // Versioning shows where the bucket has it on. Garage shows the usage only.
+    assert.equal(await page.locator('#bucketChips [data-chip="versioning"]').count(), provider.versioning ? 1 : 0);
+    if (instance === 'garage-main') assert.deepEqual(await chipNames(page), ['usage']);
+    if (instance === 'seaweedfs-main') assert.deepEqual(await chipNames(page), ['versioning', 'lifecycle', 'usage']);
+    if (instance === 'minio-main') assert.deepEqual(await chipNames(page), ['versioning', 'usage']);
+    // The listing has no totals at its foot: only the range of the page and the rows.
+    assert.equal(await page.locator('#folderCount, .tableFoot__count, .bucketStatus').count(), 0);
+    assert.match(await page.textContent('.tableFoot'), /^\d+ to \d+ of \d+\+?Rows/);
+    assert.equal(await visibleText(page, ' folders, '), 0);
     assert.deepEqual(page.errors, []);
     await page.context().close();
   });
 }
 
-test('usage: a bucket without quota says "used", quota_bytes gives the limit, and a bucket without usage shows nothing', async () => {
+test('usage: the chips of seaweedfs-locked, of the encrypted buckets and of a bucket without quota', async () => {
   const page = await newPage();
   await open(page, '-/seaweedfs/seaweedfs-locked/');
-  await page.waitForSelector('.bucketStatus [data-status="usage"]');
-  assert.match(await usageItem(page).textContent(), /^~[\d.]+ (B|KB|MB) used/);
+  await page.waitForSelector('#bucketChips [data-chip="usage"]');
+  // A bucket with Object Lock has versioning and its padlock; it does not encrypt.
+  assert.deepEqual(await chipNames(page), ['versioning', 'object-lock', 'usage']);
+  assert.equal(await page.getAttribute('#bucketChips [data-chip="versioning"]', 'title'), 'Versioning is on: a change or a delete keeps the older versions of a file.');
+  assert.equal(await page.locator('#bucketChips [data-chip="object-lock"] .ic-lock').count(), 1);
+  assert.match(await page.textContent('#bucketChips [data-chip="object-lock"] .bucketChip__label'), /^Object Lock/);
+  assert.equal(await page.getAttribute('#bucketChips [data-chip="object-lock"]', 'title'), 'Object Lock is on');
+  // Each chip is an icon with a tooltip: the label is for a screen reader, and the usage keeps its short text.
+  const looks = await page.locator('#bucketChips .bucketChip').evaluateAll(nodes => nodes.map(node => [node.dataset.chip, node.querySelector('.bucketChip__label').getBoundingClientRect().width > 1, Boolean(node.title)]));
+  assert.deepEqual(looks, [['versioning', false, true], ['object-lock', false, true], ['usage', true, true]]);
+  // No limit: "used", no bar.
+  assert.match(await usageItem(page).locator('.bucketChip__label').textContent(), /^~[\d.]+ (B|KB|MB) used$/);
   assert.equal(await usageItem(page).locator('.usageMeter').count(), 0);
   assert.match(await usageItem(page).getAttribute('title'), /\nNo limit\n/);
   assert.equal(await usageItem(page).getAttribute('data-level'), 'none');
-  // Object Lock shows in the status line of the locked bucket.
-  assert.match(await page.textContent('.bucketStatus [data-status="object-lock"]'), /^Object Lock/);
+  // The trigger of the selector does not show the padlock again next to the chips.
+  assert.equal(await page.locator('.storageSwitcher__trigger [data-bucket-object-lock]').isVisible(), false);
+
+  // The key of an encrypted bucket; the key of Garage in the colour of a warning.
+  await open(page, '-/seaweedfs/seaweedfs-encrypted/');
+  await page.waitForSelector('#bucketChips [data-chip="encryption"]');
+  assert.equal(await page.getAttribute('#bucketChips [data-chip="encryption"]', 'title'), 'Encrypted: SSE-S3 for each new object');
+  assert.equal(await page.textContent('#bucketChips [data-chip="encryption"] .bucketChip__label'), 'Encrypted: SSE-S3');
+  await open(page, '-/garage/garage-encrypted/');
+  await page.waitForSelector('#bucketChips [data-chip="encryption"]');
+  assert.match(await page.getAttribute('#bucketChips [data-chip="encryption"]', 'class'), /is-warning/);
+  assert.equal(await page.textContent('#bucketChips [data-chip="encryption"] .bucketChip__label'), 'SSE-S3 not applied');
 
   await open(page, '-/seaweedfs/seaweedfs-archive/');
-  await page.waitForSelector('.bucketStatus [data-status="usage"]');
-  assert.match(await usageItem(page).locator('.bucketStatus__text').textContent(), / of 10 GB$/);
+  await page.waitForSelector('#bucketChips [data-chip="usage"]');
+  assert.match(await usageItem(page).locator('.bucketChip__label').textContent(), / of 10 GB$/);
   assert.match(await usageItem(page).getAttribute('title'), /The configuration of S3-Browser sets this limit\. The provider does not enforce it\./);
   assert.equal((await apiUsage(page, 'seaweedfs-archive')).limitSource, 'config');
 
-  // An instance without a usage block: no usage in the status line, and no request to /api/usage.
+  // An instance without a usage block: no usage chip, and no request to /api/usage.
   const second = await newPage();
   let usageRequests = 0;
   await second.route(/\/api\/instances(\?|$)/, async route => {
@@ -4194,9 +4337,9 @@ test('usage: a bucket without quota says "used", quota_bytes gives the limit, an
   });
   await second.route(/\/api\/usage\?/, route => { usageRequests += 1; return route.continue(); });
   await open(second, MAIN);
-  await second.waitForSelector('.bucketStatus [data-status="versioning"]');
+  await second.waitForSelector('#bucketChips [data-chip="versioning"]');
   await sleep(500);
-  assert.equal(await second.locator('.bucketStatus [data-status="usage"]').count(), 0);
+  assert.equal(await second.locator('#bucketChips [data-chip="usage"]').count(), 0);
   assert.equal(usageRequests, 0);
   assert.deepEqual(page.errors, []);
   assert.deepEqual(second.errors, []);
@@ -4204,14 +4347,37 @@ test('usage: a bucket without quota says "used", quota_bytes gives the limit, an
   await second.context().close();
 });
 
-test('usage: a failed read shows no number, the tooltip says that the usage is unavailable, and the page keeps working', async () => {
+test('usage: the chip of the lifecycle rules opens the window of the rules, with the mouse and the keyboard', async () => {
+  const page = await newPage();
+  await open(page, MAIN);
+  const chip = page.locator('#bucketChips [data-chip="lifecycle"]');
+  await chip.waitFor();
+  assert.equal(await chip.evaluate(node => node.tagName), 'BUTTON');
+  assert.equal((await chip.locator('.bucketChip__short').textContent()).trim(), '1');
+  assert.equal(await chip.locator('.ic-hourglass').count(), 1);
+  assert.match(await chip.getAttribute('title'), /^1 lifecycle rule, 1 rule on\. Open the lifecycle rules of the bucket\.$/);
+  await chip.click();
+  await until(page, () => !document.querySelector('[data-lifecycle] .lifecycle__intro')?.hidden, null, 15000);
+  assert.ok(await page.locator('[data-lifecycle-rule], [data-lifecycle-kept]').count() >= 1);
+  await closeWindow(page);
+  await chip.focus();
+  await page.keyboard.press('Enter');
+  await until(page, () => !document.querySelector('[data-lifecycle] .lifecycle__intro')?.hidden, null, 15000);
+  await closeWindow(page);
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+test('usage: a failed read shows no number, the tooltip of the chip says that the usage is unavailable, and the page keeps working', async () => {
   const page = await newPage();
   const message = 'The usage of the bucket is unavailable: GetBucketInfo: the admin API refused the credentials (HTTP 403).';
   await page.route(/\/api\/usage\?/, route => route.fulfill({ json: { supported: true, available: false, instance: 'seaweedfs-main', source: 'seaweedfs', error: { code: 'usage_unavailable', message } } }));
   await open(page, MAIN);
-  await page.waitForSelector('.bucketStatus[data-usage="unavailable"]', { state: 'attached' });
-  assert.equal(await page.locator('.bucketStatus [data-status="usage"]').count(), 0);
-  assert.equal(await page.getAttribute('#folderCount', 'title'), message);
+  await page.waitForSelector('#bucketChips [data-chip="usage"][data-level="unavailable"]');
+  assert.equal(await usageItem(page).getAttribute('title'), message);
+  assert.equal(await usageItem(page).locator('.usageMeter').count(), 0);
+  assert.equal((await usageItem(page).locator('.bucketChip__label').textContent()).trim(), 'Usage unavailable');
+  assert.doesNotMatch(await usageItem(page).textContent(), /\d+ (B|KB|MB|GB)/);
   // No notice of a server that does not answer: the listing stays as it is.
   assert.equal(await page.locator('#notices > *').count(), 0);
   assert.ok(await page.locator('tr[data-name="README.md"]').count() === 1);
@@ -4222,12 +4388,12 @@ test('usage: a failed read shows no number, the tooltip says that the usage is u
 // The usage grows after an upload. SeaweedFS and Garage count a write after a few seconds. MinIO counts in a scan of
 // about one minute: its number is checked in the first test only.
 for (const instance of ['garage-main', 'seaweedfs-main']) {
-  test(`usage: ${PROVIDERS[instance].name}: the usage grows after an upload, with no reload of the page`, async () => {
+  test(`usage: ${PROVIDERS[instance].name}: the chip of the usage grows after an upload, with no reload of the page`, async () => {
     const page = await newPage();
     const host = instance.split('-')[0];
     const key = `usage-${Date.now()}.bin`;
     await open(page, `-/${host}/${instance}/`);
-    await page.waitForSelector('.bucketStatus [data-status="usage"]');
+    await page.waitForSelector('#bucketChips [data-chip="usage"]');
     const before = Number(await usageItem(page).getAttribute('data-used-bytes'));
     const requests = [];
     page.on('request', request => { if (/\/api\/usage\?/.test(request.url())) requests.push(request.url()); });
@@ -4251,7 +4417,7 @@ for (const instance of ['garage-main', 'seaweedfs-main']) {
 test('usage: the tooltip of a bucket in the selector has its usage', async () => {
   const page = await newPage();
   await open(page, MAIN);
-  await page.waitForSelector('.bucketStatus [data-status="usage"]');
+  await page.waitForSelector('#bucketChips [data-chip="usage"]');
   assert.match(await page.getAttribute('.storageSwitcher__trigger', 'title'), /\nusage: ~[\d.]+ (B|KB|MB|GB) of 20 GB \([\d.]+ %\)$/);
   await page.click('.storageSwitcher__trigger');
   await until(page, () => /usage: [\d.]+ (B|KB|MB|GB) of 20 GB/.test(document.querySelector('.storageBucket[data-instance="garage-main"]')?.title || ''));
@@ -4262,18 +4428,71 @@ test('usage: the tooltip of a bucket in the selector has its usage', async () =>
   await page.context().close();
 });
 
-test('usage: the status line wraps on a phone and stays in one line at 1280x720', async () => {
-  for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 720 }]) {
+test('usage: the chips keep one row in the header at 1440 and 1280, lose the text of the usage on a short window, and go in a popover on a phone', async () => {
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 1280, height: 720 }, { width: 900, height: 720 }]) {
     const page = await newPage({ viewport });
     await open(page, MAIN);
-    await page.waitForSelector('.bucketStatus [data-status="usage"]');
-    const widths = await page.evaluate(() => ({ page: document.documentElement.scrollWidth, view: window.innerWidth }));
-    assert.ok(widths.page <= widths.view, JSON.stringify(widths));
-    const items = await page.locator('.bucketStatus__item').evaluateAll(nodes => nodes.map(node => node.getBoundingClientRect().top));
-    if (viewport.width > 700) assert.ok(Math.max(...items) - Math.min(...items) < 2, JSON.stringify(items));
+    await page.waitForSelector('#bucketChips [data-chip="usage"]');
+    const box = await page.evaluate(() => {
+      const rect = selector => document.querySelector(selector).getBoundingClientRect();
+      const chips = Array.from(document.querySelectorAll('#bucketChips .bucketChip')).map(node => Math.round(node.getBoundingClientRect().top));
+      return { page: document.documentElement.scrollWidth, view: window.innerWidth, header: rect('.appHeader').height, chips,
+        selector: rect('.storageSwitcher__trigger').width, overflow: document.querySelector('#bucketChips').scrollWidth - document.querySelector('#bucketChips').clientWidth,
+        usageText: document.querySelector('[data-chip="usage"] .bucketChip__label').getBoundingClientRect().width,
+        meter: document.querySelector('[data-chip="usage"] .usageMeter').getBoundingClientRect().width, toggle: getComputedStyle(document.querySelector('#bucketInfoButton')).display };
+    });
+    // One row: the header keeps its height, the selector keeps its width, and no chip is cut.
+    assert.ok(box.page <= box.view, JSON.stringify(box));
+    assert.ok(box.header < 64, JSON.stringify(box));
+    assert.equal(new Set(box.chips).size, 1, JSON.stringify(box));
+    assert.ok(box.selector >= 292, JSON.stringify(box));
+    assert.equal(box.overflow, 0, JSON.stringify(box));
+    assert.equal(box.toggle, 'none');
+    // At 900 px the text of the usage goes, and its bar stays.
+    assert.equal(box.usageText > 1, viewport.width > 1100, JSON.stringify(box));
+    assert.ok(box.meter > 0, JSON.stringify(box));
     assert.deepEqual(page.errors, []);
     await page.context().close();
   }
+  const phone = await newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  await open(phone, '-/seaweedfs/seaweedfs-locked/');
+  await phone.waitForSelector('#bucketChips [data-chip="usage"]', { state: 'attached' });
+  // The chips are in a closed popover. The "i" button is on the row of the brand, at the left of the theme selector.
+  assert.equal(await phone.isVisible('#bucketChips'), false);
+  assert.equal(await phone.getAttribute('#bucketInfoButton', 'aria-label'), 'Information of the bucket');
+  assert.equal(await phone.getAttribute('#bucketInfoButton', 'aria-expanded'), 'false');
+  const row = await phone.evaluate(() => {
+    const rect = selector => document.querySelector(selector).getBoundingClientRect();
+    return { button: rect('#bucketInfoButton'), theme: rect('.themeSelect'), brand: rect('.appBrand'), page: document.documentElement.scrollWidth };
+  });
+  assert.ok(row.button.right <= row.theme.left && Math.abs(row.button.top + row.button.height / 2 - (row.theme.top + row.theme.height / 2)) < 3, JSON.stringify(row));
+  assert.ok(row.page <= 390, JSON.stringify(row));
+  await phone.tap('#bucketInfoButton');
+  assert.equal(await phone.isVisible('#bucketChips'), true);
+  assert.equal(await phone.getAttribute('#bucketInfoButton', 'aria-expanded'), 'true');
+  // One line for each chip, with its label; the popover stays in the window, above the selector.
+  const lines = await phone.locator('#bucketChips .bucketChip').evaluateAll(nodes => nodes.map(node => node.querySelector('.bucketChip__label').textContent));
+  assert.equal(lines.length, 3);
+  assert.deepEqual(lines.slice(0, 2), ['Versioning', 'Object Lock']);
+  assert.match(lines[2], /^~[\d.]+ (B|KB|MB) used$/);
+  const pop = await phone.evaluate(() => {
+    const rect = document.querySelector('#bucketChips').getBoundingClientRect();
+    const tops = Array.from(document.querySelectorAll('#bucketChips .bucketChip')).map(node => node.getBoundingClientRect().top);
+    const hit = document.elementFromPoint(rect.left + rect.width - 20, rect.top + 20);
+    return { left: rect.left, right: rect.right, rows: new Set(tops.map(Math.round)).size, onTop: Boolean(hit?.closest('#bucketChips')) };
+  });
+  assert.ok(pop.left >= 0 && pop.right <= 390 && pop.rows === 3 && pop.onTop, JSON.stringify(pop));
+  // A tap outside closes it; Escape closes it too and gives the focus back to the button.
+  await phone.tap('.tableFoot__range');
+  assert.equal(await phone.isVisible('#bucketChips'), false);
+  await phone.focus('#bucketInfoButton');
+  await phone.keyboard.press('Enter');
+  assert.equal(await phone.isVisible('#bucketChips'), true);
+  await phone.keyboard.press('Escape');
+  assert.equal(await phone.isVisible('#bucketChips'), false);
+  assert.equal(await phone.evaluate(() => document.activeElement.id), 'bucketInfoButton');
+  assert.deepEqual(phone.errors, []);
+  await phone.context().close();
 });
 
 // The details of a file: the pills of the summary strip, and the sections that start closed.
