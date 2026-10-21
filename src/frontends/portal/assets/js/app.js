@@ -435,6 +435,7 @@ BB.cfg = config;
 
   // The trigger keeps a place for the permission icons and for the line of the facts of the bucket: they are elements
   // of their own over the trigger, because a button cannot hold a button. The marks of a full bucket follow the name.
+  // On a wide window the trigger has one line, and the CSS hides the two places.
   function switcherCopy(instance) {
     return h('span', { class: 'storageSwitcher__copy' },
       h('span', { class: 'storageSwitcher__titleRow' }, h('strong', {}, storageName(instance)), h('span', { class: 'bucketMarks' }),
@@ -442,27 +443,31 @@ BB.cfg = config;
       h('span', { class: 'storageSwitcher__factsSlot', 'aria-hidden': 'true' }));
   }
 
-  // The second line of the trigger: the facts of the current bucket. A click outside its buttons acts as a click on the
-  // trigger.
-  function switcherFacts(multiple) {
-    return h('div', {
-      id: 'storageSwitcherFacts', class: 'storageSwitcher__facts bucketFacts',
-      onclick: event => {
-        if (event.target.closest('button')) return;
-        event.stopPropagation();
-        if (multiple) toggleSwitcher();
-      }
-    });
+  // A click on an element over the trigger, outside its buttons, acts as a click on the trigger.
+  function passClick(multiple) {
+    return event => {
+      if (event.target.closest('button')) return;
+      event.stopPropagation();
+      if (multiple) toggleSwitcher();
+    };
   }
 
-  // The read, write and delete icons of the current bucket: a click, Enter or Space opens the permissions of the
-  // bucket. The rest of the selector opens the list of the buckets.
-  function permissionsButton(instance) {
-    return h('button', {
-      type: 'button', class: 'storageSwitcher__perms', 'aria-label': 'Permissions of this bucket',
-      title: `Permissions of this bucket: ${permissionSummary(instance)}`,
-      onclick: event => { event.stopPropagation(); closeSwitcher(false); showPermissions(); }
-    }, permissionDots(instance, { title: false }));
+  // The facts of the current bucket: the second line of the trigger, or a part of its line on a wide window.
+  function switcherFacts(multiple) {
+    return h('div', { id: 'storageSwitcherFacts', class: 'storageSwitcher__facts bucketFacts', onclick: passClick(multiple) });
+  }
+
+  // The read, write and delete icons of the current bucket, then the versioning icon. A click, Enter or Space on the
+  // three icons opens the permissions of the bucket. The versioning icon does not act: the rest of the selector opens
+  // the list of the buckets.
+  function permissionsGroup(instance, multiple) {
+    return h('div', { class: 'storageSwitcher__permsGroup', onclick: passClick(multiple) },
+      h('button', {
+        type: 'button', class: 'storageSwitcher__perms', 'aria-label': 'Permissions of this bucket',
+        title: `Permissions of this bucket: ${permissionSummary(instance)}`,
+        onclick: event => { event.stopPropagation(); closeSwitcher(false); showPermissions(); }
+      }, permissionDots(instance, { title: false })),
+      h('span', { id: 'storageSwitcherVersioning', class: 'storageSwitcher__versioning' }));
   }
 
   function renderSwitcher() {
@@ -486,8 +491,8 @@ BB.cfg = config;
           h('span', { class: 'storageSwitcher__copy' }, h('strong', {}, 'No bucket'),
             h('small', {}, state.loadError ? 'The list of buckets cannot be loaded' : 'No bucket is visible to you'))));
       } else if (!multiple) {
-        root.replaceChildren(h('div', { class: 'storageSwitcher__trigger is-static', title: storageDetails(instance), 'aria-describedby': 'storageSwitcherFacts' },
-          ic('database', 'storageSwitcher__icon'), switcherCopy(instance)), permissionsButton(instance), switcherFacts(false));
+        root.replaceChildren(h('div', { class: 'storageSwitcher__trigger is-static', title: storageDetails(instance), 'aria-describedby': 'storageSwitcherVersioning storageSwitcherFacts' },
+          ic('database', 'storageSwitcher__icon'), switcherCopy(instance)), permissionsGroup(instance, false), switcherFacts(false));
       } else {
         const trigger = h('button', {
           type: 'button',
@@ -495,7 +500,7 @@ BB.cfg = config;
           'aria-haspopup': 'listbox',
           'aria-expanded': 'false',
           'aria-controls': 'storageSwitcherMenu',
-          'aria-describedby': 'storageSwitcherFacts',
+          'aria-describedby': 'storageSwitcherVersioning storageSwitcherFacts',
           title: storageDetails(instance),
           onclick: event => { event.stopPropagation(); toggleSwitcher(); },
           onkeydown: event => {
@@ -519,8 +524,9 @@ BB.cfg = config;
               onclick: () => { closeSwitcher(true); selectInstance(entry.id); }
             },
             h('span', { class: 'storageBucket__copy' },
-              h('span', { class: 'storageBucket__titleRow' }, h('strong', {}, storageName(entry)), h('span', { class: 'bucketMarks' }), permissionDots(entry)),
+              h('span', { class: 'storageBucket__titleRow' }, h('strong', {}, storageName(entry)), h('span', { class: 'bucketMarks' })),
               h('span', { class: 'bucketFacts' }),
+              h('span', { class: 'storageBucket__perms' }, permissionDots(entry), h('span', { class: 'storageBucket__versioning' })),
               entry.rootPrefix ? h('small', {}, `/${entry.rootPrefix}`) : null))));
           const row = h('button', {
             type: 'button', class: 'storageHost__row', 'aria-expanded': expanded ? 'true' : 'false', 'data-host': host.id,
@@ -535,7 +541,7 @@ BB.cfg = config;
             h('small', {}, `${host.provider.toUpperCase()} · ${plural(host.instances.length, 'bucket')}`)));
           return h('section', { class: 'storageHost', 'data-host': host.id }, row, list);
         }));
-        root.replaceChildren(trigger, permissionsButton(instance), switcherFacts(true), menu);
+        root.replaceChildren(trigger, permissionsGroup(instance, true), switcherFacts(true), menu);
         ui.switcherTrigger = trigger;
         ui.switcherMenu = menu;
       }
@@ -936,17 +942,24 @@ BB.cfg = config;
     return node;
   }
 
-  // The facts of a bucket that are true, in this order: versioning, encryption, Object Lock, lifecycle rules, usage. The
-  // line of the trigger has the button of the lifecycle rules, also for a bucket without rule: it is the way to the
-  // editor. The line of a bucket in the menu has no button: it is in the button of the bucket.
+  // The versioning icon of a bucket, after its permission icons: on or suspended. A bucket that never had versioning
+  // has no icon. The icon does not act: it has a tooltip and a label for a screen reader.
+  function versionMark(instance) {
+    const { versioning } = bucketState(instance);
+    if (versioning !== 'enabled' && versioning !== 'suspended') return null;
+    const [label, detail] = versioning === 'enabled'
+      ? ['Versioning: on', 'Versioning: on. A change or a delete keeps the older versions of a file.']
+      : ['Versioning: suspended', 'Versioning: suspended. The bucket keeps the older versions that it has, and makes no new ones.'];
+    return h('span', { class: ['versionMark', versioning === 'suspended' && 'is-muted'], 'data-fact': 'versioning', 'data-state': versioning, title: detail },
+      ic('git-commit'), h('span', { class: 'visually-hidden' }, `${label}. `));
+  }
+
+  // The facts of a bucket that are true, in this order: encryption, Object Lock, lifecycle rules, usage. The line of the
+  // trigger has the button of the lifecycle rules, also for a bucket without rule: it is the way to the editor. The
+  // line of a bucket in the menu has no button: it is in the button of the bucket.
   function bucketFacts(instance, { trigger = false } = {}) {
     const items = [];
-    const { versioning, rules } = bucketState(instance);
-    if (versioning === 'enabled') {
-      items.push(bucketFact('versioning', 'git-commit', 'Versioning: on', 'Versioning: on. A change or a delete keeps the older versions of a file.'));
-    } else if (versioning === 'suspended') {
-      items.push(bucketFact('versioning', 'git-commit', 'Versioning: suspended', 'Versioning: suspended. The bucket keeps the older versions that it has, and makes no new ones.', { tone: 'muted' }));
-    }
+    const { rules } = bucketState(instance);
     const lock = BB.encryption?.bucketLock(instance);
     if (lock) {
       const algorithm = instance.encryption === 'sse-s3' ? 'AES256' : String(instance.defaultEncryption || '');
@@ -1013,6 +1026,10 @@ BB.cfg = config;
     const current = Boolean(instance) && canRead();
     const facts = ui.switcher.querySelector('.storageSwitcher__facts');
     if (facts) fillNodes(facts, current ? bucketFacts(instance, { trigger: true }) : []);
+    const versioning = ui.switcher.querySelector('.storageSwitcher__versioning');
+    const mark = current ? versionMark(instance) : null;
+    if (versioning) fillNodes(versioning, [mark].filter(Boolean));
+    ui.switcher.classList.toggle('has-versioning', Boolean(versioning && mark));
     const full = current && fullUsage(instance);
     const others = state.instances.filter(entry => entry !== instance && fullUsage(entry));
     const otherText = others.length === 1 ? `Another bucket is almost full: ${storageName(others[0])}`
@@ -1030,6 +1047,7 @@ BB.cfg = config;
       if (!entry) continue;
       const readable = can('list', entry);
       fillNodes(node.querySelector('.bucketFacts'), readable ? bucketFacts(entry) : []);
+      fillNodes(node.querySelector('.storageBucket__versioning'), [readable ? versionMark(entry) : null].filter(Boolean));
       fillNodes(node.querySelector('.bucketMarks'), fullUsage(entry) ? [fullMark(entry)] : []);
       node.classList.toggle('is-full', fullUsage(entry));
       node.title = storageDetails(entry);

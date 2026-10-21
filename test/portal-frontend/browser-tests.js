@@ -1791,13 +1791,14 @@ test('selector: the bucket selector of the default interface, by host, with the 
   const trigger = page.locator('.storageSwitcher__trigger');
   assert.equal(await trigger.locator('strong').innerText(), 'SeaweedFS - primary');
   assert.equal(await trigger.locator('small').count(), 0);
+  // On a wide window, one line: the name, the permission icons, the versioning icon, the facts, the chevron.
+  await page.waitForSelector('#storageSwitcherVersioning [data-fact="versioning"]');
   const edge = await page.evaluate(() => {
-    const dots = document.querySelector('.storageSwitcher__perms .permDots').getBoundingClientRect();
-    const chevron = document.querySelector('.storageSwitcher__chevron').getBoundingClientRect();
-    const name = document.querySelector('.storageSwitcher__trigger strong').getBoundingClientRect();
-    return { dotsRight: dots.right, chevronLeft: chevron.left, nameRight: name.right, dotsLeft: dots.left };
+    const box = selector => document.querySelector(selector).getBoundingClientRect();
+    return [box('.storageSwitcher__trigger strong'), box('.storageSwitcher__perms .permDots'), box('#storageSwitcherVersioning'), box('.storageSwitcher__facts'), box('.storageSwitcher__chevron')]
+      .map(rect => [Math.round(rect.left), Math.round(rect.right)]);
   });
-  assert.ok(edge.chevronLeft - edge.dotsRight < 24 && edge.dotsLeft > edge.nameRight, `the permission dots at the right: ${JSON.stringify(edge)}`);
+  assert.ok(edge.every((item, index) => index === 0 || item[0] >= edge[index - 1][1]), `name, permissions, versioning, facts, chevron: ${JSON.stringify(edge)}`);
   const details = await trigger.getAttribute('title');
   assert.match(details, /id: seaweedfs-main/);
   assert.match(details, /host: seaweedfs/);
@@ -1844,9 +1845,9 @@ test('selector: the bucket selector of the default interface, by host, with the 
   await page.keyboard.press('Enter');
   await until(page, () => location.pathname.endsWith('/-/seaweedfs/seaweedfs-archive/'));
   assert.match(await page.locator('.storageSwitcher__trigger').innerText(), /SeaweedFS - archive/);
-  // A click outside closes the menu.
+  // A click outside closes the menu. The wide menu covers the centre of the listing: the click is at its left.
   await page.click('.storageSwitcher__trigger');
-  await page.click('#listing');
+  await page.click('#listing', { position: { x: 10, y: 10 } });
   assert.equal(await page.isHidden('#storageSwitcherMenu'), true);
   await page.context().close();
 });
@@ -4272,6 +4273,7 @@ for (const [instance, provider] of Object.entries(ENCRYPTED)) {
 
 const QUOTA_BYTES = 21474836480;
 const FACTS = '.storageSwitcher__facts';
+const VERSIONING = '#storageSwitcherVersioning';
 const usageItem = page => page.locator(`${FACTS} [data-fact="usage"]`);
 const factNames = (page, scope = FACTS) => page.locator(`${scope} .bucketFact`).evaluateAll(nodes => nodes.map(node => node.dataset.fact));
 const apiUsage = async (page, instance, fresh = false) => (await page.request.get(`${BASE}api/usage?instance=${instance}${fresh ? '&fresh=1' : ''}`)).json();
@@ -4286,7 +4288,7 @@ async function openAllBuckets(page) {
 }
 
 for (const [instance, provider] of Object.entries(PROVIDERS)) {
-  test(`usage: ${provider.name}: the second line of the selector shows the used bytes and the quota of the bucket, with a bar and a tooltip`, async () => {
+  test(`usage: ${provider.name}: the selector shows the used bytes and the quota of the bucket, with a bar and a tooltip`, async () => {
     const page = await newPage();
     const answer = await apiUsage(page, instance);
     assert.equal(answer.supported, true);
@@ -4309,22 +4311,22 @@ for (const [instance, provider] of Object.entries(PROVIDERS)) {
     if (answer.approximate) assert.match(title, /~ Approximate: /);
     if (instance === 'garage-main') assert.match(title, /Objects: [\d,]+ of 100,000/);
     assert.equal(await usageItem(page).locator('.usageMeter[role="meter"]').count(), 1);
-    // The facts are the second line of the trigger of the selector, under the name: no chip in the header.
+    // The facts are in the trigger of the selector, on the line of the name (a wide window): no chip in the header.
     const box = await page.evaluate(selector => {
       const rect = node => node.getBoundingClientRect();
       const facts = rect(document.querySelector(selector));
       const trigger = rect(document.querySelector('.storageSwitcher__trigger'));
       const name = rect(document.querySelector('.storageSwitcher__trigger strong'));
-      return { under: facts.top >= name.bottom - 1, inside: facts.left > trigger.left && facts.right < trigger.right && facts.top > trigger.top && facts.bottom < trigger.bottom,
-        aligned: Math.abs(facts.left - name.left) <= 1, old: document.querySelectorAll('#bucketChips, #bucketInfo, #bucketInfoButton, .bucketChip').length };
+      return { after: facts.left >= name.right, inside: facts.left > trigger.left && facts.right < trigger.right && facts.top > trigger.top && facts.bottom < trigger.bottom,
+        line: Math.abs((facts.top + facts.bottom) / 2 - (name.top + name.bottom) / 2) <= 3, old: document.querySelectorAll('#bucketChips, #bucketInfo, #bucketInfoButton, .bucketChip').length };
     }, FACTS);
-    assert.deepEqual(box, { under: true, inside: true, aligned: true, old: 0 });
-    // Versioning shows where the bucket has it on. Garage shows the usage only (and the way to the lifecycle rules).
-    assert.equal(await page.locator(`${FACTS} [data-fact="versioning"]`).count(), provider.versioning ? 1 : 0);
-    if (instance === 'garage-main') assert.deepEqual(await factNames(page), ['lifecycle', 'usage']);
-    if (instance === 'seaweedfs-main') assert.deepEqual(await factNames(page), ['versioning', 'lifecycle', 'usage']);
-    if (instance === 'minio-main') assert.deepEqual(await factNames(page), ['versioning', 'lifecycle', 'usage']);
-    if (provider.versioning) assert.match(await page.getAttribute(`${FACTS} [data-fact="versioning"]`, 'title'), /^Versioning: on\. /);
+    assert.deepEqual(box, { after: true, inside: true, line: true, old: 0 });
+    // Versioning shows after the permission icons where the bucket has it on. Garage shows the usage only (and the way
+    // to the lifecycle rules).
+    assert.equal(await page.locator(`${VERSIONING} [data-fact="versioning"]`).count(), provider.versioning ? 1 : 0);
+    assert.equal(await page.locator(`${FACTS} [data-fact="versioning"]`).count(), 0);
+    assert.deepEqual(await factNames(page), ['lifecycle', 'usage']);
+    if (provider.versioning) assert.match(await page.getAttribute(`${VERSIONING} [data-fact="versioning"]`, 'title'), /^Versioning: on\. /);
     // The real usage of the test stack is far from the limit: no warning.
     assert.equal(await page.isHidden('#usageBanner'), true);
     assert.equal(await page.locator('.storageSwitcher.is-full, .bucketMark').count(), 0);
@@ -4342,15 +4344,17 @@ test('usage: the facts of seaweedfs-locked, of the encrypted buckets and of a bu
   const page = await newPage();
   await open(page, '-/seaweedfs/seaweedfs-locked/');
   await page.waitForSelector(`${FACTS} [data-fact="usage"]:not([data-level="loading"])`);
-  // A bucket with Object Lock has versioning and its padlock; it does not encrypt. The chip of the rules shows for a bucket without rule too.
-  assert.deepEqual(await factNames(page), ['versioning', 'object-lock', 'lifecycle', 'usage']);
-  assert.equal(await page.getAttribute(`${FACTS} [data-fact="versioning"]`, 'title'), 'Versioning: on. A change or a delete keeps the older versions of a file.');
+  // A bucket with Object Lock has versioning (after the permission icons) and its padlock; it does not encrypt. The chip
+  // of the rules shows for a bucket without rule too.
+  assert.deepEqual(await factNames(page), ['object-lock', 'lifecycle', 'usage']);
+  assert.equal(await page.getAttribute(`${VERSIONING} [data-fact="versioning"]`, 'title'), 'Versioning: on. A change or a delete keeps the older versions of a file.');
+  assert.equal(await page.textContent(`${VERSIONING} [data-fact="versioning"] .visually-hidden`), 'Versioning: on. ');
   assert.equal(await page.locator(`${FACTS} [data-fact="object-lock"] .ic-lock`).count(), 1);
   assert.match(await page.textContent(`${FACTS} [data-fact="object-lock"] .visually-hidden`), /^Object Lock/);
   assert.equal(await page.getAttribute(`${FACTS} [data-fact="object-lock"]`, 'title'), 'Object Lock is on');
   // Each fact is an icon with a tooltip; its label is for a screen reader. The usage shows its text.
   const looks = await page.locator(`${FACTS} .bucketFact`).evaluateAll(nodes => nodes.map(node => [node.dataset.fact, Boolean(node.title), node.getBoundingClientRect().height <= 20]));
-  assert.deepEqual(looks, [['versioning', true, true], ['object-lock', true, true], ['lifecycle', true, true], ['usage', true, true]]);
+  assert.deepEqual(looks, [['object-lock', true, true], ['lifecycle', true, true], ['usage', true, true]]);
   assert.equal((await page.textContent(`${FACTS} [data-fact="lifecycle"] .bucketFact__short`)).trim(), '0');
   // No limit: "used", no bar.
   assert.match(await usageItem(page).locator('.bucketUsage__text').textContent(), /^~[\d.]+ (B|KB|MB) used$/);
@@ -4385,7 +4389,7 @@ test('usage: the facts of seaweedfs-locked, of the encrypted buckets and of a bu
   });
   await second.route(/\/api\/usage\?/, route => { usageRequests += 1; return route.continue(); });
   await open(second, MAIN);
-  await second.waitForSelector(`${FACTS} [data-fact="versioning"]`);
+  await second.waitForSelector(`${VERSIONING} [data-fact="versioning"]`);
   await second.click('.storageSwitcher__trigger');
   await sleep(500);
   assert.equal(await second.locator('[data-fact="usage"]').count(), 0);
@@ -4396,7 +4400,7 @@ test('usage: the facts of seaweedfs-locked, of the encrypted buckets and of a bu
   await second.context().close();
 });
 
-test('usage: each bucket of the menu has the second line of its facts, from the server, and no button in its button', async () => {
+test('usage: each bucket of the menu has its facts and its versioning icon, from the server, and no button in its button', async () => {
   const page = await newPage();
   // The server reads the facts of each bucket at start and again after 60 seconds: the seed changed them after the start.
   const deadline = Date.now() + 90000;
@@ -4414,12 +4418,17 @@ test('usage: each bucket of the menu has the second line of its facts, from the 
   assert.equal(byId['seaweedfs-locked'].versioningState, 'enabled');
   await open(page, MAIN);
   await openAllBuckets(page);
-  assert.deepEqual(await entryFacts(page, 'seaweedfs-main'), ['versioning', 'lifecycle', 'usage']);
+  assert.deepEqual(await entryFacts(page, 'seaweedfs-main'), ['lifecycle', 'usage']);
   assert.equal((await page.textContent('.storageBucket[data-instance="seaweedfs-main"] [data-fact="lifecycle"] .bucketFact__short')).trim(), '1');
-  assert.deepEqual(await entryFacts(page, 'seaweedfs-locked'), ['versioning', 'object-lock', 'usage']);
-  assert.deepEqual(await entryFacts(page, 'minio-locked'), ['versioning', 'object-lock', 'usage']);
-  assert.deepEqual(await entryFacts(page, 'seaweedfs-encrypted'), ['versioning', 'encryption', 'usage']);
-  assert.deepEqual(await entryFacts(page, 'minio-encrypted'), ['versioning', 'encryption', 'usage']);
+  assert.deepEqual(await entryFacts(page, 'seaweedfs-locked'), ['object-lock', 'usage']);
+  assert.deepEqual(await entryFacts(page, 'minio-locked'), ['object-lock', 'usage']);
+  assert.deepEqual(await entryFacts(page, 'seaweedfs-encrypted'), ['encryption', 'usage']);
+  assert.deepEqual(await entryFacts(page, 'minio-encrypted'), ['encryption', 'usage']);
+  // The versioning icon follows the permission icons of each bucket that has versioning on, and not the facts.
+  const versioned = await page.locator('.storageBucket').evaluateAll(nodes => nodes.filter(node => node.querySelector('.storageBucket__perms .permDots + .storageBucket__versioning [data-fact="versioning"]')).map(node => node.dataset.instance));
+  for (const id of ['seaweedfs-main', 'seaweedfs-locked', 'seaweedfs-encrypted', 'minio-main', 'minio-locked', 'minio-encrypted']) assert.ok(versioned.includes(id), `${id}: ${versioned}`);
+  assert.equal(versioned.some(id => id.startsWith('garage-')), false, versioned.join());
+  assert.equal(await page.locator('.storageBucket .bucketFacts [data-fact="versioning"]').count(), 0);
   // Garage: the usage only (a rule count when the bucket has rules), and the key in the colour of a warning.
   const garageRules = byId['garage-main'].lifecycleRules > 0 ? ['lifecycle'] : [];
   assert.deepEqual(await entryFacts(page, 'garage-main'), [...garageRules, 'usage']);
@@ -4430,15 +4439,16 @@ test('usage: each bucket of the menu has the second line of its facts, from the 
     assert.equal(await page.locator(`.storageBucket[data-instance="${id}"] .usageMeter`).count(), 1, id);
   }
   assert.match(await page.textContent('.storageBucket[data-instance="minio-locked"] .bucketUsage__text'), /^~?[\d.]+ (B|KB|MB) used$/);
-  // The line is under the name, in the button of the bucket, with no button: a button cannot hold a button.
+  // The facts are on the line of the name (a wide window), in the button of the bucket, with no button: a button cannot
+  // hold a button.
   assert.equal(await page.locator('.storageBucket button, .storageSwitcher__trigger button').count(), 0);
   const line = await page.evaluate(() => {
     const entry = document.querySelector('.storageBucket[data-instance="seaweedfs-locked"]');
     const name = entry.querySelector('strong').getBoundingClientRect();
     const facts = entry.querySelector('.bucketFacts').getBoundingClientRect();
-    return { under: facts.top >= name.bottom - 1, left: Math.abs(facts.left - name.left) <= 1, inside: facts.bottom <= entry.getBoundingClientRect().bottom };
+    return { after: facts.left >= name.right, line: Math.abs(facts.top + facts.height / 2 - name.top - name.height / 2) <= 3, inside: facts.bottom <= entry.getBoundingClientRect().bottom };
   });
-  assert.deepEqual(line, { under: true, left: true, inside: true });
+  assert.deepEqual(line, { after: true, line: true, inside: true });
   // The highlight of the current bucket stays.
   assert.equal(await page.getAttribute('.storageBucket[data-instance="seaweedfs-main"]', 'aria-selected'), 'true');
   assert.deepEqual(page.errors, []);
@@ -4580,56 +4590,187 @@ test('usage: the tooltip of a bucket in the selector has its usage', async () =>
   await page.context().close();
 });
 
-test('usage: the header keeps its height with the two lines of the selector at 1440, 1280 and 900, and on a phone the second line stays', async () => {
-  for (const viewport of [{ width: 1440, height: 900 }, { width: 1280, height: 720 }, { width: 900, height: 720 }]) {
+// The geometry of the bucket selector: the header, the trigger, the elements over it, and the scroll of the page. A
+// centre is the vertical centre of a box, in whole pixels.
+function selectorGeometry(page) {
+  return page.evaluate(() => {
+    const rect = node => node.getBoundingClientRect();
+    const centre = node => (node && rect(node).width > 0 ? Math.round(rect(node).top + rect(node).height / 2) : null);
+    const facts = document.querySelector('.storageSwitcher__facts');
+    const trigger = rect(document.querySelector('.storageSwitcher__trigger'));
+    const name = document.querySelector('.storageSwitcher__trigger strong');
+    const usage = facts.querySelector('.bucketUsage__text');
+    return {
+      view: window.innerWidth, page: document.documentElement.scrollWidth, header: rect(document.querySelector('.appHeader')).height,
+      row: [centre(document.querySelector('.appBrand')), centre(document.querySelector('#storageSwitcher')), centre(document.querySelector('.themeSelect'))],
+      width: Math.round(trigger.width), height: Math.round(trigger.height),
+      centres: [centre(name), centre(document.querySelector('.storageSwitcher__perms')), centre(facts), centre(document.querySelector('.storageSwitcher__chevron'))],
+      fit: facts.scrollWidth <= facts.clientWidth, inside: rect(facts).left >= trigger.left && rect(facts).right <= trigger.right,
+      factRows: new Set(Array.from(facts.querySelectorAll('.bucketFact')).map(centre)).size, under: rect(facts).top >= rect(name).bottom - 1,
+      name: Math.round(rect(name).width), usage: usage ? Math.round(rect(usage).width) : 0
+    };
+  });
+}
+
+const spread = values => Math.max(...values) - Math.min(...values);
+
+// The instances of the test stack that show each kind of fact: usage with a limit and a rule count, Object Lock,
+// encryption, no versioning.
+const LINE_INSTANCES = ['seaweedfs-main', 'seaweedfs-locked', 'seaweedfs-encrypted', 'garage-main', 'minio-main'];
+
+test('selector: on a wide window (1440 and 1280) the trigger is one line, the facts of each bucket are fully visible, and the header keeps its height', async () => {
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 1280, height: 720 }]) {
     const page = await newPage({ viewport });
-    await open(page, MAIN);
-    await page.waitForSelector(`${FACTS} [data-fact="usage"][data-used-bytes]`);
-    const box = await page.evaluate(selector => {
-      const rect = node => node.getBoundingClientRect();
-      const facts = document.querySelector(selector);
-      return { page: document.documentElement.scrollWidth, view: window.innerWidth, header: rect(document.querySelector('.appHeader')).height,
-        trigger: rect(document.querySelector('.storageSwitcher__trigger')).height, width: rect(document.querySelector('.storageSwitcher__trigger')).width,
-        rows: new Set(Array.from(facts.querySelectorAll('.bucketFact')).map(node => Math.round(rect(node).top + rect(node).height / 2))).size,
-        overflow: rect(facts).right <= rect(document.querySelector('.storageSwitcher__chevron')).left,
-        usageText: rect(facts.querySelector('.bucketUsage__text')).width, meter: rect(facts.querySelector('.usageMeter')).width };
-    }, FACTS);
-    // One row in the header, as before the second line: 56 px and its border.
-    assert.ok(box.page <= box.view, JSON.stringify(box));
-    assert.ok(box.header <= 59.5, JSON.stringify(box));
-    assert.ok(Math.abs(box.trigger - 46) < 1, JSON.stringify(box));
-    assert.ok(box.width >= 292, JSON.stringify(box));
-    assert.equal(box.rows, 1, JSON.stringify(box));
-    assert.equal(box.overflow, true, JSON.stringify(box));
-    assert.ok(box.usageText > 1 && box.meter > 0, JSON.stringify(box));
+    for (const instance of LINE_INSTANCES) {
+      await open(page, `-/${instance.split('-')[0]}/${instance}/`);
+      await page.waitForSelector(`${FACTS} [data-fact="usage"][data-used-bytes]`);
+      if (instance !== 'garage-main') await page.waitForSelector(`${VERSIONING} [data-fact="versioning"]`);
+      const box = await selectorGeometry(page);
+      const where = `${instance} at ${viewport.width}: ${JSON.stringify(box)}`;
+      // One line: the name, the permission icons, the facts and the chevron have the same vertical centre.
+      assert.ok(spread(box.centres) <= 3 && box.centres.every(Number.isInteger), where);
+      assert.ok(box.height <= 44, where);
+      assert.ok(box.width >= 560 && box.width <= 640, where);
+      assert.ok(box.name >= 60, where);
+      // The facts never wrap and are never cut.
+      assert.equal(box.fit, true, where);
+      assert.equal(box.inside, true, where);
+      assert.equal(box.factRows, 1, where);
+      assert.ok(box.usage > 1, where);
+      // The header keeps one row and its height of round 6 at most (59 px); the page has no horizontal scroll.
+      assert.ok(box.header <= 59.5 && spread(box.row) <= 3, where);
+      assert.ok(box.page <= box.view, where);
+    }
     assert.deepEqual(page.errors, []);
     await page.context().close();
   }
-  const phone = await newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
-  await open(phone, '-/seaweedfs/seaweedfs-locked/');
-  await phone.waitForSelector(`${FACTS} [data-fact="usage"][data-used-bytes]`);
-  // No "i" button and no popover: the selector has the facts on its second line, inside the window.
-  assert.equal(await phone.locator('#bucketInfoButton, #bucketChips').count(), 0);
-  const row = await phone.evaluate(selector => {
-    const rect = node => node.getBoundingClientRect();
-    const facts = rect(document.querySelector(selector));
-    return { left: facts.left, right: facts.right, trigger: rect(document.querySelector('.storageSwitcher__trigger')),
-      header: rect(document.querySelector('.appHeader')).height, page: document.documentElement.scrollWidth,
-      shown: Array.from(document.querySelectorAll(`${selector} .bucketFact`)).filter(node => rect(node).width > 0).map(node => node.dataset.fact) };
-  }, FACTS);
-  assert.ok(row.left >= row.trigger.left && row.right <= row.trigger.right && row.page <= 390, JSON.stringify(row));
-  assert.ok(row.header <= 111.5, JSON.stringify(row));
-  assert.deepEqual(row.shown, ['versioning', 'object-lock', 'lifecycle', 'usage']);
-  // The menu: each bucket keeps its two lines, in the window.
-  await phone.tap('.storageSwitcher__trigger');
-  const menu = await phone.evaluate(() => Array.from(document.querySelectorAll('.storageHost[data-host="seaweedfs"] .storageBucket')).map(node => {
-    const facts = node.querySelector('.bucketFacts').getBoundingClientRect();
-    return facts.height > 0 && facts.right <= window.innerWidth && facts.top >= node.querySelector('strong').getBoundingClientRect().bottom - 1;
+});
+
+test('selector: on a wide window each bucket of the menu is one line, and a bucket with a root prefix has it under its name', async () => {
+  const page = await newPage({ viewport: { width: 1440, height: 900 } });
+  await page.route(/\/api\/instances(\?|$)/, async route => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body.instances.find(item => item.id === 'seaweedfs-archive').rootPrefix = 'tenant-a/';
+    await route.fulfill({ response, json: body });
+  });
+  await open(page, MAIN);
+  await openAllBuckets(page);
+  const entries = await page.locator('.storageBucket').evaluateAll(nodes => nodes.map(node => {
+    const rect = item => item.getBoundingClientRect();
+    const centre = item => Math.round(rect(item).top + rect(item).height / 2);
+    const name = node.querySelector('strong');
+    const facts = node.querySelector('.bucketFacts');
+    const prefix = node.querySelector('small');
+    return { id: node.dataset.instance, height: Math.round(rect(node).height), centres: [centre(name), centre(facts), centre(node.querySelector('.permDots'))],
+      fit: facts.scrollWidth <= facts.clientWidth, order: rect(name).right <= rect(facts).left && rect(facts).right <= rect(node.querySelector('.permDots')).left,
+      prefix: prefix ? { text: prefix.textContent, under: rect(prefix).top >= rect(name).bottom - 1, left: Math.abs(rect(prefix).left - rect(name).left) <= 1 } : null };
   }));
-  assert.deepEqual(menu, [true, true, true, true]);
-  assert.ok(await phone.evaluate(() => document.documentElement.scrollWidth) <= 390);
-  assert.deepEqual(phone.errors, []);
-  await phone.context().close();
+  assert.equal(entries.length, 9);
+  for (const entry of entries) {
+    const where = JSON.stringify(entry);
+    assert.ok(spread(entry.centres) <= 3, where);
+    assert.equal(entry.fit, true, where);
+    assert.equal(entry.order, true, where);
+    if (entry.id === 'seaweedfs-archive') {
+      // The root prefix is the second line of that entry only.
+      assert.deepEqual(entry.prefix, { text: '/tenant-a/', under: true, left: true }, where);
+      assert.ok(entry.height > 44, where);
+    } else {
+      assert.equal(entry.prefix, null, where);
+      assert.ok(entry.height <= 44, where);
+    }
+  }
+  // The menu is as wide as the selector, with its 8 px at the left. The rows of the hosts keep their two lines.
+  const menu = await page.evaluate(() => {
+    const trigger = document.querySelector('.storageSwitcher__trigger').getBoundingClientRect();
+    const box = document.querySelector('#storageSwitcherMenu').getBoundingClientRect();
+    const host = document.querySelector('.storageHost__row');
+    return { left: Math.round(trigger.left - box.left), right: Math.round(box.right - trigger.right), width: Math.round(box.width),
+      host: host.querySelector('small').getBoundingClientRect().top >= host.querySelector('strong').getBoundingClientRect().bottom - 1 };
+  });
+  assert.deepEqual(menu, { left: 8, right: 0, width: 628, host: true });
+  assert.equal(await page.getAttribute('.storageBucket[data-instance="seaweedfs-main"]', 'aria-selected'), 'true');
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+test('selector: the versioning icon follows the trash icon, in the trigger and in the menu, on one line and on two lines; Garage has none', async () => {
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 1099, height: 800 }]) {
+    const page = await newPage({ viewport });
+    await open(page, MAIN);
+    await page.waitForSelector(`${VERSIONING} [data-fact="versioning"]`);
+    const near = scope => page.evaluate(selector => {
+      const trash = document.querySelector(`${selector} [data-permission="delete"]`).getBoundingClientRect();
+      const mark = document.querySelector(`${selector} [data-fact="versioning"]`).getBoundingClientRect();
+      return { gap: Math.round(mark.left - trash.right), centre: Math.round(Math.abs(mark.top + mark.height / 2 - trash.top - trash.height / 2)), size: [Math.round(mark.width), Math.round(mark.height)] };
+    }, scope);
+    const trigger = await near('.storageSwitcher');
+    assert.ok(trigger.gap >= 0 && trigger.gap <= 12 && trigger.centre <= 2, `${viewport.width}: ${JSON.stringify(trigger)}`);
+    assert.deepEqual(trigger.size, [16, 16]);
+    // The icon is not a part of the button of the permissions, and it is not a button.
+    assert.equal(await page.locator('.storageSwitcher__perms [data-fact="versioning"], button[data-fact="versioning"]').count(), 0);
+    assert.equal(await page.getAttribute(`${VERSIONING} [data-fact="versioning"]`, 'tabindex'), null);
+    // A click on it opens the menu of the buckets, and not the permissions.
+    await page.click(`${VERSIONING} [data-fact="versioning"]`);
+    assert.equal(await page.isVisible('#storageSwitcherMenu'), true);
+    assert.equal(await page.locator('.permList').count(), 0);
+    const entry = await near('.storageBucket[data-instance="seaweedfs-main"]');
+    assert.ok(entry.gap >= 0 && entry.gap <= 12 && entry.centre <= 2, `${viewport.width}: ${JSON.stringify(entry)}`);
+    assert.equal(await page.locator('.storageBucket[data-instance="garage-main"] [data-fact="versioning"]').count(), 0);
+    await page.keyboard.press('Escape');
+    // Garage has no versioning: no icon in the trigger.
+    await open(page, '-/garage/garage-main/');
+    await page.waitForSelector(`${FACTS} [data-fact="usage"][data-used-bytes]`);
+    assert.equal(await page.locator(`${VERSIONING} > *`).count(), 0);
+    assert.equal(await page.locator('#storageSwitcher.has-versioning').count(), 0);
+    assert.deepEqual(page.errors, []);
+    await page.context().close();
+  }
+});
+
+test('selector: below 1100 px the trigger keeps its two lines, with no horizontal scroll and no higher header at 1099, 900, 760 and 390', async () => {
+  // The heights of the header in round 6: one row of 59 px from 761 px up, two rows below.
+  const cases = [
+    { viewport: { width: 1100, height: 800 }, lines: 1, header: 59.5 },
+    { viewport: { width: 1099, height: 800 }, lines: 2, header: 59.5 },
+    { viewport: { width: 900, height: 800 }, lines: 2, header: 59.5 },
+    { viewport: { width: 760, height: 800 }, lines: 2, header: 99.5 },
+    { viewport: { width: 390, height: 844 }, lines: 2, header: 111.5, phone: true }
+  ];
+  for (const item of cases) {
+    const page = await newPage(item.phone ? { viewport: item.viewport, isMobile: true, hasTouch: true } : { viewport: item.viewport });
+    await open(page, '-/seaweedfs/seaweedfs-locked/');
+    await page.waitForSelector(`${FACTS} [data-fact="usage"][data-used-bytes]`);
+    await page.waitForSelector(`${VERSIONING} [data-fact="versioning"]`);
+    const box = await selectorGeometry(page);
+    const where = `${item.viewport.width}: ${JSON.stringify(box)}`;
+    assert.ok(box.page <= box.view, where);
+    assert.ok(box.header <= item.header, where);
+    assert.equal(box.fit, true, where);
+    assert.equal(box.inside, true, where);
+    assert.equal(box.factRows, 1, where);
+    if (item.lines === 1) {
+      assert.ok(spread(box.centres) <= 3 && box.height <= 44, where);
+    } else {
+      assert.equal(box.under, true, where);
+      assert.ok(Math.abs(box.height - 46) < 1, where);
+    }
+    assert.deepEqual(await factNames(page), ['object-lock', 'lifecycle', 'usage']);
+    if (item.phone) {
+      // No "i" button and no popover. The menu: each bucket keeps its two lines, in the window.
+      assert.equal(await page.locator('#bucketInfoButton, #bucketChips').count(), 0);
+      await page.tap('.storageSwitcher__trigger .storageSwitcher__icon');
+      const menu = await page.evaluate(() => Array.from(document.querySelectorAll('.storageHost[data-host="seaweedfs"] .storageBucket')).map(node => {
+        const facts = node.querySelector('.bucketFacts').getBoundingClientRect();
+        return facts.height > 0 && facts.right <= window.innerWidth && facts.top >= node.querySelector('strong').getBoundingClientRect().bottom - 1;
+      }));
+      assert.deepEqual(menu, [true, true, true, true]);
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth) <= 390);
+    }
+    assert.deepEqual(page.errors, []);
+    await page.context().close();
+  }
 });
 
 // The answer of /api/usage for a part of the limit of 20 GiB, as the server gives it.

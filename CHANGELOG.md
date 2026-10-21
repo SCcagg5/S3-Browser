@@ -190,15 +190,21 @@ This document uses ASD-STE100 Simplified Technical English.
 
 ### Interface `portal`: facts of the buckets in the selector, warning of a full bucket, summary of the details
 
-- The trigger of the bucket selector has a second line with the facts of the current bucket: versioning (Tabler
-  `git-commit`, the tooltip says "Versioning: on" or "Versioning: suspended"), the encryption (a key), Object Lock (a
+- The trigger of the bucket selector shows the facts of the current bucket: the encryption (a key), Object Lock (a
   padlock, with the default retention), the lifecycle rules (an hourglass and the count) and the usage, for example
-  `12.3 GB of 20 GB` with a thin bar or `12.3 GB used`. Each fact has a tooltip and shows only when it is true. A bucket
-  that never had versioning shows no versioning icon. An approximate number starts with `~`. The bar has the colour of
-  a warning from 80 % and of an error from 95 %. The header keeps its height.
+  `12.3 GB of 20 GB` with a thin bar or `12.3 GB used`. Each fact has a tooltip and shows only when it is true. An
+  approximate number starts with `~`. The bar has the colour of a warning from 80 % and of an error from 95 %.
+- The versioning icon (Tabler `git-commit`, the tooltip says "Versioning: on" or "Versioning: suspended") is directly
+  after the read, write and delete icons of the bucket, in the trigger and in each bucket of the list. It is not a part
+  of the button of the permissions, and it does not act. A bucket that never had versioning shows no versioning icon.
+- From 1100 px up, the trigger of the selector is one line of 40 px: the name, the permission and versioning icons, the
+  facts and the chevron. The selector is 620 px wide (less when the header has less space), and the list is as wide.
+  The name keeps 120 px at least, and the facts never wrap: the usage text gets an ellipsis first. Each bucket of the
+  list is one line too, with its root prefix under the name when it has one. Below 1100 px, the trigger and each
+  bucket have two lines: the name and the icons, then the facts. The header never gets higher.
 - The chip of the lifecycle rules opens the rules. It is a button next to the trigger, not in it. The keyboard goes
   from the trigger to the permission icons, then to this chip.
-- Each bucket in the list of the selector has the same second line, with the facts of that bucket. The page reads the
+- Each bucket in the list of the selector has the same facts, with the values of that bucket. The page reads the
   usage of every bucket at load and when the list opens, 4 at a time, with "…" while a read waits.
 - `/api/instances` gives `versioningState` (`enabled`, `suspended` or `off`) and `lifecycleRules` (the number of rules)
   of each bucket. The probe at start reads them, and a request of `/api/instances` reads them again in the background
@@ -275,9 +281,11 @@ This document uses ASD-STE100 Simplified Technical English.
   on each provider, a bucket with no quota, the limit of `quota_bytes`, an instance without usage, a failed read, the growth of
   the usage after an upload on Garage and SeaweedFS, the tooltips of the selector, the pills of the details and the
   sections that close with the keyboard.
-- Other tests check the facts of `seaweedfs-locked` and of the encrypted buckets, the second line of each bucket in the
-  list, 4 reads of the usage at a time, the chip of the lifecycle rules (mouse and keyboard), the height of the header
-  at 1440, 1280 and 900 px, and the second line on a phone. Tests answer `/api/usage` with 91 %, 100 % and 50 % and
+- Other tests check the facts of `seaweedfs-locked` and of the encrypted buckets, the facts of each bucket in the list,
+  4 reads of the usage at a time, and the chip of the lifecycle rules (mouse and keyboard). At 1440 and 1280 px, the
+  trigger is one line for five instances, its facts are fully visible, each bucket of the list is one line (a root
+  prefix gives a second line), and the header keeps its height. The versioning icon is within 12 px of the delete
+  icon, and Garage has none. At 1099, 900, 760 and 390 px, the two lines stay, with no horizontal scroll. Tests answer `/api/usage` with 91 %, 100 % and 50 % and
   check the banner, its role, its texts, the marks of the selector, the mark of another full bucket, and no warning
   without a limit. A test checks that Storage object and Tags are side by side in the details at 1440 px, and one under
   the other at 390 px. The settings menu has no part wider
