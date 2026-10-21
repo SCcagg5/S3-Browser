@@ -97,6 +97,17 @@ This document uses ASD-STE100 Simplified Technical English.
   Lock. The delete adds a delete marker. A version that a lock protects stays in the bucket." A warning after the
   delete says the same. A delete without a version is not refused: the provider adds a delete marker, and the locked
   version stays.
+- The listing shows a small closed padlock at the right of the name of a file with a lock: a legal hold or a retention
+  whose date is in the future. Its tooltip says "Object Lock: Governance until 2027-10-20 10:00 UTC", "Object Lock:
+  Compliance until ...", "Object Lock: legal hold", or a retention and ", legal hold". The page reads the lock from the
+  HEAD request that it sends for the encryption, so the lock adds no request. A retention whose date is past gives no
+  padlock. A change of the lock in the details makes the listing read that file again.
+- The gateway `/s3` gives the headers `x-amz-object-lock-mode`, `x-amz-object-lock-retain-until-date` and
+  `x-amz-object-lock-legal-hold` of the provider. They were removed before.
+- The bucket selector shows a closed padlock next to a bucket with Object Lock. The tooltip says "Object Lock is on" and
+  the default retention of the bucket when it has one. `/api/instances` gives `objectLockDefault` (`mode`, and `days` or
+  `years`), from the probe at start.
+- The bar of the preview page shows the same padlock and tooltip for the version on the page.
 
 ### Listing of a bucket with versioning
 
@@ -132,16 +143,22 @@ This document uses ASD-STE100 Simplified Technical English.
 - `/api/instances` gives `encryption` (the key), `defaultEncryption` (the algorithm of the default encryption of the
   bucket at start, or `""`) and `encryptionApplied` (`yes`, `no` or `unknown` for `"sse-s3"`: the provider applies the
   header, ignores it, or is not known).
-- The bucket selector shows a lock next to a bucket that encrypts, with the reason in its tooltip. A Garage bucket with
-  `"sse-s3"` gets an open lock: Garage does not encrypt.
-- The listing shows a small lock at the right of the name of an encrypted file, with the encryption in its tooltip. The
+- The mark of the encryption is a key (Tabler `key`), and the mark of Object Lock is a closed padlock. A padlock tells
+  "lock", so it is not the mark of the encryption.
+- The bucket selector shows a key next to a bucket that encrypts, with the reason in its tooltip. A Garage bucket with
+  `"sse-s3"` gets a key in the colour of a warning: Garage does not encrypt.
+- The listing shows a small key at the right of the name of an encrypted file, with the encryption in its tooltip. The
   page reads it with a HEAD request for the files on the page: 4 requests at the same time, 100 files at most, one
-  request for each file. The new setting "Show the encryption of the objects" starts or stops it for each bucket. It is
-  on by default for a bucket that encrypts, and off for the other buckets.
-- The preview page of an object with a key of the client (SSE-C) shows the name and the path of the object and the
-  message "This object is encrypted with a key of the client (SSE-C). The browser cannot read it without that key."
-  The title was "Loading" and the message "HTTP 400". The link to the original and the downloads give the same
-  message.
+  request for each file. The new setting "Show the encryption and the lock of the objects" starts or stops it for each
+  bucket. It is on by default for a bucket that encrypts or that has Object Lock, and off for the other buckets. A
+  choice that the browser kept with the old name of the setting still applies.
+- The bar of the preview page shows the key and the padlock of the version on the page, next to its size, with the
+  tooltips of the listing. The marks come from the HEAD request of the preview: a version in `?version=` shows its own
+  state. The comparison shows no mark.
+- The preview page of an object with a key of the client (SSE-C) shows the name and the path of the object, the key
+  with the tooltip "Encrypted with a key of the client (SSE-C)", and the message "This object is encrypted with a key of
+  the client (SSE-C). The browser cannot read it without that key." The title was "Loading" and the message
+  "HTTP 400". The link to the original and the downloads give the same message.
 
 ### Uploads and deletes
 
@@ -177,8 +194,19 @@ This document uses ASD-STE100 Simplified Technical English.
   check that a Compliance retention cannot be shortened. A test checks that Garage hides the section.
 - The browser tests restore and delete versions with the buttons of the picker, in the details and in the preview, and
   check the permissions of the buttons. The Object Lock test deletes the locked version with the Delete button of the
-  picker. Other tests check the locks of the buckets and of the files, the count of the HEAD requests, the SSE-C
+  picker. Other tests check the keys of the buckets and of the files, the count of the HEAD requests, the SSE-C
   message of the preview and of the downloads, and the sentence of Object Lock in the confirmation of a delete.
+- On `seaweedfs-locked` and `minio-locked`, a test writes a file with a legal hold, one with a Governance retention,
+  one with a Compliance retention, one with a past retention, one plain file, and one file with SSE-S3 and a lock. It
+  checks the marks and the tooltips of the listing and of the preview, the padlock of the bucket, the setting, and the
+  count of the HEAD requests: one for each file, and no request of `/api/object-lock`. On the buckets `encrypted`, a
+  test writes a version without encryption and a version with SSE-S3, and checks the marks of the preview and the
+  section "Encryption" of the details for each version.
+- A test checks that each label of the treemap has a contrast ratio of 4.5 or more on its tile, also the tile "Others",
+  in the light and the dark theme. A test checks that the overview of the insights has no scrollbar at 1440x900,
+  1366x768 and 1280x720.
+- A test opens the popover of suggestions of the metadata editor, and chooses a value with the mouse and with the
+  keyboard. It also types a free value.
 - The test image takes the build arguments `MULTIPART_COPY_THRESHOLD` and `MULTIPART_COPY_PART_SIZE`. The portal test
   stack copies in parts from 8 KiB up, in parts of 5 MiB. A browser test copies and renames a file of 11 MiB on each
   provider and compares the SHA-256 of the result. A second test restores a large version on SeaweedFS and MinIO.
@@ -245,6 +273,20 @@ This document uses ASD-STE100 Simplified Technical English.
   SeaweedFS compares it with the current object and answers HTTP 412.
 - A JSON file that fits in one page shows its totals at once and has no button to count lines and pages. The root of
   the JSON tree stays open.
+- The version picker has no text "Current" or "Older". The newest version is the current version: a small dot of the
+  accent colour marks it, with the tooltip "Current". The dot is the first column of the menu, and the first element of
+  the button for the current version. Two versions with the same date put the current version first.
+- In the bar of the preview page, the version picker has no right margin. That margin is for the close cross of the
+  details window, and only the details window keeps it.
+- The metadata editor has a grid of labels and fields. Each field has the width of its value: for example 28
+  characters for Content-Type and 14 for Content-Language. The suggestions show in a small popover with the look of the
+  other menus: the guessed Content-Type first, the common types, Cache-Control values, encodings, languages and dates.
+  Down, Up, Enter and Escape work, and a free value stays possible. The native list of the browser is gone.
+- The folder insights show "computed in N ms" in the subtitle, after the count and the size. The footer and the blocks
+  of totals are gone. The overview fits in the window with no scrollbar at 1440x900, 1366x768 and 1280x720: the lists of
+  files share the height that is left, and each list scrolls when it is too long.
+- The label of each treemap tile is black or white: the colour with the higher contrast on the tile. The tile "Others"
+  has its label in the colour of the text on a light tint: its label had the colour of its tile.
 
 ## 2.0.0
 

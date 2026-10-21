@@ -4,8 +4,8 @@
  *   (SSE-C) that the provider refused to read. S3-Browser never shows or asks for such a key;
  * - the bucket: its default encryption (GET /api/encryption), when the server could read it at start.
  * The section stays hidden when the provider reports no encryption.
- * The module also gives the lock next to the name of a bucket (from /api/instances), the lock next to the name of a
- * file in the listing (from a HEAD request), and the message for an object with a key of the client.
+ * The module also gives the key next to the name of a bucket (from /api/instances), the key next to the name of a
+ * file in the listing and in the preview (from a HEAD request), and the message for an object with a key of the client.
  */
 (function () {
   'use strict';
@@ -76,7 +76,7 @@
       host.remove();
       return;
     }
-    const children = [h('div', { class: 'bb-details-section-title' }, icon('lock-outline'), ' Encryption'), h('div', { class: 'bb-kv' }, rows)];
+    const children = [h('div', { class: 'bb-details-section-title' }, icon('key'), ' Encryption'), h('div', { class: 'bb-kv' }, rows)];
     if (customerKey || header(headers, 'x-amz-server-side-encryption-customer-algorithm')) {
       children.push(h('p', { class: 'encryptionNote', 'data-encryption-note': '' }, 'The provider reads this object only with the key of the client. S3-Browser does not ask for this key: the preview, the download and the copy are not available.'));
     }
@@ -105,16 +105,17 @@
   // The lock of a bucket and the lock of a file
   // ---------------------------------------------------------------------------------------------------------------
 
-  // The lock of a bucket tells the truth of the provider. A default encryption of the bucket encrypts each new object.
+  // The key of a bucket tells the truth of the provider. A default encryption of the bucket encrypts each new object.
   // The key encryption = "sse-s3" encrypts only on a provider that applies it (encryptionApplied of /api/instances):
-  // Garage accepts the header and does not encrypt, so its bucket gets an open lock. Null: no lock.
+  // Garage accepts the header and does not encrypt, so its bucket gets a key in the colour of a warning. Null: no key.
+  // The key is the mark of the encryption. The padlock is the mark of Object Lock (objectlock.js).
   function bucketLock(instance) {
     const algorithm = String(instance?.defaultEncryption || '');
     const applied = String(instance?.encryptionApplied || '');
-    if (instance?.encryption === 'sse-s3' && applied === 'yes') return { icon: 'lock', tone: 'on', title: 'Encrypted: SSE-S3 for each new object' };
-    if (algorithm) return { icon: 'lock', tone: 'on', title: `Default encryption of the bucket: ${algorithm}` };
-    if (instance?.encryption === 'sse-s3' && applied === 'no') return { icon: 'lock-open', tone: 'warn', title: 'SSE-S3 requested; the provider does not encrypt the objects (Garage)' };
-    if (instance?.encryption === 'sse-s3') return { icon: 'lock', tone: 'warn', title: 'SSE-S3 requested; the provider may not encrypt' };
+    if (instance?.encryption === 'sse-s3' && applied === 'yes') return { icon: 'key', tone: 'on', title: 'Encrypted: SSE-S3 for each new object' };
+    if (algorithm) return { icon: 'key', tone: 'on', title: `Default encryption of the bucket: ${algorithm}` };
+    if (instance?.encryption === 'sse-s3' && applied === 'no') return { icon: 'key', tone: 'warn', title: 'SSE-S3 requested; the provider does not encrypt the objects (Garage)' };
+    if (instance?.encryption === 'sse-s3') return { icon: 'key', tone: 'warn', title: 'SSE-S3 requested; the provider may not encrypt' };
     return null;
   }
 
@@ -135,12 +136,14 @@
   }
 
   // The encryption of a file in the listing: a HEAD request, and for a refusal with 400 the confirmation of
-  // /api/media-info. The answer is the text of the tooltip, or '' when the provider reports nothing.
+  // /api/media-info. The answer has the text of the tooltip (encryption, '' when the provider reports nothing) and the
+  // headers of the HEAD answer, which also give the lock of the file. A refused HEAD gives no headers.
   async function objectEncryption(key, instance) {
     try {
-      return objectEncryptionTitle((await BB.api.head(key, '', instance)).headers);
+      const { headers } = await BB.api.head(key, '', instance);
+      return { encryption: objectEncryptionTitle(headers), headers };
     } catch (error) {
-      if (await customerKeyRefusal(error, key, { instance })) return 'Encrypted with a key of the client (SSE-C)';
+      if (await customerKeyRefusal(error, key, { instance })) return { encryption: 'Encrypted with a key of the client (SSE-C)', headers: {} };
       throw error;
     }
   }

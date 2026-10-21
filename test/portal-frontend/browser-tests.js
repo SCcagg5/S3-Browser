@@ -794,7 +794,7 @@ test('listing: the columns are Name, Tags, Versions, Size and Modified, with the
   // The Details of the file list the three versions.
   await openDetails(page, 'report.txt');
   await page.waitForSelector('.versionPicker__button');
-  assert.match(await page.textContent('.versionPicker__button'), /v3.*Current/);
+  assert.match(await pickerText(page), /^● v3/);
   assert.deepEqual(page.errors, []);
   await page.context().close();
 });
@@ -899,27 +899,44 @@ async function pickVersion(page, side, index) {
 }
 
 const cleanText = items => items.map(item => item.replace(/\s+/g, ' ').trim());
+// The text of a version picker, with "● " in front when the dot of the current version is in it.
+const pickerText = (page, selector = '.versionPicker__button') => page.evaluate(target => {
+  const node = document.querySelector(target);
+  return node ? `${node.querySelector('.versionPicker__dot') ? '● ' : ''}${node.textContent.replace(/\s+/g, ' ').trim()}` : '';
+}, selector);
 
 test('versions: the picker of the details lists each version with its date, its size and its change', async () => {
   const page = await newPage();
   await open(page, `${MAIN}versions/`);
   await openDetails(page, 'report.txt');
   assert.equal(await page.locator('select[data-details-version]').count(), 0);
-  assert.match(await page.textContent('.versionPicker__button'), /v3.*Current.*3/);
+  assert.match(await pickerText(page), /^● v3.*3/);
+  assert.doesNotMatch(await pickerText(page), /Current|Older/);
+  // In the details window the picker keeps a margin for the close cross of the window.
+  assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.bb-details-head .bb-details-version-control')).marginRight), '34px');
   assert.equal(await page.getAttribute('.versionPicker__button', 'aria-expanded'), 'false');
   await page.click('.versionPicker__button');
   assert.equal(await page.isVisible('.versionPicker__menu'), true);
   assert.equal(await page.getAttribute('.versionPicker__button', 'aria-expanded'), 'true');
   const items = cleanText(await page.locator('.versionPicker__item').allInnerTexts());
   assert.equal(items.length, 3);
-  assert.match(items[0], /^v3 .*Current/);
+  assert.match(items[0], /^v3 /);
+  // The dot of the current version is in the first column of the first row only, with its name on hover.
+  const dots = await page.evaluate(() => Array.from(document.querySelectorAll('.versionPicker__item')).map(row => {
+    const dot = row.querySelector('.versionPicker__dot');
+    if (!dot) return null;
+    const style = getComputedStyle(dot);
+    return { title: dot.title, label: dot.getAttribute('aria-label'), width: style.width, first: row.querySelector('.versionPicker__choose').firstElementChild === dot, radius: style.borderRadius };
+  }));
+  assert.deepEqual(dots, [{ title: 'Current', label: 'Current', width: '8px', first: true, radius: '50%' }, null, null]);
+  assert.ok(items.every(item => !/Current|Older/.test(item)), JSON.stringify(items));
   assert.match(items[1], /^v2 /);
   assert.match(items[2], /^v1 .*first version/);
   assert.match(items[0], /\+\d+ B/);
   assert.equal(await page.getAttribute('.versionPicker__item >> nth=0', 'aria-selected'), 'true');
   assert.match(await page.textContent('.versionPicker__compare'), /Compare v3 with v2/);
   // The columns line up: the number, the date, the size and the id start at the same place in every row.
-  const columns = await page.evaluate(() => Array.from(document.querySelectorAll('.versionPicker__item')).map(row => ['.versionPicker__number', '.versionPicker__when', '.versionPicker__size', '.versionPicker__meta'].map(selector => Math.round(row.querySelector(selector).getBoundingClientRect().left * 10) / 10)));
+  const columns = await page.evaluate(() => Array.from(document.querySelectorAll('.versionPicker__item')).map(row => ['.versionPicker__dot, .versionPicker__dotSpace', '.versionPicker__number', '.versionPicker__when', '.versionPicker__size', '.versionPicker__meta'].map(selector => Math.round(row.querySelector(selector).getBoundingClientRect().left * 10) / 10)));
   for (const row of columns.slice(1)) assert.deepEqual(row, columns[0], `columns: ${JSON.stringify(columns)}`);
   // The menu stays in the window, under the button.
   const place = await page.evaluate(() => {
@@ -962,7 +979,7 @@ test('versions: the picker of the details lists each version with its date, its 
   // A choice opens the details of that version.
   await page.click('.versionPicker__button');
   await page.click('.versionPicker__item >> nth=2');
-  await until(page, () => /v1.*Older/.test(document.querySelector('.versionPicker__button')?.textContent || ''));
+  await until(page, () => /v1/.test(document.querySelector('.versionPicker__button')?.textContent || '') && !document.querySelector('.versionPicker__button .versionPicker__dot'));
   assert.deepEqual(page.errors, []);
   await page.context().close();
 });
@@ -1140,7 +1157,7 @@ test('versions: the preview page has the same picker, with no select and no sepa
   await page.goto(`${BASE}${MAIN}versions/report.txt`, { waitUntil: 'networkidle' });
   await page.waitForSelector('.versionPicker__button');
   assert.equal(await page.locator('#previewVersionSelect').count(), 0);
-  assert.match(await page.textContent('.versionPicker__button'), /v3.*Current/);
+  assert.match(await pickerText(page), /^● v3/);
   await page.click('#previewKebabBtn');
   assert.equal(await page.locator('#pv-versions').count(), 0);
   const actions = cleanText(await page.locator('#previewMenu .bb-menu-item').allInnerTexts());
@@ -1150,7 +1167,7 @@ test('versions: the preview page has the same picker, with no select and no sepa
   await page.click('.versionPicker__button');
   assert.equal(await page.locator('.versionPicker__item').count(), 3);
   await page.click('.versionPicker__item >> nth=2');
-  await until(page, () => /v1.*Older/.test(document.querySelector('.versionPicker__button')?.textContent || ''));
+  await until(page, () => /v1/.test(document.querySelector('.versionPicker__button')?.textContent || '') && !document.querySelector('.versionPicker__button .versionPicker__dot'));
   assert.match(page.url(), /version=/);
   // The comparison opens from the picker.
   const headerBefore = await page.evaluate(() => document.querySelector('.previewBar').getBoundingClientRect().height);
@@ -1181,6 +1198,14 @@ test('versions: the preview page has the same picker, with no select and no sepa
   assert.ok(place.from.right <= place.stats.left + 1 && place.stats.right <= place.to.left + 1, JSON.stringify(place));
   assert.match(await page.textContent('#compareFrom'), /^From/);
   assert.match(await page.textContent('#previewVersionControl'), /^To/);
+  // The picker To has no margin for a close cross of a window: the close button of the comparison follows at the gap of
+  // the bar.
+  const closeGap = await page.evaluate(() => ({
+    margin: getComputedStyle(document.querySelector('#previewVersionControl')).marginRight,
+    gap: document.querySelector('#compareClose').getBoundingClientRect().left - document.querySelector('#previewVersionControl').getBoundingClientRect().right
+  }));
+  assert.equal(closeGap.margin, '0px');
+  assert.ok(closeGap.gap <= 9, JSON.stringify(closeGap));
   // The comparison is in the page: the browser back button returns to the preview, and so does the button of the page.
   await page.goBack();
   await until(page, () => !document.querySelector('.versionComparePage') && document.querySelector('#viewer')?.textContent.includes('Status'));
@@ -1349,6 +1374,121 @@ test('windows: the details and the folder insights use one window, with the same
   await page.context().close();
 });
 
+// Opens the insights of the current folder from the menu of the actions, and waits until the window stops to move.
+async function openInsights(page, tab = 'overview') {
+  await page.click('#actionsButton');
+  await page.click('#insightsItem');
+  await page.waitForSelector('.bb-details--insights');
+  await until(page, () => getComputedStyle(document.querySelector('.bb-modal')).transform === 'none');
+  await page.click(`[data-insights-tab="${tab}"]`);
+  await page.waitForSelector(`[data-insights-panel="${tab}"]:not([hidden])`);
+}
+
+test('insights: every label of the treemap is readable on its tile, also the tile Others', async () => {
+  const prefix = 'insights-readable/';
+  const page = await newPage();
+  // Eight large files of different types (so, different tile colours), and twelve tiny files: each of them is less than
+  // 1% of the total, so the server groups them in the tile Others.
+  const types = ['txt', 'png', 'pdf', 'csv', 'json', 'zip', 'md', 'bin'];
+  try {
+    for (const [index, type] of types.entries()) await putWithServer(page, 'seaweedfs-main', `${prefix}large-${index}.${type}`, Buffer.alloc(40000 + index * 500, 65), { 'Content-Type': 'application/octet-stream' });
+    for (let index = 0; index < 12; index++) await putWithServer(page, 'seaweedfs-main', `${prefix}tiny-${index}.txt`, Buffer.alloc(100 + index, 66));
+    for (const scheme of ['dark', 'light']) {
+      const view = await newPage({ colorScheme: scheme });
+      await open(view, MAIN + prefix);
+      await openInsights(view, 'treemap');
+      await view.waitForSelector('.folder-treemap:not(.is-layout-pending) .folder-treemap-node');
+      const result = await view.evaluate(() => {
+        // The browser resolves any CSS colour (rgb, hex, color-mix, color()) when it draws it on a canvas of one pixel.
+        const context = Object.assign(document.createElement('canvas'), { width: 1, height: 1 }).getContext('2d', { willReadFrequently: true });
+        const draw = (color, base) => {
+          context.fillStyle = '#000000';
+          context.fillStyle = base;
+          context.fillRect(0, 0, 1, 1);
+          context.fillStyle = '#000000';
+          context.fillStyle = color;
+          context.fillRect(0, 0, 1, 1);
+          return Array.from(context.getImageData(0, 0, 1, 1).data.slice(0, 3));
+        };
+        const luminance = rgb => {
+          const [red, green, blue] = rgb.map(value => { const unit = value / 255; return unit <= 0.04045 ? unit / 12.92 : ((unit + 0.055) / 1.055) ** 2.4; });
+          return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+        };
+        const ratio = (first, second) => { const [high, low] = [luminance(first), luminance(second)].sort((a, b) => b - a); return (high + 0.05) / (low + 0.05); };
+        const rgbText = rgb => `rgb(${rgb.join(', ')})`;
+        const modalBackground = getComputedStyle(document.querySelector('.bb-modal')).backgroundColor;
+        const tiles = [];
+        for (const node of document.querySelectorAll('.folder-treemap-node')) {
+          const style = getComputedStyle(node);
+          // The colours of the tile: its background, then each colour of the stripes over it. The worst one counts.
+          const base = draw(style.backgroundColor, modalBackground);
+          const grounds = [base];
+          for (const stop of style.backgroundImage.match(/rgba?\([^)]*\)|color\([^)]*\)/g) || []) grounds.push(draw(stop, rgbText(base)));
+          for (const text of node.querySelectorAll('.folder-treemap-name, .folder-treemap-size, .folder-treemap-meta')) {
+            if (!text.getClientRects().length || getComputedStyle(text).visibility === 'hidden') continue;
+            const textStyle = getComputedStyle(text);
+            const color = draw(textStyle.color, rgbText(base));
+            tiles.push({ tile: node.dataset.name, kind: node.dataset.kind, part: text.className, text: text.textContent, color: textStyle.color, ground: rgbText(base), opacity: textStyle.opacity, ratio: Math.min(...grounds.map(ground => ratio(color, ground))) });
+          }
+        }
+        return tiles;
+      });
+      const others = result.filter(entry => entry.kind === 'other');
+      assert.ok(others.length >= 2, `${scheme}: the tile Others shows its name and its size: ${JSON.stringify(others)}`);
+      assert.ok(others.some(entry => entry.tile === 'Others' && entry.part === 'folder-treemap-name'), `${scheme}: the name of the tile Others is visible`);
+      for (const entry of others) assert.ok(entry.ratio >= 4.5, `${scheme}: Others ${entry.part} ${entry.ratio.toFixed(2)}: ${JSON.stringify(entry)}`);
+      assert.ok(result.filter(entry => entry.kind === 'file').length >= 8, `${scheme}: the file tiles have labels`);
+      for (const entry of result) {
+        assert.ok(entry.ratio >= 4.5, `${scheme}: ${entry.tile} ${entry.part} ${entry.ratio.toFixed(2)}: ${JSON.stringify(entry)}`);
+        assert.equal(entry.opacity, '1', `${scheme}: ${entry.tile} ${entry.part} is opaque`);
+      }
+      // Both label colours are in use: the dark label on the light tiles, and the light label on the dark tiles.
+      assert.ok(new Set(result.filter(entry => entry.kind === 'file').map(entry => entry.color)).size >= 2, `${scheme}: two label colours`);
+      assert.deepEqual(view.errors, []);
+      await view.context().close();
+    }
+  } finally {
+    await deletePrefix(page, 'seaweedfs-main', prefix);
+    await page.context().close();
+  }
+});
+
+test('insights: the overview of the bucket root fits in the window at 1440x900 and 1366x768, with no scrollbar', async () => {
+  for (const [width, height] of [[1440, 900], [1366, 768], [1280, 720]]) {
+    const page = await newPage({ viewport: { width, height } });
+    await open(page, MAIN);
+    await openInsights(page, 'overview');
+    const state = await page.evaluate(() => {
+      const panel = document.querySelector('[data-insights-panel="overview"]');
+      const body = document.querySelector('.bb-details--insights .bb-details-body');
+      const modal = document.querySelector('.bb-modal');
+      const fonts = Array.from(panel.querySelectorAll('.folder-distribution-label, .folder-distribution-value, .folder-file-list-name, .folder-file-list-secondary, .folder-file-list-value')).map(node => parseFloat(getComputedStyle(node).fontSize));
+      const lists = Array.from(panel.querySelectorAll('.folder-file-list')).map(list => {
+        const rows = list.querySelector('.folder-file-list-rows');
+        const box = rows.getBoundingClientRect();
+        const all = Array.from(rows.querySelectorAll('.folder-file-list-row'));
+        return { all: all.length, visible: all.filter(row => row.getBoundingClientRect().bottom <= box.bottom + 1).length };
+      });
+      return {
+        panel: [panel.scrollHeight, panel.clientHeight], body: [body.scrollHeight, body.clientHeight], modal: modal.getBoundingClientRect().bottom, inner: innerHeight,
+        subtitle: document.querySelector('.bb-details-prefix').textContent, footers: document.querySelectorAll('.folder-details-footer').length, minimumFont: Math.min(...fonts), lists
+      };
+    });
+    const where = `${width}x${height}: ${JSON.stringify(state)}`;
+    assert.ok(state.panel[0] <= state.panel[1], `the panel scrolls, ${where}`);
+    assert.ok(state.body[0] <= state.body[1], `the body of the window scrolls, ${where}`);
+    assert.ok(state.modal <= state.inner, `the window is cut at the bottom, ${where}`);
+    assert.match(state.subtitle, / · [\d,]+ objects · [\d.,]+ \w+ · computed in [\d,]+ ms$/, where);
+    assert.equal(state.footers, 0, where);
+    assert.ok(state.minimumFont >= 11.9, `a text is smaller than 12px, ${where}`);
+    assert.equal(await page.locator('text=/^Computed in/').count(), 0);
+    // The lists share the room that is left: each shows at least four rows (the others scroll inside the list).
+    for (const list of state.lists) assert.ok(list.visible >= Math.min(4, list.all), `a list is too small, ${where}`);
+    assert.deepEqual(page.errors, []);
+    await page.context().close();
+  }
+});
+
 test('versions: a file with one version has no version picker; the action button of a row has no frame', async () => {
   const page = await newPage();
   await open(page, `${MAIN}config/`);
@@ -1400,7 +1540,7 @@ test('versions: the picker of the details restores and deletes a version, with a
   assert.equal((await dataVersions(page, 'seaweedfs-main', key)).length, 4);
   assert.equal((await getObject(page, 'seaweedfs-main', key)).body.toString(), `${key} version 1\n`);
   // The details open again on the current version, and the badge of the listing counts 4 versions.
-  await until(page, () => /v4.*Current/.test(document.querySelector('.bb-details-head .versionPicker__button')?.textContent || ''));
+  await until(page, () => /v4/.test(document.querySelector('.bb-details-head .versionPicker__button')?.textContent || '') && Boolean(document.querySelector('.bb-details-head .versionPicker__button .versionPicker__dot')));
   await until(page, row => document.querySelector(`tr[data-name="${row}"] .versionCount`)?.textContent.trim() === '4', name);
   // Delete v2: a confirmation, then the version is gone.
   await pickerAction(page, v2.version, 'remove');
@@ -1408,7 +1548,7 @@ test('versions: the picker of the details restores and deletes a version, with a
   await page.click(`${confirmWindow} .bb-btn-primary`);
   await page.waitForSelector('.bb-toast >> text=Version deleted.');
   assert.deepEqual((await dataVersions(page, 'seaweedfs-main', key)).map(version => version.version).filter(id => [v1.version, v2.version, v3.version].includes(id)), [v3.version, v1.version]);
-  await until(page, () => /v3.*Current/.test(document.querySelector('.bb-details-head .versionPicker__button')?.textContent || ''));
+  await until(page, () => /v3/.test(document.querySelector('.bb-details-head .versionPicker__button')?.textContent || '') && Boolean(document.querySelector('.bb-details-head .versionPicker__button .versionPicker__dot')));
   await until(page, row => document.querySelector(`tr[data-name="${row}"] .versionCount`)?.textContent.trim() === '3', name);
   // A cancel does nothing.
   await pickerAction(page, v1.version, 'remove');
@@ -1434,7 +1574,7 @@ test('versions: the picker of the preview deletes the version that the page show
   const [, v2, v1] = await dataVersions(page, 'seaweedfs-main', key);
   await page.goto(`${BASE}${MAIN}${key}?version=${encodeURIComponent(v2.version)}`, { waitUntil: 'networkidle' });
   await until(page, text => document.querySelector('#viewer')?.textContent.includes(text), `${key} version 2`);
-  assert.match(await page.textContent('#previewVersionControl .versionPicker__button'), /v2.*Older/);
+  assert.match(await pickerText(page, '#previewVersionControl .versionPicker__button'), /^v2/);
   // The delete of the version of the page: the page shows the current version.
   await page.click('#previewVersionControl .versionPicker__button');
   await page.hover(`.versionPicker__item[data-version="${v2.version}"]`);
@@ -1443,14 +1583,14 @@ test('versions: the picker of the preview deletes the version that the page show
   await page.waitForSelector('.bb-toast >> text=Version deleted.');
   await until(page, text => document.querySelector('#viewer')?.textContent.includes(text), `${key} version 3`);
   assert.doesNotMatch(page.url(), /version=/);
-  assert.match(await page.textContent('#previewVersionControl .versionPicker__button'), /v2.*Current/);
+  assert.match(await pickerText(page, '#previewVersionControl .versionPicker__button'), /^● v2/);
   // The restore of v1 makes a new current version: the page shows it.
   await page.click('#previewVersionControl .versionPicker__button');
   await page.hover(`.versionPicker__item[data-version="${v1.version}"]`);
   await page.click(`.versionPicker__item[data-version="${v1.version}"] [data-version-action="restore"]`);
   await page.click('.bb-overlay .bb-btn-primary');
   await page.waitForSelector('.bb-toast >> text=Version restored.');
-  await until(page, () => /v3.*Current/.test(document.querySelector('#previewVersionControl .versionPicker__button')?.textContent || ''));
+  await until(page, () => /v3/.test(document.querySelector('#previewVersionControl .versionPicker__button')?.textContent || '') && Boolean(document.querySelector('#previewVersionControl .versionPicker__button .versionPicker__dot')));
   await until(page, text => document.querySelector('#viewer')?.textContent.includes(text), `${key} version 1`);
   assert.deepEqual(page.errors, []);
   await deletePrefix(page, 'seaweedfs-main', 'actions/');
@@ -2310,6 +2450,110 @@ test('metadata: without the edit, the details keep the custom metadata and show 
   assert.equal(await second.locator('[data-metadata-section]').count(), 0);
   assert.match(await second.textContent('[data-metadata-fallback]'), /owner/);
   await second.context().close();
+});
+
+test('metadata: the fields suggest values in a popover of the portal; the mouse, the keyboard and free text work', async () => {
+  const page = await newPage();
+  const instance = 'seaweedfs-main';
+  const name = `suggest-${Date.now()}.txt`;
+  const key = `meta/${name}`;
+  await putWithServer(page, instance, key, 'suggest\n', { 'Content-Type': 'application/octet-stream' });
+  await open(page, `${MAIN}meta/`);
+  await openMetadataForm(page, name);
+  // No native list: the page has the popover only.
+  assert.equal(await page.evaluate(() => document.querySelector('datalist')), null);
+  const menu = '.suggest__menu';
+  const header = field => `[data-metadata-header="${field}"]`;
+  assert.equal(await page.getAttribute(header('contentType'), 'role'), 'combobox');
+  assert.equal(await page.getAttribute(header('contentType'), 'aria-expanded'), 'false');
+
+  // The focus opens the popover. The guessed type of the name is the first row, with a mark.
+  await page.focus(header('contentType'));
+  await page.waitForSelector(menu);
+  assert.equal(await page.getAttribute(header('contentType'), 'aria-expanded'), 'true');
+  assert.equal(await page.getAttribute(header('contentType'), 'aria-controls'), await page.getAttribute(menu, 'id'));
+  assert.equal(await page.getAttribute(menu, 'role'), 'listbox');
+  assert.equal(await page.getAttribute(`${menu} [role="option"]:first-child`, 'data-value'), 'text/plain');
+  assert.equal((await page.textContent(`${menu} [role="option"]:first-child .suggest__tag`)).trim(), 'Guess');
+  assert.ok(await page.locator(`${menu} [role="option"]`).count() > 5);
+  // The popover is in the large window, so that the scroll area does not clip it. It has the look of the other menus.
+  assert.equal(await page.evaluate(selector => document.querySelector(selector).parentElement.classList.contains('bb-overlay'), menu), true);
+  const looks = await page.evaluate(selector => {
+    const pick = node => { const style = getComputedStyle(node); return { radius: style.borderTopLeftRadius, shadow: style.boxShadow, background: style.backgroundColor, border: style.borderTopColor }; };
+    const probes = ['versionPicker__menu', 'bb-menu-popover'].map(className => {
+      const probe = document.createElement('div');
+      probe.className = className;
+      document.body.append(probe);
+      const result = pick(probe);
+      probe.remove();
+      return result;
+    });
+    return { popover: pick(document.querySelector(selector)), picker: probes[0], menu: probes[1] };
+  }, menu);
+  assert.equal(looks.popover.radius, looks.picker.radius);
+  assert.equal(looks.popover.radius, looks.menu.radius);
+  assert.equal(looks.popover.shadow, looks.picker.shadow);
+  assert.equal(looks.popover.shadow, looks.menu.shadow);
+  assert.equal(looks.popover.background, looks.picker.background);
+  assert.equal(looks.popover.border, looks.picker.border);
+  assert.notEqual(looks.popover.shadow, 'none');
+
+  // The mouse chooses a row. The popover closes and the focus stays in the field.
+  await page.click(`${menu} [role="option"][data-value="application/json"]`);
+  assert.equal(await page.inputValue(header('contentType')), 'application/json');
+  assert.equal(await page.locator(menu).count(), 0);
+  assert.equal(await page.getAttribute(header('contentType'), 'aria-expanded'), 'false');
+  assert.equal(await page.isDisabled('[data-metadata-save]'), false);
+
+  // The keyboard: Down moves the highlight, Enter chooses it.
+  await page.focus(header('cacheControl'));
+  await page.waitForSelector(menu);
+  await page.keyboard.press('ArrowDown');
+  assert.equal(await page.getAttribute(`${menu} [role="option"][aria-selected="true"]`, 'data-value'), 'no-cache');
+  assert.equal(await page.getAttribute(header('cacheControl'), 'aria-activedescendant'), await page.getAttribute(`${menu} [role="option"][aria-selected="true"]`, 'id'));
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('Enter');
+  assert.equal(await page.inputValue(header('cacheControl')), 'no-cache');
+  assert.equal(await page.locator(menu).count(), 0);
+  // Down opens a closed popover. Tab leaves the field and closes it; the next field opens its own popover.
+  await page.keyboard.press('ArrowDown');
+  await page.waitForSelector(menu);
+  await page.keyboard.press('Tab');
+  assert.equal(await page.getAttribute(header('cacheControl'), 'aria-expanded'), 'false');
+  assert.equal(await page.evaluate(() => document.activeElement.dataset.metadataHeader), 'contentDisposition');
+  assert.equal(await page.locator(menu).count(), 1);
+
+  // Escape closes the popover only: the large window stays open.
+  await page.focus(header('contentEncoding'));
+  await page.waitForSelector(menu);
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator(menu).count(), 0);
+  assert.equal(await page.isVisible('.bb-details--file'), true);
+  assert.equal(await page.locator('.bb-overlay--large').count(), 1);
+
+  // A free text stays in the field. The popover shows the values that contain the text, and hides when none does.
+  await page.fill(header('contentEncoding'), 'g');
+  await page.waitForSelector(menu);
+  assert.deepEqual(await page.locator(`${menu} [role="option"]`).evaluateAll(rows => rows.map(row => row.dataset.value)), ['gzip']);
+  await page.fill(header('contentLanguage'), 'sv-SE');
+  assert.equal(await page.locator(menu).count(), 0);
+  assert.equal(await page.inputValue(header('contentLanguage')), 'sv-SE');
+  assert.equal(await page.inputValue(header('contentEncoding')), 'g');
+  await page.fill(header('contentEncoding'), '');
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('.bb-overlay--large').count(), 1);
+
+  await saveMetadata(page, 'sv-SE');
+  const after = await apiMetadata(page, instance, key);
+  assert.equal(after.headers.contentType, 'application/json');
+  assert.equal(after.headers.cacheControl, 'no-cache');
+  assert.equal(after.headers.contentLanguage, 'sv-SE');
+  assert.equal(after.headers.contentEncoding, undefined);
+  assert.equal(await page.evaluate(() => document.querySelector('datalist')), null);
+  assert.deepEqual(page.errors, []);
+  await page.request.delete(`${BASE}s3?instance=${instance}&key=${encodeURIComponent(key)}`);
+  await page.context().close();
 });
 
 // ------------------------------------------------------------------------------------------------------------------
@@ -3427,6 +3671,9 @@ for (const instance of ['seaweedfs-main', 'garage-main']) {
     assert.equal(await page.textContent('.preview-error p'), CUSTOMER_KEY_TEXT);
     assert.doesNotMatch(await page.textContent('#viewer'), /HTTP 400/);
     assert.match(await page.title(), /^customer-key\.txt - /);
+    // The error and the bar show the key of the encryption, with the reason in its tooltip.
+    assert.equal(await page.locator('.preview-error .mdi-key').count(), 1);
+    assert.deepEqual(await previewMarks(page), { encryption: 'Encrypted with a key of the client (SSE-C)' });
     // The link to the original opens no page: it gives the message.
     let pages = 0;
     page.context().on('page', () => { pages += 1; });
@@ -3460,17 +3707,18 @@ test('encryption: an other answer 400 of the provider is not an SSE-C object: th
   assert.equal(await page.textContent('#docName'), 'hello.txt');
   assert.equal(await page.textContent('.preview-error strong'), 'Preview unavailable');
   assert.match(await page.textContent('.preview-error p'), /HTTP 400/);
-  assert.equal(await page.locator('.preview-error .mdi-lock-outline').count(), 0);
+  assert.equal(await page.locator('.preview-error .mdi-key').count(), 0);
+  assert.deepEqual(await previewMarks(page), {});
   await page.context().close();
 });
 
-// The lock of a bucket in the bucket selector: the trigger and the entries of the menu.
+// The key of a bucket in the bucket selector: the trigger and the entries of the menu.
 const bucketLockOf = (page, instance) => page.evaluate(id => {
   const node = document.querySelector(`.storageBucket[data-instance="${id}"] [data-bucket-lock]`);
   return node ? { icon: node.dataset.bucketLock, title: node.title, tone: node.className } : null;
 }, instance);
 
-test('encryption: the bucket selector shows a lock for a bucket that encrypts, and an open lock for Garage, which does not', async () => {
+test('encryption: the bucket selector shows a key for a bucket that encrypts, and a key in the colour of a warning for Garage, which does not', async () => {
   const page = await newPage();
   const instances = (await (await page.request.get(`${BASE}api/instances`)).json()).instances;
   const facts = Object.fromEntries(instances.map(item => [item.id, [item.encryption, item.defaultEncryption, item.encryptionApplied || '']]));
@@ -3480,11 +3728,11 @@ test('encryption: the bucket selector shows a lock for a bucket that encrypts, a
   assert.deepEqual(facts['seaweedfs-main'], ['', '', '']);
   await open(page, MAIN);
   for (const instance of ['seaweedfs-encrypted', 'minio-encrypted']) {
-    assert.deepEqual(await bucketLockOf(page, instance), { icon: 'lock', title: 'Encrypted: SSE-S3 for each new object', tone: 'bucketLock is-on' }, instance);
+    assert.deepEqual(await bucketLockOf(page, instance), { icon: 'key', title: 'Encrypted: SSE-S3 for each new object', tone: 'bucketLock is-on' }, instance);
   }
   for (const instance of ['seaweedfs-main', 'minio-main', 'garage-main', 'seaweedfs-locked']) assert.equal(await bucketLockOf(page, instance), null, instance);
   const garage = await bucketLockOf(page, 'garage-encrypted');
-  assert.equal(garage.icon, 'lock-open');
+  assert.deepEqual([garage.icon, garage.tone], ['key', 'bucketLock is-warn']);
   assert.match(garage.title, /^SSE-S3 requested; the provider does not encrypt/);
   assert.equal(await page.locator('.storageSwitcher__trigger [data-bucket-lock]').count(), 0);
   // The trigger of the selector shows the lock of the open bucket.
@@ -3515,7 +3763,7 @@ async function watchHeads(page, delay = 0) {
 }
 
 const noLockPending = page => until(page, () => !document.querySelector('.nameLock__pending'));
-const fileLock = (page, name) => page.evaluate(row => document.querySelector(`tr[data-name="${row}"] .nameLock__icon`)?.title || '', name);
+const fileLock = (page, name) => page.evaluate(row => document.querySelector(`tr[data-name="${row}"] .nameLock__icon[data-mark="encryption"]`)?.title || '', name);
 
 for (const [instance, provider] of Object.entries(ENCRYPTED)) {
   test(`encryption: ${provider.name}: the listing shows a lock next to the name of an encrypted file, by default, and no new column`, async () => {
@@ -3665,6 +3913,198 @@ test('encryption: a default encryption of the bucket gives the lock of the bucke
   assert.deepEqual(page.errors, []);
   await page.context().close();
 });
+
+// The marks of a file in the listing: the key of the encryption and the padlock of Object Lock, with their tooltips.
+const fileMarks = (page, name) => page.evaluate(row => Object.fromEntries(Array.from(document.querySelectorAll(`tr[data-name="${row}"] .nameLock__icon`))
+  .map(mark => [mark.dataset.mark, mark.title])), name);
+
+// The marks of the version in the bar of the preview, with their tooltips. The bar is hidden without a mark.
+const previewMarks = page => page.evaluate(() => {
+  const host = document.querySelector('#docMarks');
+  return host.hidden ? {} : Object.fromEntries(Array.from(host.querySelectorAll('[data-mark]')).map(mark => [mark.dataset.mark, mark.title]));
+});
+
+// Waits for the end of the load of the preview: the bar then has the marks of the version.
+const previewReady = page => until(page, () => Boolean(document.querySelector('#viewer')) && !document.querySelector('#viewer').classList.contains('preview-loading'));
+
+// The tooltip of a lock in the listing: the mode, and the retain-until date in UTC to the minute.
+const lockTooltip = (mode, until) => `Object Lock: ${mode} until ${new Date(until).toISOString().slice(0, 16).replace('T', ' ')} UTC`;
+
+for (const [instance, provider] of Object.entries(LOCKED)) {
+  test(`object lock: ${provider.name}: the listing and the preview show the lock of each file next to its name, from the HEAD of the encryption, and the bucket has its padlock`, async () => {
+    const page = await newPage({ timezoneId: 'UTC' });
+    const info = await lockedHostOf(page, instance);
+    const prefix = `marks-${encryptionStamp()}/`;
+    const names = { hold: 'hold.txt', governance: 'governance.txt', compliance: 'compliance.txt', plain: 'plain.txt', both: 'both.txt', ended: 'ended.txt' };
+    for (const name of Object.values(names)) {
+      const extra = name === names.both ? { 'content-type': 'text/plain', 'x-amz-server-side-encryption': 'AES256' } : { 'content-type': 'text/plain' };
+      await s3(instance, 'PUT', `/locked/${prefix}${name}`, '', Buffer.from(`${name}\n`), extra);
+    }
+    const versionOf = async name => (await apiVersions(page, instance, `${prefix}${name}`)).find(version => version.isCurrent).version;
+    const lock = async (name, change) => {
+      const answer = await putLock(page, instance, `${prefix}${name}`, await versionOf(name), change);
+      assert.equal(answer.status(), 200, await answer.text());
+    };
+    const governanceUntil = `${lockField(90)}Z`;
+    const complianceUntil = `${lockField(45)}Z`;
+    await lock(names.hold, { legalHold: true });
+    await lock(names.governance, { retention: { mode: 'GOVERNANCE', retainUntil: governanceUntil } });
+    await lock(names.compliance, { retention: { mode: 'COMPLIANCE', retainUntil: complianceUntil } });
+    await lock(names.both, { legalHold: true, retention: { mode: 'GOVERNANCE', retainUntil: governanceUntil } });
+    const endedUntil = `${lockField(3)}Z`;
+    await lock(names.ended, { retention: { mode: 'GOVERNANCE', retainUntil: endedUntil } });
+    // The provider encrypts the object of the two marks.
+    assert.equal((await s3Head(instance, `/locked/${prefix}${names.both}`))['x-amz-server-side-encryption'], 'AES256');
+    while (Date.now() <= Date.parse(endedUntil) + 500) await sleep(250);
+    // The bucket has Object Lock and no default encryption: the marks show by default.
+    const heads = await watchHeads(page);
+    let lockRequests = 0;
+    page.on('request', request => { if (request.url().includes('/api/object-lock')) lockRequests += 1; });
+    await open(page, `-/${info.host}/${instance}/${prefix}`);
+    await noLockPending(page);
+    assert.deepEqual(await fileMarks(page, names.hold), { 'object-lock': 'Object Lock: legal hold' });
+    assert.deepEqual(await fileMarks(page, names.governance), { 'object-lock': lockTooltip('Governance', governanceUntil) });
+    assert.deepEqual(await fileMarks(page, names.compliance), { 'object-lock': lockTooltip('Compliance', complianceUntil) });
+    assert.deepEqual(await fileMarks(page, names.plain), {});
+    assert.deepEqual(await fileMarks(page, names.ended), {}, 'a retention whose date is past');
+    assert.deepEqual(await fileMarks(page, names.both), { encryption: 'Encrypted: SSE-S3', 'object-lock': `${lockTooltip('Governance', governanceUntil)}, legal hold` });
+    // The key of the encryption and the padlock of the lock, at the right of the name, in one cell.
+    const look = await page.evaluate(row => {
+      const cell = document.querySelector(`tr[data-name="${row}"] .nameCell`);
+      const [key, padlock] = cell.querySelectorAll('.nameLock__icon');
+      return { key: key.querySelector('.ic').className, padlock: padlock.querySelector('.ic').className, order: cell.querySelector('.nameLink').getBoundingClientRect().right <= key.getBoundingClientRect().left && key.getBoundingClientRect().right <= padlock.getBoundingClientRect().left };
+    }, names.both);
+    assert.deepEqual(look, { key: 'ic ic-key', padlock: 'ic ic-lock', order: true });
+    // One HEAD for each file, and no other request for the lock.
+    assert.equal(heads.total, Object.keys(names).length);
+    assert.equal(new Set(heads.keys).size, Object.keys(names).length);
+    assert.equal(lockRequests, 0);
+    // The bucket of the selector has its padlock. The bucket "default" of the same provider has none.
+    assert.equal(await page.getAttribute('.storageSwitcher__trigger [data-bucket-object-lock]', 'title'), 'Object Lock is on');
+    assert.equal(await page.locator('.storageSwitcher__trigger [data-bucket-object-lock] .ic-lock').count(), 1);
+    assert.equal(await page.locator('.storageSwitcher__trigger [data-bucket-lock]').count(), 0);
+    // The preview shows the same marks next to the size, from its own HEAD, with no request for the lock.
+    for (const [name, marks] of [[names.both, { encryption: 'Encrypted: SSE-S3', 'object-lock': `${lockTooltip('Governance', governanceUntil)}, legal hold` }],
+      [names.compliance, { 'object-lock': lockTooltip('Compliance', complianceUntil) }], [names.plain, {}], [names.ended, {}]]) {
+      const preview = await newPage({ timezoneId: 'UTC' });
+      preview.on('request', request => { if (request.url().includes('/api/object-lock')) lockRequests += 1; });
+      await preview.goto(`${BASE}-/${info.host}/${instance}/${prefix}${name}`, { waitUntil: 'networkidle' });
+      await previewReady(preview);
+      assert.deepEqual(await previewMarks(preview), marks, name);
+      assert.deepEqual(preview.errors, []);
+      await preview.context().close();
+    }
+    assert.equal(lockRequests, 0);
+    // A new load of the listing reads each file again, one time: the answers stay only in the page.
+    await open(page, `-/${info.host}/${instance}/${prefix}`);
+    await noLockPending(page);
+    const files = Object.keys(names).length;
+    assert.equal(heads.total, 2 * files);
+    // The setting stops the marks and the requests, and starts them again from the answers that the page has.
+    await page.click('#settingsButton');
+    assert.match(await page.textContent('#encryptionSetting'), /Show the encryption and the lock of the objects/);
+    assert.match(await page.textContent('#settingsReset'), /Reset the columns, the filter, the encryption and the lock/);
+    assert.equal(await page.isChecked('#encryptionToggle'), true);
+    await page.uncheck('#encryptionToggle');
+    await page.keyboard.press('Escape');
+    await until(page, () => !document.querySelector('.nameLock__icon'));
+    await page.click('#refreshButton');
+    await page.waitForSelector('.tableBox:not(.is-busy)');
+    await sleep(500);
+    assert.equal(await page.locator('.nameLock__icon, .nameLock__pending').count(), 0);
+    assert.equal(heads.total, 2 * files);
+    await page.click('#settingsButton');
+    await page.check('#encryptionToggle');
+    await page.keyboard.press('Escape');
+    await noLockPending(page);
+    assert.deepEqual(await fileMarks(page, names.hold), { 'object-lock': 'Object Lock: legal hold' });
+    assert.equal(heads.total, 2 * files);
+    // A change of the lock in the details: the listing reads the file again.
+    await openLockDetails(page, names.hold);
+    await page.click('[data-lock-edit]');
+    await page.uncheck('[data-lock-legal-hold]');
+    await saveLock(page);
+    await closeWindow(page);
+    await until(page, name => !document.querySelector(`tr[data-name="${name}"] .nameLock__icon`) && !document.querySelector('.nameLock__pending'), names.hold);
+    assert.equal(heads.total, 2 * files + 1);
+    // The bucket "default" of the provider has no Object Lock: no padlock.
+    const main = await lockedHostOf(page, provider.provider);
+    await open(page, `-/${main.host}/${provider.provider}/`);
+    assert.equal(await page.locator('.storageSwitcher__trigger [data-bucket-object-lock]').count(), 0);
+    assert.deepEqual(page.errors, []);
+    // The end: the hold goes, the Governance retention goes with the bypass, the Compliance retention ends.
+    await lock(names.both, { legalHold: false });
+    for (const name of [names.governance, names.both]) {
+      await lock(name, { retention: { mode: 'GOVERNANCE', retainUntil: `${lockField(2)}Z` }, bypassGovernance: true });
+    }
+    const end = Math.max(Date.parse(complianceUntil), Date.now() + 2500) + 500;
+    while (Date.now() <= end) await sleep(500);
+    for (const name of Object.values(names)) await purgeVersions(page, instance, `${prefix}${name}`);
+    for (const name of Object.values(names)) assert.equal(await versionCount(page, instance, `${prefix}${name}`), 0, name);
+    await page.context().close();
+  });
+}
+
+test('object lock: the padlock of a bucket gives its default retention, and a bucket without Object Lock has none', async () => {
+  const page = await newPage();
+  await page.route(/\/api\/instances/, async route => {
+    const response = await route.fetch();
+    const body = await response.json();
+    for (const instance of body.instances) if (instance.id === 'seaweedfs-locked') instance.objectLockDefault = { mode: 'GOVERNANCE', days: 30 };
+    await route.fulfill({ response, json: body });
+  });
+  const info = await lockedHostOf(page, 'seaweedfs-locked');
+  await open(page, `-/${info.host}/seaweedfs-locked/`);
+  assert.equal(await page.getAttribute('.storageSwitcher__trigger [data-bucket-object-lock]', 'title'), 'Object Lock is on. Default retention: Governance, 30 days');
+  assert.equal(await page.getAttribute('.storageSwitcher__trigger [data-bucket-object-lock]', 'aria-label'), 'Object Lock is on. Default retention: Governance, 30 days');
+  await open(page, MAIN);
+  assert.equal(await page.locator('.storageSwitcher__trigger [data-bucket-object-lock]').count(), 0);
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+for (const [instance, provider] of Object.entries(ENCRYPTED)) {
+  test(`encryption: ${provider.name}: the preview and the details show the encryption of the version on the page, and a version without encryption has no key`, async () => {
+    const page = await newPage();
+    const info = await lockedHostOf(page, instance);
+    const key = `enc/versions-${encryptionStamp()}.txt`;
+    const name = key.split('/').pop();
+    // Version 1 without encryption, version 2 with SSE-S3, both written on the provider.
+    await putPlain(instance, key, 'version 1\n');
+    await sleep(1100);
+    await s3(instance, 'PUT', encryptedPath(instance, key), '', Buffer.from('version 2\n'), { 'content-type': 'text/plain', 'x-amz-server-side-encryption': 'AES256' });
+    const versions = await apiVersions(page, instance, key);
+    const first = versions.find(version => !version.isCurrent && !version.deleteMarker);
+    const second = versions.find(version => version.isCurrent);
+    assert.ok(first && second, JSON.stringify(versions));
+    const heads = await watchHeads(page);
+    for (const [query, marks] of [[`?version=${encodeURIComponent(first.version)}`, {}], [`?version=${encodeURIComponent(second.version)}`, { encryption: 'Encrypted: SSE-S3' }], ['', { encryption: 'Encrypted: SSE-S3' }]]) {
+      const before = heads.total;
+      await page.goto(`${BASE}-/${info.host}/${instance}/${key}${query}`, { waitUntil: 'networkidle' });
+      await previewReady(page);
+      assert.deepEqual(await previewMarks(page), marks, query);
+      assert.equal(heads.total - before, 1, `one HEAD for ${query || 'the current version'}`);
+    }
+    // The version picker of the preview changes the version, and the marks follow.
+    await page.click('#previewVersionControl .versionPicker__button');
+    await page.click(`.versionPicker__item[data-version="${first.version}"] .versionPicker__choose`);
+    await until(page, version => new URLSearchParams(location.search).get('version') === version, first.version);
+    await previewReady(page);
+    assert.deepEqual(await previewMarks(page), {});
+    // The details of each version: the section Encryption for version 2, no section for version 1.
+    await open(page, `-/${info.host}/${instance}/enc/`);
+    await openEncryptionDetails(page, name);
+    assert.equal(await encryptionText(page, 'object'), 'SSE-S3 (AES256)');
+    await page.click('.bb-details-head .versionPicker__button');
+    await page.click(`.versionPicker__item[data-version="${first.version}"] .versionPicker__choose`);
+    await until(page, () => /v1/.test(document.querySelector('.bb-details-head .versionPicker__button')?.textContent || ''));
+    await page.waitForSelector('[data-details-tool-card="integrity"]');
+    await until(page, () => !document.querySelector('[data-encryption-section]'));
+    assert.deepEqual(page.errors, []);
+    await purgeVersions(page, instance, key);
+    await page.context().close();
+  });
+}
 
 (async () => {
   browser = await chromium.launch();

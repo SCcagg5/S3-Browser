@@ -331,45 +331,9 @@
   grid-template-columns: 105px minmax(0, 1fr);
 }
 }
-.folder-details-summary {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: .65rem;
-}
-.folder-details-metric {
-  display: flex;
-  min-width: 0;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: .65rem;
-  padding: .62rem .72rem;
-  background: var(--raised);
-  border: 1px solid color-mix(in srgb, var(--accent-text) 35%, var(--border));
-  border-radius: 8px;
-}
-.folder-details-metric span {
-  color: var(--muted);
-  font-size: .78rem;
-  font-weight: 600;
-}
-.folder-details-metric strong {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--text);
-  font-size: .94rem;
-  font-variant-numeric: tabular-nums;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.folder-details-footer {
-  padding-top: .2rem;
-  color: var(--muted);
-  font-size: .72rem;
-  text-align: left;
-}
 .folder-distribution {
   display: grid;
-  gap: .48rem;
+  gap: .4rem;
   padding-top: .8rem;
   border-top: 1px solid var(--bb-border);
 }
@@ -383,7 +347,7 @@
 .folder-distribution-bar {
   display: flex;
   width: 100%;
-  height: 14px;
+  height: 12px;
   overflow: hidden;
   background: var(--raised);
   border: 1px solid var(--border);
@@ -399,7 +363,7 @@
 .folder-distribution-legend {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-  gap: .35rem .8rem;
+  gap: .15rem .8rem;
 }
 .folder-distribution-legend-item {
   display: grid;
@@ -408,7 +372,7 @@
   gap: .4rem;
   min-width: 0;
   color: var(--text);
-  font-size: .76rem;
+  font-size: .75rem;
 }
 .folder-distribution-swatch {
   width: 10px;
@@ -428,7 +392,7 @@
   white-space: nowrap;
 }
 .folder-insights-tabs {
-  margin: 0 0 .8rem;
+  margin: 0 0 .6rem;
   border-bottom: 1px solid var(--bb-border);
 }
 .folder-insights-panel {
@@ -436,11 +400,6 @@
 }
 .folder-insights-panel[hidden] {
   display: none !important;
-}
-@media (max-width: 600px) {
-.folder-details-summary {
-  grid-template-columns: 1fr;
-}
 }
 .bb-details--insights .bb-details-body {
   box-sizing: border-box;
@@ -454,7 +413,7 @@
   align-items: flex-end;
   min-width: 0;
   gap: .2rem;
-  margin: 0 0 .8rem;
+  margin: 0 0 .6rem;
   padding: 0 .15rem;
   overflow-x: auto;
   overflow-y: hidden;
@@ -464,12 +423,12 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: start;
-  gap: 1rem;
-  margin-top: .8rem;
+  gap: .8rem;
+  margin-top: 0;
 }
 .folder-distribution-grid .folder-distribution {
   height: 100%;
-  padding: .8rem;
+  padding: .6rem .75rem;
   background: var(--panel);
   border: 1px solid var(--bb-border);
   border-radius: 9px;
@@ -527,9 +486,6 @@
   flex: 1 1 auto;
   min-height: 0;
 }
-.folder-insights-panel[data-insights-panel="overview"] .folder-details-footer {
-  margin-top: auto;
-}
 .sqlite-table-host .data-table-scroll {
   grid-column: 1;
   grid-row: 5;
@@ -558,21 +514,21 @@
   min-height: 0;
   align-self: start;
 }
-.folder-insights-panel[data-insights-panel="overview"] .folder-details-footer {
-  margin-top: auto;
-}
+/* The two lists share the height that is left. A list is not higher than its rows: if the window is low, the rows of the
+   list scroll inside it, and the panel does not scroll. */
 .folder-file-lists {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  flex: 1 1 auto;
+  display: flex;
+  flex: 1 1 0;
   min-height: 0;
+  align-items: flex-start;
   gap: .8rem;
-  margin-top: .8rem;
+  margin-top: .6rem;
 }
 .folder-file-list {
   display: flex;
   min-width: 0;
-  min-height: 0;
+  max-height: 100%;
+  flex: 1 1 0;
   flex-direction: column;
   overflow: hidden;
   background: var(--panel);
@@ -580,32 +536,33 @@
   border-radius: 9px;
 }
 .folder-file-list-title {
-  padding: .58rem .7rem;
+  padding: .45rem .7rem;
   color: var(--text);
   background: var(--raised);
   border-bottom: 1px solid var(--bb-border, var(--border-strong));
-  font-size: .76rem;
+  font-size: .78rem;
   font-weight: 700;
 }
 .folder-file-list-rows {
   display: grid;
   min-height: 0;
-  flex: 1 1 auto;
-  grid-auto-rows: minmax(2.25rem, 1fr);
+  flex: 0 1 auto;
+  grid-auto-rows: 2.1rem;
   overflow: auto;
 }
 .folder-file-list-row {
   display: grid;
-  grid-template-columns: 1.25rem minmax(0, 1fr) auto;
+  grid-template-columns: 1.25rem minmax(0, 1fr) auto auto;
   min-width: 0;
   align-items: center;
-  gap: .5rem;
+  gap: .6rem;
   width: 100%;
-  padding: .48rem .65rem;
+  padding: 0 .65rem;
   color: var(--text);
   background: transparent;
   border: 0;
   border-bottom: 1px solid var(--border);
+  font-size: .75rem;
   text-align: left;
   cursor: pointer;
 }
@@ -618,35 +575,28 @@
 .folder-file-list-row > .mdi {
   color: var(--primary-color, var(--accent-text));
 }
-.folder-file-list-copy {
-  display: grid;
-  min-width: 0;
-  gap: .08rem;
-}
-.folder-file-list-copy strong,
-.folder-file-list-copy small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.folder-file-list-copy strong {
-  color: var(--text);
-  font-size: .77rem;
-  font-weight: 600;
-}
-.folder-file-list-copy small {
-  color: var(--muted);
-  font-size: .67rem;
-  text-transform: capitalize;
-}
+.folder-file-list-name,
+.folder-file-list-secondary,
 .folder-file-list-value {
-  max-width: 9rem;
   overflow: hidden;
-  color: var(--text);
-  font-size: .68rem;
   font-variant-numeric: tabular-nums;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.folder-file-list-name {
+  min-width: 0;
+  color: var(--text);
+  font-size: .8rem;
+  font-weight: 600;
+}
+.folder-file-list-secondary {
+  max-width: 9rem;
+  color: var(--muted);
+}
+.folder-file-list-value {
+  max-width: 9rem;
+  color: var(--text);
+  text-align: right;
 }
 .folder-file-list-empty {
   padding: .8rem;
@@ -655,7 +605,11 @@
 }
 @media (max-width: 760px) {
 .folder-file-lists {
-  grid-template-columns: 1fr;
+  flex-direction: column;
+  align-items: stretch;
+}
+.folder-file-list {
+  flex: 0 0 auto;
 }
 }
 .sqlite-preview .data-table-scroll {
@@ -1201,17 +1155,16 @@
 }
 .folder-treemap-node.is-other {
   cursor: default;
-  background-color: var(--warning);
+  background-color: color-mix(in srgb, var(--warning) 12%, var(--raised));
   background-image: repeating-linear-gradient(
     135deg,
-    var(--track) 0,
-    var(--track) 7px,
-    var(--track) 7px,
-    var(--track) 14px
+    transparent 0,
+    transparent 7px,
+    color-mix(in srgb, var(--warning) 12%, transparent) 7px,
+    color-mix(in srgb, var(--warning) 12%, transparent) 14px
   );
-  border-color: color-mix(in srgb, var(--warning) 45%, var(--border));
+  border-color: color-mix(in srgb, var(--warning) 55%, var(--border));
   border-radius: 2px;
-  box-shadow: inset 0 0 0 1px rgba(120, 53, 15, .18);
 }
 .folder-treemap-node.is-hovered,
 .folder-treemap-node:focus-visible {
@@ -1234,11 +1187,11 @@
   gap: .08rem;
   padding: .26rem .34rem;
   overflow: hidden;
-  color: var(--on-fill);
+  color: var(--treemap-label, var(--on-fill));
   font-size: .74rem;
   font-weight: 700;
   line-height: 1.12;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, .72);
+  text-shadow: var(--treemap-shadow, 0 1px 2px rgba(0, 0, 0, .72));
   pointer-events: none;
   background: none;
 }
@@ -1279,9 +1232,10 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* The tile Others is a light tint of the theme: its label uses the text colour of the theme, with a contrast far above 4.5. */
 .folder-treemap-node.is-other > .folder-treemap-label {
-  color: var(--warning);
-  text-shadow: 0 1px 0 rgba(255, 255, 255, .55);
+  color: var(--text);
+  text-shadow: none;
   background: none;
 }
 .folder-treemap-name {
@@ -1315,7 +1269,6 @@
   color: inherit;
   font-size: .61rem;
   font-weight: 600;
-  opacity: .9;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1350,7 +1303,7 @@
   align-items: center;
   gap: .28rem;
   padding: .08rem .3rem;
-  font-size: .64rem;
+  font-size: .72rem;
   line-height: 1;
   white-space: nowrap;
 }
@@ -1366,12 +1319,12 @@
 }
 .folder-treemap-node.is-other > .folder-treemap-label.is-other-inline .folder-treemap-size,
 .folder-treemap-node.is-other > .folder-treemap-label.is-other-inline .folder-treemap-meta {
-  font-size: .55rem;
+  font-size: .68rem;
 }
 .folder-treemap-node.is-other > .folder-treemap-label.is-other-compact {
   gap: 0;
   padding: .08rem .2rem;
-  font-size: .62rem;
+  font-size: .7rem;
   line-height: 1;
 }
 .folder-treemap-node.is-other > .folder-treemap-label.is-other-compact .folder-treemap-details {
@@ -1379,7 +1332,7 @@
 }
 .folder-treemap-node.is-other > .folder-treemap-label.is-other-compact .folder-treemap-size,
 .folder-treemap-node.is-other > .folder-treemap-label.is-other-compact .folder-treemap-meta {
-  font-size: .53rem;
+  font-size: .66rem;
 }
 .folder-treemap-label.is-hidden {
   display: none;

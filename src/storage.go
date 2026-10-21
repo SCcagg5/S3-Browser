@@ -521,6 +521,7 @@ func (s *storageInstance) publicInfo() instanceInfo {
 		MultipartUploads:    s.multipartUploadsAvailable(),
 		Lifecycle:           s.lifecycleAvailable(),
 		ObjectLock:          s.objectLockAvailable(),
+		ObjectLockDefault:   s.objectLockDefaultInfo(),
 		BucketEncryption:    s.bucketEncryptionAvailable(),
 		Encryption:          s.cfg.Encryption,
 		DefaultEncryption:   defaultEncryption,
@@ -544,7 +545,10 @@ type instanceInfo struct {
 	MultipartUploads    bool   `json:"multipartUploadsSupported"`
 	Lifecycle           bool   `json:"lifecycleSupported"`
 	ObjectLock          bool   `json:"objectLockSupported"`
-	BucketEncryption    bool   `json:"bucketEncryptionSupported"`
+	// ObjectLockDefault is the default retention of the bucket that the probe read at start. It is absent for a bucket
+	// without Object Lock or without a default retention.
+	ObjectLockDefault *objectLockDefaultJSON `json:"objectLockDefault,omitempty"`
+	BucketEncryption  bool                   `json:"bucketEncryptionSupported"`
 	// Encryption is the key encryption of the bucket: "" or "sse-s3".
 	Encryption string `json:"encryption"`
 	// DefaultEncryption is the algorithm of the default encryption of the bucket at start, empty when it has none.

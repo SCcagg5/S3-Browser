@@ -765,6 +765,43 @@
     return `hsl(${hue} 62% 52%)`;
   }
 
+  // The label of a file tile is white or black, whichever has the higher WCAG contrast with the colour of the tile. The
+  // higher of the two ratios is 4.58 at the least, so every label has a ratio of 4.5 or more. The browser reads the
+  // colour (hex or hsl) through a canvas of one pixel.
+  const treemapLabelColors = Object.freeze({ light: '#ffffff', dark: '#000000' });
+  const treemapLabelCache = new Map();
+  let treemapColorContext = null;
+
+  function treemapColorLuminance(color) {
+    if (!treemapColorContext) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 1;
+      canvas.height = 1;
+      treemapColorContext = canvas.getContext('2d', { willReadFrequently: true });
+    }
+    treemapColorContext.clearRect(0, 0, 1, 1);
+    treemapColorContext.fillStyle = '#000000';
+    treemapColorContext.fillStyle = color;
+    treemapColorContext.fillRect(0, 0, 1, 1);
+    const channels = Array.from(treemapColorContext.getImageData(0, 0, 1, 1).data.slice(0, 3), value => {
+      const unit = value / 255;
+      return unit <= 0.04045 ? unit / 12.92 : ((unit + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+  }
+
+  function treemapLabelStyle(color) {
+    if (!treemapLabelCache.has(color)) {
+      const luminance = treemapColorLuminance(color);
+      const darkRatio = (luminance + 0.05) / 0.05;
+      const lightRatio = 1.05 / (luminance + 0.05);
+      treemapLabelCache.set(color, darkRatio >= lightRatio
+        ? `--treemap-label:${treemapLabelColors.dark};--treemap-shadow:none`
+        : `--treemap-label:${treemapLabelColors.light};--treemap-shadow:0 1px 2px rgba(0, 0, 0, .72)`);
+    }
+    return treemapLabelCache.get(color);
+  }
+
   function distributionEntries(entries, field, maximum = 7) {
     const source = Array.from(entries || []);
     const ordered = source
@@ -799,7 +836,7 @@
     return `<section class="folder-distribution"><div class="folder-distribution-title">${escapeHTML(title)}</div><div class="folder-distribution-bar" role="img" aria-label="${escapeHTML(title)}">${segments}</div><div class="folder-distribution-legend">${legend}</div></section>`;
   }
 
-  function statsFileListHTML(title, entries, mode, maximum = 6) {
+  function statsFileListHTML(title, entries, mode, maximum = 10) {
     const items = Array.from(entries || []).slice(0, maximum);
     if (!items.length) {
       return `<section class="folder-file-list"><div class="folder-file-list-title">${escapeHTML(title)}</div><div class="folder-file-list-empty">No file data available.</div></section>`;
@@ -812,9 +849,10 @@
       const dateLabel = BB.runtime.formatDateTimeUTC(entry?.lastModified) || 'Unknown date';
       const primaryMeta = mode === 'recent' ? dateLabel : formatBytes(entry?.bytes || 0);
       const secondaryMeta = mode === 'recent' ? formatBytes(entry?.bytes || 0) : dateLabel;
-      return `<button type="button" class="folder-file-list-row" data-insight-file="true" data-path="${escapeHTML(path)}" data-kind="file" data-size="${Math.max(0, Number(entry?.bytes || 0))}" data-mime="${escapeHTML(entry?.mime || '')}" data-etag="${escapeHTML(entry?.etag || '')}" data-modified="${escapeHTML(entry?.lastModified || '')}" title="${escapeHTML(path)}">
+      return `<button type="button" class="folder-file-list-row" data-insight-file="true" data-path="${escapeHTML(path)}" data-kind="file" data-size="${Math.max(0, Number(entry?.bytes || 0))}" data-mime="${escapeHTML(entry?.mime || '')}" data-etag="${escapeHTML(entry?.etag || '')}" data-modified="${escapeHTML(entry?.lastModified || '')}" title="${escapeHTML(`${path} · ${kind}`)}">
         <i class="mdi mdi-${escapeHTML(iconName)}"></i>
-        <span class="folder-file-list-copy"><strong>${escapeHTML(name)}</strong><small>${escapeHTML(kind)} · ${escapeHTML(secondaryMeta)}</small></span>
+        <strong class="folder-file-list-name">${escapeHTML(name)}</strong>
+        <span class="folder-file-list-secondary">${escapeHTML(secondaryMeta)}</span>
         <span class="folder-file-list-value">${escapeHTML(primaryMeta)}</span>
       </button>`;
     }).join('');
@@ -1025,7 +1063,9 @@
     const branchClass = isBranch ? ' is-branch has-header' : ' is-terminal';
     const role = kind === 'other' ? 'img' : 'button';
     const headerValue = header > 0 ? `${header.toFixed(2)}px` : '100%';
-    output.push(`<div class="folder-treemap-node is-${kind}${branchClass}" tabindex="0" role="${role}" aria-label="${escapeHTML(title.replace(/\n/g, ', '))}" data-kind="${kind}" data-name="${escapeHTML(node.name || '')}" data-depth="${depth}" data-header-height="${header}" data-path="${escapeHTML(node.path || '')}" data-size="${Math.max(0, Number(node.bytes || 0))}" data-count="${Math.max(0, Number(node.count || 0))}" data-mime="${escapeHTML(node.mime || '')}" data-etag="${escapeHTML(node.etag || '')}" data-modified="${escapeHTML(node.lastModified || '')}" style="left:${drawX.toFixed(2)}px;top:${drawY.toFixed(2)}px;width:${drawWidth.toFixed(2)}px;height:${drawHeight.toFixed(2)}px;z-index:${depth};--treemap-color:${color};--treemap-header:${headerValue}">${label}</div>`);
+    // Folder tiles and the tile Others use the colours of the theme. A file tile has its own colour and its own label colour.
+    const labelStyle = kind === 'file' ? `;${treemapLabelStyle(color)}` : '';
+    output.push(`<div class="folder-treemap-node is-${kind}${branchClass}" tabindex="0" role="${role}" aria-label="${escapeHTML(title.replace(/\n/g, ', '))}" data-kind="${kind}" data-name="${escapeHTML(node.name || '')}" data-depth="${depth}" data-header-height="${header}" data-path="${escapeHTML(node.path || '')}" data-size="${Math.max(0, Number(node.bytes || 0))}" data-count="${Math.max(0, Number(node.count || 0))}" data-mime="${escapeHTML(node.mime || '')}" data-etag="${escapeHTML(node.etag || '')}" data-modified="${escapeHTML(node.lastModified || '')}" style="left:${drawX.toFixed(2)}px;top:${drawY.toFixed(2)}px;width:${drawWidth.toFixed(2)}px;height:${drawHeight.toFixed(2)}px;z-index:${depth};--treemap-color:${color};--treemap-header:${headerValue}${labelStyle}">${label}</div>`);
     if (isLeaf || output.length >= treemapMaximumRectangles) return;
 
     const inset = Math.min(treemapBranchInsetPixels, drawWidth / 4, drawHeight / 4);
@@ -1153,20 +1193,15 @@
       const requestedTab = initialTab === 'treemap' ? 'treemap' : 'overview';
       const dialog = ui().alert({
         html: `<div id="${insightID}" class="bb-details bb-details--treemap bb-details--insights" data-initial-tab="${requestedTab}">
-          <div class="bb-details-head"><i class="mdi mdi-${isRoot ? 'database-outline' : 'chart-box-outline'}"></i><div class="bb-details-titles"><div class="bb-details-name">${scopeTitle}</div><div class="bb-details-prefix">${escapeHTML(scopePath)} · ${Number(stats.count || 0).toLocaleString()} objects · ${escapeHTML(formatBytes(stats.totalBytes || 0))}</div></div></div>
+          <div class="bb-details-head"><i class="mdi mdi-${isRoot ? 'database-outline' : 'chart-box-outline'}"></i><div class="bb-details-titles"><div class="bb-details-name">${scopeTitle}</div><div class="bb-details-prefix">${escapeHTML(scopePath)} · ${Number(stats.count || 0).toLocaleString()} objects · ${escapeHTML(formatBytes(stats.totalBytes || 0))} · computed in ${Number(stats.tookMs || 0).toLocaleString()} ms</div></div></div>
           <div class="bb-details-body">
             <div class="spreadsheet-tabs folder-insights-tabs" role="tablist" aria-label="${scopeTitle}">
               <button type="button" class="spreadsheet-tab" role="tab" data-insights-tab="overview"><i class="mdi mdi-chart-donut"></i><span>Overview</span></button>
               <button type="button" class="spreadsheet-tab" role="tab" data-insights-tab="treemap"><i class="mdi mdi-chart-tree"></i><span>Treemap</span></button>
             </div>
             <section class="folder-insights-panel" data-insights-panel="overview">
-              <div class="folder-details-summary" role="group" aria-label="Scope totals">
-                <div class="folder-details-metric"><span>Objects</span><strong>${Number(stats.count || 0).toLocaleString()}</strong></div>
-                <div class="folder-details-metric"><span>Total size</span><strong>${escapeHTML(formatBytes(stats.totalBytes))}</strong></div>
-              </div>
               <div class="folder-distribution-grid">${distributionHTML(entries, 'bytes', 'Distribution by size')}${distributionHTML(entries, 'count', 'Distribution by object count')}</div>
               <div class="folder-file-lists">${statsFileListHTML('Most recent files', stats.recent, 'recent')}${statsFileListHTML('Largest files', stats.largest, 'largest')}</div>
-              <div class="folder-details-footer">Computed in ${Number(stats.tookMs || 0).toLocaleString()} ms</div>
             </section>
             <section class="folder-insights-panel" data-insights-panel="treemap" hidden>
               <div class="folder-treemap is-layout-pending" role="img" aria-label="${scopeTitle} size treemap" aria-busy="true"></div>

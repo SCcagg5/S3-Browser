@@ -427,6 +427,70 @@ func TestProbeObjectLockShowsOnlyAnEnabledBucket(t *testing.T) {
 	}
 }
 
+// /api/instances gives the default retention that the probe read, and nothing for a bucket without a default retention
+// or without Object Lock.
+func TestInstancesGiveTheDefaultRetentionOfTheBucket(t *testing.T) {
+	for _, test := range []struct {
+		config, mode string
+		want         *objectLockDefaultJSON
+	}{
+		{"enabled", objectLockGovernance, &objectLockDefaultJSON{Mode: objectLockGovernance, Days: 30}},
+		{"enabled", objectLockCompliance, &objectLockDefaultJSON{Mode: objectLockCompliance, Days: 30}},
+		{"enabled", "", nil},
+		{"none", objectLockGovernance, nil},
+	} {
+		app, _, _ := testApplication(t)
+		fake, server := newFakeLockS3(t)
+		fake.config, fake.defaultMode = test.config, test.mode
+		instance := app.instances["rw"]
+		instance.backend = newAnonymousS3BackendForTest(t, server.URL, "bucket")
+		instance.probeObjectLock(context.Background())
+		recorder := doJSON(app, http.MethodGet, "/api/instances", nil)
+		var payload struct {
+			Instances []struct {
+				ID      string                 `json:"id"`
+				Default *objectLockDefaultJSON `json:"objectLockDefault"`
+			} `json:"instances"`
+		}
+		if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		for _, info := range payload.Instances {
+			if info.ID != "rw" {
+				continue
+			}
+			if (info.Default == nil) != (test.want == nil) || info.Default != nil && *info.Default != *test.want {
+				t.Fatalf("%s %q: objectLockDefault = %+v, want %+v", test.config, test.mode, info.Default, test.want)
+			}
+		}
+	}
+}
+
+// The HEAD of the gateway /s3 gives the lock headers of the provider: the listing reads the lock from the HEAD that it
+// sends for the encryption.
+func TestHeadGivesTheLockHeadersOfTheObject(t *testing.T) {
+	app, fake := mediaInfoApplication(t)
+	fake.headHeader = http.Header{
+		"X-Amz-Object-Lock-Mode":              {"GOVERNANCE"},
+		"X-Amz-Object-Lock-Retain-Until-Date": {"2027-10-20T10:00:00Z"},
+		"X-Amz-Object-Lock-Legal-Hold":        {"ON"},
+		sseHeader:                             {"AES256"},
+	}
+	head := httptest.NewRecorder()
+	app.routes().ServeHTTP(head, httptest.NewRequest(http.MethodHead, "/s3?instance=rw&key=notes.txt", nil))
+	if head.Code != http.StatusOK {
+		t.Fatalf("status = %d", head.Code)
+	}
+	for name, want := range map[string]string{
+		"X-Amz-Object-Lock-Mode": "GOVERNANCE", "X-Amz-Object-Lock-Retain-Until-Date": "2027-10-20T10:00:00Z",
+		"X-Amz-Object-Lock-Legal-Hold": "ON", sseHeader: "AES256",
+	} {
+		if got := head.Header().Get(name); got != want {
+			t.Fatalf("%s = %q, want %q (headers %v)", name, got, want, head.Header())
+		}
+	}
+}
+
 func TestValidateObjectLockRequest(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)

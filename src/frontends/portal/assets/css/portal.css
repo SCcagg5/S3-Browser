@@ -718,7 +718,8 @@ button.storageSwitcher__trigger:hover {
   margin-left: auto;
 }
 
-/* The lock of a bucket that encrypts. An open lock in the colour of a warning: the provider ignores the encryption. */
+/* The key of a bucket that encrypts, and the padlock of a bucket with Object Lock. A key in the colour of a warning: the
+   provider ignores the encryption. */
 .bucketLock {
   display: inline-grid;
   flex: none;
@@ -1375,6 +1376,104 @@ button.storageSwitcher__trigger:hover {
   font-size: var(--fs-sm);
 }
 
+/* Suggestions of a text field (BB.suggest). The popover has the look of the other menus: the version picker has the same
+   border, radius and shadow. It is fixed in the window of the field, so that the scroll area does not clip it. */
+.suggest {
+  position: relative;
+  display: inline-flex;
+  max-width: 100%;
+}
+
+.suggest .input {
+  padding-right: 28px;
+  text-overflow: ellipsis;
+}
+
+.suggest::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 9px;
+  width: 12px;
+  height: 12px;
+  margin-top: -6px;
+  background-color: var(--muted);
+  -webkit-mask: url("../icons/tabler/chevron-down.svg") center / contain no-repeat;
+  mask: url("../icons/tabler/chevron-down.svg") center / contain no-repeat;
+  pointer-events: none;
+  transition: transform var(--dur-quick) var(--ease);
+}
+
+.suggest:has([aria-expanded="true"])::after {
+  transform: rotate(180deg);
+}
+
+.suggest__menu {
+  position: fixed;
+  z-index: calc(var(--z-modal) + 5);
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  max-width: calc(100vw - 16px);
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pop);
+  background: var(--panel);
+  box-shadow: var(--shadow-overlay);
+  animation: pop-in var(--dur-base) var(--ease);
+}
+
+.suggest__option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  color: var(--text);
+  font-size: var(--fs-md);
+  cursor: pointer;
+}
+
+.suggest__option.is-current {
+  border-color: var(--selected-edge);
+  background: var(--selected-bg);
+}
+
+.suggest__option.is-active {
+  background: var(--row-hover);
+}
+
+.suggest__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.suggest__tag {
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-tint);
+  color: var(--accent-text);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+}
+
+.suggest__hint {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+
+.suggest__option .mdi {
+  --icon-size: 16px;
+  color: var(--muted);
+}
+
 .bb-menu {
   position: relative;
   display: inline-flex;
@@ -1730,11 +1829,13 @@ button.storageSwitcher__trigger:hover {
   cursor: pointer;
 }
 
-/* The lock of an encrypted file, at the right of its name, in the name cell: the table keeps its columns. */
+/* The marks of a file at the right of its name, in the name cell: the key of the encryption and the padlock of Object
+   Lock. The table keeps its columns. */
 .nameLock {
   display: inline-flex;
   flex: none;
   align-items: center;
+  gap: 4px;
   margin-left: -4px;
   color: var(--muted);
 }
@@ -3164,10 +3265,15 @@ button.versionCount:focus-visible {
   gap: 8px;
 }
 
-.tagEditor__form .input,
-.metaEditor__add .input {
+/* A field has the width of what it holds: a key is short, a value is longer, and both shrink on a narrow window. */
+.tagEditor__form .input {
   flex: 1 1 140px;
   min-width: 0;
+  max-width: 44ch;
+}
+
+.tagEditor__form .input:first-child {
+  max-width: 26ch;
 }
 
 .tagEditor__count,
@@ -3227,11 +3333,27 @@ button.versionCount:focus-visible {
   gap: 6px;
 }
 
+/* The form is a grid of two columns: the label, then the field. --field-size is the width of the field in characters of
+   the monospace font; the padding and the arrow of the field come on top. */
+.metaEditor {
+  --label-w: 10.5rem;
+}
+
 .metaEditor__field {
   display: grid;
-  grid-template-columns: minmax(112px, 165px) minmax(0, 1fr);
+  grid-template-columns: var(--label-w) minmax(0, 1fr);
   align-items: center;
   gap: .7rem;
+}
+
+.metaEditor__field > .input,
+.metaEditor__field > .suggest {
+  width: min(100%, calc(var(--field-size, 100%) + 56px));
+}
+
+.metaEditor__field > .suggest {
+  font-family: var(--font-mono);
+  font-size: var(--fs-md);
 }
 
 .metaEditor__field > span,
@@ -3244,9 +3366,17 @@ button.versionCount:focus-visible {
 }
 
 .metaEditor__caption {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding-top: 4px;
   color: var(--muted);
   font-size: var(--fs-sm);
   font-weight: 600;
+}
+
+.metaEditor__caption .metaEditor__count {
+  font-weight: 400;
 }
 
 .metaEditor__view .metaEditor__caption {
@@ -3262,18 +3392,26 @@ button.versionCount:focus-visible {
   display: none;
 }
 
-.metaEditor__entry {
+/* The user metadata: a key in the column of the labels, a value of at most 44 characters, and one button at the right. The
+   row that adds a metadata has the same columns. */
+.metaEditor__entry,
+.metaEditor__add {
   display: grid;
-  grid-template-columns: minmax(112px, 165px) minmax(0, 1fr) auto;
+  grid-template-columns: var(--label-w) minmax(0, calc(44ch + 24px)) auto;
   align-items: center;
+  justify-content: start;
   gap: .7rem;
+  font-family: var(--font-mono);
+  font-size: var(--fs-md);
 }
 
-.metaEditor__add {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
+.metaEditor__add .input {
+  width: min(100%, calc(20ch + 24px));
+  min-width: 0;
+}
+
+.metaEditor__add .input + .input {
+  width: 100%;
 }
 
 /* On a phone the name of a field goes above its input. */
@@ -3290,6 +3428,19 @@ button.versionCount:focus-visible {
 
   .metaEditor__entry .metaEditor__key {
     grid-column: 1 / -1;
+  }
+
+  .metaEditor__add {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .metaEditor__add .input {
+    width: 100%;
+  }
+
+  .metaEditor__add .bb-btn {
+    justify-self: start;
   }
 }
 
@@ -3805,15 +3956,28 @@ button.versionCount:focus-visible {
   padding-right: 20px;
 }
 
+/* The tabs of the insights have their own height. The panel takes the rest of the window, so that the window has no scrollbar
+   when the content fits. */
+.bb-overlay--large .bb-modal--large .bb-details--insights .bb-details-body {
+  display: flex;
+  flex-direction: column;
+}
+
 .bb-overlay--large .bb-modal--large .folder-insights-panel {
-  height: calc(var(--bb-large-height) - 3.6rem);
-  min-height: 300px;
+  height: auto;
+  min-height: 0;
+  flex: 1 1 0;
 }
 
 /* Version picker of the file details ------------------------------------------------------------------------------------ */
 
 .bb-details-version-control {
   position: relative;
+}
+
+/* In the details window, the close cross of the window is at the right of the picker. The bar of the preview page has
+   no such cross: there the picker has no margin. */
+.bb-details-head .bb-details-version-control {
   margin-right: 34px;
 }
 
@@ -3870,18 +4034,17 @@ button.versionCount:focus-visible {
   font-size: var(--fs-xs);
 }
 
-.versionPicker__tag {
-  padding: 1px 6px;
-  border-radius: var(--radius-pill);
-  background: var(--accent-tint);
-  color: var(--accent-text);
-  font-size: var(--fs-xs);
-  font-weight: var(--fw-semibold);
+/* The newest version is the current one: a dot marks it, in the button and in the first column of the menu. */
+.versionPicker__dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-fill);
 }
 
-.versionPicker__tag--old {
-  background: var(--row-hover);
-  color: var(--muted);
+.versionPicker__dotSpace {
+  width: 8px;
 }
 
 .versionPicker__menu {
@@ -3905,8 +4068,9 @@ button.versionCount:focus-visible {
 
 .versionPicker__list {
   display: grid;
-  /* The columns belong to the list, so every row has the same column positions. */
-  grid-template-columns: 38px minmax(150px, 1fr) max-content max-content 16px;
+  /* The columns belong to the list, so every row has the same column positions. The first column holds the left
+     padding of a row (10px) and the dot of the current version (8px). */
+  grid-template-columns: 18px 38px minmax(150px, 1fr) max-content max-content 16px;
   gap: 2px 12px;
   padding: 6px;
   overflow-y: auto;
@@ -3914,7 +4078,7 @@ button.versionCount:focus-visible {
 
 /* A row is an option: the button of the choice, then the action buttons of the version. */
 .versionPicker__list.has-actions {
-  grid-template-columns: 38px minmax(150px, 1fr) max-content max-content 16px max-content;
+  grid-template-columns: 18px 38px minmax(150px, 1fr) max-content max-content 16px max-content;
 }
 
 .versionPicker__item {
@@ -4120,7 +4284,6 @@ button.versionCount:focus-visible {
   gap: 8px;
 }
 
-.versionPicker__button--compact .versionPicker__tag,
 .versionPicker__button--compact .versionPicker__count {
   display: none;
 }
@@ -4391,11 +4554,11 @@ button.versionCount:focus-visible {
   }
 
   .versionPicker__list {
-    grid-template-columns: 34px minmax(0, 1fr) max-content 16px;
+    grid-template-columns: 18px 34px minmax(0, 1fr) max-content 16px;
   }
 
   .versionPicker__list.has-actions {
-    grid-template-columns: 34px minmax(0, 1fr) max-content 16px max-content;
+    grid-template-columns: 18px 34px minmax(0, 1fr) max-content 16px max-content;
   }
 
   .versionPicker__meta {

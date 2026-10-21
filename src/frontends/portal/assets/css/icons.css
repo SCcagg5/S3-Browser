@@ -135,6 +135,7 @@
 .mdi-shield-key-outline { --icon: url("../icons/tabler/shield-lock.svg"); }
 .mdi-shield-lock-outline { --icon: url("../icons/tabler/shield-lock.svg"); }
 .mdi-lock-outline { --icon: url("../icons/tabler/lock.svg"); }
+.mdi-key { --icon: url("../icons/tabler/key.svg"); }
 .mdi-source-commit { --icon: url("../icons/tabler/git-commit.svg"); }
 .mdi-spreadsheet { --icon: url("../icons/tabler/file-spreadsheet.svg"); }
 .mdi-subdirectory-arrow-right { --icon: url("../icons/tabler/corner-down-right.svg"); }
@@ -214,11 +215,11 @@
 .ic-git-commit { --icon: url("../icons/tabler/git-commit.svg"); }
 .ic-hourglass { --icon: url("../icons/tabler/hourglass.svg"); }
 .ic-info-circle { --icon: url("../icons/tabler/info-circle.svg"); }
+.ic-key { --icon: url("../icons/tabler/key.svg"); }
 .ic-layout-grid { --icon: url("../icons/tabler/layout-grid.svg"); }
 .ic-list { --icon: url("../icons/tabler/list.svg"); }
 .ic-loader-2 { --icon: url("../icons/tabler/loader-2.svg"); }
 .ic-lock { --icon: url("../icons/tabler/lock.svg"); }
-.ic-lock-open { --icon: url("../icons/tabler/lock-open.svg"); }
 .ic-maximize { --icon: url("../icons/tabler/maximize.svg"); }
 .ic-minimize { --icon: url("../icons/tabler/minimize.svg"); }
 .ic-minus { --icon: url("../icons/tabler/minus.svg"); }

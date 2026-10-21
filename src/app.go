@@ -1515,8 +1515,12 @@ func copyObjectHeaders(destination, source http.Header) {
 		"last-modified":       true,
 		"vary":                true,
 		"x-amz-version-id":    true,
-		"x-goog-generation":   true,
-		"x-goog-hash":         true,
+		// The lock of the version: the listing shows it from the HEAD answer that it reads for the encryption.
+		"x-amz-object-lock-mode":              true,
+		"x-amz-object-lock-retain-until-date": true,
+		"x-amz-object-lock-legal-hold":        true,
+		"x-goog-generation":                   true,
+		"x-goog-hash":                         true,
 	}
 	for _, name := range encryptionResponseHeaders {
 		allowed[name] = true

@@ -152,6 +152,31 @@
     return `${text} ${units[unit]}`;
   }
 
+  // The marks of the version that the page shows, next to its size: the key of the encryption and the padlock of Object
+  // Lock, from the headers of the HEAD answer that the page reads for the preview. No headers: no mark.
+  // customerKey marks an object with a key of the client, whose HEAD the provider refuses.
+  function setObjectMarks(headers = null, customerKey = false) {
+    const host = byId('docMarks');
+    if (!host) return;
+    const encryption = customerKey ? 'Encrypted with a key of the client (SSE-C)' : (headers && BB.encryption?.objectEncryptionTitle(headers)) || '';
+    const lock = (headers && BB.objectLock?.lockTitle(BB.objectLock.lockFromHeaders(headers))) || '';
+    const mark = (kind, title, name) => {
+      const node = document.createElement('span');
+      node.className = 'docMarks__icon';
+      node.dataset.mark = kind;
+      node.setAttribute('role', 'img');
+      node.title = title;
+      node.setAttribute('aria-label', title);
+      const icon = document.createElement('i');
+      icon.className = `ic ic-${name}`;
+      icon.setAttribute('aria-hidden', 'true');
+      node.append(icon);
+      return node;
+    };
+    host.replaceChildren(...[encryption && mark('encryption', encryption, 'key'), lock && mark('object-lock', lock, 'lock')].filter(Boolean));
+    host.hidden = !host.childElementCount;
+  }
+
   // The header of the portal interface: the way back names the folder, the path starts at the display name of the
   // bucket (the root), as the crumbs of the browser page do.
   function setDocMeta(key, size, archiveKey = '') {
@@ -284,6 +309,8 @@
     container.append(host);
     const shown = previewVersions.find(version => version.version === (currentVersion() || previewVersions.find(item => item.isCurrent)?.version));
     setDocMeta(key, shown ? Number(shown.size) : NaN, '');
+    // The comparison shows two versions: the bar has no mark of one version.
+    setObjectMarks();
     updateBackLink(key);
     showCompareBar(true);
     activeCompare = BB.versions.mountCompare(host, {
@@ -1326,6 +1353,7 @@
     }
 
     customerKeyObject = false;
+    setObjectMarks();
     setPreviewMode('loading');
     container.className = 'preview-loading';
     container.replaceChildren();
@@ -1342,6 +1370,8 @@
         ? await BB.api.archiveEntryHead(key, archiveEntry, { instance: config.instanceId, version })
         : await BB.api.head(key, version, config.instanceId);
       setDocMeta(displayKey, metadata.size, archiveEntry ? key : '');
+      // An entry of an archive has no encryption and no lock of its own.
+      setObjectMarks(archiveEntry ? null : metadata.headers);
       updateBackLink(key, archiveEntry);
       const rawURL = archiveEntry
         ? BB.api.archiveEntryURL(key, archiveEntry, { inline: true, instance: config.instanceId, version })
@@ -1477,8 +1507,9 @@
       // say why. The size comes from the listing.
       if (!archiveEntry && await BB.encryption?.customerKeyRefusal(error, key, { version: currentVersion(), instance: config.instanceId })) {
         customerKeyObject = true;
+        setObjectMarks(null, true);
         byId('openRawBtn').href = BB.api.openURLForKey(key, config.instanceId, currentVersion());
-        renderError(new Error(BB.encryption.CUSTOMER_KEY_TEXT), 'Encrypted with a key of the client', 'lock-outline');
+        renderError(new Error(BB.encryption.CUSTOMER_KEY_TEXT), 'Encrypted with a key of the client', 'key');
         return;
       }
       renderError(error);

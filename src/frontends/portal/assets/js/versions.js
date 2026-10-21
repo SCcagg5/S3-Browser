@@ -71,9 +71,12 @@
   };
 
   // The versions that hold data, the newest first, with the number of each (v1 is the oldest) and the size change.
+  // The current version of S3 is the newest one. Two versions can have the same date (a provider gives the date to the
+  // second): then the current version goes first, and the other ones keep the order of the provider (newest first).
   function listVersions(versions) {
     const real = (versions || []).filter(version => version && !version.deleteMarker && version.version);
-    real.sort((left, right) => new Date(right.lastModified || 0) - new Date(left.lastModified || 0));
+    real.sort((left, right) => (new Date(right.lastModified || 0) - new Date(left.lastModified || 0))
+      || (Number(Boolean(right.isCurrent)) - Number(Boolean(left.isCurrent))));
     const models = real.map((version, index) => ({ ...version, number: real.length - index }));
     models.forEach((model, index) => {
       model.older = models[index + 1] || null;
@@ -89,6 +92,9 @@
   };
 
   const versionLabel = version => `v${version.number}`;
+
+  // The mark of the current version: a dot of the accent colour. Its name shows on hover and for a screen reader.
+  const currentDot = () => h('span', { class: 'versionPicker__dot', role: 'img', title: 'Current', 'aria-label': 'Current' });
 
   // ---------------------------------------------------------------------------------------------------------------
   // Version picker (file details)
@@ -109,10 +115,9 @@
 
     const label = h('span', { class: 'versionPicker__label' },
       h('strong', {}, versionLabel(active)),
-      active === current ? h('span', { class: 'versionPicker__tag' }, 'Current') : h('span', { class: 'versionPicker__tag versionPicker__tag--old' }, 'Older'),
       h('span', { class: 'versionPicker__date' }, formatDate(active.lastModified)));
     const button = h('button', { type: 'button', class: ['versionPicker__button', compact && 'versionPicker__button--compact'], 'aria-haspopup': 'listbox', 'aria-expanded': 'false', title: `${list.length} versions` },
-      caption ? h('span', { class: 'versionPicker__caption' }, caption) : null, icon('source-commit'), label, h('span', { class: 'versionPicker__count' }, `${list.length}`), icon('chevron-down'));
+      active.isCurrent ? currentDot() : null, caption ? h('span', { class: 'versionPicker__caption' }, caption) : null, icon('source-commit'), label, h('span', { class: 'versionPicker__count' }, `${list.length}`), icon('chevron-down'));
 
     // The action buttons of a row: frameless icons. They show on hover and on keyboard focus, and the keyboard always
     // reaches them. An action closes the menu first: its confirmation is a window over the page.
@@ -135,6 +140,7 @@
         type: 'button', class: 'versionPicker__choose', 'aria-label': `${versionLabel(version)}${version.isCurrent ? ', current' : ''}, ${when}, ${formatBytes(version.size)}`,
         onclick: () => { close(); if (version !== active) onSelect?.(version === current && !explicit ? '' : version.version); }
       },
+        version.isCurrent ? currentDot() : h('span', { class: 'versionPicker__dotSpace', 'aria-hidden': 'true' }),
         h('span', { class: 'versionPicker__number' }, versionLabel(version)),
         h('span', { class: 'versionPicker__when' },
           h('span', {}, when),
@@ -143,7 +149,6 @@
           h('span', {}, formatBytes(version.size)),
           h('small', { class: version.delta ? (version.delta > 0 ? 'is-grow' : 'is-shrink') : '' }, version.delta === null ? 'first version' : formatDelta(version.delta))),
         h('span', { class: 'versionPicker__meta' },
-          version.isCurrent ? h('span', { class: 'versionPicker__tag' }, 'Current') : null,
           h('code', { title: version.version }, shortId(version.version))),
         isActive ? icon('check') : h('span', { class: 'versionPicker__spacer' }));
       return h('div', { class: ['versionPicker__item', isActive && 'is-active'], role: 'option', 'aria-selected': isActive ? 'true' : 'false', 'data-version': version.version },

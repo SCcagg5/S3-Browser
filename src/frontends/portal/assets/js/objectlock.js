@@ -71,7 +71,7 @@
   async function mountSection(host, { key, instance = null, version = '', canWrite = false, onChanged = null }) {
     const editButton = h('button', { type: 'button', class: 'iconButton detailsEditButton', 'data-lock-edit': '', title: 'Edit the retention', 'aria-label': 'Edit the retention', 'aria-pressed': 'false', hidden: true }, icon('pencil-outline'));
     const body = h('div', { class: 'metaEditor lockEditor' }, h('span', { class: 'metaEditor__state' }, 'Loading the retention…'));
-    host.replaceChildren(h('div', { class: 'bb-details-section-title' }, icon('shield-lock-outline'), ' Retention', editButton), body);
+    host.replaceChildren(h('div', { class: 'bb-details-section-title' }, icon('lock-outline'), ' Retention', editButton), body);
 
     let saved;
     // The difference between the clock of the server and the clock of the browser, read with the state.
@@ -281,5 +281,41 @@
     render();
   }
 
-  BB.objectLock = { mountSection };
+  // ---------------------------------------------------------------------------------------------------------------
+  // The lock of a file in the listing and the lock of a bucket in the selector
+  // ---------------------------------------------------------------------------------------------------------------
+
+  // The lock of a version from the headers of its HEAD answer (names in lowercase): the mode, the retain-until date in
+  // milliseconds and the legal hold. Null when the headers give no lock.
+  function lockFromHeaders(headers) {
+    const mode = String(headers?.['x-amz-object-lock-mode'] || '').trim().toUpperCase();
+    const until = Date.parse(String(headers?.['x-amz-object-lock-retain-until-date'] || '').trim());
+    const legalHold = String(headers?.['x-amz-object-lock-legal-hold'] || '').trim().toUpperCase() === 'ON';
+    const retention = mode && Number.isFinite(until) ? { mode, until } : null;
+    return retention || legalHold ? { ...(retention || {}), legalHold } : null;
+  }
+
+  // The date of a tooltip: UTC, to the minute.
+  const shortUTC = ms => {
+    const date = new Date(ms);
+    return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())} UTC`;
+  };
+
+  // The tooltip of the lock of a file, or '' when nothing holds the version now. A retention whose date is past does
+  // not hold the version: it does not count.
+  function lockTitle(lock, now = Date.now()) {
+    if (!lock) return '';
+    const parts = [];
+    if (lock.mode && lock.until > now) parts.push(`${modeName(lock.mode)} until ${shortUTC(lock.until)}`);
+    if (lock.legalHold) parts.push('legal hold');
+    return parts.length ? `Object Lock: ${parts.join(', ')}` : '';
+  }
+
+  // The tooltip of the lock of a bucket (from /api/instances), or '' for a bucket without Object Lock.
+  function bucketLockTitle(instance) {
+    if (instance?.objectLockSupported !== true) return '';
+    return instance.objectLockDefault ? `Object Lock is on. Default retention: ${bucketDefaultText(instance.objectLockDefault)}` : 'Object Lock is on';
+  }
+
+  BB.objectLock = { mountSection, lockFromHeaders, lockTitle, bucketLockTitle };
 })();

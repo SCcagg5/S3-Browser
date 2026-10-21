@@ -277,6 +277,8 @@ func (s *s3Backend) PutObjectLegalHold(ctx context.Context, key, version string,
 type objectLockCapability struct {
 	// on is set when the probe found a bucket with Object Lock.
 	on atomic.Bool
+	// bucketDefault is the default retention of the bucket that the probe read. It is nil for a bucket without one.
+	bucketDefault atomic.Pointer[objectLockDefault]
 }
 
 // objectLockAvailable tells if the bucket of the instance has Object Lock. Until the probe has run, the answer is no.
@@ -302,6 +304,22 @@ func (s *storageInstance) probeObjectLock(ctx context.Context) {
 	defer cancel()
 	config, err := manager.ObjectLockConfiguration(probeCtx)
 	s.objectLock.on.Store(err == nil && config.Enabled)
+	if err == nil && config.Enabled {
+		s.objectLock.bucketDefault.Store(config.Default)
+	}
+}
+
+// objectLockDefaultInfo gives the default retention of the bucket that the probe read at start, for /api/instances.
+// It is nil for a bucket without Object Lock or without a default retention.
+func (s *storageInstance) objectLockDefaultInfo() *objectLockDefaultJSON {
+	if !s.objectLockAvailable() {
+		return nil
+	}
+	value := s.objectLock.bucketDefault.Load()
+	if value == nil {
+		return nil
+	}
+	return &objectLockDefaultJSON{Mode: value.Mode, Days: value.Days, Years: value.Years}
 }
 
 func (s *storageInstance) objectLockManager() (ObjectLockManager, error) {

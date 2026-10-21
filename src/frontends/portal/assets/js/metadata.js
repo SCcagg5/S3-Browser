@@ -31,19 +31,24 @@
 
   const icon = name => h('i', { class: `mdi mdi-${name}`, 'aria-hidden': 'true' });
 
-  // The standard headers of the form, in the order of the server. Each has values to suggest.
+  // The standard headers of the form, in the order of the server. Each has values to suggest and the width of its field in
+  // characters. The guessed Content-Type comes first.
   const COMMON_TYPES = ['application/octet-stream', 'text/plain', 'text/csv', 'text/html', 'text/markdown', 'application/json', 'application/xml',
     'application/pdf', 'application/zip', 'image/png', 'image/jpeg', 'image/svg+xml', 'video/mp4', 'audio/mpeg'];
+  const LANGUAGES = [['en', 'English'], ['en-US', 'English, United States'], ['fr', 'French'], ['de', 'German'], ['es', 'Spanish']];
   const HEADERS = [
-    { field: 'contentType', label: 'Content-Type', placeholder: 'application/octet-stream' },
-    { field: 'cacheControl', label: 'Cache-Control', placeholder: 'max-age=3600', suggest: () => ['no-cache', 'no-store', 'max-age=3600', 'public, max-age=86400', 'private, max-age=0'] },
-    { field: 'contentDisposition', label: 'Content-Disposition', placeholder: 'inline', suggest: name => ['inline', `attachment; filename="${name.replace(/["\\]/g, '')}"`] },
-    { field: 'contentEncoding', label: 'Content-Encoding', placeholder: 'gzip', suggest: () => ['gzip', 'br', 'zstd', 'deflate', 'identity'] },
-    { field: 'contentLanguage', label: 'Content-Language', placeholder: 'en', suggest: () => ['en', 'en-US', 'fr', 'de', 'es'] },
-    { field: 'expires', label: 'Expires', placeholder: 'Wed, 21 Oct 2026 07:28:00 GMT', suggest: () => [new Date(Date.now() + 86400000).toUTCString(), new Date(Date.now() + 30 * 86400000).toUTCString()] }
+    { field: 'contentType', label: 'Content-Type', placeholder: 'application/octet-stream', size: 28,
+      suggest: name => {
+        const guess = BB.detect?.contentTypeForName?.(name) || '';
+        return [...(guess ? [{ value: guess, tag: 'Guess' }] : []), ...COMMON_TYPES];
+      } },
+    { field: 'cacheControl', label: 'Cache-Control', placeholder: 'max-age=3600', size: 36, suggest: () => ['no-cache', 'no-store', 'max-age=3600', 'public, max-age=86400', 'private, max-age=0'] },
+    { field: 'contentDisposition', label: 'Content-Disposition', placeholder: 'inline', size: 40, suggest: name => ['inline', `attachment; filename="${name.replace(/["\\]/g, '')}"`] },
+    { field: 'contentEncoding', label: 'Content-Encoding', placeholder: 'gzip', size: 16, suggest: () => ['gzip', 'br', 'zstd', 'deflate', 'identity'] },
+    { field: 'contentLanguage', label: 'Content-Language', placeholder: 'en', size: 14, suggest: () => LANGUAGES.map(([value, hint]) => ({ value, hint })) },
+    { field: 'expires', label: 'Expires', placeholder: 'Wed, 21 Oct 2026 07:28:00 GMT', size: 28,
+      suggest: () => [{ value: new Date(Date.now() + 86400000).toUTCString(), hint: 'In 1 day' }, { value: new Date(Date.now() + 30 * 86400000).toUTCString(), hint: 'In 30 days' }] }
   ];
-
-  let listCounter = 0;
 
   const byteLength = text => new TextEncoder().encode(String(text)).length;
   const metadataBytes = entries => entries.reduce((total, entry) => total + byteLength(entry.key) + byteLength(entry.value), 0);
@@ -144,25 +149,15 @@
       view.replaceChildren(...(rows.length ? rows : [h('span', { class: 'metaEditor__state' }, 'No metadata.')]));
     }
 
-    function datalist(values) {
-      listCounter += 1;
-      const id = `metaEditor-list-${listCounter}`;
-      return { id, node: h('datalist', { id }, ...values.filter(Boolean).map(value => h('option', { value }))) };
-    }
-
-    function headerRow({ field, label, placeholder, suggest }) {
-      const values = field === 'contentType'
-        ? [...new Set([BB.detect?.contentTypeForName?.(name) || '', ...COMMON_TYPES])]
-        : suggest(name);
-      const list = datalist(values);
-      const input = h('input', { type: 'text', class: 'input mono', placeholder, list: list.id, autocomplete: 'off', spellcheck: 'false', 'aria-label': label, 'data-metadata-header': field });
+    function headerRow({ field, label, placeholder, size, suggest }) {
+      const input = h('input', { type: 'text', class: 'input mono', placeholder, autocomplete: 'off', spellcheck: 'false', 'aria-label': label, 'data-metadata-header': field });
       input.value = draft.headers[field] || '';
       input.addEventListener('input', () => {
         if (input.value) draft.headers[field] = input.value; else delete draft.headers[field];
         say('');
         renderState();
       });
-      return h('label', { class: 'metaEditor__field' }, h('span', {}, label), input, list.node);
+      return h('label', { class: 'metaEditor__field', style: `--field-size: ${size}ch` }, h('span', {}, label), BB.suggest.field(input, { values: () => suggest(name) }));
     }
 
     function entryRow(entry) {
@@ -174,11 +169,11 @@
       return h('div', { class: 'metaEditor__entry' }, h('span', { class: 'metaEditor__key mono' }, entry.key), value, remove);
     }
 
-    const keyInput = h('input', { type: 'text', class: 'input', placeholder: 'Key', 'aria-label': 'Metadata key', autocomplete: 'off', spellcheck: 'false' });
-    const valueInput = h('input', { type: 'text', class: 'input', placeholder: 'Value', 'aria-label': 'Metadata value', autocomplete: 'off', spellcheck: 'false' });
+    const keyInput = h('input', { type: 'text', class: 'input mono', placeholder: 'Key', 'aria-label': 'Metadata key', autocomplete: 'off', spellcheck: 'false' });
+    const valueInput = h('input', { type: 'text', class: 'input mono', placeholder: 'Value', 'aria-label': 'Metadata value', autocomplete: 'off', spellcheck: 'false' });
     const addButton = h('button', { type: 'button', class: 'bb-btn', 'data-metadata-add': '' }, icon('plus'), h('span', {}, 'Add'));
     const count = h('span', { class: 'metaEditor__count' });
-    const addRow = h('div', { class: 'metaEditor__add' }, keyInput, valueInput, addButton, count);
+    const addRow = h('div', { class: 'metaEditor__add' }, keyInput, valueInput, addButton);
     // S3 keeps the keys of the user metadata in lowercase: the field does the same.
     keyInput.addEventListener('input', () => { keyInput.value = keyInput.value.toLowerCase(); });
 
@@ -211,7 +206,7 @@
     function renderForm() {
       form.replaceChildren(
         h('div', { class: 'metaEditor__fields' }, ...HEADERS.map(headerRow)),
-        h('div', { class: 'metaEditor__caption' }, 'User metadata'),
+        h('div', { class: 'metaEditor__caption' }, 'User metadata', count),
         h('div', { class: 'metaEditor__entries' }, ...draft.metadata.map(entryRow)),
         addRow
       );

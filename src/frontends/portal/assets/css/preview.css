@@ -69,6 +69,29 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* The marks of the version on the page, after its size: the key of the encryption and the padlock of Object Lock. */
+.docMarks {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  align-self: center;
+  color: var(--muted);
+}
+
+.docMarks[hidden] {
+  display: none;
+}
+
+.docMarks__icon {
+  display: inline-grid;
+  place-items: center;
+}
+
+.docMarks .ic {
+  --icon-size: 15px;
+}
+
 .previewTitle__path {
   display: flex;
   align-items: center;

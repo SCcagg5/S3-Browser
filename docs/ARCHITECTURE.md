@@ -101,6 +101,8 @@ The listing of the provider does not give tags, and S3 has no request that lists
 
 The details of a file have a picker of versions. It shows each version with its number (v1 is the oldest), its date, its size and the change of size since the version before. A choice opens the details of that version. The tags of an older version are read only.
 
+The picker sorts the versions by date, the newest first. In S3, the current version is the newest version that holds data, so the picker shows no text "Current" or "Older". A small dot of the accent colour marks the version that the provider gives with `IsLatest`, with the tooltip "Current". The dot is the first column of the menu, and the first element of the button for the current version. Two versions with the same date (SeaweedFS gives the date to the second) put the current version first. When the current version is a delete marker, no version gets the dot.
+
 Each row of the picker also has frameless icon buttons: Download, Restore and Delete. They show on hover and on keyboard focus. Restore is not on the current version and needs the write permission. Delete needs the delete permission. Restore and Delete open a confirmation first, and call `POST /api/versions/restore` or `DELETE /api/versions`. A delete that a lock refuses shows the message of `409 object_locked`. After a restore or a delete, the details open again, the preview page reads the versions and the preview again, and the listing reads its folder again.
 
 A row of the picker is a `div` with the role `option`. It has a button for the choice and the action buttons. Up and Down go from row to row. Left and Right go from the choice to the action buttons of the row. Tab goes through every button of the menu, and Escape closes it. The pickers From and To of a comparison have no action buttons.
@@ -195,6 +197,8 @@ The copy also sends the storage class, the website redirect and the server-side 
 A request with `version` copies that version onto the key. The version becomes the current version, as a restore does. The tags of that version stay.
 
 The action is `objects.write` on the node of the key (refer to [ACCESS.md](ACCESS.md)). No new right exists.
+
+The form is a grid of labels and fields. Each field has the width of its value, and 100% at most on a narrow window. `BB.suggest` (`assets/js/common/suggest.js`) adds the suggestions to a text field with the ARIA combobox pattern. The popover is in the large window, with the look of the menu of the version picker. The typed text filters the values, and a free value stays possible. Down and Up move the mark, Enter chooses, and Escape closes the popover and not the window. The first value of Content-Type is the type that `detect.js` guesses from the name.
 
 At start, the server probes each instance that has the write permission: a copy with REPLACE of an object that does not exist, with an ETag that no object has. A provider with `CopyObject` answers "no such key" and writes nothing. A provider without it answers `501` or `405`, and the instance then reports `metadataEditSupported: false` in `/api/instances`. A later `501` of an edit has the same effect. The GCS backend has no edit: it answers `501 metadata_unsupported`, and the page hides the button.
 
@@ -404,6 +408,23 @@ A refusal for a lock does not change the delete permission that the instance rep
 
 For a batch delete, the server reads the lock of up to 100 refused keys of each batch. The other refused keys stay a failure of the job.
 
+### The lock in the listing, the bucket selector and the preview
+
+The HEAD answer of a version gives its lock: `x-amz-object-lock-mode`, `x-amz-object-lock-retain-until-date` and `x-amz-object-lock-legal-hold`. The gateway `/s3` gives these headers. The listing reads them from the HEAD request that it sends for the encryption (refer to "Marks in the bucket selector, the listing and the preview"). Thus the lock adds no request. A file with a legal hold, or with a retention whose date is in the future, gets a small closed padlock at the right of its name. The tooltip gives the lock:
+
+| Lock | Tooltip |
+| --- | --- |
+| Governance retention | "Object Lock: Governance until 2027-10-20 10:00 UTC" |
+| Compliance retention | "Object Lock: Compliance until 2027-10-20 10:00 UTC" |
+| Legal hold | "Object Lock: legal hold" |
+| Both | "Object Lock: Governance until 2027-10-20 10:00 UTC, legal hold" |
+
+The page makes the tooltip at each drawing. A retention whose date is past does not count. A change of the lock in the section "Retention" makes the listing read that file again: the change keeps the ETag and the date of the file.
+
+The bucket selector shows a closed padlock next to a bucket with `objectLockSupported`. The tooltip says "Object Lock is on". The probe at start also reads the default retention of the bucket. `/api/instances` gives it in `objectLockDefault` (`mode`, and `days` or `years`), and the tooltip then adds "Default retention: Governance, 30 days". A change of the default retention after the start shows after the next start. The bar of the preview page shows the padlock of the version on the page, from the HEAD request of the preview.
+
+On AWS S3, the HEAD answer has the lock headers only for a caller with `s3:GetObjectRetention` and `s3:GetObjectLegalHold`. Without them, the listing shows no padlock.
+
 ### The section "Retention"
 
 When `objectLockSupported` is true, the details of a file have the section "Retention". It shows the mode, the retain-until date, the legal hold and the default retention of the bucket, for the version of the details. A frameless "Edit" button opens the form in the same window, with Save and Revert, as the sections "Metadata" and "Tags". A person without the write permission sees no button.
@@ -455,7 +476,7 @@ The details of a file have the section "Encryption" after "Storage object". It s
 
 The preview page of an SSE-C object shows the name and the path of the object, and the message "This object is encrypted with a key of the client (SSE-C). The browser cannot read it without that key." The link to the original and the downloads give the same message. The page uses this message only when the HEAD request fails with `400` and `GET /api/media-info` gives `customerKey: true`. Any other `400` stays an error.
 
-### Locks in the bucket selector and in the listing
+### Marks in the bucket selector, the listing and the preview
 
 `/api/instances` gives three facts for each instance:
 
@@ -465,11 +486,13 @@ The preview page of an SSE-C object shows the name and the path of the object, a
 | `defaultEncryption` | The algorithm of the default encryption of the bucket at start (`AES256`, `aws:kms`), or `""` |
 | `encryptionApplied` | For `"sse-s3"` only: `"yes"` on AWS S3, MinIO and SeaweedFS, `"no"` on Garage, `"unknown"` for a provider that S3-Browser does not know |
 
-The bucket selector shows a lock next to the name of a bucket that encrypts. The tooltip says "Encrypted: SSE-S3 for each new object" or "Default encryption of the bucket: AES256". The lock tells the truth of the provider. Garage accepts the header and does not encrypt, so a Garage bucket with `"sse-s3"` gets an open lock in the colour of a warning. For a provider that S3-Browser does not know, the tooltip says "SSE-S3 requested; the provider may not encrypt".
+The mark of the encryption is a key (Tabler `key`). The mark of Object Lock is a closed padlock (Tabler `lock`). The bucket selector shows a key next to the name of a bucket that encrypts. The tooltip says "Encrypted: SSE-S3 for each new object" or "Default encryption of the bucket: AES256". The key tells the truth of the provider. Garage accepts the header and does not encrypt, so a Garage bucket with `"sse-s3"` gets a key in the colour of a warning. For a provider that S3-Browser does not know, the tooltip says "SSE-S3 requested; the provider may not encrypt". A bucket with Object Lock also gets its padlock: the two marks are separate, and each shows only when it is true.
 
-A listing does not give the encryption of an object. Thus the listing reads it with a HEAD request for each file on the page, as it reads the tags: 4 requests at the same time, 100 files at most. A file waits with a mark, and an answer stays for the ETag and the date of the file. An encrypted file gets a small lock at the right of its name, in the cell of the name. The tooltip names the encryption: SSE-S3, SSE-KMS with its key, or "key of the client" (SSE-C). A HEAD request of an SSE-C object fails with `400`, and `GET /api/media-info` then confirms the key of the client. A file without an encryption gets no lock.
+A listing does not give the encryption of an object. Thus the listing reads it with a HEAD request for each file on the page, as it reads the tags: 4 requests at the same time, 100 files at most. A file waits with a mark, and an answer stays for the ETag and the date of the file. An encrypted file gets a small key at the right of its name, in the cell of the name. The padlock of a lock follows the key. The tooltip of the key names the encryption: SSE-S3, SSE-KMS with its key, or "key of the client" (SSE-C). A HEAD request of an SSE-C object fails with `400`, and `GET /api/media-info` then confirms the key of the client. Such a file gets no padlock, because its HEAD answer gives no header. A file without an encryption gets no key.
 
-The setting "Show the encryption of the objects" of the listing starts or stops these requests for each bucket. The browser keeps the choice in `portal.listing`. Without a choice, the setting is on for a bucket with a default encryption, or with `"sse-s3"` on a provider that does not ignore it. It is off for the other buckets, so their listing sends no HEAD request.
+The setting "Show the encryption and the lock of the objects" of the listing starts or stops these requests for each bucket. The browser keeps the choice in `portal.listing`, with the name `encryption` of the first version of the setting. Without a choice, the setting is on for a bucket with a default encryption, with `"sse-s3"` on a provider that does not ignore it, or with `objectLockSupported`. It is off for the other buckets, so their listing sends no HEAD request.
+
+The bar of the preview page shows the key and the padlock of the version on the page, next to its size, with the tooltips of the listing. The marks come from the HEAD request that the preview sends for the version: a version in `?version=` shows its own encryption and its own lock. An SSE-C object gets the key with the tooltip "Encrypted with a key of the client (SSE-C)". An entry of an archive and the comparison of two versions show no mark.
 
 ## Insights treemap normalization
 
@@ -483,6 +506,10 @@ The statistics worker builds the semantic treemap on the backend after the compl
 - returns an immutable `treemap` tree plus `treemapThresholdBytes`.
 
 The browser performs only geometric squarified layout, label fitting, focus feedback, and navigation. It does not reconstruct folders, regroup data, or decide which single-child nodes to remove.
+
+The browser chooses the label colour of a file tile from the WCAG contrast: black or white text, the colour with the higher ratio on the colour of the tile. That ratio is always 4.5 or more. The tile "Others" has a light tint of the warning colour, and its label has the colour of the text of the theme.
+
+The subtitle of the window gives the path, the count of objects, the total size and the time of the scan: `<path> · N objects · SIZE · computed in N ms`. The overview fits in the window with no scrollbar at 1280x720 and larger. The lists "Most recent files" and "Largest files" have 10 rows at most. They share the height that is left, and each list scrolls when it is too short. A very small window scrolls.
 
 ## Version capability and version access
 

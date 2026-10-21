@@ -412,17 +412,25 @@ BB.cfg = config;
     ].join('\n');
   }
 
-  // The lock next to the name of a bucket that encrypts, with the reason in its tooltip. An open lock for a bucket whose
-  // provider ignores the encryption that the server asks for.
+  // The key next to the name of a bucket that encrypts, with the reason in its tooltip. A key in the colour of a warning
+  // for a bucket whose provider ignores the encryption that the server asks for.
   function bucketLock(instance) {
     const lock = BB.encryption?.bucketLock(instance);
     if (!lock) return null;
     return h('span', { class: ['bucketLock', `is-${lock.tone}`], role: 'img', title: lock.title, 'aria-label': lock.title, 'data-bucket-lock': lock.icon }, ic(lock.icon));
   }
 
+  // The padlock next to the name of a bucket with Object Lock, with the default retention in its tooltip when the server
+  // read one at start.
+  function bucketObjectLock(instance) {
+    const title = BB.objectLock?.bucketLockTitle(instance);
+    if (!title) return null;
+    return h('span', { class: 'bucketLock is-on', role: 'img', title, 'aria-label': title, 'data-bucket-object-lock': '' }, ic('lock'));
+  }
+
   function switcherCopy(instance) {
     return h('span', { class: 'storageSwitcher__copy' },
-      h('span', { class: 'storageSwitcher__titleRow' }, h('strong', {}, storageName(instance)), bucketLock(instance), permissionDots(instance)));
+      h('span', { class: 'storageSwitcher__titleRow' }, h('strong', {}, storageName(instance)), bucketLock(instance), bucketObjectLock(instance), permissionDots(instance)));
   }
 
   function renderSwitcher() {
@@ -482,7 +490,7 @@ BB.cfg = config;
             h('span', { class: 'storageBucket__mark' }, entry.id === state.instanceId ? ic('check', 'storageBucket__check') : null),
             ic('folder'),
             h('span', { class: 'storageBucket__copy' },
-              h('span', { class: 'storageBucket__titleRow' }, h('strong', {}, storageName(entry)), bucketLock(entry), permissionDots(entry)),
+              h('span', { class: 'storageBucket__titleRow' }, h('strong', {}, storageName(entry)), bucketLock(entry), bucketObjectLock(entry), permissionDots(entry)),
               entry.rootPrefix ? h('small', {}, `/${entry.rootPrefix}`) : null))));
           const row = h('button', {
             type: 'button', class: 'storageHost__row', 'aria-expanded': expanded ? 'true' : 'false', 'data-host': host.id,
@@ -903,7 +911,7 @@ BB.cfg = config;
     t.tbody.replaceChildren(...visibleRows().map(buildRow));
     applyTagFilter();
     refreshVisibleTags();
-    refreshVisibleEncryption();
+    refreshVisibleMarks();
     const total = state.nextContinuationToken ? `${rangeEnd().toLocaleString('en-US')}+` : (state.scanOffset + state.rows.length).toLocaleString('en-US');
     t.range.textContent = `${rangeStart().toLocaleString('en-US')} to ${rangeEnd().toLocaleString('en-US')} of ${total}`;
     t.pageSize.value = String(state.pageSize);
@@ -954,7 +962,7 @@ BB.cfg = config;
     const name = h('div', { class: ['nameCell', !isContent && 'is-folder'] },
       isContent ? mdi(fileIcon(row)) : ic('folder'),
       h('button', { type: 'button', class: 'nameLink', title: isContent ? row.key : row.prefix, onclick: () => (isContent ? openPreview(row) : goToPrefix(row.prefix)) }, row.name),
-      isContent ? h('span', { class: 'nameLock' }, encryptionMark(row)) : null);
+      isContent ? h('span', { class: 'nameLock' }, objectMarks(row)) : null);
     let size;
     if (isContent) {
       const parts = byteParts(row.size);
@@ -1369,7 +1377,7 @@ BB.cfg = config;
     ui.settingsMenu.querySelector('[data-column="tags"]').closest('label').hidden = state.tagsUnsupported;
     ui.settingsMenu.querySelector('#uploadTagsSetting').hidden = state.tagsUnsupported;
     ui.settingsMenu.querySelector('#uploadTagsSeparator').hidden = state.tagsUnsupported;
-    ui.encryptionToggle.checked = encryptionShown();
+    ui.encryptionToggle.checked = marksShown();
   }
 
   // The tags of the new uploads: saved when the field changes, with the reason when a tag is wrong.
@@ -1458,48 +1466,67 @@ BB.cfg = config;
   }
 
   // ---------------------------------------------------------------------------------------------------------------
-  // Encryption: the lock next to the name of an encrypted file
+  // Encryption and Object Lock: the marks next to the name of a file
   // ---------------------------------------------------------------------------------------------------------------
 
-  // A listing does not give the encryption of a file: the page reads it with a HEAD request for the files on the page,
-  // as for the tags. It does this for a bucket that encrypts, or when the person sets the setting for the bucket.
-  const encryptionShown = () => {
+  // A listing does not give the encryption or the lock of a file: the page reads both from one HEAD request for the
+  // files on the page, as for the tags. It does this for a bucket that encrypts or that has Object Lock, or when the
+  // person sets the setting for the bucket. The saved choice of each bucket keeps its old name (encryption).
+  const marksShown = () => {
     const choice = state.encryptionChoice[state.instanceId];
-    return typeof choice === 'boolean' ? choice : Boolean(BB.encryption?.encryptionAware(currentInstance()));
+    if (typeof choice === 'boolean') return choice;
+    const instance = currentInstance();
+    return Boolean(BB.encryption?.encryptionAware(instance)) || instance?.objectLockSupported === true;
   };
 
-  // The answers stay for the ETag and the date of the file: a new listing does not read an unchanged file again.
-  const encryptionCache = new Map();
-  const encryptionCacheKey = row => `${state.instanceId}|${row.key}|${row.etag}|${row.dateModified?.getTime?.() || ''}`;
+  // The answers stay for the ETag and the date of the file: a new listing does not read an unchanged file again. A
+  // change of the lock keeps the ETag and the date: the event of the change removes the answers of the file.
+  const marksCache = new Map();
+  const marksCacheKey = row => `${state.instanceId}|${row.key}|${row.etag}|${row.dateModified?.getTime?.() || ''}`;
 
-  function encryptionMark(row) {
-    if (row.type !== 'content' || !encryptionShown() || row.encryptionSkipped) return null;
-    if (row.encryption === undefined) return h('span', { class: 'nameLock__pending', role: 'img', 'aria-label': 'The encryption is loading' });
-    if (!row.encryption) return null;
-    return h('span', { class: 'nameLock__icon', role: 'img', title: row.encryption, 'aria-label': row.encryption }, ic('lock'));
+  // The key of the encryption, then the padlock of Object Lock. The tooltip of the lock is made at each drawing: a
+  // retention whose date is past goes.
+  function objectMarks(row) {
+    if (row.type !== 'content' || !marksShown() || row.encryptionSkipped) return [];
+    if (row.encryption === undefined) return [h('span', { class: 'nameLock__pending', role: 'img', 'aria-label': 'The encryption and the lock are loading' })];
+    const lock = BB.objectLock?.lockTitle(row.lock) || '';
+    return [
+      row.encryption ? h('span', { class: 'nameLock__icon', role: 'img', title: row.encryption, 'aria-label': row.encryption, 'data-mark': 'encryption' }, ic('key')) : null,
+      lock ? h('span', { class: 'nameLock__icon nameLock__icon--objectLock', role: 'img', title: lock, 'aria-label': lock, 'data-mark': 'object-lock' }, ic('lock')) : null
+    ].filter(Boolean);
   }
 
-  function updateEncryptionCell(row) {
+  function updateMarksCell(row) {
     const cell = row.element?.querySelector('.nameLock');
-    if (cell) cell.replaceChildren(...[encryptionMark(row)].filter(Boolean));
+    if (cell) cell.replaceChildren(...objectMarks(row));
   }
 
-  // Reads the encryption of the files on the page, 4 at the same time, at most 100. A file that cannot be read gets no
-  // lock: the page shows only what the provider reports.
-  async function refreshVisibleEncryption() {
-    if (!encryptionShown() || !canRead() || state.listError || !BB.encryption) return;
+  // A change of the lock of a file in its details: the page reads the file again.
+  function forgetMarks(key) {
+    for (const cacheKey of [...marksCache.keys()]) if (cacheKey.startsWith(`${state.instanceId}|${key}|`)) marksCache.delete(cacheKey);
+    for (const row of state.rows || []) {
+      if (row.key === key) { row.encryption = undefined; row.lock = undefined; updateMarksCell(row); }
+    }
+    state.encryptionSignature = '';
+    void refreshVisibleMarks();
+  }
+
+  // Reads the encryption and the lock of the files on the page, 4 at the same time, at most 100. A file that cannot be
+  // read gets no mark: the page shows only what the provider reports.
+  async function refreshVisibleMarks() {
+    if (!marksShown() || !canRead() || state.listError || !BB.encryption) return;
     const instanceId = state.instanceId;
     const files = visibleRows().filter(row => row.type === 'content' && row.key);
     const rows = files.slice(0, 100);
     // The files after the first 100 get no mark: the page does not read them.
     for (const row of files.slice(100)) {
-      if (row.encryption === undefined && !row.encryptionSkipped) { row.encryptionSkipped = true; updateEncryptionCell(row); }
+      if (row.encryption === undefined && !row.encryptionSkipped) { row.encryptionSkipped = true; updateMarksCell(row); }
     }
     for (const row of rows) {
       row.encryptionSkipped = false;
-      if (row.encryption === undefined && encryptionCache.has(encryptionCacheKey(row))) {
-        row.encryption = encryptionCache.get(encryptionCacheKey(row));
-        updateEncryptionCell(row);
+      if (row.encryption === undefined && marksCache.has(marksCacheKey(row))) {
+        ({ encryption: row.encryption, lock: row.lock } = marksCache.get(marksCacheKey(row)));
+        updateMarksCell(row);
       }
     }
     const signature = `${instanceId}|${rows.map(row => row.key).join('\n')}`;
@@ -1515,15 +1542,18 @@ BB.cfg = config;
         if (request !== state.encryptionRequest || instanceId !== state.instanceId) return;
         row.encryptionLoading = true;
         try {
-          row.encryption = await BB.encryption.objectEncryption(row.key, instanceId);
-          if (encryptionCache.size >= 5000) encryptionCache.clear();
-          encryptionCache.set(encryptionCacheKey(row), row.encryption);
+          const answer = await BB.encryption.objectEncryption(row.key, instanceId);
+          row.encryption = answer.encryption;
+          row.lock = BB.objectLock?.lockFromHeaders(answer.headers) || null;
+          if (marksCache.size >= 5000) marksCache.clear();
+          marksCache.set(marksCacheKey(row), { encryption: row.encryption, lock: row.lock });
         } catch (_) {
           row.encryption = '';
+          row.lock = null;
         } finally {
           row.encryptionLoading = false;
         }
-        updateEncryptionCell(row);
+        updateMarksCell(row);
       }
     };
     await Promise.all([worker(), worker(), worker(), worker()]);
@@ -1796,6 +1826,7 @@ BB.cfg = config;
     document.addEventListener('bb:tags-changed', event => forgetTags(event.detail?.key));
     // A save of the metadata changes the date and the versions of the object: the listing reads them again.
     document.addEventListener('bb:metadata-changed', () => { void refresh(); });
+    document.addEventListener('bb:object-lock-changed', event => forgetMarks(event.detail?.key));
     // A restore or a delete of a version changes the date, the size and the count of the versions of the file.
     document.addEventListener('bb:versions-changed', () => { void refresh(); });
     ui.fileInput.addEventListener('change', onFileInput);
