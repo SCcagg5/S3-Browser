@@ -1,7 +1,19 @@
-/* The information page of a bucket or a volume (info.html). It uses the header, the parts and the badges of portal.css.
-   The header has the brand at the left edge, the link back to the listing after it, and the theme at the right edge.
-   The sections are in two columns on a wide window and in one column on a phone. Each section is a list of terms and
-   values; a value can have a thin bar and a note. */
+/* The information page of a bucket or a volume (info.html), in the visual language of the System page of ClickHouse
+   Dash: the panel colour from edge to edge, a row of section links with an underline under the header, then parts
+   with a heading (16 px), tiles in their own boxes for the numbers, cards with a title (14 px) and a key-value list
+   with a border and lines of two shades (12 px), gauges as the disk cards of Dash (the percent over a track of 8 px),
+   and status chips (18 px). The chips and the tiles have the colours of the state icons of the selector: green (on,
+   allowed), orange (on, with a problem) and grey (off, not available, denied). The parts are in one column on a
+   phone. The page uses the tokens of portal.css. */
+
+html:has(> body.infoPage),
+.infoPage {
+  background: var(--panel);
+}
+
+.infoPage .appHeader {
+  background: var(--panel);
+}
 
 .infoPage .appHeader__right {
   margin-left: auto;
@@ -22,11 +34,84 @@
   text-overflow: ellipsis;
 }
 
+/* The row of the section links: the underline of the current part is on the border of the row. */
+.infoNav {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 var(--header-gutter);
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.infoNav__tabs {
+  display: flex;
+  min-width: 0;
+  margin-bottom: -1px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.infoNav__tab {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  padding: 0 12px;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color var(--dur-quick) var(--ease), border-color var(--dur-quick) var(--ease);
+}
+
+.infoNav__tab:hover {
+  color: var(--text);
+}
+
+.infoNav__tab.is-active {
+  border-bottom-color: var(--accent-fill);
+  color: var(--text);
+}
+
+.infoMain {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+  min-width: 0;
+  padding: var(--header-gutter) var(--header-gutter) calc(var(--header-gutter) * 2 + 48px);
+  font-size: var(--fs-md);
+}
+
+.infoMain:focus {
+  outline: none;
+}
+
+.infoMain .notices:empty {
+  display: none;
+}
+
+/* The head: the name, the chips of the kind and of the root prefix, the seven state icons, then a muted line. */
 .infoHead {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.infoHead__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
   min-width: 0;
 }
 
 .infoTitle {
+  min-width: 0;
   margin: 0;
   overflow: hidden;
   font-size: var(--fs-2xl);
@@ -36,97 +121,449 @@
   white-space: nowrap;
 }
 
-.infoSections {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: start;
-  gap: 16px;
+.infoHead__chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 
-.infoSection__title {
+.infoHead__states {
+  cursor: default;
+}
+
+.infoHead__states[hidden] {
+  display: none;
+}
+
+.infoHead__lede {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+/* Parts: a heading and a count, then the body. The anchor of a part is under the row of the section links. */
+.infoSections {
   display: flex;
+  flex-direction: column;
+  gap: 32px;
+  min-width: 0;
+}
+
+.infoPart {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  scroll-margin-top: 52px;
+}
+
+.infoPart__head {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 6px 12px;
+  min-height: 32px;
+}
+
+.infoPart__title {
   margin: 0;
   font-size: var(--fs-xl);
   font-weight: var(--fw-semibold);
   line-height: 1.3;
 }
 
-.infoSection__title .ic {
-  --icon-size: 18px;
+.infoPart__count {
   color: var(--muted);
-}
-
-.infoSection__lede {
-  margin-top: 6px;
-}
-
-.infoList {
-  display: grid;
-  grid-template-columns: minmax(96px, max-content) minmax(0, 1fr);
-  gap: 10px 16px;
-  margin: 14px 0 0;
-  font-size: var(--fs-md);
-  line-height: 20px;
-}
-
-.infoList dt {
-  color: var(--muted);
-}
-
-.infoList dd {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-  margin: 0;
-  overflow-wrap: anywhere;
+  font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
 }
 
-.infoList__value {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 10px;
+.infoPart__body {
+  display: grid;
+  gap: 12px;
   min-width: 0;
 }
 
-.infoList__note {
+/* Tiles in their own boxes: an eyebrow label, the value and a sub line. */
+.infoTiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
+  gap: 8px;
+}
+
+.infoTile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+}
+
+.infoTile__label,
+.infoTile__sub {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.infoTile__label {
+  font-weight: var(--fw-semibold);
+}
+
+.infoTile__value {
+  overflow: hidden;
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-semibold);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.infoTile.is-ok .infoTile__value {
+  color: var(--success);
+}
+
+.infoTile.is-off .infoTile__value {
+  color: var(--muted);
+}
+
+.infoTile.is-warn {
+  border-color: color-mix(in srgb, var(--warning) 55%, var(--border));
+}
+
+.infoTile.is-warn .infoTile__value {
+  color: var(--warning);
+}
+
+.infoTile.is-error {
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+}
+
+.infoTile.is-error .infoTile__value {
+  color: var(--danger);
+}
+
+/* Two cards side by side on a wide window (3 / 2), one under the other on a narrow window. */
+.infoGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  align-items: start;
+  gap: 20px 24px;
+}
+
+.infoGrid__main,
+.infoGrid__side {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+}
+
+.infoGrid > .infoGrid__main:only-child {
+  grid-column: 1 / -1;
+}
+
+.infoCard {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.infoCard__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.infoCard__title {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+  line-height: 1.3;
+}
+
+.infoCard__count,
+.infoCard__note {
+  margin: 0;
   color: var(--muted);
   font-size: var(--fs-sm);
-  line-height: 16px;
 }
 
-.infoMeter {
-  width: 100%;
+/* A key-value list: a border, the keys in muted text, a darker shade on each second row. */
+.infoKv {
+  display: grid;
+  grid-template-columns: fit-content(40%) minmax(0, 1fr);
+  min-width: 0;
+  margin: 0;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: 4px;
+  font-size: var(--fs-sm);
+  line-height: 1.35;
 }
 
-.infoMeter.is-warning .usageMeter__fill {
+.infoKv__row {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  min-width: 0;
+}
+
+.infoKv__row:nth-child(even) {
+  background: color-mix(in srgb, var(--raised) 48%, transparent);
+}
+
+.infoKv__row:hover {
+  background: var(--row-hover);
+}
+
+.infoKv__key {
+  min-width: 0;
+  margin: 0;
+  padding: 5px 12px 5px 8px;
+  color: var(--muted);
+}
+
+.infoKv__value {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  margin: 0;
+  padding: 5px 8px;
+  overflow-wrap: anywhere;
+}
+
+.infoKv__main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  min-width: 0;
+}
+
+.infoKv__note {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+
+/* Status chips. */
+.infoChip {
+  --chip-color: var(--muted);
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  height: 18px;
+  padding: 0 6px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--chip-color) 42%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--chip-color) 12%, transparent);
+  color: var(--chip-color);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.infoChip .ic {
+  --icon-size: 12px;
+}
+
+.infoChip--on {
+  --chip-color: var(--success);
+}
+
+.infoChip--warn {
+  --chip-color: var(--warning);
+}
+
+.infoChip--accent {
+  --chip-color: var(--accent-text);
+}
+
+.infoChip--off {
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--muted) 8%, transparent);
+}
+
+/* Gauges, as the disk cards of Dash: the name and its chips, the percent over a track, a summary, then facts. */
+.infoGauges {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: 12px;
+}
+
+.infoGauge {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+  background: var(--panel);
+}
+
+.infoGauge[data-fill="warn"] {
+  border-color: color-mix(in srgb, var(--warning) 45%, var(--border));
+}
+
+.infoGauge[data-fill="error"] {
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+}
+
+.infoGauge__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.infoGauge__name {
+  min-width: 0;
+  margin: 0 auto 0 0;
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+}
+
+.infoGauge__chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.infoGauge__meter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.infoGauge__percent,
+.infoGauge__value {
+  flex: none;
+  min-width: 6ch;
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-semibold);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+}
+
+.infoGauge__track {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 24px;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent-fill) 14%, transparent);
+}
+
+.infoGauge__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--accent-fill) 70%, transparent);
+}
+
+.infoGauge__meter[data-fill="warn"] .infoGauge__percent {
+  color: var(--warning);
+}
+
+.infoGauge__meter[data-fill="warn"] .infoGauge__fill {
   background: var(--warning);
 }
 
-.infoMeter.is-error .usageMeter__fill {
+.infoGauge__meter[data-fill="error"] .infoGauge__percent {
+  color: var(--danger);
+}
+
+.infoGauge__meter[data-fill="error"] .infoGauge__fill {
   background: var(--danger);
 }
 
+.infoGauge__summary,
+.infoGauge__note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.infoGauge__note {
+  font-size: var(--fs-xs);
+}
+
+.infoGauge__facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 12px;
+  margin: 0;
+  font-size: var(--fs-sm);
+}
+
+.infoGauge__fact {
+  display: contents;
+}
+
+.infoGauge__fact dt {
+  color: var(--muted);
+}
+
+.infoGauge__fact dd {
+  min-width: 0;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+/* A part without numbers: its title and the reason, in a dashed box. */
+.infoEmpty {
+  display: grid;
+  justify-items: start;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-inner);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.infoEmpty strong {
+  color: var(--text);
+  font-weight: var(--fw-semibold);
+}
+
 .infoAction {
+  height: 24px;
+  padding: 0 8px;
+  font-size: var(--fs-sm);
   text-decoration: none;
 }
 
-@media (max-width: 760px) {
-  .infoSections {
+@media (max-width: 820px) {
+  .infoGrid {
     grid-template-columns: minmax(0, 1fr);
   }
 }
 
 @media (max-width: 420px) {
-  .infoList {
+  .infoKv {
     grid-template-columns: minmax(0, 1fr);
-    gap: 2px;
   }
 
-  .infoList dd + dt {
-    margin-top: 8px;
+  .infoKv__key {
+    padding-bottom: 0;
+  }
+
+  .infoKv__value {
+    padding-top: 2px;
   }
 }

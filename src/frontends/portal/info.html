@@ -44,11 +44,24 @@
     </div>
   </header>
 
-  <main id="main" class="page infoMain" tabindex="-1">
+  <nav class="infoNav" aria-label="Sections of the page">
+    <div class="infoNav__tabs">
+      <a class="infoNav__tab" href="#info-summary" data-section="summary">Summary</a>
+      <a class="infoNav__tab" href="#info-access" data-section="access">Identity and permissions</a>
+      <a class="infoNav__tab" href="#info-storage" data-section="storage">Storage</a>
+      <a class="infoNav__tab" href="#info-functions" data-section="functions">Functions</a>
+    </div>
+  </nav>
+
+  <main id="main" class="infoMain" tabindex="-1">
     <div id="notices" class="notices" aria-live="polite"></div>
     <div class="infoHead">
-      <h1 id="infoTitle" class="infoTitle">Loading the information</h1>
-      <p id="infoLede" class="part__lede"></p>
+      <div class="infoHead__row">
+        <h1 id="infoTitle" class="infoTitle">Loading the information</h1>
+        <span id="infoChips" class="infoHead__chips"></span>
+        <span id="infoStates" class="stateGroup infoHead__states" role="img" hidden></span>
+      </div>
+      <p id="infoLede" class="infoHead__lede"></p>
     </div>
     <div id="infoBanner" class="usageBanner" role="alert" hidden></div>
     <div id="infoSections" class="infoSections" aria-busy="true"></div>
@@ -61,6 +74,7 @@
   <script src="assets/js/usage.js"></script>
   <script src="assets/js/encryption.js"></script>
   <script src="assets/js/objectlock.js"></script>
+  <script src="assets/js/states.js"></script>
   <script src="assets/js/info.js"></script>
 </body>
 </html>

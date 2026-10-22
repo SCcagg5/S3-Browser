@@ -153,18 +153,29 @@ Only the bucket selector opens the page:
 - Enter and Space open the link. Tab goes from the trigger to the link. In the list, the arrow Right goes from an entry to its link, and the arrow Left goes back.
 - The accessible name of the link is "Information and permissions of this bucket", with the name of the bucket in the list, then the state of each icon. The tooltip has one line for each icon: "Read: allowed", "Encryption: off" and so on.
 
-The page has the header of the listing in one row: the brand at the left edge, the link "Back to <bucket>" after it, and the theme at the right edge. The sections are in two columns on a wide window, and in one column on a phone. Each section is a list of terms and values, and each row shows only when the server knows its value:
+The page has the header of the listing in one row: the brand at the left edge, the link "Back to <bucket>" after it, and the theme at the right edge. The page has the visual language of the System page of ClickHouse Dash:
 
-| Section | Rows |
+- The panel colour goes from edge to edge, with the gutter of the header (12 px, 10 px on a narrow window).
+- A row of section links is under the header: "Summary", "Identity and permissions", "Storage" and "Functions". The link of the part on screen is underlined. The row stays at the top when the page scrolls.
+- The head has the name (20 px), a chip with the kind of storage, a chip with the root prefix, and the seven state icons of the selector (`assets/js/states.js`).
+- Each part has a heading (16 px), then its content. The parts are 32 px apart.
+- Numbers are in tiles with a border: a label, the value (16 px) and a sub line. A used part of 80 % or more has the colour of a warning, and of 95 % or more the colour of an error.
+- Two cards are side by side (3 / 2) on a wide window, and one under the other at 820 px and less. A card has a title (14 px) and a key-value list: a border, the keys in muted text, and a darker shade on each second row (12 px). On a phone, the key is above its value.
+- The quota and the storage are gauges, as the disk cards of Dash: the name and its chips, the percent (16 px) over a track of 8 px, a summary ("12 MB used of 20 GB") and facts.
+- The states are chips of 18 px, in the colours of the state icons: green (on, allowed), orange (on, with a problem) and grey (off, not available, denied). The page has no red chip: a denied permission is grey, as in the selector.
+
+Each row shows only when the server knows its value:
+
+| Part | Content |
 | --- | --- |
-| Identity | The name, the id, the kind of storage (AWS S3, MinIO, SeaweedFS, Garage, or "S3" for a provider that the probe did not recognise; "Mounted folder of the server" for a volume), the host, the bucket, the root prefix and the region |
-| Permissions | Read, write and delete, with the reason of each decision: the ceiling of the configuration, `server.access_mode = "force_read_only"` or the access policy. Then the permissions of the configuration, and for a volume, if the process can write in the folder |
-| Storage | What the bucket or the volume holds, the quota with its bar, the objects, the storage behind it with its bar and its free bytes, and the source of the numbers. An approximate number has a `~` and the reason. A full bucket gets the banner of the listing above the sections |
-| Functions | Versioning (enabled, suspended or never enabled), the encryption of the writes, the default encryption of the bucket, if the provider applies SSE-S3, Object Lock with its default retention, the lifecycle rules, tags, the edit of the metadata, the incomplete uploads and the SHA-256 checksum of the uploads |
+| Summary | Tiles: what the bucket or the volume holds, the quota, the storage, the free bytes, and read, write and delete |
+| Identity and permissions | The card Identity: the name, the id, the kind of storage (AWS S3, MinIO, SeaweedFS, Garage, or "S3" for a provider that the probe did not recognise; "Mounted folder of the server" for a volume), the host, the bucket, the root prefix and the region. The card Permissions: read, write and delete, with the reason of each decision (the ceiling of the configuration, `server.access_mode = "force_read_only"` or the access policy), the permissions of the configuration, and for a volume, if the process can write in the folder |
+| Storage | A card for what the bucket or the volume holds (with the source and the time of the count), a gauge for the quota (with the bytes left and the objects), and a gauge for the storage behind it (with its free bytes). An approximate number has a `~`, a chip "Approximate" and the reason. A full bucket gets the banner of the listing above the parts |
+| Functions | The card Data protection: versioning (enabled, suspended or never enabled), the encryption of the writes, the default encryption of the bucket, if the provider applies SSE-S3, and Object Lock with its default retention. The card Operations: the lifecycle rules with the button "Open the lifecycle rules", tags, the edit of the metadata, the incomplete uploads and the SHA-256 checksum of the uploads |
 
-The page never shows an endpoint, an admin URL, a token or the path of a volume on the server. A volume has the rows that apply to a folder. One row says that versions, tags, metadata, lifecycle rules, Object Lock and the encryption of S3 are not available for a mounted folder.
+The page never shows an endpoint, an admin URL, a token or the path of a volume on the server. A volume has the rows that apply to a folder, in one card. One row says that versions, tags, metadata, lifecycle rules, Object Lock and the encryption of S3 are not available for a mounted folder.
 
-The page reads `/api/instances`, `GET /api/usage` and `GET /api/lifecycle`, and no other endpoint. `/api/instances` gives `flavour`: the S3 provider that the probe at start recognised (`aws`, `minio`, `seaweedfs` or `garage`), or no field. Each read obeys the permissions of the person. A section that the person cannot read says "Not allowed". An instance without a `usage` block says "Not available", with the reason. While the count of a volume runs, the page reads the usage again every 3 seconds, 20 times at most.
+The page reads `/api/instances`, `GET /api/usage` and `GET /api/lifecycle`, and no other endpoint. `/api/instances` gives `flavour`: the S3 provider that the probe at start recognised (`aws`, `minio`, `seaweedfs` or `garage`), or no field. Each read obeys the permissions of the person. A part that the person cannot read says "Not allowed", in a box with a dashed border. An instance without a `usage` block says "Not available", with the reason. While the count of a volume runs, the page reads the usage again every 3 seconds, 20 times at most.
 
 The button "Open the lifecycle rules" opens the listing of the bucket with `?lifecycle`. The listing opens the window of the rules after its first page, and removes `?lifecycle` from the address. Thus the editor stays in one place: the listing.
 
