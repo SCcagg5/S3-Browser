@@ -249,60 +249,80 @@ html:has(> body.infoPage),
 /* Gauges, as the disk cards of Dash: the name and its chips, the percent over a track, a summary, then facts. */
 .infoGauges {
   display: grid;
-  gap: 6px;
-}
-
-.infoGauge {
-  display: grid;
-  align-content: start;
-  gap: 2px;
   min-width: 0;
-  padding: 6px 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-inner);
   background: var(--panel);
 }
 
+/* A gauge is compact: on the first line the name, the percent over a track (or the value) and the chips; then the
+   summary; then the facts on one line. The gauges are in one box, with a line between them. */
+.infoGauge {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) auto;
+  align-items: center;
+  align-content: start;
+  gap: 1px 8px;
+  min-width: 0;
+  padding: 5px 10px;
+}
+
+.infoGauge + .infoGauge {
+  border-top: 1px solid var(--border);
+}
+
 .infoGauge[data-fill="warn"] {
-  border-color: color-mix(in srgb, var(--warning) 45%, var(--border));
+  box-shadow: inset 2px 0 0 var(--warning);
 }
 
 .infoGauge[data-fill="error"] {
-  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+  box-shadow: inset 2px 0 0 var(--danger);
 }
 
 .infoGauge__head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 8px;
+  display: contents;
 }
 
 .infoGauge__name {
+  grid-column: 1;
+  grid-row: 1;
   min-width: 0;
-  margin: 0 auto 0 0;
-  font-size: var(--fs-lg);
+  margin: 0;
+  font-size: var(--fs-md);
   font-weight: var(--fw-semibold);
 }
 
 .infoGauge__chips {
+  grid-column: 3;
+  grid-row: 1;
   display: inline-flex;
   flex-wrap: wrap;
   gap: 4px;
 }
 
+.infoGauge__chips:empty {
+  display: none;
+}
+
 .infoGauge__meter {
+  grid-column: 2;
+  grid-row: 1;
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
 }
 
+.infoGauge__value {
+  grid-column: 2;
+  grid-row: 1;
+}
+
 .infoGauge__percent,
 .infoGauge__value {
   flex: none;
   min-width: 6ch;
-  font-size: var(--fs-xl);
+  font-size: var(--fs-lg);
   font-weight: var(--fw-semibold);
   font-variant-numeric: tabular-nums;
   line-height: 1.25;
@@ -343,6 +363,7 @@ html:has(> body.infoPage),
 
 .infoGauge__summary,
 .infoGauge__note {
+  grid-column: 1 / -1;
   margin: 0;
   color: var(--muted);
   font-size: var(--fs-sm);
@@ -354,15 +375,17 @@ html:has(> body.infoPage),
 }
 
 .infoGauge__facts {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  gap: 2px 12px;
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 12px;
   margin: 0;
   font-size: var(--fs-sm);
 }
 
 .infoGauge__fact {
-  display: contents;
+  display: inline-flex;
+  gap: 4px;
 }
 
 .infoGauge__fact dt {
