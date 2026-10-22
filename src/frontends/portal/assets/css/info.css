@@ -203,6 +203,37 @@ html:has(> body.infoPage),
   font-size: var(--fs-xs);
 }
 
+/* Pairs: a muted term and its value, side by side, wrapping in the width of the card. */
+.infoPairs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 14px;
+  margin: 0;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+}
+
+.infoPair {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.infoPair__key {
+  color: var(--muted);
+}
+
+.infoPair__value {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  margin: 0;
+}
+
 /* Status chips. */
 .infoChip {
   --chip-color: var(--muted);

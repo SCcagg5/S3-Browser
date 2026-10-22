@@ -91,6 +91,14 @@
           item.note ? h('span', { class: 'infoKv__note' }, item.note) : null))));
   }
 
+  // Pairs on lines that wrap: a muted term, then its value. The pairs take the width, not one line each.
+  function pairs(rows, label) {
+    return h('dl', { class: 'infoPairs', 'aria-label': label || null }, rows.filter(Boolean).map(item =>
+      h('div', { class: 'infoPair', 'data-row': item.key || null },
+        h('dt', { class: 'infoPair__key' }, item.term),
+        h('dd', { class: 'infoPair__value' }, item.value, item.note ? h('span', { class: 'infoKv__note' }, item.note) : null))));
+  }
+
   // A gauge, as a disk of the System page of Dash: its name and chips, the percent over a track, a summary and facts.
   function gauge({ key, title, chips = [], percent = null, level = '', approximate = false, value = '', summary = '', facts = [], note = '' }) {
     const tone = levelTone(level);
@@ -255,9 +263,9 @@
     const bucketDefault = instance.bucketEncryptionSupported === true ? (instance.defaultEncryption ? chip('on', name) : chip('off', 'None')) : '';
     const applied = { yes: chip('on', 'Yes'), no: [chip('warn', 'No'), ' the provider does not encrypt'], unknown: chip('off', 'Unknown') }[instance.encryptionApplied] || '';
     return [
-      row('Encryption of the writes', configured, '', 'encryption'),
-      row('Default encryption of the bucket', bucketDefault, '', 'default-encryption'),
-      row('The provider applies SSE-S3', applied, lock?.tone === 'warn' ? lock.title : '', 'encryption-applied')
+      row('Encryption', configured, '', 'encryption'),
+      row('Default encryption', bucketDefault, '', 'default-encryption'),
+      row('Applied by the provider', applied, lock?.tone === 'warn' ? lock.title : '', 'encryption-applied')
     ];
   }
 
@@ -278,16 +286,16 @@
   }
 
   function checksumRow(instance) {
-    if (instance.provider === 's3') return row('SHA-256 checksum of the uploads', chip('on', 'Yes'), '', 'checksum');
-    if (isVolume(instance)) return row('SHA-256 checksum of the uploads', chip('on', 'Yes'), '', 'checksum');
-    return row('SHA-256 checksum of the uploads', chip('off', 'No'), '', 'checksum');
+    if (instance.provider === 's3') return row('SHA-256', chip('on', 'Yes'), '', 'checksum');
+    if (isVolume(instance)) return row('SHA-256', chip('on', 'Yes'), '', 'checksum');
+    return row('SHA-256', chip('off', 'No'), '', 'checksum');
   }
 
   const supported = (value, yes = 'Yes') => (value ? chip('on', yes) : chip('off', 'Not available'));
 
   function functionCards(instance, lifecycle) {
     if (isVolume(instance)) {
-      return [card('volume', 'Functions of a mounted folder', {}, kv([
+      return [card('volume', 'Functions of a mounted folder', {}, pairs([
         row('Folders', chip('on', 'Real folders'), '', 'folders'),
         row('Incomplete uploads', supported(instance.multipartUploadsSupported === true), '', 'multipart'),
         checksumRow(instance)
@@ -295,15 +303,15 @@
     }
     const lockDefault = instance.objectLockSupported === true && instance.objectLockDefault ? `Default retention: ${BB.objectLock.defaultText(instance.objectLockDefault)}` : '';
     return [
-      card('protection', 'Data protection', {}, kv([
+      card('protection', 'Data protection', {}, pairs([
         versioningRow(instance, lifecycle),
         ...encryptionRows(instance),
         row('Object Lock', instance.objectLockSupported === true ? chip('on', 'On') : chip('off', 'Off'), lockDefault, 'object-lock')
       ], 'Data protection')),
-      card('operations', 'Operations', {}, kv([
+      card('operations', 'Operations', {}, pairs([
         lifecycleRow(instance, lifecycle),
         row('Tags', supported(instance.tagsSupported === true), '', 'tags'),
-        row('Edit of the metadata', supported(instance.metadataEditSupported === true), '', 'metadata'),
+        row('Metadata edit', supported(instance.metadataEditSupported === true), '', 'metadata'),
         row('Incomplete uploads', supported(instance.multipartUploadsSupported === true), '', 'multipart'),
         checksumRow(instance)
       ], 'Operations'))];
