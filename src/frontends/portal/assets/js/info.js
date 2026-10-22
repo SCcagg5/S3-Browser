@@ -432,7 +432,7 @@
     back.href = BB.api.browserPageURL('', { instance: instance.id });
     back.setAttribute('aria-label', `Back to the files of ${instance.name || instance.id}`);
     back.hidden = false;
-    document.title = `${instance.name || instance.id} - Information`;
+    document.title = `${instance.name || instance.id} - Information - Stowr`;
     byId('infoTitle').textContent = `Information of the ${noun(instance)} ${instance.name || instance.id}`;
     render();
     renderLifecycle(instance);

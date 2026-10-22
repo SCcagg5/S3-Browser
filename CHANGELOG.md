@@ -52,6 +52,9 @@ This document uses ASD-STE100 Simplified Technical English.
 - The selector keeps one row of 460 px at most. A narrow selector drops the amount of the usage first (440 px), then
   its short text (400 px), the usage (360 px) and the icon of the trigger (300 px). The seven icons stay at every
   width: on a window of 320 px, the selector shows the name, the seven icons and the chevron.
+  At 240 px and less, the count of the lifecycle rules goes: with two digits and the mark of a full bucket, the trigger
+  was 4 px wider than the selector. The hourglass stays.
+- The title of the information page ends with the name of the product: "<bucket> - Information - Stowr".
 - The window "Bucket permissions", the popover "Usage" and the item "Usage" of the Actions menu are removed: the
   information page has their content.
 - The lifecycle rules are edited in the part "Lifecycle rules" of the information page (`#info-lifecycle`), with no

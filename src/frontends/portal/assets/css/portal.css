@@ -5332,6 +5332,12 @@ body > .appHeader {
     padding: 0 1px;
   }
 
+  /* The count of the lifecycle rules goes: with two digits and the mark of a full bucket, the trigger would be wider
+     than the selector. The hourglass stays, and the tooltip and the name of the link give the count. */
+  .storageSwitcher .stateIcon__count {
+    display: none;
+  }
+
   .storageSwitcher > .storageSwitcher__trigger {
     padding-right: 6px;
   }
