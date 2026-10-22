@@ -392,9 +392,17 @@ html:has(> body.infoPage),
   background: var(--danger);
 }
 
+.infoGauge__detail {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 12px;
+  min-width: 0;
+}
+
 .infoGauge__summary,
 .infoGauge__note {
-  grid-column: 1 / -1;
   margin: 0;
   color: var(--muted);
   font-size: var(--fs-sm);
@@ -406,7 +414,6 @@ html:has(> body.infoPage),
 }
 
 .infoGauge__facts {
-  grid-column: 1 / -1;
   display: flex;
   flex-wrap: wrap;
   gap: 0 12px;

@@ -110,10 +110,12 @@
     return h('section', { class: 'infoGauge', 'data-gauge': key, 'data-fill': tone || 'ok', 'aria-label': title },
       h('header', { class: 'infoGauge__head' }, h('h3', { class: 'infoGauge__name' }, title), h('span', { class: 'infoGauge__chips' }, chips)),
       meter, value ? h('div', { class: 'infoGauge__value' }, value) : null,
-      summary ? h('p', { class: 'infoGauge__summary' }, summary) : null,
-      facts.filter(Boolean).length ? h('dl', { class: 'infoGauge__facts' }, facts.filter(Boolean).map(item =>
-        h('div', { class: 'infoGauge__fact', 'data-fact': item.key || null }, h('dt', {}, item.term), h('dd', {}, item.value)))) : null,
-      note ? h('p', { class: 'infoGauge__note' }, note) : null);
+      // The second line: the summary, then the facts, on the same line while they fit.
+      summary || facts.filter(Boolean).length || note ? h('div', { class: 'infoGauge__detail' },
+        summary ? h('p', { class: 'infoGauge__summary' }, summary) : null,
+        facts.filter(Boolean).length ? h('dl', { class: 'infoGauge__facts' }, facts.filter(Boolean).map(item =>
+          h('div', { class: 'infoGauge__fact', 'data-fact': item.key || null }, h('dt', {}, item.term), h('dd', {}, item.value)))) : null,
+        note ? h('p', { class: 'infoGauge__note' }, note) : null) : null);
   }
 
   // A part without numbers: a title and the reason, in a dashed box.
