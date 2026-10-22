@@ -440,6 +440,19 @@
 
   async function start() {
     window.addEventListener('hashchange', markSection);
+    // The page has a base address, so a link "#info-storage" would leave the page. A click changes the fragment of the
+    // address of the page, and the links carry this address.
+    document.querySelectorAll('.infoNav__tab').forEach(link => {
+      const hash = `#info-${link.dataset.section}`;
+      link.href = `${location.pathname}${location.search}${hash}`;
+      link.addEventListener('click', event => {
+        if (event.ctrlKey || event.metaKey || event.shiftKey || event.button) return;
+        event.preventDefault();
+        history.replaceState(null, '', `${location.pathname}${location.search}${hash}`);
+        markSection();
+        window.scrollTo(0, 0);
+      });
+    });
     const route = BB.runtime.storageRoute();
     let payload;
     try {
