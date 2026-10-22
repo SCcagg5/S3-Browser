@@ -58,7 +58,7 @@ step('the volume on the mount is an instance with the host word volume and the u
   assert.match(usage.storage.approximateReason, /FUSE or network file system/);
   console.log(`      statfs of the mount: ${usage.storage.usedBytes} bytes used of ${usage.storage.totalBytes}, ${usage.storage.freeBytes} free`);
   await open(page, VOLUME);
-  await page.waitForSelector('#storageSwitcherFacts [data-fact="usage"]');
+  await page.waitForSelector('.storageSwitcher__facts [data-fact="usage"]');
 });
 
 step('New folder makes a folder on the mount, and a small upload is checked with SHA-256', async () => {
@@ -126,13 +126,15 @@ step('a large upload resumes after a lost chunk; its temporary file is an incomp
   assert.equal(usage.usedObjects, 3);
   console.log(`      the volume holds ${usage.selfBytes} bytes in ${usage.usedObjects} files; statfs: ${usage.storage.usedBytes} of ${usage.storage.totalBytes}`);
   await page.reload({ waitUntil: 'networkidle' });
-  await page.waitForSelector('#storageSwitcherFacts [data-fact="usage"][data-used-bytes]');
-  await page.click('#storageSwitcherFacts [data-fact="usage"]');
-  await page.waitForSelector('#usagePopover');
-  const values = await page.locator('#usagePopover .usagePopover__value').allInnerTexts();
-  assert.match(values[0], /^40 MB, 3 files$/);
-  assert.match(values[1], /^~[\d.]+ (B|KB|MB|GB) of [\d.]+ (GB|TB) \([\d.]+ %\), [\d.]+ (GB|TB) left$/);
-  await page.keyboard.press('Escape');
+  await page.waitForSelector('.storageSwitcher__facts [data-fact="usage"][data-used-bytes]');
+  // The selector shows the amount that the folder holds; the information page gives the files and the storage.
+  assert.equal(await page.textContent('.storageSwitcher__facts .bucketUsage__amount'), '40 MB');
+  await page.click('.storageSwitcher__facts [data-fact="usage"]');
+  await page.waitForURL(/\?info$/);
+  await page.waitForSelector('[data-gauge="storage"]');
+  assert.match(await page.textContent('[data-gauge="holds"]'), /This volume holds.*40 MB.*3 files/s);
+  assert.match(await page.textContent('[data-gauge="storage"]'), /Approximate.*~[\d.]+ (B|KB|MB|GB) used of [\d.]+ (GB|TB).*Free[\d.]+ (GB|TB)/s);
+  await page.goBack({ waitUntil: 'networkidle' });
 });
 
 step('copy, rename and delete of a folder with a nested folder', async () => {
