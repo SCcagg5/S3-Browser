@@ -895,6 +895,8 @@ BB.cfg = config;
         update();
         return;
       }
+      // The selector gets the buckets first: it reads their facts.
+      renderSwitcher();
       applyCurrentInstance();
       // The usage of the other buckets: the mark of a full bucket shows also before the menu opens.
       ui.selector.loadAllUsage();

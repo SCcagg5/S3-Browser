@@ -49,79 +49,81 @@
     </div>
   </header>
 
-  <main id="main" class="page" tabindex="-1">
-    <div id="notices" class="notices" aria-live="polite"></div>
+  <div class="pageScroll" data-page-scroll>
+    <main id="main" class="page" tabindex="-1">
+      <div id="notices" class="notices" aria-live="polite"></div>
 
-    <section id="browser" class="part browser" aria-labelledby="folderTitle">
-      <div id="usageBanner" class="usageBanner" role="alert" hidden></div>
-      <div class="browserHead">
-        <h1 id="folderTitle" class="visually-hidden">Loading the buckets</h1>
-        <nav id="crumbs" class="crumbs" aria-label="Folder path"></nav>
-        <div class="toolbar" role="toolbar" aria-label="Folder actions">
-          <form id="searchForm" class="searchField" role="search">
-            <i class="ic ic-search" aria-hidden="true"></i>
-            <label class="visually-hidden" for="searchInput">Open a prefix in this folder</label>
-            <input id="searchInput" class="input" type="search" autocomplete="off" spellcheck="false" placeholder="Open a prefix in this folder" />
-            <kbd aria-hidden="true">Enter</kbd>
-          </form>
-          <label id="tagFilterWrap" class="searchField searchField--tags" hidden>
-            <i class="ic ic-tags" aria-hidden="true"></i>
-            <span class="visually-hidden">Filter the rows by tag</span>
-            <input id="tagFilter" class="input" type="text" autocomplete="off" spellcheck="false" placeholder="Filter by tag: key or key=value" />
-            <span id="tagStatus" class="searchField__status" role="status" aria-live="polite"></span>
-          </label>
-          <span id="accessBadge" class="badge" hidden></span>
-          <div id="settingsWrap" class="menuWrap menuWrap--tight">
-            <button id="settingsButton" class="iconButton" type="button" aria-label="Listing settings" title="Listing settings" aria-haspopup="true" aria-expanded="false" aria-controls="settingsMenu"><i class="ic ic-settings" aria-hidden="true"></i></button>
-            <div id="settingsMenu" class="menu menu--settings" role="group" aria-label="Listing settings" hidden>
-              <p class="menu__title">Columns</p>
-              <label class="menu__check"><input type="checkbox" checked disabled data-column="name" /><span>Name</span></label>
-              <label class="menu__check"><input type="checkbox" data-column="tags" /><span>Tags</span></label>
-              <label class="menu__check" id="versionsSetting"><input type="checkbox" data-column="versions" /><span>Versions</span></label>
-              <label class="menu__check"><input type="checkbox" data-column="size" /><span>Size</span></label>
-              <label class="menu__check"><input type="checkbox" data-column="modified" /><span>Modified</span></label>
-              <label class="menu__check" id="encryptionSetting" title="A key and a padlock next to the name of a file: one HEAD request for each file on the page"><input type="checkbox" id="encryptionToggle" /><span>Encryption and lock</span></label>
-              <div class="menu__sep" role="separator"></div>
-              <p class="menu__title">Filters</p>
-              <label class="menu__check" id="tagFilterSetting"><input type="checkbox" id="tagFilterToggle" /><span>Filter by tag</span></label>
-              <div class="menu__sep" role="separator" id="uploadTagsSeparator"></div>
-              <div id="uploadTagsSetting">
-                <p class="menu__title">Tags of the new uploads</p>
-                <input id="uploadTagsInput" class="input" type="text" autocomplete="off" spellcheck="false" placeholder="team=data, retention=30d" aria-label="Tags of the new uploads" />
-                <p id="uploadTagsMessage" class="menu__message" role="status"></p>
+      <section id="browser" class="part browser" aria-labelledby="folderTitle">
+        <div id="usageBanner" class="usageBanner" role="alert" hidden></div>
+        <div class="browserHead">
+          <h1 id="folderTitle" class="visually-hidden">Loading the buckets</h1>
+          <nav id="crumbs" class="crumbs" aria-label="Folder path"></nav>
+          <div class="toolbar" role="toolbar" aria-label="Folder actions">
+            <form id="searchForm" class="searchField" role="search">
+              <i class="ic ic-search" aria-hidden="true"></i>
+              <label class="visually-hidden" for="searchInput">Open a prefix in this folder</label>
+              <input id="searchInput" class="input" type="search" autocomplete="off" spellcheck="false" placeholder="Open a prefix in this folder" />
+              <kbd aria-hidden="true">Enter</kbd>
+            </form>
+            <label id="tagFilterWrap" class="searchField searchField--tags" hidden>
+              <i class="ic ic-tags" aria-hidden="true"></i>
+              <span class="visually-hidden">Filter the rows by tag</span>
+              <input id="tagFilter" class="input" type="text" autocomplete="off" spellcheck="false" placeholder="Filter by tag: key or key=value" />
+              <span id="tagStatus" class="searchField__status" role="status" aria-live="polite"></span>
+            </label>
+            <span id="accessBadge" class="badge" hidden></span>
+            <div id="settingsWrap" class="menuWrap menuWrap--tight">
+              <button id="settingsButton" class="iconButton" type="button" aria-label="Listing settings" title="Listing settings" aria-haspopup="true" aria-expanded="false" aria-controls="settingsMenu"><i class="ic ic-settings" aria-hidden="true"></i></button>
+              <div id="settingsMenu" class="menu menu--settings" role="group" aria-label="Listing settings" hidden>
+                <p class="menu__title">Columns</p>
+                <label class="menu__check"><input type="checkbox" checked disabled data-column="name" /><span>Name</span></label>
+                <label class="menu__check"><input type="checkbox" data-column="tags" /><span>Tags</span></label>
+                <label class="menu__check" id="versionsSetting"><input type="checkbox" data-column="versions" /><span>Versions</span></label>
+                <label class="menu__check"><input type="checkbox" data-column="size" /><span>Size</span></label>
+                <label class="menu__check"><input type="checkbox" data-column="modified" /><span>Modified</span></label>
+                <label class="menu__check" id="encryptionSetting" title="A key and a padlock next to the name of a file: one HEAD request for each file on the page"><input type="checkbox" id="encryptionToggle" /><span>Encryption and lock</span></label>
+                <div class="menu__sep" role="separator"></div>
+                <p class="menu__title">Filters</p>
+                <label class="menu__check" id="tagFilterSetting"><input type="checkbox" id="tagFilterToggle" /><span>Filter by tag</span></label>
+                <div class="menu__sep" role="separator" id="uploadTagsSeparator"></div>
+                <div id="uploadTagsSetting">
+                  <p class="menu__title">Tags of the new uploads</p>
+                  <input id="uploadTagsInput" class="input" type="text" autocomplete="off" spellcheck="false" placeholder="team=data, retention=30d" aria-label="Tags of the new uploads" />
+                  <p id="uploadTagsMessage" class="menu__message" role="status"></p>
+                </div>
+                <div class="menu__sep" role="separator"></div>
+                <button id="settingsReset" class="menu__item" type="button" title="Reset the columns, the tag filter, and the encryption and lock of each bucket"><i class="ic ic-rotate" aria-hidden="true"></i>Reset to defaults</button>
               </div>
-              <div class="menu__sep" role="separator"></div>
-              <button id="settingsReset" class="menu__item" type="button" title="Reset the columns, the tag filter, and the encryption and lock of each bucket"><i class="ic ic-rotate" aria-hidden="true"></i>Reset to defaults</button>
             </div>
-          </div>
-          <button id="refreshButton" class="iconButton" type="button" aria-label="Refresh" title="Refresh"><i class="ic ic-refresh" aria-hidden="true"></i></button>
-          <div class="menuWrap">
-            <button id="actionsButton" class="button" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="actionsMenu">
-              <i class="ic ic-dots-vertical" aria-hidden="true"></i><span class="button__label--wide">Actions</span><i class="ic ic-chevron-down button__chevron" aria-hidden="true"></i>
-            </button>
-            <div id="actionsMenu" class="menu" role="menu" hidden>
-              <button id="zipItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-file-zip" aria-hidden="true"></i>Download as ZIP</button>
-              <button id="insightsItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-chart-bar" aria-hidden="true"></i><span>Storage insights</span></button>
-              <button id="folderTagsItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-tags" aria-hidden="true"></i><span>Tag this folder</span></button>
-              <button id="multipartsItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-file-x" aria-hidden="true"></i><span>Incomplete uploads</span></button>
-              <button id="newFolderItem" class="menu__item" type="button" role="menuitem" hidden><i class="ic ic-folder-plus" aria-hidden="true"></i><span>New folder</span></button>
+            <button id="refreshButton" class="iconButton" type="button" aria-label="Refresh" title="Refresh"><i class="ic ic-refresh" aria-hidden="true"></i></button>
+            <div class="menuWrap">
+              <button id="actionsButton" class="button" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="actionsMenu">
+                <i class="ic ic-dots-vertical" aria-hidden="true"></i><span class="button__label--wide">Actions</span><i class="ic ic-chevron-down button__chevron" aria-hidden="true"></i>
+              </button>
+              <div id="actionsMenu" class="menu" role="menu" hidden>
+                <button id="zipItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-file-zip" aria-hidden="true"></i>Download as ZIP</button>
+                <button id="insightsItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-chart-bar" aria-hidden="true"></i><span>Storage insights</span></button>
+                <button id="folderTagsItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-tags" aria-hidden="true"></i><span>Tag this folder</span></button>
+                <button id="multipartsItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-file-x" aria-hidden="true"></i><span>Incomplete uploads</span></button>
+                <button id="newFolderItem" class="menu__item" type="button" role="menuitem" hidden><i class="ic ic-folder-plus" aria-hidden="true"></i><span>New folder</span></button>
+              </div>
             </div>
-          </div>
-          <div id="uploadWrap" class="menuWrap">
-            <button id="uploadButton" class="button button--primary" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="uploadMenu">
-              <i class="ic ic-upload" aria-hidden="true"></i>Upload<i class="ic ic-chevron-down button__chevron" aria-hidden="true"></i>
-            </button>
-            <div id="uploadMenu" class="menu" role="menu" hidden>
-              <button id="uploadFilesItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-file-upload" aria-hidden="true"></i>Upload files</button>
-              <button id="uploadFolderItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-folder-up" aria-hidden="true"></i>Upload a folder</button>
-              <p class="menu__hint">You can also drop files on the page.</p>
+            <div id="uploadWrap" class="menuWrap">
+              <button id="uploadButton" class="button button--primary" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="uploadMenu">
+                <i class="ic ic-upload" aria-hidden="true"></i>Upload<i class="ic ic-chevron-down button__chevron" aria-hidden="true"></i>
+              </button>
+              <div id="uploadMenu" class="menu" role="menu" hidden>
+                <button id="uploadFilesItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-file-upload" aria-hidden="true"></i>Upload files</button>
+                <button id="uploadFolderItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-folder-up" aria-hidden="true"></i>Upload a folder</button>
+                <p class="menu__hint">You can also drop files on the page.</p>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-      <div id="listing"></div>
-    </section>
-  </main>
+        <div id="listing"></div>
+      </section>
+    </main>
+  </div>
 
   <div id="dropOverlay" class="dropOverlay" role="status" aria-live="polite" hidden>
     <div class="dropOverlay__card">

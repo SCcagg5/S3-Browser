@@ -230,6 +230,8 @@
     encodeRouteSegment,
     encodeStoragePath,
     storageRoute: currentStorageRoute,
+    // The element that scrolls the page: the element under the header (.pageScroll), else the document.
+    pageScroller: () => document.querySelector('[data-page-scroll]') || document.scrollingElement || document.documentElement,
     browserPageURL,
     previewPageURL,
     formatDateTimeUTC

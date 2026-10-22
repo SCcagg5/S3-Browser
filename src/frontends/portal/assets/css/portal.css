@@ -280,15 +280,24 @@
   box-sizing: border-box;
 }
 
+/* The scroll of a page, as in ClickHouse Dash: the document never scrolls. The body is a column: the header stays at
+   the top, and only the element under it (.pageScroll) scrolls. Its scrollbar starts under the header and ends at the
+   right edge of the window. Sticky elements stick to the top of that element, under the header. */
 html {
+  height: 100%;
+  overflow: hidden;
   background: var(--bg);
   scrollbar-color: var(--border-strong) transparent;
   -webkit-text-size-adjust: 100%;
 }
 
 body {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
   margin: 0;
-  min-height: 100dvh;
+  overflow: hidden;
   background: var(--bg);
   color: var(--text);
   font: var(--fs-lg) / 1.45 var(--font);
@@ -2725,6 +2734,18 @@ button.versionCount:focus-visible {
 
 .bb-no-scroll {
   overflow: hidden;
+}
+
+body > .appHeader {
+  flex: none;
+}
+
+.pageScroll {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 
 /* Folder upload confirmation (dialog content written by the page). */

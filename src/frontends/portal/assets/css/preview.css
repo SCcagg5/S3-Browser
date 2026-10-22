@@ -7,8 +7,8 @@
 /* Header ---------------------------------------------------------------------------------------------------------- */
 
 .previewBar {
-  position: sticky;
-  top: 0;
+  position: relative;
+  flex: none;
   z-index: var(--z-header);
   border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg) 92%, transparent);
@@ -484,4 +484,23 @@
     justify-content: flex-end;
     row-gap: 8px;
   }
+}
+
+/* The scroll of the page (portal.css): the document and the body never scroll, the bar stays at the top, and the
+   element under it scrolls. Its scrollbar starts under the bar and ends at the right edge of the window. */
+html.preview-root,
+body.preview-page {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+body.preview-page {
+  display: flex;
+  flex-direction: column;
+}
+
+.preview-page .bar {
+  position: relative;
+  top: auto;
 }

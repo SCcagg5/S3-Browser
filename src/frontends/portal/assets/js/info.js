@@ -406,13 +406,15 @@
       const abort = query.has('lifecycle-abort') ? String(query.get('lifecycle-abort') || '') : null;
       if (abort !== null) window.history.replaceState(null, '', `${window.location.pathname}?info${window.location.hash}`);
       body = h('div', { class: 'lifecycle', 'data-lifecycle': '' });
+      // The editor reads the rules only in an element of the page: it mounts after the part is in the page.
+      box.replaceChildren(part('lifecycle', 'Lifecycle rules', '', body));
       BB.lifecycle.mount(body, {
         instance: instance.id,
         canWrite: can(instance, 'upload'),
         prefill: abort === null ? null : { id: 'abort-incomplete-uploads', prefix: abort, abortMultipartDays: 7 }
       });
     }
-    box.replaceChildren(part('lifecycle', 'Lifecycle rules', '', body));
+    if (!body.isConnected) box.replaceChildren(part('lifecycle', 'Lifecycle rules', '', body));
     if (window.location.hash === '#info-lifecycle') byId('info-lifecycle')?.scrollIntoView({ block: 'start' });
   }
 
@@ -448,12 +450,11 @@
     selector.setState({ instances, currentId: instance.id, loading: false });
     // The usage of the other buckets: the mark of a full bucket shows also before the list opens.
     selector.loadAllUsage();
+    // The way back to the files of the bucket: the first line of the page. The header is the header of the listing.
     const back = byId('infoBack');
     back.href = BB.api.browserPageURL('', { instance: instance.id });
-    back.title = `Back to ${instance.name || instance.id}`;
-    // A narrow window shows only the chevron of the link: the label names it.
-    back.setAttribute('aria-label', back.title);
-    back.querySelector('.backLink__text').textContent = `Back to ${instance.name || instance.id}`;
+    back.querySelector('.infoBack__text').textContent = `Back to the files of ${instance.name || instance.id}`;
+    back.hidden = false;
     document.title = `${instance.name || instance.id} - Information`;
     byId('infoTitle').textContent = `Information of the ${noun(instance)} ${instance.name || instance.id}`;
     render();
