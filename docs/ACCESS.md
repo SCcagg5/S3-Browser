@@ -142,7 +142,7 @@ service (identity.audience, for example "infra-s3")
 
 - The id of a `bucket` is the label of its `bucket` block, not the name of the bucket at the provider. Two blocks
   that show the same provider bucket with two `root_prefix` values are two resources.
-- A `volume` block (a folder of the server, since 2.2.0) is also a resource of the type `bucket`, with the label of its
+- A `volume` block (a folder of the server, since 0.1.0) is also a resource of the type `bucket`, with the label of its
   block as id. Its top-level folders are `prefix` resources, and each route asks the same actions as for a bucket.
   The labels of the `bucket` and `volume` blocks are one set: two blocks cannot have the same label.
 - The id of a `prefix` is the first segment of the object key, below `root_prefix`, without the `/`. For the key

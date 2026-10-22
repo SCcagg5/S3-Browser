@@ -9,7 +9,7 @@ Supported top-level blocks:
 - zero or one `server` block;
 - zero or more `auth "id"` blocks;
 - zero or more `bucket "id"` blocks. Each `bucket` block needs an `auth` block;
-- zero or more `volume "id"` blocks: a folder of the server that the browser shows as a bucket (since 2.2.0);
+- zero or more `volume "id"` blocks: a folder of the server that the browser shows as a bucket (since 0.1.0);
 - exactly one `access` block (since 2.0.0). It is mandatory.
 
 A file needs one `bucket` block or one `volume` block at least.

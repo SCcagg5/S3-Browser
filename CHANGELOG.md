@@ -2,17 +2,18 @@
 
 This document uses ASD-STE100 Simplified Technical English.
 
-## 3.0.0 (2026-10-23)
+## 0.1.0 (2026-10-23)
 
 The product has a new name: Stowr. It also shows the folders of a server (volumes), so the name of a browser of S3 does
-not fit any more. Version 3.0.0 is one release with the functions for S3 buckets of 2.1.0, the volumes, the new
-interface `portal` and the new name. The numbers 2.1.0 and 2.2.0 were never published. A configuration file of 2.0.0
+not fit any more. Version 0.1.0 is the first release under this name: the numbering starts again. It continues S3-Browser
+2.0.0 and adds the functions for S3 buckets of 2.1.0, the volumes, the new interface `portal` and the new name. The
+numbers 2.1.0 and 2.2.0 were never published. A configuration file of 2.0.0
 starts without any change of a key. The names of the binary, of the image and of some headers change: refer to
 [Upgrade steps from 2.0.0](#upgrade-steps-from-200).
 
 ### Upgrade steps from 2.0.0
 
-Do these steps before you start 3.0.0:
+Do these steps before you start 0.1.0 on a deployment of S3-Browser 2.0.0:
 
 1. The binary is `stowr`, not `s3-browser`. The archives of a release are `stowr_<version>_linux_<arch>.tar.gz`, not
    `s3-browser_<version>_linux_<arch>.tar.gz`. Change the commands of your scripts and services, for example
@@ -31,7 +32,7 @@ Do these steps before you start 3.0.0:
 5. The repository is `https://github.com/SCcagg5/stowr`. GitHub sends the old address to it.
 6. For a build from the source: the Go module is `stowr`, not `s3-browser`.
 
-The probes at start, the volumes and the interface `portal` are new in 3.0.0. Their names have no older form, so they
+The probes at start, the volumes and the interface `portal` are new in 0.1.0. Their names have no older form, so they
 need no step: the probe keys `.stowr-provider-probe`, `.stowr-tags-probe` and `.stowr-metadata-probe`, the temporary
 files `.stowr-tmp-…` of a volume and the browser key `stowr.portal.version`.
 
@@ -162,7 +163,7 @@ change. Refer to the section "Volume block" of [docs/CONFIGURATION.md](docs/CONF
 - Tests: the Go tests of the volumes, a volume in the portal test stack, and the real test on a FUSE mount of
   SeaweedFS (`test/volume-fuse/run.sh`). Refer to [test/README.md](test/README.md).
 
-## 2.1.0 (never published, included in 3.0.0)
+## 2.1.0 (never published, included in 0.1.0)
 
 Version 2.1.0 adds the test interface `portal`, many functions for S3 buckets and a first set of tests on three
 providers (SeaweedFS, MinIO and Garage). Each new key of the configuration is optional. A configuration file of 2.0.0
