@@ -255,6 +255,10 @@ The main additions are:
   ClickHouse Dash (44 px on a coarse pointer).
 - A narrow window keeps the one row. At 600 px and less, the name of the brand and the text of "Back to panel" go (the
   chevron stays). At 420 px and less, the version goes. The mark of the brand stays.
+- The header has the full width of the window, as the header of ClickHouse Dash: the brand at the left gutter, the
+  bucket selector and the theme button at the right gutter. The gutter of the header is the gutter of ClickHouse Dash:
+  12 px, and 10 px at 820 px and less. The bar of the preview page does the same. The content of
+  the page keeps its centred column of 1400 px.
 - The bar of the preview page is one row of 45 px too (57 px on a coarse pointer): the way back, the name of the file,
   its size and its path on one line, then the tools. The path gets an ellipsis before the name. At 760 px and less,
   the path and the date of the version go. A comparison keeps one row from 761 px; below, its versions and its
@@ -267,7 +271,8 @@ The main additions are:
   the two themes, also with "Back to panel", with no horizontal scroll. The trigger is one row of 28 px (44 px) at each
   width for five instances, a long name with every fact and a full bucket, one bucket and a failed read of the usage.
   Each bucket and each host of the list is one line, and the list has the edges of the trigger. The bar of the preview
-  is one row at each width. The background of each menu has an alpha of 1, the menu has an opacity of 1 in its first frame,
+  is one row at each width. At 1920, 1440 and 1000 px, the brand and the way back are 12 px from the left edge and the
+  theme button 12 px from the right edge (10 px at 820 and 390 px), on the list page and the preview page. The background of each menu has an alpha of 1, the menu has an opacity of 1 in its first frame,
   and no element of the page is over it, in the two themes.
 
 ### Uploads and deletes

@@ -1757,7 +1757,7 @@ test('listing: Size and Modified use a font with one width for every character, 
   await page.context().close();
 });
 
-test('header: the brand and the version of ClickHouse Dash, in the centred column of the page', async () => {
+test('header: the brand and the version of ClickHouse Dash at the left edge of the window, the selectors at the right edge, and the page in its centred column', async () => {
   const page = await newPage({ viewport: { width: 1700, height: 900 } });
   await open(page, MAIN);
   const build = (await (await page.request.get(`${BASE}api/instances`)).json()).build;
@@ -1766,14 +1766,17 @@ test('header: the brand and the version of ClickHouse Dash, in the centred colum
   assert.ok((await page.textContent('#versionBadge')).startsWith(version));
   assert.match(await page.getAttribute('#versionBadge', 'title'), /^Server version\n/);
   const box = await page.evaluate(() => {
-    const inner = document.querySelector('.appHeader__inner').getBoundingClientRect();
-    const main = document.querySelector('#browser').getBoundingClientRect();
-    const header = document.querySelector('.appHeader').getBoundingClientRect();
-    return { innerLeft: inner.left, innerRight: inner.right, mainLeft: main.left, mainRight: main.right, header: header.width };
+    const rect = selector => document.querySelector(selector).getBoundingClientRect();
+    return { header: rect('.appHeader').width, brand: rect('.appBrand').left, theme: rect('.themeSelect__button').right, main: [rect('#browser').left, rect('#browser').right],
+      gutter: parseFloat(getComputedStyle(document.querySelector('.appHeader__inner')).paddingLeft) };
   });
   assert.equal(box.header, 1700);
-  assert.ok(Math.abs(box.innerLeft - box.mainLeft) <= 25 && Math.abs(box.innerRight - box.mainRight) <= 25, JSON.stringify(box));
-  // The theme selector is at the right end of the column, after the bucket selector.
+  // As in ClickHouse Dash, the header has the full width of the window. The part of the browser keeps its centred column
+  // of 1400 px, so its edges are not the edges of the header.
+  assert.equal(box.gutter, 12, JSON.stringify(box));
+  assert.ok(Math.abs(box.brand - box.gutter) <= 1 && Math.abs(box.theme - (1700 - box.gutter)) <= 1, JSON.stringify(box));
+  assert.ok(Math.abs(box.main[0] - (1700 - box.main[1])) <= 1 && box.main[0] > box.brand + 100, JSON.stringify(box));
+  // The theme selector is at the right end of the header, after the bucket selector.
   const order = await page.evaluate(() => {
     const switcher = document.querySelector('#storageSwitcher').getBoundingClientRect();
     const theme = document.querySelector('.themeSelect').getBoundingClientRect();
@@ -1782,6 +1785,51 @@ test('header: the brand and the version of ClickHouse Dash, in the centred colum
   assert.equal(order, true);
   // Without a path prefix, the page is the root of the site: no "Back to panel".
   assert.equal(await page.isHidden('#backLink'), true);
+  await page.context().close();
+});
+
+// The edges of a header: the left edge of its first element (with its margin) and the right edge of the theme button,
+// against the gutter of the header.
+function headerEdges(page, inner, first) {
+  return page.evaluate(([innerSelector, firstSelector]) => {
+    const node = Array.from(document.querySelectorAll(firstSelector)).find(item => item.getClientRects().length);
+    const style = getComputedStyle(node);
+    return { left: node.getBoundingClientRect().left - parseFloat(style.marginLeft), right: document.querySelector('.themeSelect__button').getBoundingClientRect().right,
+      gutter: parseFloat(getComputedStyle(document.querySelector(innerSelector)).paddingLeft), view: window.innerWidth };
+  }, [inner, first]);
+}
+
+// The gutter of the header of ClickHouse Dash, measured with its stylesheet: 12 px, and 10 px at 820 px and less.
+const DASH_GUTTERS = [[1920, 12], [1440, 12], [1000, 12], [820, 10], [390, 10]];
+
+test('header: at 1920, 1440 and 1000 px the brand is 12 px from the left edge and the theme button 12 px from the right edge (10 px on a phone), on the list page and the preview page', async () => {
+  const page = await newPage({ viewport: { width: 1920, height: 900 } });
+  const cases = [
+    { name: 'list', path: MAIN, inner: '.appHeader__inner', first: '.appBrand' },
+    { name: 'list with the way back', path: MAIN, inner: '.appHeader__inner', first: '#backLink', back: true },
+    { name: 'preview', path: `${MAIN}reports/2026/q3/summary.md`, inner: '.previewBar__inner', first: '.previewBar__back' },
+    { name: 'comparison', path: `${MAIN}versions/report.txt`, inner: '.previewBar__inner', first: '.previewBar__back', compare: true }
+  ];
+  for (const item of cases) {
+    await page.setViewportSize({ width: 1920, height: 900 });
+    await page.goto(BASE + item.path, { waitUntil: 'networkidle' });
+    if (item.back) await page.evaluate(() => { document.getElementById('backLink').hidden = false; });
+    if (item.compare) {
+      await page.waitForSelector('.previewVersion .versionPicker__button');
+      await page.click('.previewVersion .versionPicker__button');
+      await page.click('.versionPicker__compare');
+      await page.waitForSelector('#compareFrom:not([hidden]) .versionPicker__button');
+    }
+    for (const [width, gutter] of DASH_GUTTERS) {
+      await page.setViewportSize({ width, height: 900 });
+      const box = await headerEdges(page, item.inner, item.first);
+      const where = `${item.name} at ${width}: ${JSON.stringify(box)}`;
+      assert.equal(box.gutter, gutter, where);
+      assert.ok(Math.abs(box.left - box.gutter) <= 1, where);
+      assert.ok(Math.abs(box.right - (box.view - box.gutter)) <= 1, where);
+    }
+  }
+  assert.deepEqual(page.errors, []);
   await page.context().close();
 });
 
