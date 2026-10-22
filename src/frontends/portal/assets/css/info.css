@@ -15,7 +15,7 @@ html:has(> body.infoPage),
   background: var(--panel);
 }
 
-.infoPage .appHeader__right {
+.infoPage .storageSwitcher[hidden] ~ .appHeader__right {
   margin-left: auto;
 }
 
