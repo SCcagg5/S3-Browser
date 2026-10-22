@@ -76,7 +76,9 @@ This document uses ASD-STE100 Simplified Technical English.
   under the header and ends at the right edge of the window. This applies to the listing, the preview page, the
   information page and the 404 page.
 - The link "Browse" is in the header of the information page, after the brand, with no chevron. It opens the files
-  of the bucket. The page is more compact: small gaps between the parts, the cards and the rows.
+  of the bucket. The page is more compact: small gaps between the parts, the cards and the rows. Identity has only
+  the name, the kind, the host, the bucket and the region. The three permissions are on one line, with no description.
+  The rows and the cards have no explanatory text; the page keeps the warnings and the errors.
 - The list of the buckets is a non-modal dialog, not a listbox. The current bucket has `aria-current="true"`.
 - `GET /api/instances` gives `flavour` for an S3 instance: the provider that the probe at start recognised (`aws`,
   `minio`, `seaweedfs` or `garage`). The field is absent for an unknown provider.

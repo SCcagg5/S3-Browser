@@ -125,13 +125,9 @@
   function identityRows(instance) {
     return [
       row('Name', instance.name, '', 'name'),
-      row('Id', h('span', { class: 'mono' }, instance.id), 'The label of the block in the configuration, and the id of the resource of the access policy.', 'id'),
-      row('Kind', kindText(instance), instance.provider === 's3' && !FLAVOURS[instance.flavour] ? 'The server did not recognise the S3 provider.' : '', 'kind'),
+      row('Kind', kindText(instance), '', 'kind'),
       row('Host', h('span', { class: 'mono' }, instance.host), '', 'host'),
-      isVolume(instance)
-        ? row('Bucket', 'None: a volume', 'The server reads and writes the files of the folder with the identity of its process.', 'bucket')
-        : row('Bucket', h('span', { class: 'mono' }, instance.bucket), '', 'bucket'),
-      row('Root prefix', instance.rootPrefix ? h('span', { class: 'mono' }, `/${instance.rootPrefix}`) : '', `The browser shows only this part of the ${noun(instance)}.`, 'root-prefix'),
+      isVolume(instance) ? null : row('Bucket', h('span', { class: 'mono' }, instance.bucket), '', 'bucket'),
       row('Region', instance.region ? h('span', { class: 'mono' }, instance.region) : '', '', 'region')
     ];
   }
@@ -150,33 +146,20 @@
   // Allowed and allowed on use are green, denied is grey: the colours of the icons of the selector.
   const permissionTone = state => (BB.capabilities.normalizeState(state) === 'denied' ? 'off' : 'on');
 
+  // The three permissions on one line: a chip for each, with the reason of a refusal in its title.
   function permissionRows(instance) {
-    const caps = instance.capabilities || {};
-    const rows = BB.states.permissions(instance).map(item => {
+    const chips = BB.states.permissions(instance).map(item => {
       const name = BB.capabilities.normalizeState(item.state);
-      const badge = h('span', { class: ['infoChip', `infoChip--${permissionTone(item.state)}`], 'data-permission': item.key, 'data-state': name },
-        ic(item.icon), BB.capabilities.stateLabel(item.state));
       const reasons = [name === 'denied' ? decisionSource(item.state) : '', String(item.state.reason || '')].filter(Boolean);
-      return row(item.label, badge, reasons.join(' '), item.key);
+      return h('span', { class: ['infoChip', `infoChip--${permissionTone(item.state)}`], 'data-permission': item.key, 'data-state': name, title: reasons.join(' ') || null },
+        ic(item.icon), `${item.label}: ${BB.capabilities.stateLabel(item.state)}`);
     });
-    const provider = Array.from(caps.permissions || []).map(String).join(', ');
-    rows.push(row('Permissions of the configuration', provider ? h('span', { class: 'mono' }, provider) : 'Not reported', '', 'configuration'));
-    if (isVolume(instance)) {
-      const write = BB.capabilities.normalizeState(caps.write || {});
-      rows.push(row('Writable', write === 'denied' ? chip('off', 'No') : chip('on', 'Yes'), 'The start of the server checks that its process can write in the folder.', 'writable'));
-    }
-    return rows;
-  }
-
-  function permissionCount(instance) {
-    const allowed = BB.states.permissions(instance).filter(item => permissionTone(item.state) === 'on').length;
-    return `${allowed} of 3 allowed`;
+    return [row('Permissions', h('span', { class: 'infoChips' }, chips), '', 'permissions')];
   }
 
   // --- Storage --------------------------------------------------------------------------------------------------------
 
   const usageShown = usage => usage?.supported === true && (usage.available === true || Boolean(usage.storage));
-  const lineNote = (usage, term) => BB.usage.lines(usage).find(line => line.term === term)?.note || '';
 
   // What the bucket holds: "~12 MB", and for a volume "computing…" or "at least 10 GB" while the count runs.
   function holdsText(usage) {
@@ -214,8 +197,7 @@
           { key: 'source', term: 'Source', value: BB.usage.sourceName(usage) },
           counted ? { key: 'counted', term: 'Counted', value: counted } : null,
           volume && usage.selfState === 'partial' ? { key: 'limit', term: 'Count of the files', value: 'Stopped at its limit: 1,000,000 entries or 20 seconds' } : null
-        ],
-        note: lineNote(usage, holdsTerm)
+        ]
       }));
       if (Number(usage.limitBytes) > 0) {
         cards.push(gauge({
@@ -225,8 +207,7 @@
           facts: [
             { key: 'left', term: 'Left', value: bytes(Math.max(0, Number(usage.limitBytes) - Number(usage.usedBytes))) },
             Number(usage.limitObjects) > 0 && Number(usage.usedObjects) >= 0 ? { key: 'objects', term: 'Objects', value: `${count(usage.usedObjects)} of ${count(usage.limitObjects)}` } : null
-          ],
-          note: lineNote(usage, 'Quota')
+          ]
         }));
       }
     } else if (usage.error) {
@@ -238,8 +219,7 @@
         key: 'storage', title: 'Storage', percent: Number(storage.percent) || 0, level: storage.level, approximate: storage.approximate,
         chips: storage.approximate ? [chip('warn', 'Approximate', storage.approximateReason || '')] : [],
         summary: `${mark(storage.approximate)}${bytes(storage.usedBytes)} used of ${bytes(storage.totalBytes)}`,
-        facts: [{ key: 'free', term: 'Free', value: bytes(storage.freeBytes) }],
-        note: lineNote(usage, 'Storage')
+        facts: [{ key: 'free', term: 'Free', value: bytes(storage.freeBytes) }]
       }));
     } else if (usage.storageError) {
       cards.push(gauge({ key: 'storage', title: 'Storage', chips: [chip('warn', 'Unavailable')], note: usage.storageError.message || '' }));
@@ -259,12 +239,12 @@
   const rulesOf = (instance, lifecycle) => (Array.isArray(lifecycle?.rules) ? lifecycle.rules : Number.isInteger(instance.lifecycleRules) ? instance.lifecycleRules : null);
 
   function versioningRow(instance, lifecycle) {
-    if (instance.versioningSupported !== true) return row('Versioning', chip('off', 'Not available'), 'This provider has no versions.', 'versioning');
+    if (instance.versioningSupported !== true) return row('Versioning', chip('off', 'Not available'), '', 'versioning');
     switch (versioningOf(instance, lifecycle)) {
-      case 'enabled': return row('Versioning', chip('on', 'Enabled'), 'A change or a delete keeps the older versions of a file.', 'versioning');
-      case 'suspended': return row('Versioning', chip('warn', 'Suspended'), 'The bucket keeps the older versions that it has, and makes no new ones.', 'versioning');
+      case 'enabled': return row('Versioning', chip('on', 'Enabled'), '', 'versioning');
+      case 'suspended': return row('Versioning', chip('warn', 'Suspended'), '', 'versioning');
       case 'off': return row('Versioning', chip('off', 'Never enabled'), '', 'versioning');
-      default: return row('Versioning', chip('off', 'Unknown'), 'The server could not read the versioning of the bucket.', 'versioning');
+      default: return row('Versioning', chip('off', 'Unknown'), '', 'versioning');
     }
   }
 
@@ -272,11 +252,11 @@
     const lock = BB.encryption?.bucketLock(instance);
     const asked = instance.encryption === 'sse-s3';
     const configured = asked
-      ? [chip(instance.encryptionApplied === 'no' ? 'warn' : 'on', 'SSE-S3'), ' for each write (encryption = "sse-s3")']
-      : [chip('off', 'No header'), ' the default encryption of the bucket applies'];
+      ? chip(instance.encryptionApplied === 'no' ? 'warn' : 'on', 'SSE-S3')
+      : chip('off', 'No header');
     const name = BB.states.ENCRYPTION_NAMES[instance.defaultEncryption] || instance.defaultEncryption;
     const bucketDefault = instance.bucketEncryptionSupported === true ? (instance.defaultEncryption ? chip('on', name) : chip('off', 'None')) : '';
-    const applied = { yes: chip('on', 'Yes'), no: [chip('warn', 'No'), ' the provider accepts the header and does not encrypt (Garage)'], unknown: chip('off', 'Unknown') }[instance.encryptionApplied] || '';
+    const applied = { yes: chip('on', 'Yes'), no: [chip('warn', 'No'), ' the provider does not encrypt'], unknown: chip('off', 'Unknown') }[instance.encryptionApplied] || '';
     return [
       row('Encryption of the writes', configured, '', 'encryption'),
       row('Default encryption of the bucket', bucketDefault, '', 'default-encryption'),
@@ -301,8 +281,8 @@
   }
 
   function checksumRow(instance) {
-    if (instance.provider === 's3') return row('SHA-256 checksum of the uploads', [chip('on', 'Yes'), ' each part of an upload carries its SHA-256, and the provider checks it where it can'], '', 'checksum');
-    if (isVolume(instance)) return row('SHA-256 checksum of the uploads', [chip('on', 'Yes'), ' the server checks the SHA-256 of an upload in one request'], '', 'checksum');
+    if (instance.provider === 's3') return row('SHA-256 checksum of the uploads', chip('on', 'Yes'), '', 'checksum');
+    if (isVolume(instance)) return row('SHA-256 checksum of the uploads', chip('on', 'Yes'), '', 'checksum');
     return row('SHA-256 checksum of the uploads', chip('off', 'No'), '', 'checksum');
   }
 
@@ -311,10 +291,9 @@
   function functionCards(instance, lifecycle) {
     if (isVolume(instance)) {
       return grid(card('volume', 'Functions of a mounted folder', {}, kv([
-        row('Folders', chip('on', 'Real folders'), 'An empty folder exists.', 'folders'),
-        row('Incomplete uploads', supported(instance.multipartUploadsSupported === true), 'The temporary files of the uploads that stopped.', 'multipart'),
-        checksumRow(instance),
-        row('Versions, tags, metadata, lifecycle rules, Object Lock, encryption of S3', chip('off', 'Not available for a mounted folder'), '', 'not-available')
+        row('Folders', chip('on', 'Real folders'), '', 'folders'),
+        row('Incomplete uploads', supported(instance.multipartUploadsSupported === true), '', 'multipart'),
+        checksumRow(instance)
       ], 'Functions')));
     }
     const lockDefault = instance.objectLockSupported === true && instance.objectLockDefault ? `Default retention: ${BB.objectLock.defaultText(instance.objectLockDefault)}` : '';
@@ -328,7 +307,7 @@
         lifecycleRow(instance, lifecycle),
         row('Tags', supported(instance.tagsSupported === true), '', 'tags'),
         row('Edit of the metadata', supported(instance.metadataEditSupported === true), '', 'metadata'),
-        row('Incomplete uploads', supported(instance.multipartUploadsSupported === true), 'The list and the abort of the incomplete multipart uploads.', 'multipart'),
+        row('Incomplete uploads', supported(instance.multipartUploadsSupported === true), '', 'multipart'),
         checksumRow(instance)
       ], 'Operations')));
   }
@@ -352,9 +331,7 @@
     sections.replaceChildren(
       part('access', 'Identity and permissions', '',
         grid(card('identity', 'Identity', {}, kv(identityRows(instance), 'Identity')),
-          card('permissions', 'Permissions', { countText: permissionCount(instance) },
-            kv(permissionRows(instance), 'Permissions'),
-            h('p', { class: 'infoCard__note' }, 'The page hides what you cannot do. The server checks each request again.')))),
+          card('permissions', 'Permissions', {}, kv(permissionRows(instance), 'Permissions')))),
       part('storage', 'Storage', page.usage?.source ? BB.usage.sourceName(page.usage) : '', storageBody(instance, page.usage)),
       part('functions', 'Functions', '', functionCards(instance, page.lifecycle)));
     sections.removeAttribute('aria-busy');

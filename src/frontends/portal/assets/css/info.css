@@ -434,3 +434,10 @@ html:has(> body.infoPage),
     padding-top: 2px;
   }
 }
+
+/* The three permissions on one line. */
+.infoChips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}

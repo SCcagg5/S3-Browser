@@ -344,8 +344,8 @@
       const root = editor?.rootPrefix || '';
       intro.replaceChildren(...(root
         ? ['The rules apply to the bucket. This part edits the rules under ', h('code', {}, root), ': a prefix of a rule starts there. The other rules stay as they are.']
-        : ['The rules apply to the whole bucket. The storage provider runs them, not Stowr.']));
-      intro.hidden = !editor;
+        : []));
+      intro.hidden = !editor || !root;
       providerNote.textContent = editor?.providerNote || '';
       providerNote.hidden = !editor?.providerNote;
       readonly.textContent = !editor ? '' : !editor.writable ? `You cannot change the rules here. ${editor.readOnlyReason || ''}`.trim() : !canWrite ? 'You cannot change the rules here: you have no write permission in this bucket.' : '';
