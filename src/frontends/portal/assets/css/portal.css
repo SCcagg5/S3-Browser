@@ -711,6 +711,8 @@ html[data-theme-mode="light"] .themeSelect__current > .themeIcon--light {
   border: 0;
   border-radius: var(--radius-control);
   background: transparent;
+  color: inherit;
+  text-decoration: none;
   cursor: pointer;
   transition: background-color var(--dur-quick) var(--ease);
 }
@@ -1034,9 +1036,22 @@ button.storageSwitcher__trigger:hover,
 }
 
 /* An entry of a bucket is one line: the name with its root prefix and its marks, the facts, then the permission icons
-   at the right end. The versioning icon keeps its place, so that the permission icons make one column. */
+   at the right end. The permission icons are a link to the information page of the bucket, next to the button of the
+   bucket and over its right end: the button keeps a free part for it. The versioning icon keeps its place, so that
+   the permission icons make one column. */
+.storageBucket__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+}
+
+.storageBucket__row > .storageBucket {
+  grid-area: 1 / 1;
+  padding-right: calc(var(--perms-width) + 34px);
+}
+
 .storageBucket__copy {
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   column-gap: 12px;
 }
@@ -1046,9 +1061,26 @@ button.storageSwitcher__trigger:hover,
 }
 
 .storageBucket__perms {
+  position: relative;
   display: inline-flex;
-  grid-area: 1 / 3;
+  grid-area: 1 / 1;
+  justify-self: end;
+  align-items: center;
   gap: 3px;
+  height: 28px;
+  margin-right: 6px;
+  padding: 0 4px;
+  border-radius: var(--radius-inner);
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  transition: box-shadow var(--dur-quick) var(--ease);
+}
+
+.storageBucket__perms:hover,
+.storageBucket__perms:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+  background: var(--panel);
 }
 
 .storageBucket__versioning {
@@ -1097,7 +1129,7 @@ button.storageSwitcher__trigger:hover,
   min-width: 0;
 }
 
-.storageBucket[aria-selected="true"] {
+.storageBucket[aria-current="true"] {
   border-color: var(--selected-edge);
   background: var(--selected-bg);
 }
@@ -3090,68 +3122,6 @@ button.versionCount:focus-visible {
   transform-origin: top right;
 }
 
-.permissions {
-  display: grid;
-  gap: 12px;
-}
-
-.permissions .part__lede {
-  margin: 0;
-}
-
-.permList {
-  display: grid;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-box);
-}
-
-.permRow {
-  display: grid;
-  grid-template-columns: 7.5em auto minmax(0, 1fr);
-  align-items: center;
-  gap: 4px 12px;
-  min-height: var(--row);
-  padding: 8px 12px;
-  font-size: var(--fs-md);
-}
-
-.permRow + .permRow {
-  border-top: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
-}
-
-.permRow .badge {
-  justify-self: start;
-}
-
-@media (max-width: 560px) {
-  .permRow {
-    grid-template-columns: 7.5em minmax(0, 1fr);
-  }
-
-  .permRow .permReason {
-    grid-column: 1 / -1;
-  }
-}
-
-.permName {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: var(--fw-semibold);
-}
-
-.permName .mdi {
-  color: var(--muted);
-}
-
-.permReason {
-  color: var(--muted);
-  font-size: var(--fs-sm);
-}
-
 .listing {
   display: grid;
   gap: 10px;
@@ -5103,6 +5073,7 @@ button.bucketFact:focus-visible {
   text-overflow: ellipsis;
 }
 
+.bucketUsage__amount,
 .bucketUsage__short {
   flex: none;
   white-space: nowrap;
@@ -5202,8 +5173,8 @@ button.bucketFact:focus-visible {
   }
 }
 
-/* The usage in the trigger and in the menu: the bar and a short text (the percent of the limit, or the used bytes).
-   The whole text is for a screen reader and in the tooltip. */
+/* The usage in the trigger and in the menu: the amount that the bucket holds, the bar and a short text (the percent of
+   the limit, or the used bytes). The whole text is for a screen reader and in the tooltip. */
 .storageSwitcher .bucketUsage__text {
   position: absolute;
   width: 1px;
@@ -5214,10 +5185,16 @@ button.bucketFact:focus-visible {
   white-space: nowrap;
 }
 
-/* A narrow selector shows fewer facts, in the trigger and in the menu, in this order: first the short text of the usage
-   goes (the bar stays), then the usage, then the encryption key, the padlock of Object Lock, the versioning icon and
-   the icon of the trigger. The narrowest selector shows the name, the permission icons and the chevron. The tooltips
-   of the trigger and of each entry give each fact. Nothing wraps. */
+/* A narrow selector shows fewer facts, in the trigger and in the menu, in this order: first the amount of the usage
+   goes, then its short text (the bar stays), then the usage, then the encryption key, the padlock of Object Lock, the
+   versioning icon and the icon of the trigger. The narrowest selector shows the name, the permission icons and the
+   chevron. The tooltips of the trigger and of each entry give each fact. Nothing wraps. */
+@container switcher (max-width: 440px) {
+  .storageSwitcher .bucketUsage__amount {
+    display: none;
+  }
+}
+
 @container switcher (max-width: 420px) {
   .storageSwitcher .bucketUsage__short {
     display: none;
@@ -5271,85 +5248,6 @@ button.bucketFact:focus-visible {
   .storageSwitcher > .storageSwitcher__trigger {
     height: 44px;
   }
-}
-
-/* The popover "Usage": the lines of the usage of the current bucket, in a table, with a bar for the quota and for the
-   storage. It has the look of the menus, and its own place under the control that opened it. */
-.usagePopover {
-  position: fixed;
-  z-index: var(--z-menu);
-  display: grid;
-  gap: 8px;
-  max-width: calc(100vw - 32px);
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pop);
-  background: var(--panel);
-  box-shadow: var(--shadow-overlay);
-  color: var(--text);
-  font-size: var(--fs-sm);
-  line-height: 18px;
-}
-
-.usagePopover:focus-visible {
-  outline: 2px solid var(--focus-ring-color);
-  outline-offset: 2px;
-}
-
-.usagePopover__head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  min-width: 0;
-}
-
-.usagePopover__head span {
-  overflow: hidden;
-  color: var(--muted);
-  font-size: var(--fs-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.usagePopover__list {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 8px 12px;
-  margin: 0;
-}
-
-.usagePopover__list dt {
-  color: var(--muted);
-  white-space: nowrap;
-}
-
-.usagePopover__list dd {
-  display: grid;
-  gap: 4px;
-  margin: 0;
-  min-width: 0;
-  font-variant-numeric: tabular-nums;
-}
-
-.usagePopover__meter {
-  width: 100%;
-}
-
-.usagePopover__meter.is-warning .usageMeter__fill {
-  background: var(--warning);
-}
-
-.usagePopover__meter.is-error .usageMeter__fill {
-  background: var(--danger);
-}
-
-.usagePopover__note,
-.usagePopover__source {
-  margin: 0;
-  color: var(--muted);
-  font-size: var(--fs-xs);
-  line-height: 16px;
 }
 
 /* The banner of a full bucket, at the top of the listing. */

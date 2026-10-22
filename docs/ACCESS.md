@@ -251,7 +251,9 @@ S3-Browser shows only the buckets on which the human holds one action at least:
 - A request for a hidden bucket gets the same answer as a request for a bucket that does not exist: `403` with the
   action of the route. For a bucket that does not exist, S3-Browser asks the action on the service. Thus a human with
   a grant on the service gets `404` (`unknown_instance`), and the other humans get `403`.
-- The page of a hidden bucket (`/-/<auth>/<bucket>/...`) is the `404` page of a bucket that does not exist.
+- The page of a hidden bucket (`/-/<auth>/<bucket>/...`) is the `404` page of a bucket that does not exist. The
+  information page of a bucket (`/-/<auth>/<bucket>/?info`) obeys the same rule. It has no route of its own: it reads
+  `GET /api/instances`, `GET /api/usage` and `GET /api/lifecycle`, with the actions of these routes.
 - `GET /healthz` still counts all the buckets.
 
 ### Navigation

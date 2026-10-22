@@ -927,6 +927,19 @@ func (s *storageInstance) refreshBucketFacts() {
 	}()
 }
 
+// knownFlavour gives the provider that an earlier probe recognised, or "": it never asks the provider.
+func (s *storageInstance) knownFlavour() string {
+	if s == nil {
+		return ""
+	}
+	s.lifecycle.mu.Lock()
+	defer s.lifecycle.mu.Unlock()
+	if !s.lifecycle.flavourKnown {
+		return ""
+	}
+	return s.lifecycle.flavour
+}
+
 // lifecycleFlavour gives the provider of the instance, and asks it one time.
 func (s *storageInstance) lifecycleFlavour(ctx context.Context) string {
 	s.lifecycle.mu.Lock()

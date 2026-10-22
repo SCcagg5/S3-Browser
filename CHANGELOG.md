@@ -19,11 +19,27 @@ This document uses ASD-STE100 Simplified Technical English.
 - A volume gives what its folder holds (`selfBytes`, the number of files, and `selfState`: `computing`, `partial` or
   `ready`), from a count in the background with a budget (1,000,000 entries, 20 seconds, 5 minutes of life, made old by
   each write of S3-Browser), and its file system as the storage.
-- Interface `portal`: the usage of the trigger is a button that opens the popover "Usage" (what the bucket or the
-  volume holds, the quota, the storage with the free bytes, a bar for each). The item "Usage" of the Actions menu and the
-  usage of the current bucket in the list also open it, for a narrow selector. The chip keeps its one-row form. The
-  warning of a full bucket names the part: "The storage of this bucket is 91 % full: 910 GB of 1000 GB, 90 GB left." or
-  "This volume is on a file system that is 91 % full: ...".
+- Interface `portal`: the usage in the bucket selector starts with the amount that the bucket holds (`3 MB`), before
+  the bar and the percent. For a volume, the amount is `computing…` or `≥ 3 MB` while the count runs. A narrow
+  selector drops the amount first (440 px). Each entry of the list has the same amount. The chip keeps its one-row form
+  and its tooltip, and it does not act. The warning of a full bucket names the part: "The storage of this bucket is 91 %
+  full: 910 GB of 1000 GB, 90 GB left." or "This volume is on a file system that is 91 % full: ...".
+
+### Information page of a bucket
+
+- Interface `portal`: each bucket and each volume has a read-only information page at `/-/<host>/<bucket>/?info`. It
+  has four sections: identity, permissions (with the reason of each decision), storage and functions. It shows no
+  endpoint, no admin URL, no token and no path of a volume on the server. Refer to the section "Information page of a
+  bucket" of [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+- The permission icons of the trigger of the bucket selector, and of each entry of its list, are a link to this page.
+  The link is next to the button of the entry, not in it. Enter and Space open it.
+- The window "Bucket permissions", the popover "Usage" and the item "Usage" of the Actions menu are removed: the
+  information page has their content.
+- The button "Open the lifecycle rules" of the page opens the listing with `?lifecycle`, which opens the window of the
+  rules.
+- The list of the buckets is a non-modal dialog, not a listbox. The current bucket has `aria-current="true"`.
+- `GET /api/instances` gives `flavour` for an S3 instance: the provider that the probe at start recognised (`aws`,
+  `minio`, `seaweedfs` or `garage`). The field is absent for an unknown provider.
 - Tests: the data of each provider of the portal test stack is on a tmpfs of 4 GiB, and the volume `files` on a tmpfs
   of 1 GiB, so the numbers are the same on each test host.
 

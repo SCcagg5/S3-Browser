@@ -2,7 +2,8 @@
  * BB.usage: the usage and the quota of a bucket (GET /api/usage).
  * - the read: one answer for each instance, kept in the page; a read with fresh asks the server to read the admin API
  *   of the provider again (the server reads it again only when its value is older than 10 seconds);
- * - the texts: "12.3 GB of 20 GB" or "12.3 GB used", "~" for an approximate number, and the tooltip with the bucket,
+ * - the texts: "12.3 GB of 20 GB" or "12.3 GB used", "~" for an approximate number, the amount before the percent of the
+ *   selector, and the tooltip with the bucket,
  *   the objects, the source, the time of the count and the reason of an approximate number.
  * - the warning of a full bucket: 90 % or more of the limit of bytes, with the text of the banner of the listing.
  * The numbers are for the whole bucket, also for an instance with a root prefix. The server reads the admin API only for
@@ -121,8 +122,19 @@
     return bytes;
   }
 
-  // The lines of the usage: the term, the value, the bar (percent and level) and a note. The popover and the tooltip
-  // show them. Each line is there only when it is known.
+  // The amount that the bucket holds, before the percent in the selector: "3 MB", "~3 MB" for an approximate number.
+  // For a volume: "computing…" before the first bytes, "≥ 3 MB" while the count runs or after it stopped at its limit.
+  // It is '' when the amount is not known, and when the short text is already the amount (no limit).
+  function amountText(answer) {
+    if (!bucketShown(answer) || !hasLimit(answer)) return '';
+    if (!volumeAnswer(answer)) return `${mark(answer.approximate)}${formatBytes(answer.usedBytes)}`;
+    const bytes = Number(answer.selfBytes ?? answer.usedBytes) || 0;
+    if (answer.selfState === 'computing' && bytes <= 0) return 'computing…';
+    return `${answer.selfState === 'computing' || answer.selfState === 'partial' ? '≥ ' : ''}${formatBytes(bytes)}`;
+  }
+
+  // The lines of the usage: the term, the value, the bar (percent and level) and a note. The information page and the
+  // tooltip show them. Each line is there only when it is known.
   function lines(answer) {
     const out = [];
     if (!answer || answer.supported !== true) return out;
@@ -221,5 +233,5 @@
 
   const sourceName = answer => SOURCES[answer?.source] || String(answer?.source || '');
 
-  BB.usage = { load, cached, loading, shown, hasLimit, sourceName, constraint, shortText, text, lines, title, selectorLine, full, fullText, approximateNote, formatBytes };
+  BB.usage = { load, cached, loading, shown, hasLimit, sourceName, constraint, shortText, amountText, text, lines, title, selectorLine, full, fullText, approximateNote, formatBytes };
 })();

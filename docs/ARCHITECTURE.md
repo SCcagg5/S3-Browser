@@ -142,9 +142,31 @@ A saved choice wins over the default. Version 1 kept each column, also a column 
 
 The listing has no totals at its foot. The foot has the range of the page, the rows of each page and the pager.
 
-## Permissions of a bucket
+## Information page of a bucket
 
-The trigger of the bucket selector shows the read, write and delete icons of the current bucket. The icons are a button of their own, above the trigger and in its grid cell, on the line of the name, before the chevron. The trigger keeps a place for them. A click on the icons, or Enter and Space on them, opens the window "Bucket permissions". The rest of the trigger opens the list of the buckets. The button has the accessible name "Permissions of this bucket", and its tooltip names each permission. The entries of the list keep their icons as a mark only.
+Each bucket and each volume has one information page at `/-/<host>/<bucket>/?info`. The page is read only. The server sends `info.html` for `?info` on the root of an instance. An instance that does not exist, or that the person cannot see, gives the usual 404. The page uses `assets/js/info.js` and `assets/css/info.css`.
+
+Only the bucket selector opens the page:
+
+- The read, write and delete icons of the trigger are a link to the page of the current bucket. The link is above the trigger and in its grid cell, on the line of the name, before the chevron. The trigger keeps a place for it. The rest of the trigger opens the list of the buckets.
+- In the list of the buckets, the icons of each entry are a link to the page of that bucket. The link is next to the button of the entry, not in it: a button cannot hold a link.
+- Enter and Space open the link. In the list, the arrow Right goes from an entry to its link, and the arrow Left goes back.
+- The accessible name of the link is "Information and permissions of this bucket", with the name of the bucket in the list. The tooltip is "Information and permissions: Read: ..., Write: ..., Delete: ...".
+
+The page has the header of the listing in one row: the brand at the left edge, the link "Back to <bucket>" after it, and the theme at the right edge. The sections are in two columns on a wide window, and in one column on a phone. Each section is a list of terms and values, and each row shows only when the server knows its value:
+
+| Section | Rows |
+| --- | --- |
+| Identity | The name, the id, the kind of storage (AWS S3, MinIO, SeaweedFS, Garage, or "S3" for a provider that the probe did not recognise; "Mounted folder of the server" for a volume), the host, the bucket, the root prefix and the region |
+| Permissions | Read, write and delete, with the reason of each decision: the ceiling of the configuration, `server.access_mode = "force_read_only"` or the access policy. Then the permissions of the configuration, and for a volume, if the process can write in the folder |
+| Storage | What the bucket or the volume holds, the quota with its bar, the objects, the storage behind it with its bar and its free bytes, and the source of the numbers. An approximate number has a `~` and the reason. A full bucket gets the banner of the listing above the sections |
+| Functions | Versioning (enabled, suspended or never enabled), the encryption of the writes, the default encryption of the bucket, if the provider applies SSE-S3, Object Lock with its default retention, the lifecycle rules, tags, the edit of the metadata, the incomplete uploads and the SHA-256 checksum of the uploads |
+
+The page never shows an endpoint, an admin URL, a token or the path of a volume on the server. A volume has the rows that apply to a folder. One row says that versions, tags, metadata, lifecycle rules, Object Lock and the encryption of S3 are not available for a mounted folder.
+
+The page reads `/api/instances`, `GET /api/usage` and `GET /api/lifecycle`, and no other endpoint. `/api/instances` gives `flavour`: the S3 provider that the probe at start recognised (`aws`, `minio`, `seaweedfs` or `garage`), or no field. Each read obeys the permissions of the person. A section that the person cannot read says "Not allowed". An instance without a `usage` block says "Not available", with the reason. While the count of a volume runs, the page reads the usage again every 3 seconds, 20 times at most.
+
+The button "Open the lifecycle rules" opens the listing of the bucket with `?lifecycle`. The listing opens the window of the rules after its first page, and removes `?lifecycle` from the address. Thus the editor stays in one place: the listing.
 
 ## Tags in the listing
 
@@ -603,21 +625,21 @@ The trigger of the bucket selector has the name of the current bucket, its permi
 | Encryption (a key): "Encrypted: SSE-S3 for each new object" or the default encryption of the bucket | `encryption`, `defaultEncryption` and `encryptionApplied` of `/api/instances`. Garage with `"sse-s3"` gets "SSE-S3 not applied" in the colour of a warning |
 | Object Lock (a padlock), with the default retention | `objectLockSupported` and `objectLockDefault` of `/api/instances` |
 | The lifecycle rules (an hourglass and the count) | The current bucket: the rules in `GET /api/lifecycle`. The other buckets: `lifecycleRules` of `/api/instances` |
-| The usage: a thin bar and a short text, the more constraining part (`62 %`, of the quota or of the storage) or the used bytes (`12.3 GB`), at the right of the facts. The whole text (`12.3 GB of 20 GB` or `Storage: 910 GB of 1000 GB`) is in the tooltip and for a screen reader. In the trigger, the usage is a button that opens the popover "Usage" | `GET /api/usage` |
+| The usage, at the right of the facts: the amount that the bucket holds (`3 MB`), then a thin bar and a short text. The short text is the more constraining part (`62 %`, of the quota or of the storage), or the used bytes (`12.3 GB`) for a bucket without a limit. A bucket without a limit has no amount: the short text is the amount. For a volume, the amount is what its folder holds: `computing…` before the first bytes, and `≥ 3 MB` while the count runs or after it stopped at its limit. The whole text (`12.3 GB of 20 GB` or `Storage: 910 GB of 1000 GB`) is in the tooltip and for a screen reader. The usage does not act | `GET /api/usage` |
 
 A bucket that never had versioning gets no versioning icon: "off" is not a fact that the line shows. An approximate number starts with `~`. The bar has the colour of a warning from 80 % and the colour of an error from 95 %. The tooltip of the usage names the bucket, the used bytes, the limit and its source, and the objects. It also gives the source, the time of the count and the reason of an approximate number. The numbers are for the whole bucket, also for an instance with a root prefix.
 
-The trigger is a button, and a button cannot hold a button. Thus the permission icons and the facts are elements of their own, over the trigger and in its grid. The permission icons are a button that opens the permissions. The versioning icon follows them in the same group, but it is not a part of this button and it does not act. In the facts, the lifecycle rules are a button: a click, Enter or Space opens the window of the rules. This button shows also for a bucket without rule ("0"): it is the way to add the first rule. The keyboard goes from the trigger to the permission icons, then to this button.
+The trigger is a button, and a button cannot hold a button or a link. Thus the permission icons and the facts are elements of their own, over the trigger and in its grid. The permission icons are a link to the information page of the bucket. The versioning icon follows them in the same group, but it is not a part of this link and it does not act. In the facts, the lifecycle rules are a button: a click, Enter or Space opens the window of the rules. This button shows also for a bucket without rule ("0"): it is the way to add the first rule. The keyboard goes from the trigger to the link of the permission icons, then to this button.
 
 A click on the rest of the selector, also on the versioning icon, opens the list of the buckets. A failed read of the usage of the current bucket gives a muted icon, with the reason in its tooltip. In the list, the facts are a part of the button of each bucket and have no button. They show the lifecycle rules only for a bucket with rules. Each fact and the versioning icon have a label for a screen reader. The trigger names them in `aria-describedby`.
 
 The selector has one layout at every width. The trigger is never on two lines:
 
 - The trigger is one line of 28 px, as the host picker of ClickHouse Dash (44 px on a coarse pointer). The selector is a grid with five columns: the icon, the name, the permission and versioning icons, the facts and the chevron. The trigger is a subgrid that spans the five columns, so the elements over it share its columns.
-- The selector is 460 px wide, and less when the header has less space. The selector is a CSS container. A narrower selector shows fewer facts, in this order: first the short text of the usage goes (420 px and less), then the usage (380 px), then the key, the padlock, the versioning icon and the icon of the trigger (330 px), and then the lifecycle button (250 px). The narrowest selector shows the name, the permission icons and the chevron.
+- The selector is 460 px wide, and less when the header has less space. The selector is a CSS container. A narrower selector shows fewer facts, in this order: first the amount of the usage goes (440 px and less), then the short text of the usage (420 px), then the usage (380 px), then the key, the padlock, the versioning icon and the icon of the trigger (330 px), and then the lifecycle button (250 px). The narrowest selector shows the name, the permission icons and the chevron.
 - The tooltip of the trigger gives each fact at every width: the versioning, the encryption, Object Lock, the number of lifecycle rules and the usage. The facts never wrap and are never cut. The name gets an ellipsis.
 - The list of the buckets has the same left and right edges as the selector. The open trigger covers the top of the list, and the two make one shape.
-- Each entry of the list is one line: the name, a root prefix after it in small muted text, the facts, then the permission and versioning icons at the right end. The prefix gets an ellipsis before the name. The versioning icon keeps its place also when it does not show, so the permission icons make one column. A narrow list drops the facts of its entries in the order of the trigger. Each host of the list is one line: its name, then the provider and the number of buckets.
+- Each entry of the list is one line: the name, a root prefix after it in small muted text, the facts, then the permission and versioning icons at the right end. The icons are a link next to the button of the entry, over its right end. The current bucket has `aria-current="true"`. The list is a non-modal dialog with buttons and links, not a listbox. The prefix gets an ellipsis before the name. The versioning icon keeps its place also when it does not show, so the permission icons make one column. A narrow list drops the facts of its entries in the order of the trigger. Each host of the list is one line: its name, then the provider and the number of buckets.
 
 `/api/instances` gives two facts of each bucket for the list:
 
@@ -630,20 +652,9 @@ The probe at start reads them (`GetBucketVersioning` after the probe of the vers
 
 The page reads the facts of the current bucket when it opens. It reads the usage again (`fresh=1`) 1.5 seconds and 12 seconds after a change: an upload, a delete, a copy, a move, a rename, a metadata edit, a restore or the end of a job. A group of changes gives one read. A click on the reload icon reads the facts again. At load, and again when the menu opens, the page reads the usage of each bucket with `usageSupported`. It sends 4 reads at the same time at most. An entry shows "…" while its read waits. A failed read of another bucket shows nothing. The page and the server keep each answer for 60 seconds. The tooltip of each bucket also has its usage. The preview page has no facts.
 
-### The popover "Usage"
+### The usage on the information page
 
-A click, Enter or Space on the usage of the trigger opens a small popover with the look of the menus. Its lines are a
-table (`dl`), each line only when it is known: "This bucket holds" (or "This volume holds") with the used bytes and the
-objects; "Quota" with the used part of the quota and its bar; "Objects" for a limit of objects; "Storage" with the used
-bytes, the size, the percent and the free bytes, with its bar and its note (for example "Raw capacity of 1 storage
-node, before the replication"). An approximate number has a `~` and the reason. For a volume, the first line is
-"computing…" or "at least 10 GB" while the count runs. Escape and a click outside close the popover. The focus goes
-back to the control that opened it.
-
-On a narrow selector the usage of the trigger does not show. The popover then opens from the item "Usage" of the Actions
-menu, and from the usage of the current bucket in the list of the buckets (a click on its usage). The item "Usage" shows
-for each instance with `usageSupported`. The entries of the list keep a short chip, in their button: a button cannot
-hold a button.
+The selector shows the amount, the bar and the percent only. The information page of the bucket gives each line of the usage, in a table (`dl`): "This bucket holds" (or "This volume holds") with the used bytes and the objects, and "Quota" with the used part of the quota and its bar. It also gives "Objects" for a limit of objects. "Storage" has the used bytes, the size, the percent and the free bytes, with its bar and its note (for example "Raw capacity of 1 storage node, before the replication"). For a volume, the first line is "computing…" or "at least 10 GB" while the count runs.
 
 ### The warning of a full bucket
 

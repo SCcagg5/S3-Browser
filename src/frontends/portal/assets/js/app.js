@@ -466,7 +466,7 @@ BB.cfg = config;
   // A click on an element over the trigger, outside its buttons, acts as a click on the trigger.
   function passClick(multiple) {
     return event => {
-      if (event.target.closest('button')) return;
+      if (event.target.closest('button, a')) return;
       event.stopPropagation();
       if (multiple) toggleSwitcher();
     };
@@ -477,16 +477,33 @@ BB.cfg = config;
     return h('div', { id: 'storageSwitcherFacts', class: 'storageSwitcher__facts bucketFacts', onclick: passClick(multiple) });
   }
 
-  // The read, write and delete icons of the current bucket, then the versioning icon. A click, Enter or Space on the
-  // three icons opens the permissions of the bucket. The versioning icon does not act: the rest of the selector opens
-  // the list of the buckets.
+  // The address of the information page of a bucket: /-/<host>/<bucket>/?info.
+  const infoPageURL = instance => `${BB.api.browserPageURL('', { instance: instance.id })}?info`;
+
+  // The link of the permission icons to the information page of a bucket. It is a link, so Enter opens it; Space opens
+  // it too, as on a button. In the menu, the link is next to the button of the bucket, not in it.
+  function infoLink(instance, { menu = false } = {}) {
+    return h('a', {
+      class: menu ? 'storageBucket__perms' : 'storageSwitcher__perms',
+      href: infoPageURL(instance),
+      'data-info': instance.id,
+      'aria-label': `Information and permissions of this ${storageNoun(instance)}${menu ? `: ${storageName(instance)}` : ''}`,
+      title: `Information and permissions: ${permissionSummary(instance)}`,
+      onclick: event => event.stopPropagation(),
+      onkeydown: event => {
+        if (event.key !== ' ') return;
+        event.preventDefault();
+        event.currentTarget.click();
+      }
+    }, permissionDots(instance, { title: false }), menu ? h('span', { class: 'storageBucket__versioning' }) : null);
+  }
+
+  // The read, write and delete icons of the current bucket, then the versioning icon. The three icons are the link to
+  // the information page of the bucket. The versioning icon does not act: the rest of the selector opens the list of
+  // the buckets.
   function permissionsGroup(instance, multiple) {
     return h('div', { class: 'storageSwitcher__permsGroup', onclick: passClick(multiple) },
-      h('button', {
-        type: 'button', class: 'storageSwitcher__perms', 'aria-label': `Permissions of this ${storageNoun(instance)}`,
-        title: `Permissions of this ${storageNoun(instance)}: ${permissionSummary(instance)}`,
-        onclick: event => { event.stopPropagation(); closeSwitcher(false); showPermissions(); }
-      }, permissionDots(instance, { title: false })),
+      infoLink(instance),
       h('span', { id: 'storageSwitcherVersioning', class: 'storageSwitcher__versioning' }));
   }
 
@@ -517,7 +534,7 @@ BB.cfg = config;
         const trigger = h('button', {
           type: 'button',
           class: 'storageSwitcher__trigger',
-          'aria-haspopup': 'listbox',
+          'aria-haspopup': 'dialog',
           'aria-expanded': 'false',
           'aria-controls': 'storageSwitcherMenu',
           'aria-describedby': 'storageSwitcherVersioning storageSwitcherFacts',
@@ -528,36 +545,31 @@ BB.cfg = config;
           }
         }, ic(storageIcon(instance), 'storageSwitcher__icon'), switcherCopy(instance), ic('chevron-down', 'storageSwitcher__chevron'));
         const menu = h('div', {
-          id: 'storageSwitcherMenu', class: 'storageSwitcher__menu', role: 'listbox', 'aria-label': 'Storage hosts and buckets', hidden: true,
+          id: 'storageSwitcherMenu', class: 'storageSwitcher__menu', role: 'dialog', 'aria-label': 'Storage hosts and buckets', hidden: true,
           onclick: event => event.stopPropagation(),
           onkeydown: onSwitcherKey
         }, storageHosts().map(host => {
           const expanded = state.expandedHosts[host.id] === true;
           const list = h('div', { class: 'storageHost__buckets', role: 'group', 'aria-label': `${host.id} buckets`, hidden: !expanded },
-            host.instances.map(entry => h('button', {
-              type: 'button',
-              class: 'storageBucket',
-              role: 'option',
-              'aria-selected': entry.id === state.instanceId ? 'true' : 'false',
-              'data-instance': entry.id,
-              title: storageDetails(entry),
-              onclick: event => {
-                // The usage of the current bucket in the menu opens the popover "Usage", also when the trigger has no
-                // room for its usage.
-                if (entry.id === state.instanceId && event.target.closest('[data-fact="usage"]') && BB.usage.shown(BB.usage.cached(entry.id))) {
-                  closeSwitcher(false);
-                  openUsage(ui.switcherTrigger);
-                  return;
+            // An entry is the button of the bucket, and next to it the link of its permission icons to its
+            // information page: a button cannot hold a link.
+            host.instances.map(entry => h('div', { class: 'storageBucket__row', 'data-instance': entry.id },
+              h('button', {
+                type: 'button',
+                class: 'storageBucket',
+                'aria-current': entry.id === state.instanceId ? 'true' : null,
+                'data-instance': entry.id,
+                title: storageDetails(entry),
+                onclick: () => {
+                  closeSwitcher(true);
+                  selectInstance(entry.id);
                 }
-                closeSwitcher(true);
-                selectInstance(entry.id);
-              }
-            },
-            h('span', { class: 'storageBucket__copy' },
-              h('span', { class: 'storageBucket__titleRow' }, h('strong', {}, storageName(entry)),
-                entry.rootPrefix ? h('small', { class: 'storageBucket__prefix' }, `/${entry.rootPrefix}`) : null, h('span', { class: 'bucketMarks' })),
-              h('span', { class: 'bucketFacts' }),
-              h('span', { class: 'storageBucket__perms' }, permissionDots(entry), h('span', { class: 'storageBucket__versioning' }))))));
+              },
+              h('span', { class: 'storageBucket__copy' },
+                h('span', { class: 'storageBucket__titleRow' }, h('strong', {}, storageName(entry)),
+                  entry.rootPrefix ? h('small', { class: 'storageBucket__prefix' }, `/${entry.rootPrefix}`) : null, h('span', { class: 'bucketMarks' })),
+                h('span', { class: 'bucketFacts' }))),
+              infoLink(entry, { menu: true }))));
           const row = h('button', {
             type: 'button', class: 'storageHost__row', 'aria-expanded': expanded ? 'true' : 'false', 'data-host': host.id,
             // The row of a host is one line: the volumes say what they are in the tooltip.
@@ -601,7 +613,7 @@ BB.cfg = config;
     // The usage of each bucket goes into its line. The page and the server keep each answer for 60 seconds.
     loadAllUsage();
     ui.switcherTrigger.setAttribute('aria-expanded', 'true');
-    if (focus) (ui.switcherMenu.querySelector('.storageBucket[aria-selected="true"]') || switcherItems()[0])?.focus();
+    if (focus) (ui.switcherMenu.querySelector('.storageBucket[aria-current="true"]') || switcherItems()[0])?.focus();
   }
 
   function closeSwitcher(focus = false) {
@@ -617,13 +629,23 @@ BB.cfg = config;
     else closeSwitcher(false);
   }
 
+  // The arrows Up and Down go from row to row. The arrow Right goes from a bucket to the link of its permission icons,
+  // and the arrow Left goes back. Tab goes through the controls of the menu, and closes it when the focus leaves it.
   function onSwitcherKey(event) {
+    const active = document.activeElement;
+    const link = active?.closest?.('.storageBucket__perms');
     const items = switcherItems();
-    const index = items.indexOf(document.activeElement);
+    const index = items.indexOf(link ? link.previousElementSibling : active);
     if (event.key === 'ArrowDown') { event.preventDefault(); items[Math.min(items.length - 1, index + 1)]?.focus(); }
     else if (event.key === 'ArrowUp') { event.preventDefault(); items[Math.max(0, index - 1)]?.focus(); }
+    else if (event.key === 'ArrowRight' && active?.classList?.contains('storageBucket')) { event.preventDefault(); active.nextElementSibling?.focus(); }
+    else if (event.key === 'ArrowLeft' && link) { event.preventDefault(); link.previousElementSibling?.focus(); }
     else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeSwitcher(true); }
-    else if (event.key === 'Tab') closeSwitcher(false);
+    else if (event.key === 'Tab') {
+      const controls = Array.from(ui.switcherMenu.querySelectorAll('button, a[href]')).filter(node => node.offsetParent !== null);
+      const next = controls.indexOf(active) + (event.shiftKey ? -1 : 1);
+      if (next < 0 || next >= controls.length) closeSwitcher(false);
+    }
   }
 
   // ---------------------------------------------------------------------------------------------------------------
@@ -778,8 +800,6 @@ BB.cfg = config;
     ui.insightsItem.disabled = !read || Boolean(state.listError);
     ui.insightsItem.querySelector('span').textContent = state.pathPrefix ? 'Folder insights' : `${capitalized(storageNoun(instance))} insights`;
     ui.newFolderItem.hidden = !isVolume(instance);
-    ui.usageItem.hidden = !instance || instance.usageSupported !== true;
-    ui.usageItem.disabled = !read || !BB.usage.shown(BB.usage.cached(instance?.id));
     ui.newFolderItem.disabled = !read || !canWrite() || Boolean(state.listError);
     ui.uploadWrap.hidden = !instance || !canWrite() || Boolean(state.listError);
     ui.folderTagsItem.hidden = state.tagsUnsupported;
@@ -964,18 +984,20 @@ BB.cfg = config;
     if (canRead()) BB.lifecycle.open({ prefix: state.pathPrefix, canWrite: canWrite() });
   }
 
-  // The usage: the text, a short text, the thin bar of the used part, and the tooltip. A full bucket has a red bar. The
-  // used part is the more constraining of the quota of the bucket and the storage behind it (data-constraint). The
-  // selector shows the short text (the percent, or the used bytes). The whole text is for a screen reader only. In the
-  // trigger, the usage is a button that opens the popover "Usage".
-  function usageFact(usage, { trigger = false } = {}) {
+  // The usage: the text, the amount, a short text, the thin bar of the used part, and the tooltip. A full bucket has a red
+  // bar. The used part is the more constraining of the quota of the bucket and the storage behind it (data-constraint).
+  // The selector shows the amount that the bucket holds ("3 MB", "≥ 3 MB" or "computing…" for a volume), then the short
+  // text (the percent, or the used bytes when there is no limit). The whole text is for a screen reader only. The usage
+  // does not act: the information page of the bucket gives each line of it.
+  function usageFact(usage) {
     const limited = BB.usage.hasLimit(usage);
-    const node = h(trigger ? 'button' : 'span', {
-      type: trigger ? 'button' : null, 'aria-haspopup': trigger ? 'dialog' : null,
+    const amount = BB.usage.amountText(usage);
+    const node = h('span', {
       class: ['bucketFact', 'bucketUsage', usage.level && `is-${usage.level}`, BB.usage.full(usage) && 'is-full'], 'data-fact': 'usage',
-      'data-level': usage.level || 'none', 'data-constraint': BB.usage.constraint(usage) || 'none', 'data-used-bytes': String(usage.usedBytes), title: BB.usage.title(usage),
-      onclick: trigger ? event => { event.stopPropagation(); toggleUsage(event.currentTarget); } : null
-    }, h('span', { class: 'bucketUsage__text' }, BB.usage.text(usage)), h('span', { class: 'bucketUsage__short', 'aria-hidden': 'true' }, BB.usage.shortText(usage)),
+      'data-level': usage.level || 'none', 'data-constraint': BB.usage.constraint(usage) || 'none', 'data-used-bytes': String(usage.usedBytes), title: BB.usage.title(usage)
+    }, h('span', { class: 'bucketUsage__text' }, BB.usage.text(usage)),
+    amount ? h('span', { class: 'bucketUsage__amount', 'aria-hidden': 'true' }, amount) : null,
+    h('span', { class: 'bucketUsage__short', 'aria-hidden': 'true' }, BB.usage.shortText(usage)),
     limited ? h('span', { class: 'usageMeter', role: 'meter', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(usage.percent), 'aria-label': 'Used part of the limit' },
       h('span', { class: 'usageMeter__fill' })) : null);
     const fill = node.querySelector('.usageMeter__fill');
@@ -1026,7 +1048,7 @@ BB.cfg = config;
     if (instance.usageSupported === true && can('list', instance)) {
       const usage = BB.usage.cached(instance.id);
       if (BB.usage.shown(usage)) {
-        items.push(usageFact(usage, { trigger }));
+        items.push(usageFact(usage));
       } else if (!usage && BB.usage.loading(instance.id)) {
         items.push(h('span', { class: 'bucketFact bucketUsage is-loading', 'data-fact': 'usage', 'data-level': 'loading', title: `Reading the usage of the ${storageNoun(instance)}` }, '…'));
       } else if (usage?.supported === true && trigger) {
@@ -1037,60 +1059,6 @@ BB.cfg = config;
       }
     }
     return items;
-  }
-
-  // The popover "Usage": the lines of the usage of the current bucket (what it holds, its quota, the storage behind it),
-  // each with its bar and its note. The usage of the trigger opens it (a click, Enter or Space), and so do the usage of
-  // the current bucket in the menu and the item "Usage" of the Actions menu. Escape, a click outside and a second click
-  // close it; the focus goes back to the control that opened it.
-  function usageMeter(line) {
-    const meter = h('span', { class: ['usageMeter', 'usagePopover__meter', line.level && `is-${line.level}`], role: 'meter', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(line.percent), 'aria-label': `Used part: ${line.term}` },
-      h('span', { class: 'usageMeter__fill' }));
-    meter.firstChild.style.width = `${Math.min(100, Math.max(line.percent, line.percent > 0 ? 2 : 0))}%`;
-    return meter;
-  }
-
-  function closeUsage({ focus = true } = {}) {
-    const open = ui.usagePopover;
-    if (!open) return;
-    ui.usagePopover = null;
-    open.node.remove();
-    open.anchor?.setAttribute?.('aria-expanded', 'false');
-    if (focus && open.opener?.isConnected) open.opener.focus();
-  }
-
-  function toggleUsage(anchor) {
-    if (ui.usagePopover?.anchor === anchor) closeUsage();
-    else openUsage(anchor);
-  }
-
-  function openUsage(anchor) {
-    closeUsage({ focus: false });
-    const instance = currentInstance();
-    const usage = BB.usage.cached(instance?.id);
-    if (!instance || !anchor || !BB.usage.shown(usage)) return;
-    const opener = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : anchor;
-    const rows = BB.usage.lines(usage).flatMap(line => [
-      h('dt', {}, line.term),
-      h('dd', {}, h('span', { class: 'usagePopover__value' }, line.value), line.percent !== undefined ? usageMeter(line) : null,
-        line.note ? h('small', { class: 'usagePopover__note' }, line.note) : null)]);
-    const counted = usage.asOf ? BB.runtime.formatDateTimeUTC(usage.asOf) : '';
-    const node = h('div', {
-      id: 'usagePopover', class: 'usagePopover', role: 'dialog', 'aria-label': `Usage of ${storageName(instance)}`, tabindex: '-1',
-      onclick: event => event.stopPropagation(),
-      onkeydown: event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeUsage(); } }
-    }, h('div', { class: 'usagePopover__head' }, h('strong', {}, 'Usage'), h('span', {}, storageName(instance))),
-    h('dl', { class: 'usagePopover__list' }, rows),
-    h('p', { class: 'usagePopover__source' }, `Source: ${BB.usage.sourceName(usage)}${counted ? `, ${counted}` : ''}`));
-    document.body.append(node);
-    const box = anchor.getBoundingClientRect();
-    const width = Math.min(360, window.innerWidth - 32);
-    node.style.width = `${width}px`;
-    node.style.left = `${Math.max(16, Math.min(box.right - width, window.innerWidth - width - 16))}px`;
-    node.style.top = `${Math.round(box.bottom + 6)}px`;
-    anchor.setAttribute?.('aria-expanded', 'true');
-    ui.usagePopover = { node, anchor, opener };
-    node.focus();
   }
 
   // Puts nodes in a container when they differ from the nodes that it has. The focus stays on the same fact.
@@ -1142,7 +1110,7 @@ BB.cfg = config;
       if (!entry) continue;
       const readable = can('list', entry);
       fillNodes(node.querySelector('.bucketFacts'), readable ? bucketFacts(entry) : []);
-      fillNodes(node.querySelector('.storageBucket__versioning'), [readable ? versionMark(entry) : null].filter(Boolean));
+      fillNodes(node.parentElement.querySelector('.storageBucket__versioning'), [readable ? versionMark(entry) : null].filter(Boolean));
       fillNodes(node.querySelector('.bucketMarks'), fullUsage(entry) ? [fullMark(entry)] : []);
       node.classList.toggle('is-full', fullUsage(entry));
       node.title = storageDetails(entry);
@@ -1391,10 +1359,14 @@ BB.cfg = config;
       // The usage of the other buckets: the mark of a full bucket shows also before the menu opens.
       loadAllUsage();
       state.pathPrefix = routeInstance === state.instanceId ? normalizePrefix(route.path) : parseLegacyHash();
+      // ?lifecycle (the link of the information page) opens the lifecycle rules after the first listing. The address
+      // of the page loses it.
+      const openRules = routeInstance === state.instanceId && new URLSearchParams(location.search).has('lifecycle');
       ui.searchInput.value = '';
       replaceLocation(state.pathPrefix);
       update();
       await refresh();
+      if (openRules && config.lifecycleSupported) openLifecycle();
     } catch (error) {
       state.isInitializing = false;
       const kind = classify(error);
@@ -1999,33 +1971,6 @@ BB.cfg = config;
     downloadArchive({ archiveName: `${prefix.split('/').filter(Boolean).pop() || 'folder'}.zip`, basePrefix: prefix });
   }
 
-  async function showPermissions() {
-    const instance = currentInstance();
-    if (!instance) return;
-    const caps = instance.capabilities || {};
-    const rows = [['Read', 'read', 'eye-outline'], ['Write', 'write', 'pencil-outline'], ['Delete', 'delete', 'delete-outline']].map(([label, key, iconName]) => {
-      const capability = caps[key] || {};
-      const name = BB.capabilities.normalizeState(capability);
-      const folder = state.folderAccess && state.folderAccess[key] === false;
-      const result = folder ? 'Denied in this folder' : BB.capabilities.stateLabel(capability);
-      const tone = folder || name === 'denied' ? 'danger' : name === 'allowed' ? 'ok' : '';
-      const reason = String(capability.reason || '');
-      return `<li class="permRow"><span class="permName"><i class="mdi mdi-${iconName}" aria-hidden="true"></i>${label}</span>
-        <span class="badge${tone ? ` badge--${tone}` : ''}">${escapeHTML(result)}</span>
-        ${reason ? `<span class="permReason">${escapeHTML(reason)}</span>` : ''}</li>`;
-    }).join('');
-    const provider = Array.from(caps.permissions || []).map(String).join(', ') || 'not reported';
-    await BB.ui.alert({
-      title: `${capitalized(storageNoun(instance))} permissions`,
-      html: `<div class="permissions">
-        <p class="part__lede">${escapeHTML(instance.name)}: ${storageNoun(instance)} <code>${escapeHTML(instance.bucket)}</code> on <code>${escapeHTML(instance.host)}</code>.
-        The page hides what you cannot do. The server checks each request again.</p>
-        <ul class="permList">${rows}</ul>
-        <p class="part__lede">Permissions of the configuration: <code>${escapeHTML(provider)}</code>.</p>
-      </div>`
-    });
-  }
-
   // ---------------------------------------------------------------------------------------------------------------
   // Uploads
   // ---------------------------------------------------------------------------------------------------------------
@@ -2183,7 +2128,7 @@ BB.cfg = config;
       insightsItem: 'insightsItem', accessBadge: 'accessBadge', uploadWrap: 'uploadWrap',
       uploadButton: 'uploadButton', uploadMenu: 'uploadMenu', uploadFilesItem: 'uploadFilesItem',
       uploadFolderItem: 'uploadFolderItem', uploadTagsInput: 'uploadTagsInput', uploadTagsMessage: 'uploadTagsMessage', folderTagsItem: 'folderTagsItem', multipartsItem: 'multipartsItem',
-      newFolderItem: 'newFolderItem', usageItem: 'usageItem',
+      newFolderItem: 'newFolderItem',
       tagFilterWrap: 'tagFilterWrap', settingsButton: 'settingsButton', settingsMenu: 'settingsMenu', settingsReset: 'settingsReset',
       tagFilterToggle: 'tagFilterToggle', encryptionToggle: 'encryptionToggle', tagFilter: 'tagFilter', tagStatus: 'tagStatus', listing: 'listing', dropOverlay: 'dropOverlay', dropTarget: 'dropTarget',
       uploadDock: 'uploadDock', fileInput: 'fileInput', dirInput: 'dirInput'
@@ -2211,12 +2156,6 @@ BB.cfg = config;
     ui.folderTagsItem.addEventListener('click', () => { if (canWrite()) void tagFolder(state.pathPrefix); });
     ui.multipartsItem.addEventListener('click', () => { if (canRead()) BB.multiparts.open({ prefix: state.pathPrefix, canWrite: canWrite() }); });
     ui.newFolderItem.addEventListener('click', () => { void makeFolder(); });
-    // The item "Usage" opens the popover under the Actions button: it is the way to it on a narrow selector.
-    ui.usageItem.addEventListener('click', event => {
-      event.stopPropagation();
-      closeMenu({ focus: true });
-      openUsage(ui.actionsButton);
-    });
     ui.tagFilter.addEventListener('input', () => { state.tagFilter = ui.tagFilter.value; applyTagFilter(); });
     document.addEventListener('bb:tags-changed', event => forgetTags(event.detail?.key));
     // A save of the metadata changes the date and the versions of the object: the listing reads them again.
@@ -2231,15 +2170,10 @@ BB.cfg = config;
     window.addEventListener('popstate', updateFromLocation);
     document.addEventListener('click', event => {
       if (openMenu && !openMenu.menu.contains(event.target) && !openMenu.trigger.contains(event.target)) closeMenu();
-      if (ui.usagePopover && !ui.usagePopover.node.contains(event.target) && !ui.usagePopover.anchor.contains(event.target)) closeUsage({ focus: false });
       if (ui.switcher && !ui.switcher.contains(event.target)) closeSwitcher(false);
     });
     document.addEventListener('keydown', event => {
       if (event.key === 'Escape') {
-        if (ui.usagePopover) {
-          closeUsage();
-          return;
-        }
         closeMenu({ focus: true });
         closeSwitcher(false);
       }

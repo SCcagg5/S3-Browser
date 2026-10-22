@@ -1855,6 +1855,12 @@ func (a *application) handleStorageFrontend(w http.ResponseWriter, r *http.Reque
 			requested := "/preview.html"
 			if trailingSlash {
 				requested = "/index.html"
+				// /-/<host>/<bucket>/?info is the information page of the instance, in a frontend that has it.
+				if len(segments) == 2 && r.URL.Query().Has("info") {
+					if _, err := fs.Stat(a.publicFS, "info.html"); err == nil {
+						requested = "/info.html"
+					}
+				}
 			}
 			serveEmbeddedFrontend(w, r, a.publicFS, requested, frontendBaseHref(r.URL.Path))
 			return
@@ -1981,7 +1987,7 @@ func secureStaticHandler(root fs.FS) http.Handler {
 				}
 			}
 		}
-		if requested == "/index.html" || requested == "/preview.html" {
+		if requested == "/index.html" || requested == "/preview.html" || requested == "/info.html" {
 			serveEmbeddedFrontend(w, r, root, requested, frontendBaseHref(r.URL.Path))
 			return
 		}

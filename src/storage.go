@@ -548,6 +548,7 @@ func (s *storageInstance) publicInfo() instanceInfo {
 		Host:                s.cfg.AuthID,
 		Name:                s.cfg.Name,
 		Provider:            s.cfg.Provider,
+		Flavour:             s.knownFlavour(),
 		Bucket:              s.cfg.Bucket,
 		Region:              s.cfg.Region,
 		RootPrefix:          s.cfg.RootPrefix,
@@ -571,10 +572,12 @@ func (s *storageInstance) publicInfo() instanceInfo {
 }
 
 type instanceInfo struct {
-	ID                  string `json:"id"`
-	Host                string `json:"host"`
-	Name                string `json:"name"`
-	Provider            string `json:"provider"`
+	ID       string `json:"id"`
+	Host     string `json:"host"`
+	Name     string `json:"name"`
+	Provider string `json:"provider"`
+	// Flavour is the S3 provider that the probe at start recognised: "aws", "minio", "seaweedfs", "garage", or absent.
+	Flavour             string `json:"flavour,omitempty"`
 	Bucket              string `json:"bucket"`
 	Region              string `json:"region,omitempty"`
 	RootPrefix          string `json:"rootPrefix,omitempty"`

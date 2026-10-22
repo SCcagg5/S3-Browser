@@ -1,0 +1,132 @@
+/* The information page of a bucket or a volume (info.html). It uses the header, the parts and the badges of portal.css.
+   The header has the brand at the left edge, the link back to the listing after it, and the theme at the right edge.
+   The sections are in two columns on a wide window and in one column on a phone. Each section is a list of terms and
+   values; a value can have a thin bar and a note. */
+
+.infoPage .appHeader__right {
+  margin-left: auto;
+}
+
+/* The link back to the listing is after the brand: its line is at its left. */
+.infoBack {
+  min-width: 0;
+  margin-left: 0;
+  padding: 0 4px 0 10px;
+  border-right: 0;
+  border-left: 1px solid var(--border);
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+}
+
+.infoBack .backLink__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.infoHead {
+  min-width: 0;
+}
+
+.infoTitle {
+  margin: 0;
+  overflow: hidden;
+  font-size: var(--fs-2xl);
+  font-weight: var(--fw-semibold);
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.infoSections {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 16px;
+}
+
+.infoSection__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-semibold);
+  line-height: 1.3;
+}
+
+.infoSection__title .ic {
+  --icon-size: 18px;
+  color: var(--muted);
+}
+
+.infoSection__lede {
+  margin-top: 6px;
+}
+
+.infoList {
+  display: grid;
+  grid-template-columns: minmax(96px, max-content) minmax(0, 1fr);
+  gap: 10px 16px;
+  margin: 14px 0 0;
+  font-size: var(--fs-md);
+  line-height: 20px;
+}
+
+.infoList dt {
+  color: var(--muted);
+}
+
+.infoList dd {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+.infoList__value {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: 0;
+}
+
+.infoList__note {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  line-height: 16px;
+}
+
+.infoMeter {
+  width: 100%;
+}
+
+.infoMeter.is-warning .usageMeter__fill {
+  background: var(--warning);
+}
+
+.infoMeter.is-error .usageMeter__fill {
+  background: var(--danger);
+}
+
+.infoAction {
+  text-decoration: none;
+}
+
+@media (max-width: 760px) {
+  .infoSections {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 420px) {
+  .infoList {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+
+  .infoList dd + dt {
+    margin-top: 8px;
+  }
+}
