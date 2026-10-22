@@ -1,4 +1,4 @@
-/* S3-Browser, "portal" interface: the preview page.
+/* Stowr, "portal" interface: the preview page.
    The header is the header of the portal, one row of 45 px as the header of ClickHouse Dash: the way back at the left,
    then the file name, its size and its path from the bucket root on one line, and the tools and the theme control at
    the right edge of the window. Markdown and highlighted code use the tokens of portal.css, so they follow the theme;

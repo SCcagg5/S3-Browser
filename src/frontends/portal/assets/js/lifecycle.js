@@ -85,7 +85,7 @@
     if (rule.noncurrentExpirationDays) actions.push(`deletes the noncurrent versions ${dayCount(rule.noncurrentExpirationDays)} after they become noncurrent`);
     if (rule.abortIncompleteMultipartDays) actions.push(`aborts the incomplete uploads ${dayCount(rule.abortIncompleteMultipartDays)} after their start`);
     if (rule.expiredObjectDeleteMarker) actions.push('removes the expired delete markers');
-    return `${scope.join(', ')}: ${actions.length ? actions.join(', ') : 'no action that S3-Browser knows'}.`;
+    return `${scope.join(', ')}: ${actions.length ? actions.join(', ') : 'no action that Stowr knows'}.`;
   }
 
   // ---------------------------------------------------------------------------------------------------------------
@@ -320,7 +320,7 @@
           h('span', { class: `badge${rule.enabled ? ' badge--ok' : ''}` }, rule.enabled ? 'Enabled' : 'Disabled'),
           kept ? h('span', { class: 'badge badge--accent', 'data-lifecycle-kept-note': '' }, 'Kept as is') : null),
         h('p', { class: 'lifecycleRule__summary' }, kept && !item.entry.xml ? 'A rule of another part of the bucket.' : describeRule(rule)),
-        kept && item.entry.reason ? h('p', { class: 'lifecycleRule__reason' }, `${item.entry.reason} S3-Browser writes it back unchanged.`) : null,
+        kept && item.entry.reason ? h('p', { class: 'lifecycleRule__reason' }, `${item.entry.reason} Stowr writes it back unchanged.`) : null,
         kept && item.entry.xml ? h('details', { class: 'lifecycleRule__xml' }, h('summary', {}, 'XML'), h('pre', { class: 'mono' }, item.entry.xml)) : null);
     }
 
@@ -344,7 +344,7 @@
       const root = editor?.rootPrefix || '';
       intro.replaceChildren(...(root
         ? ['The rules apply to the bucket. This part edits the rules under ', h('code', {}, root), ': a prefix of a rule starts there. The other rules stay as they are.']
-        : ['The rules apply to the whole bucket. The storage provider runs them, not S3-Browser.']));
+        : ['The rules apply to the whole bucket. The storage provider runs them, not Stowr.']));
       intro.hidden = !editor;
       providerNote.textContent = editor?.providerNote || '';
       providerNote.hidden = !editor?.providerNote;
@@ -367,7 +367,7 @@
         apply(await BB.api.lifecycle(instance));
         if (!editor) {
           // A backend that only reads the rules.
-          editor = { writable: false, readOnlyReason: 'This storage provider does not let S3-Browser change the rules.', entries: [], fields: {}, hidden: [] };
+          editor = { writable: false, readOnlyReason: 'This storage provider does not let Stowr change the rules.', entries: [], fields: {}, hidden: [] };
         }
         reloadButton.hidden = true;
         if (pendingPrefill) {

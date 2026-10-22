@@ -94,14 +94,14 @@
     else if (!result.failed) parts.push(`No upload was older than ${plural(days, 'day')}.`);
     if (result.skippedUndated) parts.push(`${plural(result.skippedUndated, 'upload')} without a start date stayed.`);
     if (result.skippedRecent) parts.push(`${plural(result.skippedRecent, 'younger upload')} stayed.`);
-    if (result.skippedActive) parts.push(`${plural(result.skippedActive, 'upload')} that S3-Browser sends now stayed.`);
+    if (result.skippedActive) parts.push(`${plural(result.skippedActive, 'upload')} that Stowr sends now stayed.`);
     if (result.failed) parts.push(`${plural(result.failed, 'upload')} not aborted because of an error.`);
     return parts.join(' ');
   }
 
   function failureText(error, what) {
     if (error?.status === 403) return 'You cannot abort the incomplete uploads here.';
-    if (error?.status === 501 || error?.code === 'multipart_unsupported') return 'This storage provider does not let S3-Browser list the incomplete uploads.';
+    if (error?.status === 501 || error?.code === 'multipart_unsupported') return 'This storage provider does not let Stowr list the incomplete uploads.';
     return `${what}: ${error?.message || error}`;
   }
 
@@ -201,7 +201,7 @@
       undated.hidden = !canWrite || dateless === 0;
       if (dateless) {
         const them = dateless === 1 ? 'it' : 'them';
-        undated.textContent = `The storage provider gives no start date for ${plural(dateless, 'upload')}. S3-Browser does not abort ${them} by age: select ${them} and use Abort selected.`;
+        undated.textContent = `The storage provider gives no start date for ${plural(dateless, 'upload')}. Stowr does not abort ${them} by age: select ${them} and use Abort selected.`;
       }
       total.textContent = `${plural(rows.length, 'upload')}${nextToken ? ' shown' : ''}`;
     }
@@ -249,7 +249,7 @@
       moreButton.hidden = !nextToken;
       if (unsupported) {
         state.hidden = false;
-        state.textContent = 'This storage provider does not let S3-Browser list the incomplete uploads.';
+        state.textContent = 'This storage provider does not let Stowr list the incomplete uploads.';
       }
       if (added) body.append(...added.map(rowNode));
       else body.replaceChildren(...rows.map(rowNode));
@@ -327,7 +327,7 @@
       const confirmed = await BB.ui.confirm({
         title: 'Abort incomplete uploads',
         html: `<p>Abort the incomplete uploads ${volume ? 'with no write for more than' : 'that started more than'} ${plural(days, 'day')}${volume ? '' : ' ago'}? ${removed} and the uploads cannot continue.</p>`
-          + `<p>These uploads stay: an upload without a start date, an upload younger than ${plural(minimumHours, 'hour')}, and an upload that this S3-Browser sends now.</p>`,
+          + `<p>These uploads stay: an upload without a start date, an upload younger than ${plural(minimumHours, 'hour')}, and an upload that this Stowr sends now.</p>`,
         confirmLabel: 'Abort'
       });
       if (!confirmed) return;

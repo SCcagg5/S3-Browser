@@ -445,7 +445,7 @@ BB.cfg = config;
     // The heading is for screen readers: the crumbs show the place on the screen.
     const heading = instance ? `${title}${list.length ? `, in ${instance.name}` : `, ${storageNoun(instance)} root`}` : title;
     if (ui.title.textContent !== heading) ui.title.textContent = heading;
-    document.title = instance ? `${title} - ${instance.name} - Object storage` : 'Object storage';
+    document.title = instance ? `${title} - ${instance.name} - Stowr` : 'Stowr';
   }
 
   // ---------------------------------------------------------------------------------------------------------------
@@ -797,7 +797,7 @@ BB.cfg = config;
 
   // An entry of a volume that the server does not read: no link, no size, no action, and a tooltip that says why.
   function buildUnreadableRow(row) {
-    const reason = 'S3-Browser does not read this entry: it is a symbolic link that leaves the volume or that does not resolve, or it is not a regular file.';
+    const reason = 'Stowr does not read this entry: it is a symbolic link that leaves the volume or that does not resolve, or it is not a regular file.';
     const tr = h('tr', { 'data-name': row.name, 'data-type': row.type, 'data-unreadable': 'true', class: 'is-unreadable' },
       h('td', {}, h('div', { class: 'nameCell is-unreadable', title: reason },
         ic('ban'), h('span', { class: 'nameText' }, row.name), h('span', { class: 'visually-hidden' }, ` (${reason})`))),
@@ -1462,7 +1462,7 @@ BB.cfg = config;
     if (!name) problem = 'The name is empty.';
     else if (name.includes('/')) problem = 'A name cannot have a "/".';
     else if (name === '.' || name === '..') problem = 'The name cannot be "." or "..".';
-    else if (name.startsWith('.s3b-tmp-')) problem = 'The names that start with ".s3b-tmp-" are for the temporary files of S3-Browser.';
+    else if (name.startsWith('.s3b-tmp-')) problem = 'The names that start with ".s3b-tmp-" are for the temporary files of Stowr.';
     if (problem) {
       BB.ui.toast(`The folder is not made. ${problem}`, { status: 'error', duration: 6500 });
       return;

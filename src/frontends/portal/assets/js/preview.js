@@ -201,7 +201,7 @@
     const backLabel = folders.length ? folders[folders.length - 1] : (currentInstance?.name || 'Folder');
     back.querySelector('span').textContent = backLabel;
     back.title = `Back to ${backLabel}`;
-    document.title = `${name || 'Preview'} - ${currentInstance?.name || 'Object storage'}`;
+    document.title = `${name || 'Preview'} - ${currentInstance?.name || 'Stowr'}`;
   }
 
   function setVisible(id, visible) {

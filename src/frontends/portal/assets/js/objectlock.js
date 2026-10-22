@@ -231,7 +231,7 @@
         return { bypass: `This change replaces the Governance retention with a Compliance retention until ${dateText(until)}. Nobody can shorten or remove a Compliance retention, not even the owner of the bucket.` };
       }
       if (seconds(until) < seconds(old)) {
-        return { bypass: `This change shortens the Governance retention of this version from ${dateText(old)} to ${dateText(until)}. S3-Browser sends it with the bypass of the Governance retention (x-amz-bypass-governance-retention). The version can then be deleted from ${dateText(until)}.` };
+        return { bypass: `This change shortens the Governance retention of this version from ${dateText(old)} to ${dateText(until)}. Stowr sends it with the bypass of the Governance retention (x-amz-bypass-governance-retention). The version can then be deleted from ${dateText(until)}.` };
       }
       return { bypass: '' };
     }

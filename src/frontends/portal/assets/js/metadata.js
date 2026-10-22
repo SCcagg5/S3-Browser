@@ -94,7 +94,7 @@
     if (version) notes.push('This version becomes the current version, as a restore does. The other versions stay.');
     else if (versioning) notes.push('A new version is created. The current version stays in the list of versions.');
     if (state.multipartETag) notes.push('The ETag can change: the object was uploaded in parts.');
-    else if (state.copyInParts) notes.push('The ETag changes: S3-Browser copies an object of this size in parts.');
+    else if (state.copyInParts) notes.push('The ETag changes: Stowr copies an object of this size in parts.');
     return notes;
   }
 
@@ -272,7 +272,7 @@
         if (failure?.status === 501) {
           canWrite = false;
           stopEdit();
-          say('This storage provider does not let S3-Browser change the metadata.', 'error');
+          say('This storage provider does not let Stowr change the metadata.', 'error');
           return;
         }
         say(failure?.status === 403 ? 'You cannot change the metadata of this object.' : `The metadata is not saved: ${failure?.message || failure}`, 'error');

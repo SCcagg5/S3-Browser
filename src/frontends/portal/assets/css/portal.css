@@ -1,4 +1,4 @@
-/* S3-Browser, "portal" interface: the main stylesheet of every page.
+/* Stowr, "portal" interface: the main stylesheet of every page.
 
    Design rules. The tokens below write them down; the components only name tokens.
    1. Header of ClickHouse Dash at the full width of the window, one row of 45 px at every width with controls of
@@ -2056,7 +2056,7 @@ button.storageSwitcher__trigger:hover {
   font-weight: var(--fw-semibold);
 }
 
-/* An entry of a volume that S3-Browser does not read: muted, without a link. */
+/* An entry of a volume that Stowr does not read: muted, without a link. */
 .nameCell.is-unreadable {
   color: var(--muted);
   cursor: help;

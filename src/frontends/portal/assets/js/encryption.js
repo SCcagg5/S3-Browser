@@ -1,7 +1,7 @@
 /*
  * BB.encryption: the encryption section of the file details. It is read only.
  * - the object: the headers of the HEAD answer (SSE-S3, SSE-KMS and its key), or an object with a key of the client
- *   (SSE-C) that the provider refused to read. S3-Browser never shows or asks for such a key;
+ *   (SSE-C) that the provider refused to read. Stowr never shows or asks for such a key;
  * - the bucket: its default encryption (GET /api/encryption), when the server could read it at start.
  * The section stays hidden when the provider reports no encryption.
  * The module also gives the key next to the name of a bucket (from /api/instances), the key next to the name of a
@@ -78,7 +78,7 @@
     }
     const children = [h('div', { class: 'bb-details-section-title' }, icon('key'), ' Encryption'), h('div', { class: 'bb-kv' }, rows)];
     if (customerKey || header(headers, 'x-amz-server-side-encryption-customer-algorithm')) {
-      children.push(h('p', { class: 'encryptionNote', 'data-encryption-note': '' }, 'The provider reads this object only with the key of the client. S3-Browser does not ask for this key: the preview, the download and the copy are not available.'));
+      children.push(h('p', { class: 'encryptionNote', 'data-encryption-note': '' }, 'The provider reads this object only with the key of the client. Stowr does not ask for this key: the preview, the download and the copy are not available.'));
     }
     host.replaceChildren(...children);
     host.hidden = false;

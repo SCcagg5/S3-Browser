@@ -25,6 +25,14 @@ This document uses ASD-STE100 Simplified Technical English.
   and its tooltip, and it does not act. The warning of a full bucket names the part: "The storage of this bucket is 91 %
   full: 910 GB of 1000 GB, 90 GB left." or "This volume is on a file system that is 91 % full: ...".
 
+### Name and logo
+
+- Interface `portal`: the product has the name Stowr in the header, the titles of the pages, the favicon and the
+  texts of the page. The logo is a crate with a lid and two slats. The logo of the header has the colour
+  `--accent-fill`, as the logo of ClickHouse Dash. The favicon has the colour `#2558d9` of the favicon of ClickHouse
+  Dash. The repository, the Docker image, the README and the documentation keep the old name until the next major
+  release.
+
 ### Information page of a bucket
 
 - Interface `portal`: each bucket and each volume has a read-only information page at `/-/<host>/<bucket>/?info`. It

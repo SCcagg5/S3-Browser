@@ -220,7 +220,7 @@
       if (Number(usage.limitBytes) > 0) {
         cards.push(gauge({
           key: 'quota', title: 'Quota', percent: Number(usage.quotaPercent ?? usage.percent) || 0, level: usage.quotaLevel ?? usage.level, approximate: usage.approximate,
-          chips: [chip('accent', usage.limitSource === 'config' ? 'Set by S3-Browser' : 'Set by the provider')],
+          chips: [chip('accent', usage.limitSource === 'config' ? 'Set by Stowr' : 'Set by the provider')],
           summary: `${mark(usage.approximate)}${bytes(usage.usedBytes)} used of ${bytes(usage.limitBytes)}`,
           facts: [
             { key: 'left', term: 'Left', value: bytes(Math.max(0, Number(usage.limitBytes) - Number(usage.usedBytes))) },

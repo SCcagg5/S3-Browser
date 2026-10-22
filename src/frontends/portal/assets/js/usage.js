@@ -146,7 +146,7 @@
       if (Number(answer.limitBytes) > 0) {
         out.push({ term: 'Quota', value: `${mark(answer.approximate)}${formatBytes(answer.usedBytes)} of ${formatBytes(answer.limitBytes)} (${answer.quotaPercent ?? answer.percent} %)`,
           percent: Number(answer.quotaPercent ?? answer.percent) || 0, level: answer.quotaLevel ?? answer.level,
-          note: answer.limitSource === 'config' ? 'The configuration of S3-Browser sets this limit. The provider does not enforce it.' : '' });
+          note: answer.limitSource === 'config' ? 'The configuration of Stowr sets this limit. The provider does not enforce it.' : '' });
       }
       if (Number(answer.limitObjects) > 0 && Number(answer.usedObjects) >= 0) {
         out.push({ term: 'Objects', value: `${count(answer.usedObjects)} of ${count(answer.limitObjects)}` });
