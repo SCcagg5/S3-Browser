@@ -263,6 +263,11 @@ The main additions are:
   its size and its path on one line, then the tools. The path gets an ellipsis before the name. At 760 px and less,
   the path and the date of the version go. A comparison keeps one row from 761 px; below, its versions and its
   statistics take a row under the name.
+- The theme selector is the theme selector of ClickHouse Dash, pixel for pixel, in the list header, in the preview bar
+  and on the page 404. The icons are the SVG icons of Dash (inline, 18 px, a stroke of 1.5) in place of the masked
+  icons of 16 px with a stroke of 1.75. The button is 34 x 28 px with 6 px corners at every width, and its icon is
+  in muted text at 82 % until the pointer, the focus or the menu gives the colour of the text. The focus ring is on
+  the edge of the button. The choices of the menu are 34 x 32 px, and the edge of the menu has the colour of Dash.
 - The menus open with a short move and no fade, so the page never shows through a menu, also in its first frame. This
   applies to the theme menu, the list of the buckets, the menus Actions and settings, the version picker and the
   suggestions of the metadata editor. Each menu has the opaque colour `--panel`.

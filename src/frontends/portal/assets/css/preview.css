@@ -41,11 +41,6 @@
   width: 28px;
 }
 
-.previewBar .themeSelect__button {
-  width: 34px;
-  height: 28px;
-}
-
 .previewBar__back {
   flex: none;
   max-width: 22ch;

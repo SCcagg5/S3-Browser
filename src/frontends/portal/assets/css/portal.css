@@ -31,6 +31,8 @@
   --inset: #0d0f12;
   --border: rgba(255, 255, 255, 0.08);
   --border-strong: rgba(255, 255, 255, 0.16);
+  /* The edge of the theme menu of ClickHouse Dash. */
+  --theme-menu-border: rgba(255, 255, 255, 0.14);
   --control-border: rgba(255, 255, 255, 0.4);
   --control-border-hover: rgba(255, 255, 255, 0.58);
   --button-bg: var(--raised);
@@ -103,6 +105,7 @@
     --inset: #ffffff;
     --border: rgba(15, 18, 25, 0.1);
     --border-strong: rgba(15, 18, 25, 0.2);
+    --theme-menu-border: rgba(15, 18, 25, 0.18);
     --control-border: rgba(15, 18, 25, 0.54);
     --control-border-hover: rgba(15, 18, 25, 0.72);
     --button-bg: #ffffff;
@@ -168,6 +171,7 @@
   --inset: #ffffff;
   --border: rgba(15, 18, 25, 0.1);
   --border-strong: rgba(15, 18, 25, 0.2);
+  --theme-menu-border: rgba(15, 18, 25, 0.18);
   --control-border: rgba(15, 18, 25, 0.54);
   --control-border-hover: rgba(15, 18, 25, 0.72);
   --button-bg: #ffffff;
@@ -514,7 +518,10 @@ a {
 }
 
 /* The theme selector of ClickHouse Dash: an icon button with the current choice, and the three choices in a column
-   under it, joined to the button. */
+   under it, joined to the button. Each value is the value of ClickHouse Dash, measured in a browser with its
+   stylesheet: a button of 34 x 28 px with 6 px corners, the icons of Dash (inline SVG, 18 px, a stroke of 1.5 in the
+   colour of the text), muted text at 82 % until the pointer, the focus or the menu gives the colour of the text, and
+   choices of 34 x 32 px. */
 .themeSelect {
   position: relative;
   display: none;
@@ -524,46 +531,68 @@ a {
   display: inline-flex;
 }
 
-.themeSelect__button {
+.themeSelect > .themeSelect__button {
   position: relative;
   z-index: 1;
   width: 34px;
-  height: 34px;
+  height: 28px;
+  padding: 0;
+  border-radius: var(--radius-inner);
   color: color-mix(in srgb, var(--muted) 82%, transparent);
 }
 
-.themeSelect__button:hover,
-.themeSelect.is-open .themeSelect__button {
+.themeSelect > .themeSelect__button:hover,
+.themeSelect > .themeSelect__button:focus-visible {
+  border-color: var(--button-border-hover);
   color: var(--text);
 }
 
-/* The theme button of the header of ClickHouse Dash: 34 px wide as its menu, 28 px high. */
-.appHeader .themeSelect__button {
-  width: 34px;
-  height: 28px;
+/* The focus ring of ClickHouse Dash: on the edge of the button, and inside a choice. */
+.themeSelect > .themeSelect__button:focus-visible {
+  outline-offset: 0;
 }
 
-.themeSelect.is-open .themeSelect__button {
-  border-color: var(--border-strong);
+.themeSelect__option:focus-visible {
+  outline-offset: -2px;
+}
+
+/* The open selector: the button keeps its border and its background, and its bottom edge opens into the menu. */
+.themeSelect.is-open > .themeSelect__button,
+.themeSelect.is-open > .themeSelect__button:hover {
+  border-color: var(--button-border);
   border-bottom-color: transparent;
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
-  background: var(--panel);
+  background: var(--button-bg);
+  color: var(--text);
 }
 
 .themeSelect__current {
   display: inline-flex;
 }
 
+/* An icon of ClickHouse Dash: no fill, a stroke of 1.5 in the colour of the text, round ends. */
+.themeIcon {
+  display: block;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
 .themeSelect__current > .themeIcon {
   display: none;
-  --icon-size: 18px;
 }
 
 html:not([data-theme-mode="dark"], [data-theme-mode="light"]) .themeSelect__current > .themeIcon--system,
 html[data-theme-mode="dark"] .themeSelect__current > .themeIcon--dark,
 html[data-theme-mode="light"] .themeSelect__current > .themeIcon--light {
-  display: inline-block;
+  display: block;
 }
 
 .themeSelect__menu {
@@ -572,11 +601,13 @@ html[data-theme-mode="light"] .themeSelect__current > .themeIcon--light {
   left: 0;
   z-index: var(--z-menu);
   display: grid;
+  grid-template-columns: 34px;
+  justify-content: center;
   gap: 2px;
   width: 34px;
   margin-top: -1px;
   padding: 4px 2px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--theme-menu-border);
   border-top: 0;
   border-radius: 0 0 var(--radius-control) var(--radius-control);
   background: var(--panel);
@@ -597,10 +628,11 @@ html[data-theme-mode="light"] .themeSelect__current > .themeIcon--light {
 }
 
 .themeSelect__option {
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 32px;
   padding: 0;
   border: 1px solid transparent;
   border-radius: var(--radius-inner);
@@ -609,11 +641,9 @@ html[data-theme-mode="light"] .themeSelect__current > .themeIcon--light {
   cursor: pointer;
 }
 
-.themeSelect__option .ic {
-  --icon-size: 18px;
-}
-
-.themeSelect__option:hover {
+.themeSelect__option:hover,
+.themeSelect__option:focus-visible {
+  border-color: transparent;
   background: var(--row-hover);
   color: var(--text);
 }
@@ -2961,12 +2991,13 @@ button.versionCount:focus-visible {
     --control-h-sm: 40px;
   }
 
-  .themeSelect__button {
+  .themeSelect > .themeSelect__button {
     width: 44px;
     height: 44px;
   }
 
   .themeSelect__menu {
+    grid-template-columns: 38px;
     width: 44px;
   }
 
