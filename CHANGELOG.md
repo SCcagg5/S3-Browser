@@ -28,15 +28,12 @@ Do these steps before you start 3.0.0:
 4. `access.identity.audience` is a mandatory key of the mode `authzen`, with no default value: it does not change.
    In the mode `open`, the id of the server in `/.well-known/access-actions` and of the service resource is `stowr`,
    not `s3-browser`. Change a tool that reads this id.
-5. The probes at start read three keys that do not exist: `.stowr-provider-probe`, `.stowr-tags-probe` and
-   `.stowr-metadata-probe` (before: `.s3-browser-provider-probe`, `.s3-browser-tags-probe` and
-   `.s3-browser-metadata-probe`), under the root prefix of each instance. Change a bucket policy or a rule of a
-   gateway that names the old keys.
-6. A temporary file of an upload to a volume starts with `.stowr-tmp-`, not `.s3b-tmp-`. Finish or stop the uploads
-   to the volumes before the upgrade. After it, the listing shows a file `.s3b-tmp-…` that stays from 2.x: delete it.
-7. The repository is `https://github.com/SCcagg5/stowr`. GitHub sends the old address to it.
-8. For a build from the source: the Go module is `stowr`. The portal keeps its last shown version in the browser
-   under the key `stowr.portal.version`: the notice of a new version shows one time after the upgrade.
+5. The repository is `https://github.com/SCcagg5/stowr`. GitHub sends the old address to it.
+6. For a build from the source: the Go module is `stowr`, not `s3-browser`.
+
+The probes at start, the volumes and the interface `portal` are new in 3.0.0. Their names have no older form, so they
+need no step: the probe keys `.stowr-provider-probe`, `.stowr-tags-probe` and `.stowr-metadata-probe`, the temporary
+files `.stowr-tmp-…` of a volume and the browser key `stowr.portal.version`.
 
 ### Usage: what a bucket or a volume holds, and the capacity of the storage behind it
 
