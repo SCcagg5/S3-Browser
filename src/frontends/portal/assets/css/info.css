@@ -14,47 +14,26 @@ html:has(> body.infoPage),
   background: var(--panel);
 }
 
-/* The link back to the files of the bucket: the first line of the page, under the header. The header has the same
-   parts as the header of the listing, so the selector has the same width on the two pages. */
-.infoBack {
-  display: inline-flex;
-  align-items: center;
-  align-self: start;
-  gap: 4px;
-  min-width: 0;
-  max-width: 100%;
-  margin-bottom: -20px;
-  color: var(--muted);
-  font-size: var(--fs-sm);
-  font-weight: var(--fw-semibold);
-  text-decoration: none;
-}
-
-.infoBack:hover {
-  color: var(--text);
-}
-
+/* The link back to the files of the bucket is in the header, after the brand, as the link back of the preview. */
 .infoBack[hidden] {
   display: none;
 }
 
 .infoBack .ic {
   --icon-size: 16px;
-  flex: none;
 }
 
-.infoBack__text {
+.infoBack .backLink__text {
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .infoMain {
   display: flex;
   flex-direction: column;
-  gap: 32px;
+  gap: 8px;
   min-width: 0;
-  padding: var(--header-gutter) var(--header-gutter) calc(var(--header-gutter) * 2 + 48px);
+  padding: 8px var(--header-gutter) calc(var(--header-gutter) * 2);
   font-size: var(--fs-md);
 }
 
@@ -92,13 +71,13 @@ html:has(> body.infoPage),
 .infoSections {
   display: flex;
   flex-direction: column;
-  gap: 32px;
+  gap: 16px;
   min-width: 0;
 }
 
 .infoPart {
   display: grid;
-  gap: 10px;
+  gap: 4px;
   min-width: 0;
   scroll-margin-top: 12px;
 }
@@ -107,13 +86,13 @@ html:has(> body.infoPage),
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px 12px;
-  min-height: 32px;
+  gap: 4px 12px;
+  min-height: 24px;
 }
 
 .infoPart__title {
   margin: 0;
-  font-size: var(--fs-xl);
+  font-size: var(--fs-lg);
   font-weight: var(--fw-semibold);
   line-height: 1.3;
 }
@@ -126,7 +105,7 @@ html:has(> body.infoPage),
 
 .infoPart__body {
   display: grid;
-  gap: 12px;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -135,13 +114,13 @@ html:has(> body.infoPage),
   display: grid;
   grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
   align-items: start;
-  gap: 20px 24px;
+  gap: 8px 16px;
 }
 
 .infoGrid__main,
 .infoGrid__side {
   display: grid;
-  gap: 20px;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -206,7 +185,7 @@ html:has(> body.infoPage),
 .infoKv__key {
   min-width: 0;
   margin: 0;
-  padding: 5px 12px 5px 8px;
+  padding: 3px 12px 3px 8px;
   color: var(--muted);
 }
 
@@ -215,7 +194,7 @@ html:has(> body.infoPage),
   gap: 2px;
   min-width: 0;
   margin: 0;
-  padding: 5px 8px;
+  padding: 3px 8px;
   overflow-wrap: anywhere;
 }
 
@@ -279,15 +258,15 @@ html:has(> body.infoPage),
 .infoGauges {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
-  gap: 12px;
+  gap: 8px;
 }
 
 .infoGauge {
   display: grid;
   align-content: start;
-  gap: 8px;
+  gap: 4px;
   min-width: 0;
-  padding: 12px;
+  padding: 8px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-inner);
   background: var(--panel);

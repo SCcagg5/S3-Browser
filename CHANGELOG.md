@@ -67,8 +67,8 @@ This document uses ASD-STE100 Simplified Technical English.
   (or the bar of the preview page) stays at the top, and only the element under it scrolls. Its scrollbar starts
   under the header and ends at the right edge of the window. This applies to the listing, the preview page, the
   information page and the 404 page.
-- The link back to the files of the bucket is the first line of the information page, not a part of its header: the
-  header of the two pages has the same parts, and the selector the same width.
+- The link "Back to the files of <bucket>" is in the header of the information page, after the brand. A narrow window
+  shows only its chevron. The page is more compact: smaller gaps between the parts, the cards and the rows.
 - The list of the buckets is a non-modal dialog, not a listbox. The current bucket has `aria-current="true"`.
 - `GET /api/instances` gives `flavour` for an S3 instance: the provider that the probe at start recognised (`aws`,
   `minio`, `seaweedfs` or `garage`). The field is absent for an unknown provider.
