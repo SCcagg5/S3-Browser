@@ -12,7 +12,7 @@ const config = {
 window.BB = window.BB || {};
 BB.cfg = config;
 
-document.title = 'Object Storage Browser';
+document.title = 'Stowr';
 document.documentElement.style.setProperty('--primary-color', config.primaryColor);
 
 (function main() {
@@ -1438,7 +1438,7 @@ document.documentElement.style.setProperty('--primary-color', config.primaryColo
     config.operations = instance.operations || {};
     config.versioningSupported = instance.versioningSupported === true;
     BB.runtime?.writeState('object-browser-instance', instance.id);
-    document.title = `${instance.name} - Object Storage Browser`;
+    document.title = `${instance.name} - Stowr`;
   }
 
   async function changeInstance() {

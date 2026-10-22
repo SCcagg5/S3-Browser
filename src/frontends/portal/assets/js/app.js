@@ -333,7 +333,7 @@ BB.cfg = config;
   // Header: the way back to the portal and the build
   // ---------------------------------------------------------------------------------------------------------------
 
-  // Behind the portal, a reverse proxy serves this page under a path prefix (for example /s3-browser/). The link then
+  // Behind the portal, a reverse proxy serves this page under a path prefix (for example /stowr/). The link then
   // goes back to the root of the site, which is the panel of the portal. Without a prefix, the page is the root of the
   // site and the link does not show.
   function renderHeaderLinks() {
@@ -342,7 +342,7 @@ BB.cfg = config;
 
   // The version of the server under the name of the product, as ClickHouse Dash shows its backend version. The page
   // keeps the last text in this browser, so a reload does not show "--" until /api/instances answers.
-  const VERSION_KEY = 's3-browser.portal.version';
+  const VERSION_KEY = 'stowr.portal.version';
 
   function versionText(build) {
     const version = String(build.version || build.display || 'dev');
@@ -1462,7 +1462,7 @@ BB.cfg = config;
     if (!name) problem = 'The name is empty.';
     else if (name.includes('/')) problem = 'A name cannot have a "/".';
     else if (name === '.' || name === '..') problem = 'The name cannot be "." or "..".';
-    else if (name.startsWith('.s3b-tmp-')) problem = 'The names that start with ".s3b-tmp-" are for the temporary files of Stowr.';
+    else if (name.startsWith('.stowr-tmp-')) problem = 'The names that start with ".stowr-tmp-" are for the temporary files of Stowr.';
     if (problem) {
       BB.ui.toast(`The folder is not made. ${problem}`, { status: 'error', duration: 6500 });
       return;

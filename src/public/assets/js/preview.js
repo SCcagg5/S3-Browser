@@ -147,7 +147,7 @@
     byId('instanceMeta').textContent = currentInstance
       ? `${currentInstance.name} · ${currentInstance.provider.toUpperCase()} · ${currentInstance.bucket}`
       : '';
-    document.title = `${name || 'Preview'} - ${currentInstance?.name || 'Object Storage Browser'}`;
+    document.title = `${name || 'Preview'} - ${currentInstance?.name || 'Stowr'}`;
   }
 
   function setVisible(id, visible) {

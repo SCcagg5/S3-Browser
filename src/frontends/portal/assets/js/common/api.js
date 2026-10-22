@@ -820,7 +820,7 @@
         headers: {
           'Content-Type': 'application/octet-stream',
           'Content-Range': `bytes ${start}-${end}/${total}`,
-          'X-S3-Browser-Resume-Token': resumeToken,
+          'X-Stowr-Resume-Token': resumeToken,
           ...(options.checksum ? { 'X-Checksum-Sha256': options.checksum } : {})
         },
         body: blob,
@@ -832,7 +832,7 @@
     async cancelUpload(resumeToken) {
       const response = await request('/api/uploads', {
         method: 'DELETE',
-        headers: { 'X-S3-Browser-Resume-Token': resumeToken }
+        headers: { 'X-Stowr-Resume-Token': resumeToken }
       });
       return response.json();
     },
