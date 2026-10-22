@@ -60,6 +60,12 @@ This document uses ASD-STE100 Simplified Technical English.
   "Cancel". The listing has no window of the rules and no `?lifecycle` address any more (`BB.lifecycle.open` is
   removed). The note of the window "Incomplete uploads" links to that part, with
   `?info&lifecycle-abort=<folder>` for a new rule that aborts the incomplete uploads.
+- The editor of the lifecycle rules has two columns: at the left one compact form ("New rule" or "Edit <id>", with
+  Add, or Update and Cancel), at the right the rules, one row each (Enabled, the ID, a short summary, Edit, Delete
+  with a question in the row). Save and Revert are over the list. At 1000 px and less, the list goes under the form.
+  The link `?info&lifecycle-abort=<folder>` puts the abort rule in the form, ready to add.
+- In the card Operations, the lifecycle rules are one chip: "on" with the number of the rules that are on, else "off".
+  The chip is a link to the part "Lifecycle rules".
 - The information page has the visual language of the System page of ClickHouse Dash: parts with a heading, cards
   with a key-value list, gauges for the quota and the storage (the percent over a track), and status chips in the
   colours of the state icons. The page has three columns on a wide window: Identity, then Permissions with the functions, then the storage. It is one column on a narrow window. The storage column is compact: the three gauges are in one box, each on two thin lines. The part "Lifecycle rules" and its row in Operations are not shown for a volume, for a provider without rules or for a person who cannot list. The editor has very little text: the note of the provider and the reasons are in titles, and one line names the fields that the provider does not keep. The cards Data protection and Operations show their rows as pairs (term and value) side by side, which wrap in the width of the column. The page

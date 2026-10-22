@@ -3711,18 +3711,41 @@ body > .appHeader {
   gap: 8px 12px;
 }
 
-/* Lifecycle rules: the editor in the part "Lifecycle rules" of the information page. The notes, the rules (a form for
-   each editable rule, a read-only row for each other rule), the buttons, the confirmation of a save that deletes data,
-   one line of message and the changes of the provider after a save. */
+/* Lifecycle rules: the editor in the part "Lifecycle rules" of the information page. Two columns: at the left one
+   form (a new rule, or the rule that the person edits), at the right the rules of the bucket, one compact row each,
+   with Save, Revert and Reload over them. At 1000 px and less, the list goes under the form. The texts are short: the
+   whole sentence of an action is in its title. */
 .lifecycle {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 12px;
-  padding-top: 6px;
+  gap: 8px;
+  font-size: var(--fs-sm);
 }
 
 .lifecycle p {
   margin: 0;
+}
+
+.lifecycle__columns {
+  display: grid;
+  grid-template-columns: minmax(280px, 400px) minmax(0, 1fr);
+  align-items: start;
+  gap: 12px 20px;
+}
+
+.lifecycle.is-readonly .lifecycle__columns {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.lifecycle__formBox,
+.lifecycle__listBox {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.lifecycle__formBox[hidden] {
+  display: none;
 }
 
 .lifecycle__intro,
@@ -3730,12 +3753,12 @@ body > .appHeader {
 .lifecycle__state,
 .lifecycle__hidden {
   color: var(--muted);
-  font-size: var(--fs-sm);
+  font-size: var(--fs-xs);
 }
 
 .lifecycle__readonly {
   color: var(--warning);
-  font-size: var(--fs-sm);
+  font-size: var(--fs-xs);
 }
 
 .lifecycle__hidden {
@@ -3746,114 +3769,207 @@ body > .appHeader {
   list-style: none;
 }
 
-.lifecycle__rules {
-  display: grid;
-  gap: 10px;
-  min-height: 0;
-  max-height: calc(var(--bb-large-height) - 16rem);
-  overflow: auto;
-}
-
-.lifecycleRule {
+/* The form: the name, the prefix and the tag side by side, then one line for each action. */
+.lifecycleForm {
   display: grid;
   gap: 8px;
   padding: 10px 12px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-control);
+  border-radius: var(--radius-inner);
+}
+
+.lifecycleForm__title,
+.lifecycle__listTitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+}
+
+.lifecycleForm__fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 6px 8px;
+}
+
+.lifecycleForm__field {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.lifecycleForm__field > span,
+.lifecycleForm__unit {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+
+.lifecycle .input,
+.lifecycle .bb-btn {
+  height: 28px;
+  font-size: var(--fs-sm);
+}
+
+.lifecycle .input {
+  min-width: 0;
+  padding: 0 8px;
+}
+
+.lifecycleForm__actions {
+  display: grid;
+  gap: 4px;
+}
+
+.lifecycleForm__action {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+}
+
+.lifecycleForm__action .input {
+  width: 64px;
+}
+
+.lifecycleForm__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.lifecycleForm__note {
+  font-size: var(--fs-xs);
+}
+
+.lifecycleForm__note:empty {
+  display: none;
+}
+
+.lifecycleForm__note[data-tone="error"] {
+  color: var(--danger-text, var(--danger));
+}
+
+.lifecycleForm__note[data-tone="ok"] {
+  color: var(--success);
+}
+
+/* The list: its head (the title, the count, Save, Revert, Reload), then one row for each rule. */
+.lifecycle__listHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-height: 28px;
+}
+
+.lifecycle__count {
+  color: var(--muted);
+  font-weight: var(--fw-regular);
+  font-variant-numeric: tabular-nums;
+}
+
+.lifecycle__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.lifecycle__actions[hidden] {
+  display: none;
+}
+
+.lifecycle__rules {
+  display: grid;
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: 4px;
+}
+
+.lifecycle__rules[hidden] {
+  display: none;
+}
+
+.lifecycleRule {
+  display: grid;
+  grid-template-columns: 34px minmax(60px, max-content) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 3px 8px;
+}
+
+.lifecycleRule + .lifecycleRule {
+  border-top: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
 }
 
 .lifecycleRule.is-readonly {
   background: color-mix(in srgb, var(--border) 18%, transparent);
 }
 
-.lifecycleRule__head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 12px;
+.lifecycleRule.is-editing {
+  background: var(--selected-bg);
 }
 
-.lifecycleRule__id {
-  flex: 1 1 220px;
-  min-width: 0;
+.lifecycleRule.is-new .lifecycleRule__name {
+  color: var(--accent-text);
+}
+
+.lifecycleRule > input[type="checkbox"] {
+  justify-self: center;
+}
+
+.lifecycleRule__state {
+  justify-self: center;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+}
+
+.lifecycleRule__state.is-on {
+  color: var(--success);
 }
 
 .lifecycleRule__name {
+  max-width: 180px;
+  overflow: hidden;
+  font-weight: var(--fw-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lifecycleRule__summary {
   min-width: 0;
   overflow: hidden;
-  font-weight: 600;
+  color: var(--muted);
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.lifecycleRule__enabled,
-.lifecycleRule__action {
+.lifecycleRule__tools {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 6px 8px;
+  justify-content: flex-end;
+  gap: 4px;
 }
 
-.lifecycleRule__head .iconButton {
-  width: 28px;
-  height: 28px;
-  margin-left: auto;
-  --icon-size: 18px;
+.lifecycleRule__tools .iconButton {
+  width: 26px;
+  height: 26px;
+  --icon-size: 16px;
 }
 
-.lifecycleRule__fields {
-  display: grid;
-  gap: 6px;
+.lifecycleRule__ask {
+  color: var(--warning);
+  font-weight: var(--fw-semibold);
 }
 
-.lifecycleRule__field {
-  display: grid;
-  grid-template-columns: minmax(112px, 165px) minmax(0, 1fr);
-  align-items: center;
-  gap: .7rem;
-}
-
-.lifecycleRule__field > span {
-  color: var(--muted);
-  font-size: .84rem;
-}
-
-.lifecycleRule__actions {
-  display: grid;
-  gap: 6px;
-}
-
-.lifecycleRule__action .input {
-  width: 84px;
-}
-
-.lifecycleRule__summary,
-.lifecycleRule__reason {
-  font-size: var(--fs-sm);
-}
-
-.lifecycleRule__reason {
-  color: var(--muted);
-}
-
-.lifecycleRule__xml summary {
-  color: var(--muted);
-  font-size: var(--fs-sm);
-  cursor: pointer;
-}
-
-.lifecycleRule__xml pre {
-  max-height: 10rem;
-  margin: 0;
-  overflow: auto;
-  font-size: var(--fs-sm);
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-
-.lifecycle__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+@media (max-width: 1000px) {
+  .lifecycle__columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .lifecycle__message {
@@ -3913,14 +4029,6 @@ body > .appHeader {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-}
-
-/* On a phone the name of a field goes above its input. */
-@media (max-width: 560px) {
-  .lifecycleRule__field {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 4px;
-  }
 }
 
 .tagForm {

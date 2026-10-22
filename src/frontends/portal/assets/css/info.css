@@ -272,6 +272,17 @@ html:has(> body.infoPage),
   --chip-color: var(--accent-text);
 }
 
+/* A chip that is a link, as the state of the lifecycle rules. */
+.infoChip--link {
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.infoChip--link:hover,
+.infoChip--link:focus-visible {
+  border-color: var(--chip-color);
+}
+
 .infoChip--off {
   border-color: var(--border);
   background: color-mix(in srgb, var(--muted) 8%, transparent);
@@ -464,12 +475,7 @@ html:has(> body.infoPage),
   text-decoration: underline;
 }
 
-/* The editor of the lifecycle rules is the width of a card of two columns, and the page keeps room under it. */
-#infoLifecycle .lifecycle {
-  max-width: 980px;
-  padding-top: 0;
-  font-size: var(--fs-sm);
-}
+
 
 @media (max-width: 1000px) {
   .infoColumns {

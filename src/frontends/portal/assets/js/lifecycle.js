@@ -1,10 +1,13 @@
 /*
  * BB.lifecycle: the editor of the lifecycle rules, in the part "Lifecycle rules" of the information page (info.js).
- * It is a part of the page, not a window: mount(host, options) puts it in an element of the page.
- * - the rules of the bucket: a form for each rule that the editor knows, and a read-only row with the note "Kept as is"
- *   for each other rule (transitions, size filters and so on), which the server writes back byte for byte;
- * - Add a rule, Save and Revert. Before the save, a confirmation in the page names each action that deletes data, with
- *   its prefix and its number of days: "Save the rules" or "Cancel". There is no dialog;
+ * It is a part of the page, not a window: mount(host, options) puts it in an element of the page. It has two columns:
+ * - at the left, one form: a new rule, or the rule that the person edits ("Edit <id>"). Add puts a new rule in the
+ *   list; Update changes the rule; Cancel goes back to a new rule;
+ * - at the right, the rules of the bucket, one compact row each: Enabled, the ID, a short summary, Edit and Delete.
+ *   Delete asks in the row. A rule that the editor does not know (transitions, size filters and so on) is a read-only
+ *   row with the badge "Kept as is": the server writes it back byte for byte;
+ * - Save and Revert act on the whole list. Before the save, a confirmation in the page names each action that deletes
+ *   data, with its prefix and its number of days: "Save the rules" or "Cancel". There is no dialog;
  * - the editor offers only the fields that the storage provider keeps. The server decides them and gives the reason
  *   for each other field. After the save, the server reads the rules again and tells what the provider changed, and
  *   the page gets the event bb:lifecycle-changed.
@@ -26,7 +29,7 @@
       else if (name.startsWith('on') && typeof value === 'function') node.addEventListener(name.slice(2), value);
       else node.setAttribute(name, value === true ? '' : String(value));
     }
-    for (const child of children.flat()) {
+    for (const child of children.flat(Infinity)) {
       if (child === null || child === undefined || child === false) continue;
       node.append(child instanceof Node ? child : document.createTextNode(String(child)));
     }
@@ -128,11 +131,28 @@
   // The editor
   // ---------------------------------------------------------------------------------------------------------------
 
+  // The actions with a number of days: the short label of the form and its title.
   const ACTIONS = [
-    { name: 'expiration', property: 'expirationDays', before: 'Delete the objects', after: 'days after their creation' },
-    { name: 'noncurrent', property: 'noncurrentDays', field: 'noncurrentExpiration', before: 'Delete the noncurrent versions', after: 'days after they become noncurrent' },
-    { name: 'abort', property: 'abortMultipartDays', field: 'abortMultipart', before: 'Abort the incomplete multipart uploads', after: 'days after their start' }
+    { name: 'expiration', property: 'expirationDays', label: 'Delete objects after', title: 'Delete the objects this number of days after their creation' },
+    { name: 'noncurrent', property: 'noncurrentDays', field: 'noncurrentExpiration', label: 'Delete noncurrent versions after', title: 'Delete the noncurrent versions this number of days after they become noncurrent' },
+    { name: 'abort', property: 'abortMultipartDays', field: 'abortMultipart', label: 'Abort incomplete uploads after', title: 'Abort the incomplete multipart uploads this number of days after their start' }
   ];
+
+  // The short summary of a rule: "logs/ · delete 30 d · tag k=v". A rule of the form and a rule of the server
+  // (describeRule) have other names for the same fields.
+  function shortRule(rule) {
+    const days = value => `${count(value)} d`;
+    const parts = [rule.prefix || 'all objects'];
+    if (rule.expirationDays) parts.push(`delete ${days(rule.expirationDays)}`);
+    if (rule.expirationDate) parts.push(`delete on ${String(rule.expirationDate).slice(0, 10)}`);
+    if (rule.noncurrentDays || rule.noncurrentExpirationDays) parts.push(`noncurrent ${days(rule.noncurrentDays || rule.noncurrentExpirationDays)}`);
+    if (rule.abortMultipartDays || rule.abortIncompleteMultipartDays) parts.push(`abort ${days(rule.abortMultipartDays || rule.abortIncompleteMultipartDays)}`);
+    if (rule.expiredDeleteMarker || rule.expiredObjectDeleteMarker) parts.push('delete markers');
+    if ((rule.transitions || []).length) parts.push('transition');
+    const tags = rule.tag ? [rule.tag] : (rule.tags || []);
+    if (tags.length) parts.push(`tag ${tags.map(formatTag).join(', ')}`);
+    return parts.join(' · ');
+  }
   const DEFAULT_DAYS = { expirationDays: 30, noncurrentDays: 30, abortMultipartDays: 7 };
 
   // prefix is the prefix of a new rule. prefill adds a new rule with these values. canWrite tells if the person can
@@ -145,22 +165,28 @@
     let serial = 0;
     let pendingPrefill = prefill;
 
+    // The form of a rule: { draft, target }. target is the draft of the list that the form edits, or null for a new rule.
+    let form = null;
+
     const intro = h('p', { class: 'lifecycle__intro' });
     const providerNote = h('p', { class: 'lifecycle__note', 'data-lifecycle-provider-note': '' });
     const readonly = h('p', { class: 'lifecycle__readonly', 'data-lifecycle-readonly': '' });
     const hidden = h('ul', { class: 'lifecycle__hidden', 'data-lifecycle-hidden': '' });
-    const state = h('p', { class: 'lifecycle__state' }, 'Loading the lifecycle rules…');
+    const state = h('p', { class: 'lifecycle__state' }, 'Loading…');
+    const formBox = h('div', { class: 'lifecycle__formBox' });
     const list = h('div', { class: 'lifecycle__rules', 'data-lifecycle-rules': '' });
-    const addButton = h('button', { type: 'button', class: 'bb-btn', 'data-lifecycle-add': '' }, icon('plus'), h('span', {}, 'Add a rule'));
     const saveButton = h('button', { type: 'button', class: 'bb-btn bb-btn-primary', 'data-lifecycle-save': '' }, icon('check'), h('span', {}, 'Save'));
     const revertButton = h('button', { type: 'button', class: 'bb-btn', 'data-lifecycle-revert': '' }, h('span', {}, 'Revert'));
-    const reloadButton = h('button', { type: 'button', class: 'bb-btn', 'data-lifecycle-reload': '' }, icon('refresh'), h('span', {}, 'Reload the rules'));
-    const actions = h('div', { class: 'lifecycle__actions' }, addButton, saveButton, revertButton, reloadButton);
+    const reloadButton = h('button', { type: 'button', class: 'bb-btn', 'data-lifecycle-reload': '' }, icon('refresh'), h('span', {}, 'Reload'));
+    const actions = h('div', { class: 'lifecycle__actions' }, saveButton, revertButton, reloadButton);
+    const ruleCount = h('span', { class: 'lifecycle__count' });
     const message = h('p', { class: 'lifecycle__message', role: 'status', 'data-lifecycle-message': '' });
     // The confirmation of a save that deletes data: in the page, under the rules, in place of the buttons.
     const confirmBox = h('div', { class: 'lifecycle__confirm', role: 'alert', 'data-lifecycle-confirm': '', hidden: true });
     const warnings = h('ul', { class: 'lifecycle__warnings', role: 'alert', 'data-lifecycle-warnings': '' });
+    const formNote = h('p', { class: 'lifecycleForm__note', role: 'status', 'data-lifecycle-form-message': '' });
     const say = (text, tone = '') => { message.textContent = text; message.dataset.tone = tone; };
+    const sayForm = (text, tone = '') => { formNote.textContent = text; formNote.dataset.tone = tone; };
 
     // The person confirms the actions that delete data: true for "Save the rules", false for "Cancel".
     function confirmInline(sentences) {
@@ -242,100 +268,173 @@
       baseline = JSON.stringify(editableDrafts().map(draft => ruleOf(draft).rule));
     }
 
-    function addRule(values = {}) {
+    // A free ID: the ID of the values, else rule-1, rule-2 and so on.
+    function freeId(base = '') {
       const ids = new Set([...keptIds(), ...editableDrafts().map(draft => draft.id)]);
-      let id = values.id || 'rule-1';
-      for (let index = 2; ids.has(id); index += 1) id = `${values.id || 'rule'}-${index}`;
-      const draft = draftOf({ enabled: true, prefix, ...values, id }, null);
-      entries.push({ rule: null, entry: null, draft });
-      return draft;
+      let id = base || 'rule-1';
+      for (let index = 2; ids.has(id); index += 1) id = `${base || 'rule'}-${index}`;
+      return id;
     }
 
+    function newForm(values = {}) {
+      form = { draft: draftOf({ enabled: true, prefix, ...values, id: freeId(values.id) }, null), target: null };
+    }
+
+    function editForm(draft) {
+      form = { draft: { ...draft, shown: { ...draft.shown } }, target: draft };
+    }
+
+    const checkedOf = (rule, tagError) => ({
+      ...rule, tag: rule.tag || null, tagError, expirationDays: rule.expirationDays || 0, noncurrentDays: rule.noncurrentDays || 0,
+      abortMultipartDays: rule.abortMultipartDays || 0, expiredDeleteMarker: rule.expiredDeleteMarker === true
+    });
+
+    // The error of the rule of the form, or '': the checks of the save, with the IDs of the other rules.
+    function formError() {
+      const others = [...keptIds(), ...editableDrafts().filter(draft => draft !== form.target).map(draft => draft.id)];
+      const { rule, tagError } = ruleOf(form.draft);
+      return checkRules([checkedOf(rule, tagError)], others, editor?.maxDays || 36500);
+    }
+
+    function submitForm() {
+      const error = formError();
+      if (error) { sayForm(error, 'error'); return; }
+      if (form.target) Object.assign(form.target, { ...form.draft, key: form.target.key, saved: form.target.saved });
+      else entries.push({ rule: null, entry: null, draft: form.draft });
+      newForm();
+      sayForm('');
+      render();
+      changed();
+    }
+
+    // An action of the form: a checkbox, the short label, the days and "d". The title gives the whole sentence.
     function dayInput(draft, action) {
       const on = draft[action.property] > 0;
-      const box = h('input', { type: 'checkbox', 'data-lifecycle-action': action.name, 'aria-label': action.before });
+      const box = h('input', { type: 'checkbox', 'data-lifecycle-action': action.name, 'aria-label': action.title });
       box.checked = on;
-      const days = h('input', { type: 'number', class: 'input', min: '1', max: String(editor?.maxDays || 36500), step: '1', 'aria-label': `Days: ${action.before.toLowerCase()}`, 'data-lifecycle-days': action.name });
+      const days = h('input', { type: 'number', class: 'input', min: '1', max: String(editor?.maxDays || 36500), step: '1', 'aria-label': `Days: ${action.title.toLowerCase()}`, 'data-lifecycle-days': action.name });
       days.value = String(on ? draft[action.property] : draft.shown[action.property]);
       days.disabled = !on;
-      // A checked action with no valid number keeps -1: the check of the save refuses it.
+      // A checked action with no valid number keeps -1: the check refuses it.
       const value = () => (/^\d+$/.test(days.value.trim()) && Number(days.value) > 0 ? Number(days.value) : -1);
       box.addEventListener('change', () => {
         draft[action.property] = box.checked ? value() : 0;
         days.disabled = !box.checked;
-        changed();
+        sayForm('');
       });
       days.addEventListener('input', () => {
         draft.shown[action.property] = Number(days.value);
         if (box.checked) draft[action.property] = value();
-        changed();
+        sayForm('');
       });
-      return h('label', { class: 'lifecycleRule__action' }, box, h('span', {}, action.before), days, h('span', {}, action.after));
+      return h('label', { class: 'lifecycleForm__action', title: action.title }, box, h('span', {}, action.label), days, h('span', { class: 'lifecycleForm__unit' }, 'd'));
     }
 
-    function editableRow(draft) {
-      const idInput = h('input', { type: 'text', class: 'input lifecycleRule__id', 'aria-label': 'Rule ID', placeholder: 'Rule ID', maxlength: MAX_ID, autocomplete: 'off', 'data-lifecycle-id': '' });
-      idInput.value = draft.id;
-      idInput.addEventListener('input', () => { draft.id = idInput.value; changed(); });
-      const enabled = h('input', { type: 'checkbox', 'data-lifecycle-enabled': '' });
-      enabled.checked = draft.enabled;
-      enabled.addEventListener('change', () => { draft.enabled = enabled.checked; changed(); });
-      const remove = h('button', { type: 'button', class: 'iconButton', title: 'Remove this rule', 'aria-label': 'Remove this rule', 'data-lifecycle-remove': '' }, icon('delete-outline'));
-      remove.addEventListener('click', () => {
-        entries = entries.filter(entry => entry.draft !== draft);
-        say('');
-        render();
-      });
-      const prefixInput = h('input', { type: 'text', class: 'input', 'aria-label': 'Prefix', placeholder: 'logs/ (empty: every object)', autocomplete: 'off', 'data-lifecycle-prefix': '' });
-      prefixInput.value = draft.prefix;
-      prefixInput.addEventListener('input', () => { draft.prefix = prefixInput.value.replace(/^\/+/, ''); changed(); });
-      const fields = [h('label', { class: 'lifecycleRule__field' }, h('span', {}, 'Prefix'), prefixInput)];
-      if (offered('tagFilter')) {
-        const tagInput = h('input', { type: 'text', class: 'input', 'aria-label': 'Tag filter', placeholder: 'key=value (optional)', autocomplete: 'off', 'data-lifecycle-tag': '' });
-        tagInput.value = draft.tagText;
-        tagInput.addEventListener('input', () => { draft.tagText = tagInput.value; draft.tagEdited = true; changed(); });
-        fields.push(h('label', { class: 'lifecycleRule__field' }, h('span', {}, 'Tag filter'), tagInput));
-      }
+    function textInput(label, key, value, placeholder, onInput) {
+      const input = h('input', { type: 'text', class: 'input', 'aria-label': label, placeholder, autocomplete: 'off', [`data-lifecycle-${key}`]: '' });
+      input.value = value;
+      input.addEventListener('input', () => { onInput(input.value); sayForm(''); });
+      return h('label', { class: 'lifecycleForm__field' }, h('span', {}, label), input);
+    }
+
+    // The form of the left column: a new rule, or the rule that the person edits.
+    function formView() {
+      const draft = form.draft;
+      const editing = Boolean(form.target);
+      const fields = [
+        textInput('Name', 'id', draft.id, 'Rule ID', value => { draft.id = value; }),
+        textInput('Prefix', 'prefix', draft.prefix, 'logs/ (empty: all)', value => { draft.prefix = value.replace(/^\/+/, ''); })
+      ];
+      if (offered('tagFilter')) fields.push(textInput('Tag', 'tag', draft.tagText, 'key=value', value => { draft.tagText = value; draft.tagEdited = true; }));
       const actionRows = ACTIONS.filter(action => !action.field || offered(action.field)).map(action => dayInput(draft, action));
       if (offered('expiredDeleteMarker')) {
         const marker = h('input', { type: 'checkbox', 'data-lifecycle-action': 'deleteMarker', 'aria-label': 'Remove the expired delete markers' });
         marker.checked = draft.expiredDeleteMarker;
-        marker.addEventListener('change', () => { draft.expiredDeleteMarker = marker.checked; changed(); });
-        actionRows.push(h('label', { class: 'lifecycleRule__action' }, marker, h('span', {}, 'Remove the expired delete markers')));
+        marker.addEventListener('change', () => { draft.expiredDeleteMarker = marker.checked; sayForm(''); });
+        actionRows.push(h('label', { class: 'lifecycleForm__action', title: 'Remove the delete markers that have no version left' }, marker, h('span', {}, 'Remove expired delete markers')));
       }
-      return h('div', { class: 'lifecycleRule', 'data-lifecycle-rule': '' },
-        h('div', { class: 'lifecycleRule__head' }, idInput,
-          h('label', { class: 'lifecycleRule__enabled' }, enabled, h('span', {}, 'Enabled')), remove),
-        h('div', { class: 'lifecycleRule__fields' }, fields),
-        h('div', { class: 'lifecycleRule__actions' }, actionRows));
+      const buttons = editing
+        ? [h('button', { type: 'submit', class: 'bb-btn bb-btn-primary', 'data-lifecycle-update': '' }, icon('check'), h('span', {}, 'Update')),
+          h('button', { type: 'button', class: 'bb-btn', 'data-lifecycle-cancel': '', onclick: () => { newForm(); sayForm(''); render(); } }, h('span', {}, 'Cancel'))]
+        : [h('button', { type: 'submit', class: 'bb-btn', 'data-lifecycle-add': '', disabled: busy || entries.length >= (editor?.maxRules || 1000) }, icon('plus'), h('span', {}, 'Add'))];
+      const node = h('form', { class: 'lifecycleForm', 'data-lifecycle-form': editing ? 'edit' : 'new', novalidate: true },
+        h('h3', { class: 'lifecycleForm__title' }, editing ? `Edit ${form.target.id || 'rule'}` : 'New rule'),
+        h('div', { class: 'lifecycleForm__fields' }, fields),
+        h('div', { class: 'lifecycleForm__actions' }, actionRows),
+        h('div', { class: 'lifecycleForm__buttons' }, buttons),
+        formNote);
+      node.addEventListener('submit', event => { event.preventDefault(); submitForm(); });
+      return node;
     }
 
-    // A rule that the editor does not edit: its summary and, for a rule that the editor keeps, the reason and the XML.
+    // A rule of the list that the editor edits: Enabled, the ID, the summary, Edit and Delete. Delete asks in the row.
+    function editableRow(draft) {
+      const enabled = h('input', { type: 'checkbox', 'data-lifecycle-enabled': '', 'aria-label': `Enabled: ${draft.id}`, title: 'Enabled' });
+      enabled.checked = draft.enabled;
+      enabled.addEventListener('change', () => { draft.enabled = enabled.checked; changed(); });
+      const tools = h('span', { class: 'lifecycleRule__tools' });
+      const edit = h('button', { type: 'button', class: 'iconButton', title: 'Edit', 'aria-label': `Edit ${draft.id}`, 'data-lifecycle-edit': '' }, icon('pencil-outline'));
+      edit.addEventListener('click', () => {
+        editForm(draft);
+        sayForm('');
+        render();
+        formBox.querySelector('[data-lifecycle-id]')?.focus();
+      });
+      const remove = h('button', { type: 'button', class: 'iconButton', title: 'Delete', 'aria-label': `Delete ${draft.id}`, 'data-lifecycle-remove': '' }, icon('delete-outline'));
+      remove.addEventListener('click', () => {
+        const yes = h('button', { type: 'button', class: 'bb-btn', 'data-lifecycle-remove-confirm': '' }, 'Delete');
+        const no = h('button', { type: 'button', class: 'bb-btn', 'data-lifecycle-remove-cancel': '' }, 'Cancel');
+        yes.addEventListener('click', () => {
+          entries = entries.filter(entry => entry.draft !== draft);
+          if (form?.target === draft) newForm();
+          render();
+          changed();
+        });
+        no.addEventListener('click', () => { tools.replaceChildren(edit, remove); edit.focus(); });
+        tools.replaceChildren(h('span', { class: 'lifecycleRule__ask' }, 'Delete?'), yes, no);
+        yes.focus();
+      });
+      tools.append(edit, remove);
+      const rule = ruleOf(draft).rule;
+      const full = describeRule({ ...rule, tags: rule.tag ? [rule.tag] : [], noncurrentExpirationDays: rule.noncurrentDays, abortIncompleteMultipartDays: rule.abortMultipartDays, expiredObjectDeleteMarker: rule.expiredDeleteMarker });
+      return h('div', { class: ['lifecycleRule', !draft.saved && 'is-new', form?.target === draft && 'is-editing'], 'data-lifecycle-rule': draft.id },
+        enabled,
+        h('span', { class: 'lifecycleRule__name mono', title: draft.id }, draft.id || '(no ID)'),
+        h('span', { class: 'lifecycleRule__summary', title: full }, shortRule(rule)),
+        tools);
+    }
+
+    // A rule that the editor does not edit: its state, its ID and its summary. "Kept as is" has the reason in its title.
     function readOnlyRow(item) {
       const rule = item.rule || {};
       const kept = item.entry && !item.entry.editable;
+      const other = kept && !item.entry.xml;
+      const summary = other ? 'Another part of the bucket' : shortRule(rule);
       return h('div', { class: ['lifecycleRule', 'is-readonly'], 'data-lifecycle-kept': kept ? (rule.id || '') : null, 'data-lifecycle-view': kept ? null : (rule.id || '') },
-        h('div', { class: 'lifecycleRule__head' },
-          h('span', { class: 'lifecycleRule__name mono' }, rule.id || (kept && !item.entry.xml ? 'Other rule' : '(no ID)')),
-          h('span', { class: `badge${rule.enabled ? ' badge--ok' : ''}` }, rule.enabled ? 'Enabled' : 'Disabled'),
-          kept ? h('span', { class: 'badge badge--accent', 'data-lifecycle-kept-note': '', title: item.entry.reason ? `${item.entry.reason} Stowr writes it back unchanged.` : null }, 'Kept as is') : null),
-        h('p', { class: 'lifecycleRule__summary' }, kept && !item.entry.xml ? 'A rule of another part of the bucket.' : describeRule(rule)),
-        kept && item.entry.xml ? h('details', { class: 'lifecycleRule__xml' }, h('summary', {}, 'XML'), h('pre', { class: 'mono' }, item.entry.xml)) : null);
+        h('span', { class: ['lifecycleRule__state', rule.enabled && 'is-on'], title: rule.enabled ? 'Enabled' : 'Disabled' }, rule.enabled ? 'On' : 'Off'),
+        h('span', { class: 'lifecycleRule__name mono', title: rule.id || '' }, rule.id || (other ? 'Other rule' : '(no ID)')),
+        h('span', { class: 'lifecycleRule__summary', title: other ? summary : describeRule(rule) }, summary),
+        h('span', { class: 'lifecycleRule__tools' },
+          kept ? h('span', { class: 'badge badge--accent', 'data-lifecycle-kept-note': '', title: `${item.entry.reason ? `${item.entry.reason} ` : ''}Stowr writes it back unchanged.` }, 'Kept as is') : null));
     }
 
     function renderState() {
       const canEdit = writable();
-      addButton.hidden = !canEdit;
+      formBox.hidden = !canEdit;
+      host.classList.toggle('is-readonly', !canEdit);
       saveButton.hidden = !canEdit;
       revertButton.hidden = !canEdit;
       const changes = canEdit && dirty();
       saveButton.disabled = busy || !changes;
       revertButton.disabled = busy || !changes;
-      addButton.disabled = busy || entries.length >= (editor?.maxRules || 1000);
+      const add = formBox.querySelector('[data-lifecycle-add]');
+      if (add) add.disabled = busy || entries.length >= (editor?.maxRules || 1000);
     }
 
+    // A change of the list: the message says that the change is not saved yet.
     function changed() {
-      say('');
+      if (dirty()) say('Not saved yet.');
+      else if (message.textContent === 'Not saved yet.') say('');
       renderState();
     }
 
@@ -354,9 +453,13 @@
       const notOffered = editor?.hidden || [];
       hidden.replaceChildren(...(notOffered.length ? [h('li', { 'data-field': notOffered.map(item => item.field).join(' '), title: notOffered.map(item => `${FIELD_LABELS[item.field] || item.field}: ${item.reason}`).join('\n') },
         `Not offered: ${notOffered.map(item => FIELD_LABELS[item.field] || item.field).join(', ')}`)] : []));
-      hidden.hidden = !writable() || !(editor?.hidden || []).length;
+      hidden.hidden = !writable() || !notOffered.length;
       state.hidden = Boolean(editor) && entries.length > 0;
-      if (editor && !entries.length) state.textContent = 'No lifecycle rule.';
+      if (editor && !entries.length) state.textContent = 'No rule.';
+      ruleCount.textContent = entries.length ? String(entries.length) : '';
+      if (form?.target && !entries.some(entry => entry.draft === form.target)) newForm();
+      if (!form && editor) newForm();
+      formBox.replaceChildren(...(form && writable() ? [formView(), intro, hidden] : []));
       list.replaceChildren(...entries.map(item => (item.draft ? editableRow(item.draft) : readOnlyRow(item))));
       list.hidden = !entries.length;
       renderState();
@@ -379,8 +482,8 @@
           if (!writable()) say('You cannot add the rule here: the rules are read only.', 'error');
           else if (values.abortMultipartDays && !offered('abortMultipart')) say('This storage provider does not keep a rule that aborts the incomplete uploads.', 'error');
           else {
-            addRule(values);
-            say('A new rule aborts the incomplete uploads of this folder. Check it, then save.', 'ok');
+            newForm(values);
+            sayForm('Abort rule ready: Add it, then Save.', 'ok');
           }
         }
       } catch (error) {
@@ -396,10 +499,7 @@
     async function save() {
       const drafts = editableDrafts();
       const prepared = drafts.map(draft => ({ draft, ...ruleOf(draft) }));
-      const checked = prepared.map(({ rule, tagError }) => ({
-        ...rule, tag: rule.tag || null, tagError, expirationDays: rule.expirationDays || 0, noncurrentDays: rule.noncurrentDays || 0,
-        abortMultipartDays: rule.abortMultipartDays || 0, expiredDeleteMarker: rule.expiredDeleteMarker === true
-      }));
+      const checked = prepared.map(({ rule, tagError }) => checkedOf(rule, tagError));
       const error = checkRules(checked, keptIds(), editor?.maxDays || 36500);
       if (error) { say(error, 'error'); return; }
       // The confirmation names each action that deletes data and that is new or changed.
@@ -421,11 +521,11 @@
         else { busy = false; await load(); }
         const changes = response.warnings || [];
         warnings.replaceChildren(...changes.map(text => h('li', {}, icon('alert-circle-outline'), text)));
-        say(changes.length ? 'The rules are saved, but the storage provider changed them:' : 'The lifecycle rules are saved.', changes.length ? 'error' : 'ok');
+        say(changes.length ? 'Saved, but the storage provider changed them:' : 'Saved.', changes.length ? 'error' : 'ok');
         document.dispatchEvent(new CustomEvent('bb:lifecycle-changed', { detail: { instance } }));
       } catch (failure) {
         if (failure?.code === 'lifecycle_changed') {
-          say('The lifecycle rules of the bucket changed after this page read them. Reload the rules, then make your change again.', 'error');
+          say('The rules changed after this page read them. Reload, then make your change again.', 'error');
           reloadButton.hidden = false;
         } else if (failure?.code === 'lifecycle_write_denied' || failure?.code === 'lifecycle_write_unsupported') {
           busy = false;
@@ -441,15 +541,11 @@
       render();
     }
 
-    addButton.addEventListener('click', () => {
-      const draft = addRule();
-      say('');
-      render();
-      list.querySelectorAll('[data-lifecycle-rule]')[editableDrafts().indexOf(draft)]?.querySelector('[data-lifecycle-id]')?.focus();
-    });
     saveButton.addEventListener('click', () => { void save(); });
     revertButton.addEventListener('click', () => {
       apply({ editor, rules });
+      newForm();
+      sayForm('');
       say('');
       warnings.replaceChildren();
       render();
@@ -457,7 +553,14 @@
     reloadButton.addEventListener('click', () => { say(''); warnings.replaceChildren(); void load(); });
     reloadButton.hidden = true;
 
-    host.replaceChildren(intro, providerNote, readonly, hidden, state, list, actions, confirmBox, message, warnings);
+    // The left column: the form. The right column: the head of the list (the count, Save, Revert, Reload), the rules,
+    // the confirmation, the message and the changes of the provider.
+    host.replaceChildren(providerNote, readonly,
+      h('div', { class: 'lifecycle__columns' },
+        formBox,
+        h('div', { class: 'lifecycle__listBox' },
+          h('div', { class: 'lifecycle__listHead' }, h('h3', { class: 'lifecycle__listTitle' }, 'Rules', ruleCount), actions),
+          state, list, confirmBox, message, warnings)));
     render();
     void load();
   }

@@ -269,19 +269,17 @@
     ];
   }
 
+  // The state of the rules: a chip "on" with the number of the rules that are on, else "off". The chip is a link to
+  // the part "Lifecycle rules" of the page.
   function lifecycleRow(instance, lifecycle) {
     if (instance.lifecycleSupported === false || !can(instance, 'list')) return null;
     if (lifecycle === undefined) return row('Lifecycle rules', 'Loading…', '', 'lifecycle');
     const rules = rulesOf(instance, lifecycle);
-    let state;
-    if (Array.isArray(rules)) {
-      const enabled = rules.filter(item => item.enabled).length;
-      state = !rules.length ? chip('off', 'No rule') : [chip(enabled ? 'on' : 'off', `${count(enabled)} on`), ` of ${plural(rules.length, 'rule')}`];
-    } else {
-      state = rules == null ? chip('off', 'Unknown') : chip(rules > 0 ? 'on' : 'off', rules > 0 ? plural(rules, 'rule') : 'No rule');
-    }
-    const link = h('a', { class: 'infoLink', href: '#info-lifecycle', 'data-info-lifecycle': '' }, 'Edit them below');
-    return row('Lifecycle rules', [state, link], '', 'lifecycle');
+    const enabled = Array.isArray(rules) ? rules.filter(item => item.enabled).length : Number(rules) || 0;
+    const on = enabled > 0;
+    const link = h('a', { class: ['infoChip', `infoChip--${on ? 'on' : 'off'}`, 'infoChip--link'], href: '#info-lifecycle', 'data-info-lifecycle': '', 'data-tone': on ? 'on' : 'off',
+      'aria-label': on ? `Lifecycle rules: ${count(enabled)} on` : 'Lifecycle rules: off' }, on ? `on ${count(enabled)}` : 'off');
+    return row('Lifecycle rules', link, '', 'lifecycle');
   }
 
   function checksumRow(instance) {
