@@ -15,9 +15,9 @@ import (
 )
 
 const (
-	archiveStatusTrailer  = "X-S3-Browser-Archive-Status"
-	archiveEntriesTrailer = "X-S3-Browser-Archive-Entries"
-	archiveBytesTrailer   = "X-S3-Browser-Archive-Bytes"
+	archiveStatusTrailer  = "X-Stowr-Archive-Status"
+	archiveEntriesTrailer = "X-Stowr-Archive-Entries"
+	archiveBytesTrailer   = "X-Stowr-Archive-Bytes"
 )
 
 func (a *application) handleArchive(w http.ResponseWriter, r *http.Request) {
@@ -361,7 +361,7 @@ func archiveFilename(requested, prefix, instanceName string) string {
 }
 
 func writeArchiveErrorEntry(writer *zip.Writer, archiveErr error, entries int, bytes int64) error {
-	header := &zip.FileHeader{Name: "__S3_BROWSER_ARCHIVE_INCOMPLETE.txt", Method: zip.Store, Modified: time.Now().UTC()}
+	header := &zip.FileHeader{Name: "__STOWR_ARCHIVE_INCOMPLETE.txt", Method: zip.Store, Modified: time.Now().UTC()}
 	header.SetMode(0o600)
 	entry, err := writer.CreateHeader(header)
 	if err != nil {

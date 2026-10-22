@@ -575,7 +575,7 @@ func TestAccessOpenModeKeepsTheBehaviour(t *testing.T) {
 	}
 	recorder = httptest.NewRecorder()
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, accessActionsPath, nil))
-	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"server":"s3-browser"`) {
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"server":"stowr"`) {
 		t.Fatalf("open mode actions: %d %s", recorder.Code, recorder.Body.String())
 	}
 }
@@ -599,7 +599,7 @@ func TestAccessEveryRouteIsChecked(t *testing.T) {
 		{http.MethodPost, "/api/rename", `{"instance":"rw","src":"reports/q1.csv","dst":"reports/x.csv"}`},
 		{http.MethodPost, "/api/delete-prefix", `{"instance":"rw","prefix":"reports/"}`},
 		{http.MethodPost, "/api/uploads", `{"instance":"rw","key":"reports/x.bin","size":1}`},
-		{http.MethodPost, "/api/uploads/resume", `{"resumeToken":"s3br1.cnc.AAAA"}`},
+		{http.MethodPost, "/api/uploads/resume", `{"resumeToken":"stowr1.cnc.AAAA"}`},
 		{http.MethodGet, "/api/spreadsheet?instance=rw&key=reports/q1.csv", ""},
 		{http.MethodGet, "/api/delimited?instance=rw&key=reports/q1.csv", ""},
 		{http.MethodGet, "/api/document-count?instance=rw&key=reports/q1.csv", ""},

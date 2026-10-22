@@ -269,7 +269,7 @@ func (b *volumeBackend) ListMultipartUploads(ctx context.Context, cursor multipa
 }
 
 // walkTemporary gives each file of the tree after marker, in the order of the keys, with true for a temporary file of
-// S3-Browser. It does not follow a symbolic link. It stops when visit gives false.
+// Stowr. It does not follow a symbolic link. It stops when visit gives false.
 func (b *volumeBackend) walkTemporary(ctx context.Context, real, folderKey, marker string, visit func(string, bool, os.FileInfo) bool) error {
 	_, err := walkTemporaryFolder(ctx, real, folderKey, marker, visit)
 	return err
@@ -287,7 +287,7 @@ func walkTemporaryFolder(ctx context.Context, real, folderKey, marker string, vi
 		return false, volumeError(err)
 	}
 	if len(items) > volumeMaxFolderEntries {
-		return false, apiError{Status: http.StatusUnprocessableEntity, Code: "volume_folder_too_large", Message: fmt.Sprintf("a folder has more than %d entries: S3-Browser does not list it", volumeMaxFolderEntries)}
+		return false, apiError{Status: http.StatusUnprocessableEntity, Code: "volume_folder_too_large", Message: fmt.Sprintf("a folder has more than %d entries: Stowr does not list it", volumeMaxFolderEntries)}
 	}
 	type entry struct {
 		sortKey string
@@ -373,7 +373,7 @@ func (b *volumeBackend) RemoveIncompleteUpload(_ context.Context, full, uploadID
 // list.
 func (b *volumeBackend) temporaryOfUpload(full, uploadID string) (string, error) {
 	if _, temporary := parseVolumeTempName(uploadID); !temporary || strings.ContainsRune(uploadID, '/') {
-		return "", invalidMultipartRequest("the upload id of a volume is the name of a temporary file of S3-Browser")
+		return "", invalidMultipartRequest("the upload id of a volume is the name of a temporary file of Stowr")
 	}
 	key, err := b.parse(full, false)
 	if err != nil {

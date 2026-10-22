@@ -159,7 +159,7 @@ func (r *seaweedfsUsageReader) StorageCapacity(ctx context.Context) (storageCapa
 		capacity.Reason = fmt.Sprintf("%s did not answer: %s not counted.", plural(missing, "volume server"), pronoun(missing))
 	case len(servers) > len(asked):
 		capacity.Approximate = true
-		capacity.Reason = fmt.Sprintf("S3-Browser asks %d volume servers at most: %d are not counted.", maxSeaweedFSVolumeServers, len(servers)-len(asked))
+		capacity.Reason = fmt.Sprintf("Stowr asks %d volume servers at most: %d are not counted.", maxSeaweedFSVolumeServers, len(servers)-len(asked))
 	}
 	return capacity, nil
 }

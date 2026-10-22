@@ -116,7 +116,7 @@ func TestAccessConfigRefusals(t *testing.T) {
 		"unknown block":        {replace("pdp {", "policy {}\n  pdp {"), `unknown block "policy"`},
 		"clear token":          {replace(`token_file = "pdp_token"`, `token = "abc"`), "token is a secret"},
 		"two token forms":      {replace(`token_file = "pdp_token"`, "token_file = \"pdp_token\"\n    token_env = \"X\""), "give only one of token, token_env and token_file"},
-		"missing variable":     {replace(`token_file = "pdp_token"`, `token_env = "S3_BROWSER_TEST_NO_SUCH_VARIABLE"`), `the environment variable "S3_BROWSER_TEST_NO_SUCH_VARIABLE" does not exist`},
+		"missing variable":     {replace(`token_file = "pdp_token"`, `token_env = "STOWR_TEST_NO_SUCH_VARIABLE"`), `the environment variable "STOWR_TEST_NO_SUCH_VARIABLE" does not exist`},
 		"missing token file":   {replace(`token_file = "pdp_token"`, `token_file = "nope"`), "token_file: cannot read"},
 		"no token":             {replace(`token_file = "pdp_token"`, ""), "access.pdp.token is required"},
 		"no audience":          {replace(`audience         = "infra-s3"`, ""), "access.identity.audience is required"},
@@ -139,10 +139,10 @@ func TestAccessConfigRefusals(t *testing.T) {
 }
 
 func TestAccessConfigReadsTheEnvironmentOnlyWhenTheFileNamesIt(t *testing.T) {
-	t.Setenv("S3_BROWSER_TEST_PDP_TOKEN", "token-from-env")
-	t.Setenv("S3_BROWSER_TEST_PDP_URL", "http://pdp.internal:4182/base/")
-	access := strings.Replace(authzenAccessBlock, `token_file = "pdp_token"`, `token_env = "S3_BROWSER_TEST_PDP_TOKEN"`, 1)
-	access = strings.Replace(access, `url        = "http://portal-pdp.edge.svc.cluster.local:4182"`, `url_env = "S3_BROWSER_TEST_PDP_URL"`, 1)
+	t.Setenv("STOWR_TEST_PDP_TOKEN", "token-from-env")
+	t.Setenv("STOWR_TEST_PDP_URL", "http://pdp.internal:4182/base/")
+	access := strings.Replace(authzenAccessBlock, `token_file = "pdp_token"`, `token_env = "STOWR_TEST_PDP_TOKEN"`, 1)
+	access = strings.Replace(access, `url        = "http://portal-pdp.edge.svc.cluster.local:4182"`, `url_env = "STOWR_TEST_PDP_URL"`, 1)
 	cfg, err := decodeAccessTestConfig(t, access)
 	if err != nil {
 		t.Fatal(err)
@@ -152,8 +152,8 @@ func TestAccessConfigReadsTheEnvironmentOnlyWhenTheFileNamesIt(t *testing.T) {
 	}
 	printed := formatEffectiveConfiguration(cfg)
 	for _, want := range []string{
-		`access.pdp.token = <hidden>  # env:S3_BROWSER_TEST_PDP_TOKEN`,
-		`access.pdp.url = "http://pdp.internal:4182/base"  # env:S3_BROWSER_TEST_PDP_URL`,
+		`access.pdp.token = <hidden>  # env:STOWR_TEST_PDP_TOKEN`,
+		`access.pdp.url = "http://pdp.internal:4182/base"  # env:STOWR_TEST_PDP_URL`,
 		`access.identity.audience = "infra-s3"  # file`,
 		`access.identity.max_age = "5m0s"  # default`,
 		`access.identity.public_keys = ["Ed25519 kid=`,
@@ -189,7 +189,7 @@ func TestAccessConfigOpenModeWarns(t *testing.T) {
 }
 
 func TestAuthSecretsAcceptTheEnvironmentForm(t *testing.T) {
-	t.Setenv("S3_BROWSER_TEST_SECRET", "secret-from-env")
+	t.Setenv("STOWR_TEST_SECRET", "secret-from-env")
 	dir := t.TempDir()
 	cfg, err := decodeConfig(`
 auth "s3" {
@@ -197,7 +197,7 @@ auth "s3" {
   endpoint              = "http://localhost:9000"
   region                = "test"
   access_key_id         = "clear-key"
-  secret_access_key_env = "S3_BROWSER_TEST_SECRET"
+  secret_access_key_env = "STOWR_TEST_SECRET"
 }
 bucket "b" {
   auth   = "s3"
@@ -212,7 +212,7 @@ access { mode = "open" }
 		t.Fatalf("auth = %+v", cfg.Authentications[0])
 	}
 	printed := formatEffectiveConfiguration(cfg)
-	if !strings.Contains(printed, `auth "s3".secret_access_key = <hidden>  # env:S3_BROWSER_TEST_SECRET`) || strings.Contains(printed, "secret-from-env") ||
+	if !strings.Contains(printed, `auth "s3".secret_access_key = <hidden>  # env:STOWR_TEST_SECRET`) || strings.Contains(printed, "secret-from-env") ||
 		!strings.Contains(printed, `auth "s3".access_key_id = "clear-key"  # file`) {
 		t.Fatalf("print-config:\n%s", printed)
 	}

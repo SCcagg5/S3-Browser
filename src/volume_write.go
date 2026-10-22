@@ -185,7 +185,7 @@ func (b *volumeBackend) Delete(_ context.Context, full string) error {
 		return err
 	}
 	if len(key.parts) == 0 {
-		return invalidVolumeKey("S3-Browser does not delete the root of the volume")
+		return invalidVolumeKey("Stowr does not delete the root of the volume")
 	}
 	folder, err := b.resolveFolder(key.parent(), false)
 	if isStorageNotFound(err) || isVolumeNotFolder(err) {
@@ -243,7 +243,7 @@ func (b *volumeBackend) Copy(ctx context.Context, source, destination string) er
 }
 
 // CopyMultipart copies a large file with the same stream as Copy, and gives the progress of the copy. A volume has no
-// versions, no metadata and no tags: an option that names them is refused. It lets the jobs of S3-Browser copy a large
+// versions, no metadata and no tags: an option that names them is refused. It lets the jobs of Stowr copy a large
 // file with progress and cancel.
 func (b *volumeBackend) CopyMultipart(ctx context.Context, source, destination string, options multipartCopyOptions) error {
 	if options.SourceVersion != "" || options.SourceETag != "" || options.ReplaceMetadata || options.ReplaceTags || len(options.ExtraHeaders) > 0 {

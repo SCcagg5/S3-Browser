@@ -36,7 +36,7 @@ func readVolumeFile(t *testing.T, root, relative string) string {
 	return string(data)
 }
 
-// temporaryFiles gives the temporary files of S3-Browser in the tree of root.
+// temporaryFiles gives the temporary files of Stowr in the tree of root.
 func temporaryFiles(t *testing.T, root string) []string {
 	t.Helper()
 	var found []string
@@ -52,7 +52,7 @@ func temporaryFiles(t *testing.T, root string) []string {
 func TestVolumeWritesReplaceAFileAtomically(t *testing.T) {
 	t.Parallel()
 	root := volumeTree(t)
-	_ = os.Remove(filepath.Join(root, ".s3b-tmp-0123456789abcdef0123456789abcdef-upload.bin"))
+	_ = os.Remove(filepath.Join(root, ".stowr-tmp-0123456789abcdef0123456789abcdef-upload.bin"))
 	app := volumeTestApplication(t, root, "")
 	if got := gatewayRequest(t, app, http.MethodPut, "new/deep/file.txt", []byte("first"), nil); got.Code != http.StatusNoContent {
 		t.Fatalf("PUT = %d %s", got.Code, got.Body.String())
@@ -91,7 +91,7 @@ func TestVolumeWritesReplaceAFileAtomically(t *testing.T) {
 		"a0/inside.txt":                 http.StatusConflict,
 		"link-out/x.txt":                http.StatusForbidden,
 		"x/..%2F..%2Fescape.txt":        http.StatusBadRequest,
-		"x/.s3b-tmp-mine":               http.StatusBadRequest,
+		"x/.stowr-tmp-mine":             http.StatusBadRequest,
 		"bad%FFname.txt":                http.StatusBadRequest,
 		"link-dangling/inside/file.txt": http.StatusForbidden,
 		strings.Repeat("n", 256) + ".x": http.StatusBadRequest,
@@ -313,7 +313,7 @@ func TestVolumeResumableUploadWritesATemporaryFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	request := httptest.NewRequest(http.MethodDelete, "/api/uploads", nil)
-	request.Header.Set("X-S3-Browser-Resume-Token", created.ResumeToken)
+	request.Header.Set("X-Stowr-Resume-Token", created.ResumeToken)
 	canceled := httptest.NewRecorder()
 	app.routes().ServeHTTP(canceled, request)
 	if canceled.Code != http.StatusOK {
@@ -329,10 +329,10 @@ func TestVolumeIncompleteUploadsAbortByAgeKeepsRecentFiles(t *testing.T) {
 	root := volumeTempDir(t)
 	now := time.Now()
 	files := map[string]time.Duration{
-		"logs/.s3b-tmp-00000000000000000000000000000001-old.log": 72 * time.Hour,
-		"logs/.s3b-tmp-00000000000000000000000000000002-new.log": time.Hour,
-		"logs/.s3b-tmp-00000000000000000000000000000003":         48 * time.Hour,
-		"other/.s3b-tmp-00000000000000000000000000000004-x.bin":  72 * time.Hour,
+		"logs/.stowr-tmp-00000000000000000000000000000001-old.log": 72 * time.Hour,
+		"logs/.stowr-tmp-00000000000000000000000000000002-new.log": time.Hour,
+		"logs/.stowr-tmp-00000000000000000000000000000003":         48 * time.Hour,
+		"other/.stowr-tmp-00000000000000000000000000000004-x.bin":  72 * time.Hour,
 	}
 	for relative, age := range files {
 		writeVolumeFile(t, root, relative, "part")
@@ -343,9 +343,9 @@ func TestVolumeIncompleteUploadsAbortByAgeKeepsRecentFiles(t *testing.T) {
 	writeVolumeFile(t, root, "logs/kept.log", "kept")
 	app := volumeTestApplication(t, root, "")
 	all := walkMultipartListOf(t, app, "vol", "", 1)
-	if got := uploadNames(all); strings.Join(got, ",") != "logs/.s3b-tmp-00000000000000000000000000000003#.s3b-tmp-00000000000000000000000000000003,"+
-		"logs/new.log#.s3b-tmp-00000000000000000000000000000002-new.log,logs/old.log#.s3b-tmp-00000000000000000000000000000001-old.log,"+
-		"other/x.bin#.s3b-tmp-00000000000000000000000000000004-x.bin" {
+	if got := uploadNames(all); strings.Join(got, ",") != "logs/.stowr-tmp-00000000000000000000000000000003#.stowr-tmp-00000000000000000000000000000003,"+
+		"logs/new.log#.stowr-tmp-00000000000000000000000000000002-new.log,logs/old.log#.stowr-tmp-00000000000000000000000000000001-old.log,"+
+		"other/x.bin#.stowr-tmp-00000000000000000000000000000004-x.bin" {
 		t.Fatalf("incomplete uploads = %v", got)
 	}
 	for _, upload := range all {
@@ -359,10 +359,10 @@ func TestVolumeIncompleteUploadsAbortByAgeKeepsRecentFiles(t *testing.T) {
 		t.Fatalf("result = %+v", done.MultipartResult)
 	}
 	for relative, kept := range map[string]bool{
-		"logs/.s3b-tmp-00000000000000000000000000000001-old.log": false,
-		"logs/.s3b-tmp-00000000000000000000000000000002-new.log": true,
-		"logs/.s3b-tmp-00000000000000000000000000000003":         false,
-		"other/.s3b-tmp-00000000000000000000000000000004-x.bin":  true,
+		"logs/.stowr-tmp-00000000000000000000000000000001-old.log": false,
+		"logs/.stowr-tmp-00000000000000000000000000000002-new.log": true,
+		"logs/.stowr-tmp-00000000000000000000000000000003":         false,
+		"other/.stowr-tmp-00000000000000000000000000000004-x.bin":  true,
 		"logs/kept.log": true,
 	} {
 		if _, err := os.Stat(filepath.Join(root, relative)); (err == nil) != kept {
@@ -371,7 +371,7 @@ func TestVolumeIncompleteUploadsAbortByAgeKeepsRecentFiles(t *testing.T) {
 	}
 	// The abort of one listed upload works at any age; an upload id that is not a temporary name is refused.
 	selected := doJSON(app, http.MethodPost, "/api/multiparts/abort", map[string]any{"instance": "vol", "uploads": []map[string]string{
-		{"key": "logs/new.log", "uploadId": ".s3b-tmp-00000000000000000000000000000002-new.log"},
+		{"key": "logs/new.log", "uploadId": ".stowr-tmp-00000000000000000000000000000002-new.log"},
 		{"key": "logs/kept.log", "uploadId": "kept.log"},
 	}})
 	var answer multipartAbortResponse

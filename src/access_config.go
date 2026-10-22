@@ -32,7 +32,7 @@ const (
 	maxPDPTokenBytes   = 4096
 	maxIdentityHeader  = 64
 	maxPDPEvaluations  = 1024
-	openModeServerName = "s3-browser"
+	openModeServerName = "stowr"
 )
 
 // accessConfig is the typed form of the access block (docs/ACCESS.md).

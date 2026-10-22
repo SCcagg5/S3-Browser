@@ -20,15 +20,15 @@ import (
 // refuses a key with an empty, "." or ".." part, a NUL byte, or a part longer than volumeMaxNameBytes. It resolves each
 // part of a path, one after the other. A symbolic link to a place inside the root is followed. A symbolic link that
 // leaves the root, or that does not resolve, stops the operation with volume_link_refused. The server never makes a
-// symbolic link. A key of a write must be valid UTF-8 and must not name a temporary file of S3-Browser.
+// symbolic link. A key of a write must be valid UTF-8 and must not name a temporary file of Stowr.
 //
-// Limit: a process outside S3-Browser that changes a symbolic link between the check and the use of a path can race
-// the check. The API of S3-Browser cannot make a symbolic link.
+// Limit: a process outside Stowr that changes a symbolic link between the check and the use of a path can race
+// the check. The API of Stowr cannot make a symbolic link.
 
 const (
-	// volumeTempPrefix starts the name of each temporary file of S3-Browser in a volume. The listings do not show
+	// volumeTempPrefix starts the name of each temporary file of Stowr in a volume. The listings do not show
 	// these files: the window "Incomplete uploads" shows them.
-	volumeTempPrefix = ".s3b-tmp-"
+	volumeTempPrefix = ".stowr-tmp-"
 	// volumeTempIDLength is the length of the random hexadecimal part of a temporary name.
 	volumeTempIDLength = 32
 	// volumeMaxNameBytes is the longest name of one part of a path (the limit of Linux file systems).
@@ -37,7 +37,7 @@ const (
 
 // errVolumeLink is the refusal of a path with a symbolic link that leaves the root of the volume or that does not
 // resolve.
-var errVolumeLink = apiError{Status: http.StatusForbidden, Code: "volume_link_refused", Message: "the path has a symbolic link that leaves the volume or that does not resolve: S3-Browser does not follow it"}
+var errVolumeLink = apiError{Status: http.StatusForbidden, Code: "volume_link_refused", Message: "the path has a symbolic link that leaves the volume or that does not resolve: Stowr does not follow it"}
 
 func invalidVolumeKey(format string, values ...any) error {
 	return apiError{Status: http.StatusBadRequest, Code: "invalid_key", Message: fmt.Sprintf(format, values...)}
@@ -87,7 +87,7 @@ func parseVolumeKey(key string, write bool) (volumeKey, error) {
 		case len(part) > volumeMaxNameBytes:
 			return volumeKey{}, invalidVolumeKey("a name of a key of a volume must have %d bytes or less", volumeMaxNameBytes)
 		case write && strings.HasPrefix(part, volumeTempPrefix):
-			return volumeKey{}, invalidVolumeKey("the names that start with %q are for the temporary files of S3-Browser", volumeTempPrefix)
+			return volumeKey{}, invalidVolumeKey("the names that start with %q are for the temporary files of Stowr", volumeTempPrefix)
 		}
 	}
 	return parsed, nil
@@ -214,10 +214,10 @@ func (b *volumeBackend) writeTarget(key volumeKey) (string, error) {
 		target = resolved
 	}
 	if info.IsDir() {
-		return "", apiError{Status: http.StatusConflict, Code: "volume_folder_exists", Message: "a folder has this name: S3-Browser does not replace a folder with a file"}
+		return "", apiError{Status: http.StatusConflict, Code: "volume_folder_exists", Message: "a folder has this name: Stowr does not replace a folder with a file"}
 	}
 	if !info.Mode().IsRegular() {
-		return "", apiError{Status: http.StatusConflict, Code: "volume_not_file", Message: "the path is not a regular file: S3-Browser does not replace it"}
+		return "", apiError{Status: http.StatusConflict, Code: "volume_not_file", Message: "the path is not a regular file: Stowr does not replace it"}
 	}
 	return target, nil
 }
@@ -236,7 +236,7 @@ func volumeTempName(target string) (string, error) {
 	return name, nil
 }
 
-// parseVolumeTempName tells if name is the name of a temporary file of S3-Browser, and gives the name of its target
+// parseVolumeTempName tells if name is the name of a temporary file of Stowr, and gives the name of its target
 // ("" when the temporary name does not have it).
 func parseVolumeTempName(name string) (string, bool) {
 	if !strings.HasPrefix(name, volumeTempPrefix) || len(name) < len(volumeTempPrefix)+volumeTempIDLength {
@@ -271,7 +271,7 @@ func volumeError(err error) error {
 	case errors.Is(err, fs.ErrNotExist), errno == syscall.ENOTDIR:
 		return &upstreamError{StatusCode: http.StatusNotFound, Code: "NoSuchKey", Message: "the file does not exist"}
 	case errors.Is(err, fs.ErrPermission):
-		return &upstreamError{StatusCode: http.StatusForbidden, Code: "AccessDenied", Message: "the file system refused the access to the process of S3-Browser"}
+		return &upstreamError{StatusCode: http.StatusForbidden, Code: "AccessDenied", Message: "the file system refused the access to the process of Stowr"}
 	case errno == syscall.ENOSPC || errno == syscall.EDQUOT:
 		return apiError{Status: http.StatusInsufficientStorage, Code: "volume_full", Message: "the volume has no free space"}
 	case errno == syscall.EROFS:

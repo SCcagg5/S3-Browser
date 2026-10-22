@@ -71,7 +71,7 @@ func volumeTree(t *testing.T) string {
 	writeVolumeFile(t, root, "a/b.txt", "0123456789")
 	writeVolumeFile(t, root, "a0", "zero")
 	writeVolumeFile(t, root, ".hidden", "hidden")
-	writeVolumeFile(t, root, ".s3b-tmp-0123456789abcdef0123456789abcdef-upload.bin", "part")
+	writeVolumeFile(t, root, ".stowr-tmp-0123456789abcdef0123456789abcdef-upload.bin", "part")
 	if err := os.Mkdir(filepath.Join(root, "empty"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -115,17 +115,17 @@ func TestVolumeKeysRefusePathTricks(t *testing.T) {
 	if _, err := parseVolumeKey("a/\xff.txt", false); err != nil {
 		t.Fatalf("a read with a name that is not UTF-8: %v", err)
 	}
-	if _, err := parseVolumeKey("a/.s3b-tmp-x", true); err == nil || !strings.Contains(err.Error(), "temporary files") {
+	if _, err := parseVolumeKey("a/.stowr-tmp-x", true); err == nil || !strings.Contains(err.Error(), "temporary files") {
 		t.Fatalf("a write of a temporary name: error = %v", err)
 	}
 	key, err := parseVolumeKey("a/b/", false)
 	if err != nil || !key.folder || !reflect.DeepEqual(key.parts, []string{"a", "b"}) {
 		t.Fatalf("folder key = %+v, %v", key, err)
 	}
-	if name, ok := parseVolumeTempName(".s3b-tmp-0123456789abcdef0123456789abcdef-report.pdf"); !ok || name != "report.pdf" {
+	if name, ok := parseVolumeTempName(".stowr-tmp-0123456789abcdef0123456789abcdef-report.pdf"); !ok || name != "report.pdf" {
 		t.Fatalf("temporary name = %q, %v", name, ok)
 	}
-	for _, name := range []string{".s3b-tmp-0123", ".s3b-tmp-0123456789ABCDEF0123456789abcdef", ".s3b-tmp-0123456789abcdef0123456789abcdef-", "file.txt"} {
+	for _, name := range []string{".stowr-tmp-0123", ".stowr-tmp-0123456789ABCDEF0123456789abcdef", ".stowr-tmp-0123456789abcdef0123456789abcdef-", "file.txt"} {
 		if _, ok := parseVolumeTempName(name); ok {
 			t.Fatalf("%q is not a temporary name", name)
 		}

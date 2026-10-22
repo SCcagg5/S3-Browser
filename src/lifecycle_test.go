@@ -277,7 +277,7 @@ func dropTags(body []byte) []byte {
 }
 
 func TestLifecycleSaveTellsWhatTheProviderDropped(t *testing.T) {
-	// A provider that S3-Browser does not know. A rule of the bucket uses a tag filter, so the editor offers it.
+	// A provider that Stowr does not know. A rule of the bucket uses a tag filter, so the editor offers it.
 	tagged := `<Rule><ID>tagged</ID><Filter><And><Prefix>tenant/logs/</Prefix><Tag><Key>retention</Key><Value>30d</Value></Tag></And></Filter><Status>Enabled</Status><Expiration><Days>30</Days></Expiration></Rule>`
 	app, fake := lifecycleApplication(t, "", `<LifecycleConfiguration>`+tagged+`</LifecycleConfiguration>`)
 	fake.keep = dropTags
@@ -406,7 +406,7 @@ func TestLifecycleWriteRefusalMakesTheEditorReadOnly(t *testing.T) {
 		reason string
 	}{
 		{http.StatusForbidden, "lifecycle_write_denied", "The storage provider refused the change (HTTP 403 AccessDenied): the credentials of this instance cannot change the lifecycle rules."},
-		{http.StatusNotImplemented, "lifecycle_write_unsupported", "The storage provider does not let S3-Browser change the lifecycle rules (HTTP 501 NotImplemented)."},
+		{http.StatusNotImplemented, "lifecycle_write_unsupported", "The storage provider does not let Stowr change the lifecycle rules (HTTP 501 NotImplemented)."},
 	} {
 		app, fake := lifecycleApplication(t, "AmazonS3", "")
 		fake.refuse = test.status
@@ -534,7 +534,7 @@ func TestInstancesGiveTheVersioningAndTheNumberOfLifecycleRules(t *testing.T) {
 	if count := instance.publicInfo().LifecycleRules; count == nil || *count != 1 {
 		t.Fatalf("rules after a new read = %v", count)
 	}
-	// A change outside S3-Browser: a request of /api/instances reads the facts again in the background, after
+	// A change outside Stowr: a request of /api/instances reads the facts again in the background, after
 	// bucketFactsTTL, one time.
 	fake.mu.Lock()
 	fake.body = nil
@@ -776,7 +776,7 @@ func TestLifecycleSaveWhoseReadBackFailsSaysThatTheRulesAreSaved(t *testing.T) {
 		return body
 	}
 	saved := decodeLifecycle(t, putLifecycle(app, "rw", editor.Hash, []lifecycleEditRule{{ID: "a", Enabled: true, ExpirationDays: 3}}))
-	if saved.Editor != nil || len(saved.Warnings) != 1 || !strings.HasPrefix(saved.Warnings[0], "The rules are saved, but S3-Browser cannot read them again") {
+	if saved.Editor != nil || len(saved.Warnings) != 1 || !strings.HasPrefix(saved.Warnings[0], "The rules are saved, but Stowr cannot read them again") {
 		t.Fatalf("answer = %+v", saved)
 	}
 	if !strings.Contains(fake.stored(), "<ID>a</ID>") {

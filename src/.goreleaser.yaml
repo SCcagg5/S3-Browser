@@ -1,11 +1,11 @@
 version: 2
 
-project_name: s3-browser
+project_name: stowr
 
 builds:
-  - id: s3-browser-linux
+  - id: stowr-linux
     main: .
-    binary: s3-browser
+    binary: stowr
     env:
       - CGO_ENABLED=0
     flags:
@@ -26,9 +26,9 @@ builds:
         -X main.buildDate={{ .Date }}
 
 archives:
-  - id: s3-browser-linux
+  - id: stowr-linux
     ids:
-      - s3-browser-linux
+      - stowr-linux
     formats:
       - tar.gz
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
@@ -39,4 +39,4 @@ checksum:
 release:
   github:
     owner: SCcagg5
-    name: S3-Browser
+    name: stowr

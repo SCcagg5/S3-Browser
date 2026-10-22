@@ -28,12 +28,12 @@ import (
 const (
 	// maxUserMetadataBytes is the S3 limit of the user metadata: the sum of the bytes of each key and each value.
 	maxUserMetadataBytes = 2048
-	// maxStandardHeaderBytes is the limit of S3-Browser for the value of one standard header.
+	// maxStandardHeaderBytes is the limit of Stowr for the value of one standard header.
 	maxStandardHeaderBytes = 1024
-	// maxETagBytes is the limit of S3-Browser for the ETag of a request.
+	// maxETagBytes is the limit of Stowr for the ETag of a request.
 	maxETagBytes = 128
 	// metadataProbeKey is the object that the start probe names. The probe never writes it.
-	metadataProbeKey = ".s3-browser-metadata-probe"
+	metadataProbeKey = ".stowr-metadata-probe"
 )
 
 // ObjectMetadataEditor is optional: a backend that replaces the metadata of an object, or of one version of it, by a
@@ -260,7 +260,7 @@ func isPreconditionFailed(err error) bool {
 }
 
 func metadataEditUnsupported() error {
-	return apiError{Status: http.StatusNotImplemented, Code: "metadata_unsupported", Message: "this storage provider does not let S3-Browser change the metadata of an object"}
+	return apiError{Status: http.StatusNotImplemented, Code: "metadata_unsupported", Message: "this storage provider does not let Stowr change the metadata of an object"}
 }
 
 func objectChangedError() error {
@@ -330,7 +330,7 @@ func (s *storageInstance) probeMetadataEdit(ctx context.Context) {
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	err := editor.ReplaceObjectMetadata(probeCtx, s.fullKey(metadataProbeKey), "", "s3-browser-probe", http.Header{})
+	err := editor.ReplaceObjectMetadata(probeCtx, s.fullKey(metadataProbeKey), "", "stowr-probe", http.Header{})
 	if providerRefusedFeature(err) {
 		s.metadataOff.Store(true)
 	}
@@ -364,7 +364,7 @@ func (s *storageInstance) ReplaceMetadata(ctx context.Context, key, version, eta
 		}
 	}
 	if head.Header.Get("x-amz-server-side-encryption-customer-algorithm") != "" {
-		return apiError{Status: http.StatusBadRequest, Code: "metadata_unsupported", Message: "the object is encrypted with a key of the customer (SSE-C): S3-Browser cannot copy it"}
+		return apiError{Status: http.StatusBadRequest, Code: "metadata_unsupported", Message: "the object is encrypted with a key of the customer (SSE-C): Stowr cannot copy it"}
 	}
 	kept := keptObjectHeaders(head.Header)
 	size, _ := strconv.ParseInt(strings.TrimSpace(head.Header.Get("Content-Length")), 10, 64)

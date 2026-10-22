@@ -365,7 +365,7 @@ func TestUploadResumeDoesNotProbeKeysOnReadDeniedInstance(t *testing.T) {
 		}
 		do := func(method string) publicUpload {
 			request := httptest.NewRequest(method, "/api/uploads", nil)
-			request.Header.Set("X-S3-Browser-Resume-Token", created.ResumeToken)
+			request.Header.Set("X-Stowr-Resume-Token", created.ResumeToken)
 			recorder := httptest.NewRecorder()
 			app.routes().ServeHTTP(recorder, request)
 			var upload publicUpload

@@ -195,7 +195,7 @@ func configReference() string {
 	b.WriteString("- A key without a value in the file has its default value. A key with `(required)` must have a value.\n")
 	b.WriteString("- The `access` block is mandatory. A file without it stops the start.\n")
 	b.WriteString("- A file needs one `bucket` block or one `volume` block at least. A `bucket` block needs an `auth` block.\n")
-	b.WriteString("- `s3-browser print-config -c <file>` checks the file, writes the value of each key and its source, and exits with status 0.\n")
+	b.WriteString("- `stowr print-config -c <file>` checks the file, writes the value of each key and its source, and exits with status 0.\n")
 	b.WriteString("  The source is `file`, `env:<VAR>`, `file:<path>` or `default`. The output hides each secret.\n")
 	b.WriteString("- At start, the server writes the same values in its log.\n\n")
 	b.WriteString("## Values from the environment or from a file\n\n")

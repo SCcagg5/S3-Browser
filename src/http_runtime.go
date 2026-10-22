@@ -13,9 +13,9 @@ import (
 )
 
 const (
-	resourceRequestsTrailer = "X-S3-Browser-Storage-Requests"
-	resourceBytesTrailer    = "X-S3-Browser-Storage-Bytes"
-	resourceElapsedTrailer  = "X-S3-Browser-Elapsed-Ms"
+	resourceRequestsTrailer = "X-Stowr-Storage-Requests"
+	resourceBytesTrailer    = "X-Stowr-Storage-Bytes"
+	resourceElapsedTrailer  = "X-Stowr-Elapsed-Ms"
 )
 
 // requestBudgetMiddleware attaches a fresh, concurrency-safe resource budget to

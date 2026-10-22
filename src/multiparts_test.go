@@ -239,7 +239,7 @@ func TestMultipartListFollowsTheMarkersOfEachProvider(t *testing.T) {
 				if strings.Join(got, " ") != strings.Join(want, " ") {
 					t.Fatalf("uploads = %v, want %v", got, want)
 				}
-				// The prefix of the request is a filter of S3-Browser: the provider gets no prefix.
+				// The prefix of the request is a filter of Stowr: the provider gets no prefix.
 				got = uploadNames(walkMultipartList(t, app, "logs/", size))
 				if strings.Join(got, " ") != "logs/b.log#id-0 logs/c.log#id-9" {
 					t.Fatalf("uploads under logs/ = %v", got)
@@ -294,7 +294,7 @@ func TestMultipartListGivesTheDateAndTheFirstPageOfTheParts(t *testing.T) {
 func TestMultipartListStopsWhenTheProviderDoesNotMoveItsMarkers(t *testing.T) {
 	app, fake := fakeMultipartApplication(t, "aws", sameKeyUploads(time.Now())...)
 	fake.stuck = true
-	// The provider sends the markers of the request again: S3-Browser stops with an error, not a loop.
+	// The provider sends the markers of the request again: Stowr stops with an error, not a loop.
 	got := doJSON(app, http.MethodGet, "/api/multiparts?instance=rw&max=1", nil)
 	if got.Code != http.StatusBadGateway || !strings.Contains(got.Body.String(), "provider_paging") {
 		t.Fatalf("status = %d %s", got.Code, got.Body.String())

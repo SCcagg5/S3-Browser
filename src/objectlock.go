@@ -42,11 +42,11 @@ const (
 	objectLockGovernance = "GOVERNANCE"
 	objectLockCompliance = "COMPLIANCE"
 
-	// maxObjectLockDays is the latest retain-until date that S3-Browser sets, in days from now.
+	// maxObjectLockDays is the latest retain-until date that Stowr sets, in days from now.
 	maxObjectLockDays = 36500
-	// maxObjectLockVersionBytes is the limit of S3-Browser for the version id of a request.
+	// maxObjectLockVersionBytes is the limit of Stowr for the version id of a request.
 	maxObjectLockVersionBytes = 1024
-	// maxObjectLockDateChars is the limit of S3-Browser for the text of a retain-until date.
+	// maxObjectLockDateChars is the limit of Stowr for the text of a retain-until date.
 	maxObjectLockDateChars = 64
 	// maxLockedKeys is the number of locked keys that a job keeps to show them.
 	maxLockedKeys = 20

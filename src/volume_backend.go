@@ -20,7 +20,7 @@ import (
 // The backend of a volume block: the files of a folder of the server as the objects of a bucket. Folders are real: a
 // listing with the delimiter "/" gives the subfolders, and an empty folder exists. A listing without a delimiter gives
 // the files and the empty folders (as "<folder>/" with size 0, as the folder objects of S3) in the order of the keys of
-// S3, so that the jobs of S3-Browser (delete, copy, move, Insights, archive, search) work as on a bucket. The page
+// S3, so that the jobs of Stowr (delete, copy, move, Insights, archive, search) work as on a bucket. The page
 // token of a listing is the last key of the page: it stays valid when the folder changes.
 //
 // A file has no metadata of S3: the content type comes from the extension of the name, and the ETag is the weak
@@ -181,7 +181,7 @@ type volumeEntry struct {
 }
 
 // readFolder reads the entries of the real folder whose names start with namePrefix, in the order of their keys. The
-// temporary files of S3-Browser are left out.
+// temporary files of Stowr are left out.
 func (b *volumeBackend) readFolder(ctx context.Context, real, namePrefix string) ([]volumeEntry, error) {
 	folder, err := os.Open(real)
 	if err != nil {
@@ -221,7 +221,7 @@ func (b *volumeBackend) readFolder(ctx context.Context, real, namePrefix string)
 			}
 			entries = append(entries, entry)
 			if len(entries) > volumeMaxFolderEntries {
-				return nil, apiError{Status: http.StatusUnprocessableEntity, Code: "volume_folder_too_large", Message: fmt.Sprintf("the folder has more than %d entries: S3-Browser does not list it", volumeMaxFolderEntries)}
+				return nil, apiError{Status: http.StatusUnprocessableEntity, Code: "volume_folder_too_large", Message: fmt.Sprintf("the folder has more than %d entries: Stowr does not list it", volumeMaxFolderEntries)}
 			}
 		}
 		if errors.Is(readErr, io.EOF) {
@@ -438,7 +438,7 @@ func (b *volumeBackend) stat(full string) (string, objectInfo, error) {
 	case key.folder || info.IsDir():
 		return "", objectInfo{}, &upstreamError{StatusCode: http.StatusNotFound, Code: "NoSuchKey", Message: "the file does not exist"}
 	case !info.Mode().IsRegular():
-		return "", objectInfo{}, apiError{Status: http.StatusForbidden, Code: "volume_not_file", Message: "the path is not a regular file: S3-Browser does not read it"}
+		return "", objectInfo{}, apiError{Status: http.StatusForbidden, Code: "volume_not_file", Message: "the path is not a regular file: Stowr does not read it"}
 	}
 	return real, b.object(relative, info), nil
 }

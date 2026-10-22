@@ -119,16 +119,16 @@ jobs:
               -tags=netgo,osusergo \
               -trimpath \
               -ldflags="-s -w -buildid= -X main.buildVersion=${RELEASE_VERSION} -X main.buildCommit=${RELEASE_COMMIT} -X main.buildDate=${RELEASE_BUILD_DATE}" \
-              -o /tmp/s3-browser-static .
+              -o /tmp/stowr-static .
 
-          file /tmp/s3-browser-static
-          if readelf -l /tmp/s3-browser-static | grep -q 'Requesting program interpreter'; then
+          file /tmp/stowr-static
+          if readelf -l /tmp/stowr-static | grep -q 'Requesting program interpreter'; then
             echo "release binary unexpectedly requires a dynamic loader" >&2
             exit 1
           fi
-          go version -m /tmp/s3-browser-static | grep -F 'CGO_ENABLED=0'
+          go version -m /tmp/stowr-static | grep -F 'CGO_ENABLED=0'
           short_sha=$(printf '%s' "$RELEASE_COMMIT" | cut -c1-9)
-          /tmp/s3-browser-static version | grep -F "${RELEASE_VERSION} · $short_sha"
+          /tmp/stowr-static version | grep -F "${RELEASE_VERSION} · $short_sha"
 
       - name: Build and run the scratch image
         shell: bash

@@ -50,7 +50,7 @@ const (
 
 	lifecycleNamespace = "http://s3.amazonaws.com/doc/2006-03-01/"
 	// lifecycleFlavourProbeKey is the key of the GetObject request that tells the provider. The object does not exist.
-	lifecycleFlavourProbeKey = ".s3-browser-provider-probe"
+	lifecycleFlavourProbeKey = ".stowr-provider-probe"
 )
 
 // The fields of the editor that a provider can drop or refuse. The expiration after N days with a prefix works on
@@ -71,7 +71,7 @@ var lifecycleFieldNames = map[string]string{
 	lifecycleFieldDeleteMarker: "the removal of expired delete markers",
 }
 
-// The providers that S3-Browser can tell from their answers. An empty flavour is a provider that S3-Browser does not
+// The providers that Stowr can tell from their answers. An empty flavour is a provider that Stowr does not
 // know.
 const (
 	flavourAWS       = "aws"
@@ -240,7 +240,7 @@ func (s *s3Backend) ProviderFlavour(ctx context.Context) (string, error) {
 // s3ProviderFlavour tells the provider from the endpoint, the Server header and the error document of an answer.
 // AWS S3 sends "AmazonS3", MinIO "MinIO" and SeaweedFS "SeaweedFS <size> <version>". Garage v2.4.1 sends no Server
 // header and no request id, and its error document has a Region element and no RequestId element. Any other answer
-// gives "": S3-Browser does not know the provider.
+// gives "": Stowr does not know the provider.
 func s3ProviderFlavour(endpoint *url.URL, header http.Header, body []byte) string {
 	host := ""
 	if endpoint != nil {
@@ -1010,7 +1010,7 @@ func (s *storageInstance) lifecycleFieldsFor(flavour, versioning string, used ma
 		reason := ""
 		switch {
 		case s.lifecycleDropped(field):
-			reason = "The storage provider dropped this setting after a save: S3-Browser does not offer it again."
+			reason = "The storage provider dropped this setting after a save: Stowr does not offer it again."
 		case flavour != "" && !lifecycleProviderFields[flavour][field]:
 			reason = lifecycleProviderReasons[flavour][field]
 			if reason == "" {
@@ -1021,7 +1021,7 @@ func (s *storageInstance) lifecycleFieldsFor(flavour, versioning string, used ma
 		case (field == lifecycleFieldNoncurrent || field == lifecycleFieldDeleteMarker) && !versioned:
 			reason = "The bucket has no versioning."
 		case flavour == "" && !used[field]:
-			reason = "S3-Browser does not know this storage provider, and no rule of the bucket uses this setting: the provider can drop it without an error."
+			reason = "Stowr does not know this storage provider, and no rule of the bucket uses this setting: the provider can drop it without an error."
 		}
 		fields[field] = reason == ""
 		if reason != "" {
@@ -1049,7 +1049,7 @@ type lifecycleEditorState struct {
 	// Fields tells which fields the editor offers. Hidden gives the reason for each other field.
 	Fields map[string]bool        `json:"fields"`
 	Hidden []lifecycleHiddenField `json:"hidden"`
-	// Provider is the provider that S3-Browser found ("aws", "minio", "seaweedfs", "garage"), or "".
+	// Provider is the provider that Stowr found ("aws", "minio", "seaweedfs", "garage"), or "".
 	Provider     string `json:"provider"`
 	ProviderNote string `json:"providerNote,omitempty"`
 	Versioning   string `json:"versioning"`
@@ -1258,7 +1258,7 @@ func (s *storageInstance) lifecycleWarnings(sent []byte, read lifecycleState, ru
 	warnings := []string{}
 	sentConfig, err := splitLifecycleDocument(sent)
 	if err != nil {
-		return []string{"S3-Browser cannot read the document that it sent: compare the rules with care."}
+		return []string{"Stowr cannot read the document that it sent: compare the rules with care."}
 	}
 	edited := map[string]lifecycleEditRule{}
 	for _, rule := range rules {
@@ -1323,7 +1323,7 @@ func (s *storageInstance) lifecycleWarnings(sent []byte, read lifecycleState, ru
 			if child := node.child("ID"); child != nil {
 				id = child.Text
 			}
-			warnings = append(warnings, fmt.Sprintf("The storage provider has a rule %s that S3-Browser did not send.", ruleName(id)))
+			warnings = append(warnings, fmt.Sprintf("The storage provider has a rule %s that Stowr did not send.", ruleName(id)))
 		}
 	}
 	return warnings
@@ -1411,7 +1411,7 @@ func (s *storageInstance) lifecycleWriteError(err error) error {
 	}
 	switch {
 	case providerRefusedFeature(err):
-		reason := fmt.Sprintf("The storage provider does not let S3-Browser change the lifecycle rules (%s).", upstreamStatusText(upstream))
+		reason := fmt.Sprintf("The storage provider does not let Stowr change the lifecycle rules (%s).", upstreamStatusText(upstream))
 		s.setLifecycleWriteRefusal(reason)
 		return apiError{Status: http.StatusNotImplemented, Code: "lifecycle_write_unsupported", Message: reason}
 	case upstream.StatusCode == http.StatusForbidden:
@@ -1465,7 +1465,7 @@ func (s *storageInstance) SaveLifecycle(ctx context.Context, hash string, rules 
 	read, err := s.readLifecycleState(ctx)
 	if err != nil {
 		// The write worked: the answer must not say that the save failed. The page reads the rules again.
-		return lifecycleState{}, []string{fmt.Sprintf("The rules are saved, but S3-Browser cannot read them again (%s): read them again before another change.", publicStorageError(err))}, nil
+		return lifecycleState{}, []string{fmt.Sprintf("The rules are saved, but Stowr cannot read them again (%s): read them again before another change.", publicStorageError(err))}, nil
 	}
 	warnings := s.lifecycleWarnings(body, read, rules)
 	if len(warnings) > 0 {

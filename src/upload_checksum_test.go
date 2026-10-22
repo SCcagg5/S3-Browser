@@ -135,7 +135,7 @@ func putChecksumChunk(app *application, token string, data []byte, start, total 
 	request := httptest.NewRequest(http.MethodPut, "/api/uploads", bytes.NewReader(data))
 	request.Header.Set("Content-Type", "application/octet-stream")
 	request.Header.Set("Content-Range", "bytes "+strconv.FormatInt(start, 10)+"-"+strconv.FormatInt(start+int64(len(data))-1, 10)+"/"+strconv.FormatInt(total, 10))
-	request.Header.Set("X-S3-Browser-Resume-Token", token)
+	request.Header.Set("X-Stowr-Resume-Token", token)
 	if digest != "" {
 		request.Header.Set(checksumHeader, digest)
 	}

@@ -132,7 +132,7 @@ type objectInfo struct {
 	LastModified time.Time
 	ETag         string
 	ContentType  string
-	// Unreadable is true for an entry of a volume that S3-Browser does not read: a symbolic link that leaves the
+	// Unreadable is true for an entry of a volume that Stowr does not read: a symbolic link that leaves the
 	// volume or that does not resolve, or a file that is not a regular file.
 	Unreadable bool
 }

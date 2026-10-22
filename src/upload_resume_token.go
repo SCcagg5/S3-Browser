@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-const uploadResumeTokenVersion = "s3br1"
+const uploadResumeTokenVersion = "stowr1"
 
 // uploadResumeDescriptor contains only the provider session coordinates needed
 // to reconstruct an upload after process memory has been lost. The descriptor
@@ -52,7 +52,7 @@ func (a *application) uploadResumeCipherKey(instance *storageInstance) [32]byte 
 	if material == "" {
 		material = string(a.resumeTokenKey[:])
 	}
-	return sha256.Sum256([]byte("s3-browser-transfer-resume-v1\x00" + instance.cfg.AuthID + "\x00" + material))
+	return sha256.Sum256([]byte("stowr-transfer-resume-v1\x00" + instance.cfg.AuthID + "\x00" + material))
 }
 
 func (a *application) sealUploadResumeToken(instance *storageInstance, upload uploadSession) (string, error) {

@@ -84,15 +84,15 @@ jobs:
               -tags=netgo,osusergo \
               -trimpath \
               -ldflags="-s -w -buildid= -X main.buildVersion=ci -X main.buildCommit=${GITHUB_SHA}" \
-              -o /tmp/s3-browser-static .
-          file /tmp/s3-browser-static
-          if readelf -l /tmp/s3-browser-static | grep -q 'Requesting program interpreter'; then
+              -o /tmp/stowr-static .
+          file /tmp/stowr-static
+          if readelf -l /tmp/stowr-static | grep -q 'Requesting program interpreter'; then
             echo "binary unexpectedly requires a dynamic loader" >&2
             exit 1
           fi
-          go version -m /tmp/s3-browser-static | grep -F 'CGO_ENABLED=0'
+          go version -m /tmp/stowr-static | grep -F 'CGO_ENABLED=0'
           short_sha=$(printf '%s' "$GITHUB_SHA" | cut -c1-9)
-          /tmp/s3-browser-static version | grep -F "ci · $short_sha"
+          /tmp/stowr-static version | grep -F "ci · $short_sha"
 
       - name: Build and run scratch image
         working-directory: .

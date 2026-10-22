@@ -388,7 +388,7 @@ func (s *storageInstance) probeTags(ctx context.Context) {
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	_, err := tagger.GetObjectTagging(probeCtx, s.fullKey(".s3-browser-tags-probe"), "")
+	_, err := tagger.GetObjectTagging(probeCtx, s.fullKey(".stowr-tags-probe"), "")
 	if providerRefusedFeature(err) {
 		s.tagsOff.Store(true)
 	}

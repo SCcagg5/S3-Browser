@@ -973,7 +973,7 @@ func uploadResumeTokenFromRequest(r *http.Request) string {
 	if r == nil {
 		return ""
 	}
-	return strings.TrimSpace(r.Header.Get("X-S3-Browser-Resume-Token"))
+	return strings.TrimSpace(r.Header.Get("X-Stowr-Resume-Token"))
 }
 
 func (a *application) writeUploadResponse(w http.ResponseWriter, status int, upload uploadSession) {

@@ -1,3 +1,3 @@
-module s3-browser
+module stowr
 
 go 1.22

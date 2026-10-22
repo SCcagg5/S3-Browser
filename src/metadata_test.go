@@ -343,7 +343,7 @@ func TestProbeMetadataEditMarksAProviderWithoutCopyObject(t *testing.T) {
 		t.Fatal("a provider that answers no such key keeps the edit")
 	}
 	refusing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("x-amz-copy-source-if-match") != `"s3-browser-probe"` || r.Header.Get("x-amz-metadata-directive") != "REPLACE" {
+		if r.Header.Get("x-amz-copy-source-if-match") != `"stowr-probe"` || r.Header.Get("x-amz-metadata-directive") != "REPLACE" {
 			t.Errorf("probe headers = %v", r.Header)
 		}
 		w.WriteHeader(http.StatusNotImplemented)

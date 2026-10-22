@@ -13,15 +13,15 @@ import (
 // regular files (the size of each file, not the blocks of the disk). A request never walks the tree: a sizer walks it
 // in the background, one walk at a time, and the request gets the last count. A walk reads at most volumeSizeEntries
 // entries in volumeSizeTime: a larger tree gives "partial" (at least the count). The count stays for volumeSizeTTL; a
-// write of S3-Browser in the volume makes it old, so that the next read starts a new walk. A walk does not follow a
-// symbolic link, and does not count the temporary files of S3-Browser.
+// write of Stowr in the volume makes it old, so that the next read starts a new walk. A walk does not follow a
+// symbolic link, and does not count the temporary files of Stowr.
 
 const (
 	// volumeSizeEntries is the largest number of entries that one walk reads.
 	volumeSizeEntries = 1_000_000
 	// volumeSizeTime is the longest time of one walk.
 	volumeSizeTime = 20 * time.Second
-	// volumeSizeTTL is the life of a complete count when nothing changes through S3-Browser.
+	// volumeSizeTTL is the life of a complete count when nothing changes through Stowr.
 	volumeSizeTTL = 5 * time.Minute
 
 	volumeSizeComputing = "computing"

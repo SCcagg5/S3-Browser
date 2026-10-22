@@ -238,7 +238,7 @@ func TestVolumeSizerCountsTheFilesInTheBackground(t *testing.T) {
 	writeVolumeFile(t, root, "a.txt", "12345")
 	writeVolumeFile(t, root, "deep/b.txt", "1234567890")
 	writeVolumeFile(t, root, "deep/.hidden", "123")
-	writeVolumeFile(t, root, "deep/.s3b-tmp-0123456789abcdef0123456789abcdef-part.bin", strings.Repeat("t", 1000))
+	writeVolumeFile(t, root, "deep/.stowr-tmp-0123456789abcdef0123456789abcdef-part.bin", strings.Repeat("t", 1000))
 	if err := os.Symlink(filepath.Join(base, "outside"), filepath.Join(root, "escape")); err != nil {
 		t.Fatal(err)
 	}

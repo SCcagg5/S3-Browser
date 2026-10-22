@@ -142,7 +142,7 @@ func putUploadChunk(t *testing.T, app *application, token string, data []byte, s
 	request := httptest.NewRequest(http.MethodPut, "/api/uploads", bytes.NewReader(data))
 	request.Header.Set("Content-Type", "application/octet-stream")
 	request.Header.Set("Content-Range", "bytes "+strconv.FormatInt(start, 10)+"-"+strconv.FormatInt(end, 10)+"/"+strconv.FormatInt(total, 10))
-	request.Header.Set("X-S3-Browser-Resume-Token", token)
+	request.Header.Set("X-Stowr-Resume-Token", token)
 	app.routes().ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("put upload status = %d, body = %s", recorder.Code, recorder.Body.String())
@@ -238,7 +238,7 @@ func TestCancelUploadAbortsProviderAndReleasesMemory(t *testing.T) {
 	}
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodDelete, "/api/uploads", nil)
-	request.Header.Set("X-S3-Browser-Resume-Token", created.ResumeToken)
+	request.Header.Set("X-Stowr-Resume-Token", created.ResumeToken)
 	app.routes().ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("cancel status = %d, body = %s", recorder.Code, recorder.Body.String())

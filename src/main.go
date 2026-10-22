@@ -24,7 +24,7 @@ func main() {
 			return
 		case "version", "--version", "-version":
 			info := currentBuildInfo()
-			fmt.Printf("s3-browser %s\n", info.Display)
+			fmt.Printf("stowr %s\n", info.Display)
 			return
 		case "config-reference":
 			fmt.Print(configReference())
@@ -35,7 +35,7 @@ func main() {
 		}
 	}
 
-	flags := flag.NewFlagSet("s3-browser", flag.ExitOnError)
+	flags := flag.NewFlagSet("stowr", flag.ExitOnError)
 	var configPath string
 	var printConfig bool
 	flags.StringVar(&configPath, "c", "config.hcl", "path to the HCL configuration file")

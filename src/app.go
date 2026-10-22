@@ -326,7 +326,7 @@ type listItemJSON struct {
 	LastModified *time.Time `json:"lastModified,omitempty"`
 	ETag         string     `json:"etag,omitempty"`
 	ContentType  string     `json:"contentType,omitempty"`
-	// Unreadable marks an entry of a volume that S3-Browser does not read (refer to objectInfo).
+	// Unreadable marks an entry of a volume that Stowr does not read (refer to objectInfo).
 	Unreadable bool `json:"unreadable,omitempty"`
 }
 

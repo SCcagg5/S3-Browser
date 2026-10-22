@@ -18,7 +18,7 @@ import (
 
 // The cleanup of the incomplete multipart uploads of a bucket: S3 ListMultipartUploads, ListParts and
 // AbortMultipartUpload. The list never sends a prefix to the provider: MinIO gives an empty list for a prefix that is not
-// a full key. S3-Browser keeps the uploads under the root prefix of the instance and under the prefix of the request.
+// a full key. Stowr keeps the uploads under the root prefix of the instance and under the prefix of the request.
 // Each page of the provider continues with the markers that the provider sent: SeaweedFS sends NextUploadIdMarker only,
 // Garage and AWS send both markers, and MinIO sends all the uploads in one page. The age of an upload comes from its
 // Initiated date. SeaweedFS sends no such date: the age is unknown, and the abort by age never aborts such an upload.
@@ -92,7 +92,7 @@ type multipartPartsSummary struct {
 }
 
 func multipartUnsupported() error {
-	return apiError{Status: http.StatusNotImplemented, Code: "multipart_unsupported", Message: "this storage provider does not let S3-Browser list the incomplete multipart uploads"}
+	return apiError{Status: http.StatusNotImplemented, Code: "multipart_unsupported", Message: "this storage provider does not let Stowr list the incomplete multipart uploads"}
 }
 
 func invalidMultipartRequest(format string, values ...any) error {
@@ -278,7 +278,7 @@ func (s *storageInstance) nextMultipartPage(ctx context.Context, cursor multipar
 	}
 	if page.Truncated && (page.Next == (multipartCursor{}) ||
 		(page.Next.KeyMarker == cursor.KeyMarker && page.Next.UploadIDMarker == cursor.UploadIDMarker)) {
-		return page, apiError{Status: http.StatusBadGateway, Code: "provider_paging", Message: "the storage provider sent the same page of incomplete uploads again: S3-Browser stops the list"}
+		return page, apiError{Status: http.StatusBadGateway, Code: "provider_paging", Message: "the storage provider sent the same page of incomplete uploads again: Stowr stops the list"}
 	}
 	return page, nil
 }
@@ -475,7 +475,7 @@ type multipartAbortResult struct {
 	Failed        int64 `json:"failed"`
 }
 
-const activeUploadReason = "this S3-Browser sends this upload now"
+const activeUploadReason = "this Stowr process sends this upload now"
 
 func validMultipartUploadID(id string) bool {
 	return id != "" && len(id) <= 1024 && printableASCII(id)

@@ -1,5 +1,5 @@
 # Local build outputs.
-src/s3-browser
+src/stowr
 *.zip
 
 # Local credentials and developer overrides.
