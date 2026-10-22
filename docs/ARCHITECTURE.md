@@ -149,7 +149,7 @@ Each bucket and each volume has one information page at `/-/<host>/<bucket>/?inf
 Only the bucket selector opens the page:
 
 - The seven state icons of the trigger are one link to the page of the current bucket. The link is above the trigger and in its grid cell, after the name, before the usage. The trigger keeps a place for it. The rest of the trigger opens the list of the buckets.
-- In the list of the buckets, the seven icons of each entry are one link to the page of that bucket. The link is next to the button of the entry, not in it: a button cannot hold a link.
+- A host with one bucket or one volume has no row to open in the list: its only entry is always shown. In the list of the buckets, the seven icons of each entry are one link to the page of that bucket. The link is next to the button of the entry, not in it: a button cannot hold a link.
 - Enter and Space open the link. Tab goes from the trigger to the link. In the list, the arrow Right goes from an entry to its link, and the arrow Left goes back.
 - The accessible name of the link is "Information and permissions of this bucket", with the name of the bucket in the list, then the state of each icon. The link has no tooltip: the accessible name and the information page give each state.
 
@@ -627,7 +627,7 @@ capacity: the page shows nothing about it.
 
 ### The state icons and the facts of the buckets in the bucket selector
 
-The trigger of the bucket selector has the name of the current bucket, its seven state icons and its usage. Each entry of the list of the buckets has the same parts, in the same order, with the values of that bucket. A volume has the same parts.
+The trigger of the bucket selector has the name of the current bucket, its seven state icons and its usage. Each entry of the list of the buckets has the same parts, in the same order, with the values of that bucket. A volume has the same parts, with three icons (refer to the next paragraph).
 
 The seven state icons are always there, in this order. Each icon is grey (off, not available or denied), green (on, allowed or active) or orange (on, with a problem):
 
@@ -639,7 +639,7 @@ The seven state icons are always there, in this order. Each icon is grey (off, n
 | Versioning (`git-commit`) | Versioning is enabled | Versioning is suspended | Never enabled, or not available | The current bucket: `GET /api/lifecycle`. The other buckets: `versioningState` of `/api/instances` |
 | Lifecycle rules (`hourglass`) | One rule or more is on. The count of these rules follows the icon | - | No rule, or not available | The current bucket: the rules in `GET /api/lifecycle`. The other buckets: `lifecycleRules` of `/api/instances` |
 
-A volume has its read, write and delete icons, and the four icons of S3 are grey with the title "...: not available for a mounted folder". Colour is not the only sign: each icon has a title and a hidden text with the word of its state, for example "Encryption: on (SSE-S3)", "Encryption: requested but not applied by this provider" or "Versioning: off".
+A volume has only its read, write and delete icons. A mounted folder cannot have encryption, Object Lock, versioning or lifecycle rules, so the selector does not draw these four icons. Colour is not the only sign: each icon has a title and a hidden text with the word of its state, for example "Encryption: on (SSE-S3)", "Encryption: requested but not applied by this provider" or "Versioning: off".
 
 The usage follows the icons: the amount that the bucket holds (`3 MB`), then a thin bar and a short text. The short text is the more constraining part (`62 %`, of the quota or of the storage), or the used bytes (`12.3 GB`) for a bucket without a limit. A bucket without a limit has no amount: the short text is the amount. For a volume, the amount is what its folder holds: `computing…` before the first bytes, and `≥ 3 MB` while the count runs or after it stopped at its limit. The whole text (`12.3 GB of 20 GB` or `Storage: 910 GB of 1000 GB`) is for a screen reader and on the information page. A click on the usage (the amount, the short text or the bar) opens the information page of the bucket, as a click on the state icons does. The state icons and the usage are one link, with no tooltip. In a menu entry, this click does not select the bucket. Its source is `GET /api/usage`.
 
@@ -653,7 +653,7 @@ The selector has one layout at every width. The trigger is never on two lines:
 
 - The trigger is one line of 28 px, as the host picker of ClickHouse Dash (44 px on a coarse pointer). The selector is a grid with five columns: the icon, the name, the seven icons, the usage and the chevron. The trigger is a subgrid that spans the five columns, so the elements over it share its columns.
 - The icons are 14 px with a gap of 2 px. The link is 116 px, and 124 px with the count of the lifecycle rules. Without the name, the trigger needs 342 px with every part.
-- The selector is 460 px wide, and less when the header has less space. The selector is a CSS container. A narrower selector shows fewer parts, in this order: first the amount of the usage goes (440 px and less), then the short text of the usage (400 px), then the usage (360 px), then the icon of the trigger (300 px). At 240 px and less, the icons have a gap of 1 px and the trigger has a smaller padding. For a volume, the four grey icons of S3 go last (210 px).
+- The selector is 460 px wide, and less when the header has less space. The selector is a CSS container. A narrower selector shows fewer parts, in this order: first the amount of the usage goes (440 px and less), then the short text of the usage (400 px), then the usage (360 px), then the icon of the trigger (300 px). At 240 px and less, the icons have a gap of 1 px and the trigger has a smaller padding.
 - The seven icons of a bucket stay at every width. On a window of 320 px, the selector is 220 px: the name (38 px, with an ellipsis), the seven icons with the count, and the chevron. The name keeps 32 px at least.
 - The tooltip of the trigger gives each part at every width. The parts never wrap and are never cut. The name gets an ellipsis.
 - The list of the buckets has the same left and right edges as the selector. The open trigger covers the top of the list, and the two make one shape.

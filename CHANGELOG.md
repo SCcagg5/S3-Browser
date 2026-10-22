@@ -35,7 +35,7 @@ This document uses ASD-STE100 Simplified Technical English.
   write, delete, encryption, Object Lock, versioning and lifecycle rules (with the count of the rules that are on).
   Each icon is grey (off, not available or denied), green (on or allowed) or orange (on with a problem: SSE-S3 that
   Garage does not apply, suspended versioning). The trigger and each entry of the list have the same set, after the
-  name and before the usage. A volume has its three permissions and four grey icons. Each icon has a title and a hidden
+  name and before the usage. A volume has its three permissions only: it cannot have encryption, Object Lock, versioning or lifecycle rules, so these icons are not drawn. A host with one bucket or volume has no row to open in the list. Each icon has a title and a hidden
   word for its state.
 - The seven icons are one link to this page, in the trigger and in each entry of the list. The link is next to the
   button of the entry, not in it. Enter and Space open it.

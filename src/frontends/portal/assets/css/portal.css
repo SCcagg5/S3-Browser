@@ -5179,7 +5179,7 @@ body > .appHeader {
 /* A narrow selector shows fewer parts, in the trigger and in the menu, in this order: first the amount of the usage
    goes (440 px), then its short text (400 px, the bar stays), then the usage (360 px), then the icon of the trigger
    (300 px). The seven state icons of a bucket stay at every width. At 240 px and less the icons have a gap of 1 px and the
-   trigger a smaller padding. For a volume, the four icons of S3 (always grey) go last (210 px). The budget of the
+   trigger a smaller padding. The budget of the
    trigger without the name: 342 px with every part, and 182 px with the seven icons, the count and the chevron only.
    Thus the selector of a window of 320 px (220 px) has a name of 38 px. The name takes the rest, 32 px at least,
    with an ellipsis. The accessible name of the link
@@ -5221,12 +5221,6 @@ body > .appHeader {
 
   .storageSwitcher > .storageSwitcher__trigger {
     padding-right: 6px;
-  }
-}
-
-@container switcher (max-width: 210px) {
-  .storageSwitcher [data-volume] [data-s3] {
-    display: none;
   }
 }
 

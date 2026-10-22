@@ -286,6 +286,11 @@
           }, ic('chevron-right', 'storageHost__chevron'), ic(storageIcon(host)),
           h('span', { class: 'storageHost__copy' }, h('strong', {}, host.id),
             h('small', {}, `${host.provider.toUpperCase()} · ${plural(host.instances.length, isVolume(host) ? 'volume' : 'bucket')}`)));
+          // A host with one bucket has no row to open: its only entry is in the list, always shown.
+          if (host.instances.length === 1) {
+            list.hidden = false;
+            return h('section', { class: 'storageHost', 'data-host': host.id }, list);
+          }
           return h('section', { class: 'storageHost', 'data-host': host.id }, row, list);
         }));
         root.replaceChildren(trigger, infoLink(instance), menu);

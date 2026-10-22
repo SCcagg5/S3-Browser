@@ -16,7 +16,6 @@
 
   const BB = (window.BB = window.BB || {});
   const ENCRYPTION_NAMES = { AES256: 'SSE-S3', 'aws:kms': 'SSE-KMS', 'aws:kms:dsse': 'DSSE-KMS' };
-  const MOUNTED_FOLDER = 'not available for a mounted folder';
 
   function h(tag, attrs, ...children) {
     const node = document.createElement(tag);
@@ -49,10 +48,9 @@
       const name = BB.capabilities.normalizeState(item.state);
       return { key: item.key, icon: item.icon, tone: name === 'denied' ? 'off' : 'on', text: `${item.label}: ${BB.capabilities.stateLabel(item.state).toLowerCase()}` };
     });
-    if (isVolume(instance)) {
-      return out.concat([['encryption', 'key', 'Encryption'], ['object-lock', 'lock', 'Object Lock'], ['versioning', 'git-commit', 'Versioning'], ['lifecycle', 'hourglass', 'Lifecycle rules']]
-        .map(([key, icon, label]) => ({ key, icon, tone: 'off', s3: true, text: `${label}: ${MOUNTED_FOLDER}` })));
-    }
+    // A mounted folder has no encryption, no Object Lock, no versioning and no lifecycle rules: its icons would show
+    // a setting that cannot exist, so they are not drawn. It keeps the three icons of the rights.
+    if (isVolume(instance)) return out;
     const lock = BB.encryption?.bucketLock(instance);
     const algorithm = instance.encryption === 'sse-s3' && instance.encryptionApplied === 'yes' ? 'AES256' : String(instance.defaultEncryption || (instance.encryption === 'sse-s3' ? 'AES256' : ''));
     const encryption = !lock ? { tone: 'off', text: 'Encryption: off' }
