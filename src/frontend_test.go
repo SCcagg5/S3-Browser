@@ -110,7 +110,8 @@ func TestPortalFrontendFileSystem(t *testing.T) {
 		t.Fatal(err)
 	}
 	expected := []string{
-		"index.html", "preview.html", "404.html", "favicon.svg",
+		"index.html", "preview.html", "info.html", "404.html", "favicon.svg",
+		"assets/js/info.js", "assets/js/switcher.js", "assets/js/states.js", "assets/css/info.css",
 		"assets/css/portal.css", "assets/css/icons.css", "assets/css/dialogs.css", "assets/css/viewers.css", "assets/css/preview.css",
 		"assets/icons/tabler/folder.svg", "assets/js/app.js", "assets/js/theme.js", "assets/js/uploads.js",
 		"assets/js/session.js", "assets/js/common/api.js",
@@ -160,7 +161,7 @@ func TestPortalFrontendIsServed(t *testing.T) {
 		t.Fatal("the two frontends have the same fingerprint")
 	}
 
-	for _, page := range []string{"/", "/index.html", "/preview.html"} {
+	for _, page := range []string{"/", "/index.html", "/preview.html", "/info.html"} {
 		recorder := fetchStatic(t, app, page, nil)
 		body := recorder.Body.String()
 		if recorder.Code != http.StatusOK || !strings.Contains(body, `<meta name="bb-frontend" content="portal" />`) {
