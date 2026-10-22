@@ -1,10 +1,10 @@
 /* S3-Browser, "portal" interface: the main stylesheet of every page.
 
    Design rules. The tokens below write them down; the components only name tokens.
-   1. Header of ClickHouse Dash in the 1400 px column of the page, 45 px high from 1100 px up with controls of 28 px, as
-      in ClickHouse Dash: the mark, the name and the version at the left (with "Back to panel" behind a path prefix), the
-      bucket selector of the default interface and the theme selector at the right. The page is made of parts of the
-      portal: 14 px corners, on --panel with a hairline edge. In the part of the browser, the crumbs and the toolbar
+   1. Header of ClickHouse Dash in the 1400 px column of the page, one row of 45 px at every width with controls of
+      28 px, as in ClickHouse Dash: the mark, the name and the version at the left (with "Back to panel" behind a path
+      prefix), the bucket selector of the default interface and the theme selector at the right. The page is made of
+      parts of the portal: 14 px corners, on --panel with a hairline edge. In the part of the browser, the crumbs and the toolbar
       share one row when they fit; the crumbs are the bucket mark, a slash and the folders.
    2. Data of ClickHouse Dash. Tables are dense: 32 px rows (26 px compact), 13 px text, 12 px semibold muted heads,
       hairline dividers, a blue tint under the pointer. Measures (sizes, counts, times) use the sans face with
@@ -417,13 +417,12 @@ a {
 .appHeader__inner {
   display: flex;
   align-items: center;
-  gap: 12px 16px;
+  gap: 16px;
   max-width: var(--page-width);
   min-height: var(--header-h);
   margin: 0 auto;
-  /* Below 1100 px the bucket selector is 46 px high, so the header has 6 px over it and under it. On a wide window the
-     controls are 28 px high and the header has no padding: refer to the section "Facts of a bucket in the selector". */
-  padding: 6px var(--gutter);
+  /* One row at every width, as in ClickHouse Dash: the controls are 28 px high in the 44 px of the row. */
+  padding: 0 var(--gutter);
 }
 
 .appHeader__left,
@@ -434,6 +433,7 @@ a {
   min-width: 0;
 }
 
+.appHeader__left,
 .appHeader__right {
   flex: none;
 }
@@ -536,6 +536,12 @@ a {
   color: var(--text);
 }
 
+/* The theme button of the header of ClickHouse Dash: 34 px wide as its menu, 28 px high. */
+.appHeader .themeSelect__button {
+  width: 34px;
+  height: 28px;
+}
+
 .themeSelect.is-open .themeSelect__button {
   border-color: var(--border-strong);
   border-bottom-color: transparent;
@@ -619,36 +625,28 @@ html[data-theme-mode="light"] .themeSelect__current > .themeIcon--light {
 
 /* The bucket selector of the default interface: the buckets of each host, with their permissions. ------------------ */
 
-/* The selector sits at the right of the header. The trigger has two lines: the name of the bucket, then its facts. The
-   permission icons (with the versioning icon) and the line of the facts are elements of their own over the trigger:
-   they share the grid of the trigger, and the trigger keeps a place for them. The rows of the grid: the top edge, the
-   name, the facts, the bottom edge of the trigger (its border and its padding). A wide window has one line: refer to
-   the end of the section "Facts of a bucket in the selector". */
+/* The selector sits at the right of the header, in one line at every width: the icon, the name, the permission icons
+   with the versioning icon, the facts and the chevron. The permission icons and the facts are elements of their own
+   over the trigger, because a button cannot hold a button. The trigger is a subgrid of the selector, so the elements
+   over it share its columns. The selector takes 460 px of the free space of the header, and less when the header has
+   less. It is a container: a narrow selector shows fewer facts (refer to "Facts of a bucket in the selector"). The
+   tooltip of the trigger gives each fact. The menu has the same left and right edges as the selector. */
 .storageSwitcher {
   --perms-width: 60px;
-  --versioning-width: 0px;
-  --facts-left: 41px;
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: 5px 22px 14px 5px;
+  flex: 0 1 460px;
+  grid-template-columns: [icon] max-content [name] minmax(60px, 1fr) [perms] max-content [facts] auto [chevron] max-content;
+  grid-template-rows: 28px;
   align-items: center;
+  column-gap: 10px;
   min-width: 0;
   margin-left: auto;
+  container: switcher / inline-size;
 }
 
 .storageSwitcher > .storageSwitcher__trigger {
-  grid-area: 1 / 1 / -1 / 2;
-}
-
-.storageSwitcher.has-versioning {
-  --versioning-width: 16px;
-}
-
-.storageSwitcher__permsSlot {
-  flex: none;
-  width: calc(var(--perms-width) + var(--versioning-width));
-  margin-left: auto;
+  grid-area: 1 / 1 / 2 / -1;
 }
 
 /* The button of the permission icons, then the versioning icon. A click on the versioning icon opens the menu. */
@@ -656,16 +654,12 @@ html[data-theme-mode="light"] .themeSelect__current > .themeIcon--light {
   position: relative;
   z-index: calc(var(--z-menu) + 2);
   display: flex;
-  grid-area: 2 / 1;
+  grid-area: 1 / perms;
   align-items: center;
-  justify-self: end;
-  /* The chevron of the trigger: its padding, its width and the gap before it. */
-  margin-right: 36px;
   cursor: pointer;
 }
 
 .storageSwitcher__trigger.is-static ~ .storageSwitcher__permsGroup {
-  margin-right: 10px;
   cursor: default;
 }
 
@@ -696,13 +690,12 @@ html[data-theme-mode="light"] .themeSelect__current > .themeIcon--light {
 }
 
 .storageSwitcher__trigger {
-  display: flex;
+  display: grid;
+  grid-template-columns: subgrid;
   align-items: center;
-  gap: 10px;
-  width: min(380px, 100%);
-  min-width: 292px;
-  height: 46px;
-  padding: 4px 10px 4px 12px;
+  min-width: 0;
+  height: 28px;
+  padding: 0 10px 0 12px;
   border: 1px solid var(--button-border);
   border-radius: var(--radius-control);
   background: var(--button-bg);
@@ -735,39 +728,43 @@ button.storageSwitcher__trigger:hover,
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
   background: var(--panel);
-  /* Above the menu: the trigger covers the top line of the menu, which stays visible only in the 8 px left of it. */
+  /* Above the menu: the trigger covers the top line of the menu, and the two make one shape. */
   position: relative;
   z-index: calc(var(--z-menu) + 1);
 }
 
 .storageSwitcher__icon {
   --icon-size: 18px;
+  grid-column: icon;
   color: var(--accent-text);
 }
 
 .storageSwitcher__copy {
   display: grid;
-  flex: 1;
-  gap: 1px;
+  grid-column: name;
   min-width: 0;
 }
 
-.storageSwitcher__copy:has(> .storageSwitcher__factsSlot) {
-  grid-template-rows: 22px 14px;
-  gap: 0;
+.storageSwitcher__trigger[data-empty] .storageSwitcher__copy {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
 }
 
 .storageSwitcher__facts {
   position: relative;
   z-index: calc(var(--z-menu) + 2);
-  grid-area: 3 / 1;
-  /* The icon of the trigger, its gap and its padding at the left; the chevron at the right. */
-  margin: 0 36px 0 var(--facts-left);
+  grid-area: 1 / facts;
+  min-width: 0;
+  /* The button of the lifecycle rules is larger than its icon: the 4 px at each end keep it in the box. */
+  margin: 0 -4px;
+  padding: 0 4px;
   cursor: pointer;
 }
 
+/* A trigger without a chevron: the facts also take the gap before the empty column of the chevron. */
 .storageSwitcher__trigger.is-static ~ .storageSwitcher__facts {
-  margin-right: 10px;
+  margin-right: -14px;
   cursor: default;
 }
 
@@ -852,6 +849,7 @@ button.storageSwitcher__trigger:hover,
 
 .storageSwitcher__chevron {
   --icon-size: 16px;
+  grid-column: chevron;
   color: var(--muted);
   transition: transform var(--dur-base) var(--ease);
 }
@@ -862,6 +860,7 @@ button.storageSwitcher__trigger:hover,
 
 .storageSwitcher__skeleton {
   display: block;
+  grid-column: 1 / -1;
   width: 70%;
   height: 12px;
   border-radius: var(--radius-pill);
@@ -913,16 +912,18 @@ button.storageSwitcher__trigger:hover,
   position: absolute;
   top: 100%;
   right: 0;
-  left: -8px;
+  left: 0;
   z-index: var(--z-menu);
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 4px;
   max-height: min(70vh, 520px);
   margin-top: -1px;
   padding: 6px;
   overflow-y: auto;
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius-control) 0 var(--radius-pop) var(--radius-pop);
+  border-top: 0;
+  border-radius: 0 0 var(--radius-pop) var(--radius-pop);
   background: var(--panel);
   box-shadow: var(--shadow-overlay);
   transform-origin: top center;
@@ -935,6 +936,7 @@ button.storageSwitcher__trigger:hover,
 
 .storageHost {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 2px;
 }
 
@@ -980,16 +982,32 @@ button.storageSwitcher__trigger:hover,
 .storageBucket__copy {
   display: grid;
   flex: 1;
-  gap: 1px;
   min-width: 0;
 }
 
-/* An entry of a bucket: the name and the permission icons on the first line, the facts on the second line, and the root
-   prefix under them. The versioning icon keeps its place, so that the permission icons make one column. */
+/* A host is one line: its name, then the provider and the number of buckets, small and muted. */
+.storageHost__copy {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.storageHost__copy strong {
+  flex: 0 1 auto;
+  min-width: 40px;
+}
+
+.storageHost__copy small {
+  flex: 0 100 auto;
+  min-width: 0;
+}
+
+/* An entry of a bucket is one line: the name with its root prefix and its marks, the facts, then the permission icons
+   at the right end. The versioning icon keeps its place, so that the permission icons make one column. */
 .storageBucket__copy {
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
-  column-gap: 8px;
+  column-gap: 12px;
 }
 
 .storageBucket__titleRow {
@@ -998,7 +1016,7 @@ button.storageSwitcher__trigger:hover,
 
 .storageBucket__perms {
   display: inline-flex;
-  grid-area: 1 / 2;
+  grid-area: 1 / 3;
   gap: 3px;
 }
 
@@ -1008,15 +1026,31 @@ button.storageSwitcher__trigger:hover,
 }
 
 .storageBucket .bucketFacts {
-  grid-area: 2 / 1 / 3 / -1;
+  grid-area: 1 / 2;
+  min-width: 0;
 }
 
-.storageBucket__copy small {
-  grid-column: 1 / -1;
+/* The name, the marks of a full bucket, then the root prefix, small and muted. The name takes its width first, so the
+   prefix gets the ellipsis before the name. */
+.storageBucket__titleRow strong {
+  grid-column: 1;
+  min-width: 40px;
+}
+
+.storageBucket__titleRow .bucketMarks {
+  grid-column: 2;
+  margin-left: 8px;
+}
+
+.storageBucket__prefix {
+  grid-column: 3;
+  min-width: 0;
+  margin-left: 8px;
 }
 
 .storageHost__buckets {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 2px;
   padding-left: 14px;
 }
@@ -1026,9 +1060,9 @@ button.storageSwitcher__trigger:hover,
 }
 
 .storageBucket__titleRow {
-  display: flex;
+  display: grid;
+  grid-template-columns: fit-content(100%) auto minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
   min-width: 0;
 }
 
@@ -2871,37 +2905,6 @@ button.versionCount:focus-visible {
     flex-basis: 100%;
     justify-content: flex-start;
     margin-left: 0;
-  }
-
-  /* Two rows in the header, as in ClickHouse Dash: the brand, then the bucket selector and the theme selector. */
-  .appHeader__inner {
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-
-  /* The brand and the theme selector fill the first row; the bucket selector has the second row. */
-  .appHeader__left {
-    flex: 1 1 calc(100% - 100px);
-  }
-
-  .storageSwitcher {
-    flex: 1 1 100%;
-    order: 3;
-    margin-left: 0;
-  }
-
-  .appHeader__right {
-    order: 2;
-  }
-
-  .storageSwitcher__trigger {
-    width: 100%;
-    min-width: 0;
-  }
-
-  .storageSwitcher__menu {
-    left: 0;
-    border-top-left-radius: 0;
   }
 
   .searchField kbd {
@@ -5054,6 +5057,11 @@ button.bucketFact:focus-visible {
   text-overflow: ellipsis;
 }
 
+.bucketUsage__short {
+  flex: none;
+  white-space: nowrap;
+}
+
 .bucketUsage.is-loading {
   letter-spacing: 1px;
   animation: usage-wait 1.2s var(--ease) infinite alternate;
@@ -5098,112 +5106,107 @@ button.bucketFact:focus-visible {
   background: var(--danger);
 }
 
-/* A wide window: the trigger has one line, and each bucket of the menu has one line. The selector takes 620 px of the
-   free space of the header, and less when the header has less. The columns of the selector: the icon, the name (120 px
-   at least), the permission icons with the versioning icon, the facts and the chevron. The trigger is a subgrid of the
-   selector, so the elements over it share its columns. The facts never wrap: the usage text gets an ellipsis before the
-   name gets less than 120 px. The menu is as wide as the selector. */
-@media (min-width: 1100px) {
-  /* The header of ClickHouse Dash: 45 px with its border line, and the controls of its host picker (28 px). */
+/* A narrow window keeps the one row of the header. The header gives less space to the brand, in this order: the
+   "Back to panel" link keeps its chevron only, the name of the brand goes (the version stays, under nothing), then the
+   version goes. The gutter and the gaps get smaller, as in ClickHouse Dash. */
+@media (max-width: 600px) {
   .appHeader__inner {
-    padding-block: 0;
-  }
-
-  /* The theme button of ClickHouse Dash: 34 px wide as its menu, 28 px high. */
-  .appHeader .themeSelect__button {
-    width: 34px;
-    height: 28px;
-  }
-
-  .storageSwitcher {
-    flex: 0 1 620px;
-    grid-template-columns: [icon] max-content [name] minmax(120px, 1fr) [perms] max-content [facts] auto [chevron] max-content;
-    grid-template-rows: 28px;
-    column-gap: 10px;
-  }
-
-  .storageSwitcher > .storageSwitcher__trigger {
-    display: grid;
-    grid-area: 1 / 1 / 2 / -1;
-    grid-template-columns: subgrid;
-    width: auto;
-    min-width: 0;
-    height: 28px;
-    padding-block: 0;
-  }
-
-  .storageSwitcher__icon {
-    grid-column: icon;
-  }
-
-  .storageSwitcher__copy,
-  .storageSwitcher__copy:has(> .storageSwitcher__factsSlot) {
-    grid-column: name;
-    grid-template-rows: auto;
-  }
-
-  .storageSwitcher__trigger[data-empty] .storageSwitcher__copy {
-    display: flex;
-    align-items: baseline;
     gap: 8px;
   }
 
-  .storageSwitcher__chevron {
-    grid-column: chevron;
+  .appHeader__left {
+    gap: 6px;
   }
 
-  .storageSwitcher__skeleton {
-    grid-column: 1 / -1;
+  .backLink__text,
+  .appBrand__name {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 
-  .storageSwitcher__permsSlot,
-  .storageSwitcher__factsSlot {
-    display: none;
+  .backLink {
+    padding-right: 6px;
   }
 
-  .storageSwitcher > .storageSwitcher__permsGroup,
-  .storageSwitcher > .storageSwitcher__trigger.is-static ~ .storageSwitcher__permsGroup {
-    grid-area: 1 / perms;
-    margin: 0;
+  .appBrand {
+    gap: 6px;
   }
 
-  .storageSwitcher > .storageSwitcher__facts,
-  .storageSwitcher > .storageSwitcher__trigger.is-static ~ .storageSwitcher__facts {
-    grid-area: 1 / facts;
+  .versionBadge {
+    width: auto;
     min-width: 0;
-    margin: 0;
-  }
-
-  /* A trigger without a chevron: the facts also take the gap before the empty column of the chevron. */
-  .storageSwitcher > .storageSwitcher__trigger.is-static ~ .storageSwitcher__facts {
-    margin-right: -10px;
-  }
-
-  /* An entry of the menu: the name, the facts, then the permission icons at the right end. A root prefix goes under the
-     name, as a second line of that entry only. */
-  .storageBucket__copy {
-    grid-template-columns: minmax(120px, 1fr) auto auto;
-    column-gap: 12px;
-    row-gap: 0;
-  }
-
-  .storageBucket .bucketFacts {
-    grid-area: 1 / 2;
-    min-width: 0;
-  }
-
-  .storageBucket__perms {
-    grid-area: 1 / 3;
-  }
-
-  .storageBucket__copy small {
-    grid-column: 1;
+    max-width: 64px;
   }
 }
 
-/* A wide window with a coarse pointer: the controls of the header reach 44 px, and the header is 57 px with its border
-   line, as the header of ClickHouse Dash on a coarse pointer. */
-@media (min-width: 1100px) and (pointer: coarse) {
+@media (max-width: 420px) {
+  .appHeader__inner {
+    padding-inline: 10px;
+  }
+
+  .versionBadge {
+    display: none;
+  }
+}
+
+/* The usage in the trigger and in the menu: the bar and a short text (the percent of the limit, or the used bytes).
+   The whole text is for a screen reader and in the tooltip. */
+.storageSwitcher .bucketUsage__text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* A narrow selector shows fewer facts, in the trigger and in the menu, in this order: first the short text of the usage
+   goes (the bar stays), then the usage, then the encryption key, the padlock of Object Lock, the versioning icon and
+   the icon of the trigger. The narrowest selector shows the name, the permission icons and the chevron. The tooltips
+   of the trigger and of each entry give each fact. Nothing wraps. */
+@container switcher (max-width: 420px) {
+  .storageSwitcher .bucketUsage__short {
+    display: none;
+  }
+}
+
+@container switcher (max-width: 380px) {
+  .storageSwitcher [data-fact="usage"] {
+    display: none;
+  }
+}
+
+@container switcher (max-width: 330px) {
+  .storageSwitcher [data-fact="encryption"],
+  .storageSwitcher [data-fact="object-lock"],
+  .storageSwitcher__versioning,
+  .storageBucket__versioning,
+  .storageSwitcher__icon {
+    display: none;
+  }
+
+  /* The empty column of the icon keeps its gap: the padding at the left of the trigger is smaller. */
+  .storageSwitcher > .storageSwitcher__trigger {
+    padding-left: 4px;
+  }
+}
+
+@container switcher (max-width: 250px) {
+  .storageSwitcher__facts,
+  .storageBucket .bucketFacts {
+    display: none;
+  }
+}
+
+/* A coarse pointer: the controls of the header reach 44 px, and the header is 57 px with its border line, as the header
+   of ClickHouse Dash on a coarse pointer. */
+@media (pointer: coarse) {
   .appHeader__inner {
     padding-block: 6px;
   }

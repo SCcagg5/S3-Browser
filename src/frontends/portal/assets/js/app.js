@@ -429,18 +429,31 @@ BB.cfg = config;
       `bucket: ${instance.rootPrefix ? `${instance.bucket}/${instance.rootPrefix}` : instance.bucket}`,
       `provider: ${String(instance.provider || '').toUpperCase()}`,
       permissionSummary(instance),
+      ...factLines(instance),
       BB.usage?.selectorLine(BB.usage.cached(instance.id)) || null
     ].filter(Boolean).join('\n');
   }
 
-  // The trigger keeps a place for the permission icons and for the line of the facts of the bucket: they are elements
-  // of their own over the trigger, because a button cannot hold a button. The marks of a full bucket follow the name.
-  // On a wide window the trigger has one line, and the CSS hides the two places.
+  // The facts of a bucket as lines of its tooltip. A narrow selector shows fewer facts: the tooltip gives each one.
+  function factLines(instance) {
+    if (!can('list', instance)) return [];
+    const { versioning, rules } = bucketState(instance);
+    const lock = BB.encryption?.bucketLock(instance);
+    const lockTitle = BB.objectLock?.bucketLockTitle(instance);
+    const count = Array.isArray(rules) ? rules.length : rules;
+    return [
+      versioning === 'enabled' || versioning === 'suspended' ? `versioning: ${versioning === 'enabled' ? 'on' : 'suspended'}` : null,
+      lock ? `encryption: ${lock.title}` : null,
+      lockTitle ? `object lock: ${lockTitle}` : null,
+      count != null && instance.lifecycleSupported !== false ? `lifecycle rules: ${count}` : null
+    ];
+  }
+
+  // The name of the bucket and the marks of a full bucket. The permission icons and the facts are elements of their own
+  // over the trigger, because a button cannot hold a button.
   function switcherCopy(instance) {
     return h('span', { class: 'storageSwitcher__copy' },
-      h('span', { class: 'storageSwitcher__titleRow' }, h('strong', {}, storageName(instance)), h('span', { class: 'bucketMarks' }),
-        h('span', { class: 'storageSwitcher__permsSlot', 'aria-hidden': 'true' })),
-      h('span', { class: 'storageSwitcher__factsSlot', 'aria-hidden': 'true' }));
+      h('span', { class: 'storageSwitcher__titleRow' }, h('strong', {}, storageName(instance)), h('span', { class: 'bucketMarks' })));
   }
 
   // A click on an element over the trigger, outside its buttons, acts as a click on the trigger.
@@ -452,7 +465,7 @@ BB.cfg = config;
     };
   }
 
-  // The facts of the current bucket: the second line of the trigger, or a part of its line on a wide window.
+  // The facts of the current bucket, in the line of the trigger.
   function switcherFacts(multiple) {
     return h('div', { id: 'storageSwitcherFacts', class: 'storageSwitcher__facts bucketFacts', onclick: passClick(multiple) });
   }
@@ -524,10 +537,10 @@ BB.cfg = config;
               onclick: () => { closeSwitcher(true); selectInstance(entry.id); }
             },
             h('span', { class: 'storageBucket__copy' },
-              h('span', { class: 'storageBucket__titleRow' }, h('strong', {}, storageName(entry)), h('span', { class: 'bucketMarks' })),
+              h('span', { class: 'storageBucket__titleRow' }, h('strong', {}, storageName(entry)),
+                entry.rootPrefix ? h('small', { class: 'storageBucket__prefix' }, `/${entry.rootPrefix}`) : null, h('span', { class: 'bucketMarks' })),
               h('span', { class: 'bucketFacts' }),
-              h('span', { class: 'storageBucket__perms' }, permissionDots(entry), h('span', { class: 'storageBucket__versioning' })),
-              entry.rootPrefix ? h('small', {}, `/${entry.rootPrefix}`) : null))));
+              h('span', { class: 'storageBucket__perms' }, permissionDots(entry), h('span', { class: 'storageBucket__versioning' }))))));
           const row = h('button', {
             type: 'button', class: 'storageHost__row', 'aria-expanded': expanded ? 'true' : 'false', 'data-host': host.id,
             onclick: () => {
@@ -928,13 +941,18 @@ BB.cfg = config;
     if (canRead()) BB.lifecycle.open({ prefix: state.pathPrefix, canWrite: canWrite() });
   }
 
-  // The usage: the text, the thin bar of the used part of the limit, and the tooltip. A full bucket has a red bar.
+  // The usage: the text, a short text, the thin bar of the used part of the limit, and the tooltip. A full bucket has a
+  // red bar. The selector shows the short text (the percent of the limit, or the used bytes). The whole text is for a
+  // screen reader only.
   function usageFact(usage) {
     const limited = Number(usage.limitBytes) > 0;
+    const percent = Number(usage.percent) || 0;
+    const short = limited ? (percent > 0 && percent < 1 ? '<1 %' : `${usage.approximate ? '~' : ''}${Math.floor(percent)} %`)
+      : BB.usage.text(usage).replace(/ used$/, '');
     const node = h('span', {
       class: ['bucketFact', 'bucketUsage', usage.level && `is-${usage.level}`, BB.usage.full(usage) && 'is-full'], 'data-fact': 'usage',
       'data-level': usage.level || 'none', 'data-used-bytes': String(usage.usedBytes), title: BB.usage.title(usage)
-    }, h('span', { class: 'bucketUsage__text' }, BB.usage.text(usage)),
+    }, h('span', { class: 'bucketUsage__text' }, BB.usage.text(usage)), h('span', { class: 'bucketUsage__short', 'aria-hidden': 'true' }, short),
     limited ? h('span', { class: 'usageMeter', role: 'meter', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(usage.percent), 'aria-label': 'Used part of the limit' },
       h('span', { class: 'usageMeter__fill' })) : null);
     const fill = node.querySelector('.usageMeter__fill');

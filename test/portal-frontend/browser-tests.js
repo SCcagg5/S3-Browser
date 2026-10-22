@@ -288,7 +288,7 @@ test('breadcrumb: the crumbs and the toolbar share one row on a desktop, and the
 test('breadcrumb: another bucket gives its own root crumb, and the preview path starts at the bucket', async () => {
   const page = await newPage();
   await open(page, MAIN);
-  await page.click('.storageSwitcher__trigger');
+  await page.click('.storageSwitcher__trigger strong');
   await page.click('.storageBucket[data-instance="seaweedfs-archive"]');
   await until(page, () => document.querySelector('.storageSwitcher__trigger strong')?.textContent === 'SeaweedFS - archive');
   assert.equal(await page.getAttribute('.crumb--root', 'aria-label'), 'SeaweedFS - archive, bucket root');
@@ -1790,32 +1790,79 @@ test('header: the brand and the version of ClickHouse Dash, in the centred colum
 const DASH_HEADER = 45;
 const DASH_HEADER_COARSE = 57;
 
-test('header: from 1100 px up the header has the height of the header of ClickHouse Dash, in the light and the dark theme, with no horizontal scroll', async () => {
-  const cases = [
-    { viewport: { width: 1440, height: 900 }, header: DASH_HEADER },
-    { viewport: { width: 1280, height: 720 }, header: DASH_HEADER },
-    { viewport: { width: 1440, height: 900 }, header: DASH_HEADER_COARSE, coarse: true }
-  ];
-  for (const item of cases) {
-    for (const colorScheme of ['light', 'dark']) {
-      const page = await newPage({ viewport: item.viewport, colorScheme, ...(item.coarse ? { isMobile: true, hasTouch: true } : {}) });
-      await open(page, MAIN);
-      await page.waitForSelector(`${FACTS} [data-fact="usage"][data-used-bytes]`);
-      const box = await page.evaluate(() => {
-        const height = selector => document.querySelector(selector).getBoundingClientRect().height;
-        return { header: height('.appHeader'), trigger: height('.storageSwitcher__trigger'), theme: height('.themeSelect__button'),
-          scroll: document.documentElement.scrollWidth - window.innerWidth };
-      });
-      const where = `${item.viewport.width}${item.coarse ? ' coarse' : ''} ${colorScheme}: ${JSON.stringify(box)}`;
-      assert.ok(Math.abs(box.header - item.header) <= 1, where);
-      // The controls of the header: 28 px as the host picker of ClickHouse Dash, 44 px on a coarse pointer.
-      assert.equal(box.trigger, item.coarse ? 44 : 28, where);
-      assert.equal(box.theme, item.coarse ? 44 : 28, where);
-      assert.ok(box.scroll <= 0, where);
-      assert.deepEqual(page.errors, []);
-      await page.context().close();
+// The widths of the tests of the header: a phone, a docked DevTools (700 to 1000 px), a laptop and a wide screen.
+const HEADER_WIDTHS = [320, 360, 390, 480, 600, 700, 760, 800, 900, 1000, 1100, 1280, 1440, 1920];
+
+// The geometry of the header: its height, the vertical centre of each control (the way back, the mark, the trigger and
+// the elements over it, the theme button), the order of the controls from left to right, and the scroll of the page.
+function headerRow(page) {
+  return page.evaluate(() => {
+    const shown = node => Boolean(node) && node.getClientRects().length > 0 && node.getBoundingClientRect().width > 0;
+    const rect = node => node.getBoundingClientRect();
+    const centre = node => Math.round(rect(node).top + rect(node).height / 2);
+    const pick = selector => document.querySelector(selector);
+    const controls = ['#backLink', '.appBrand__logo', '.storageSwitcher__trigger', '.storageSwitcher__trigger strong', '.storageSwitcher__perms',
+      '.storageSwitcher__facts', '.storageSwitcher__chevron', '.themeSelect__button'].map(pick).filter(shown);
+    const order = ['#backLink', '.appBrand', '#storageSwitcher', '.themeSelect'].map(pick).filter(shown).map(rect);
+    return {
+      header: rect(pick('.appHeader')).height, trigger: rect(pick('.storageSwitcher__trigger')).height, theme: rect(pick('.themeSelect__button')).height,
+      spread: Math.max(...controls.map(centre)) - Math.min(...controls.map(centre)),
+      overlap: order.some((box, index) => index > 0 && box.left < order[index - 1].right - 0.5),
+      inside: order.every(box => box.left >= 0 && box.right <= window.innerWidth),
+      scroll: document.documentElement.scrollWidth - window.innerWidth
+    };
+  });
+}
+
+test('header: one row with the height of the header of ClickHouse Dash at every width, in the two themes, with a fine and a coarse pointer, also with "Back to panel"', async () => {
+  for (const coarse of [false, true]) {
+    const page = await newPage({ viewport: { width: 1440, height: 900 }, ...(coarse ? { isMobile: true, hasTouch: true } : {}) });
+    await open(page, MAIN);
+    await page.waitForSelector(`${FACTS} [data-fact="usage"][data-used-bytes]`);
+    for (const back of [false, true]) {
+      // The page shows the way back behind a path prefix. The test stack has none: the test shows the link.
+      await page.evaluate(value => { document.getElementById('backLink').hidden = !value; }, back);
+      for (const colorScheme of ['light', 'dark']) {
+        await page.emulateMedia({ colorScheme });
+        for (const width of HEADER_WIDTHS) {
+          await page.setViewportSize({ width, height: 900 });
+          const box = await headerRow(page);
+          const where = `${width}${coarse ? ' coarse' : ''} ${colorScheme}${back ? ' back' : ''}: ${JSON.stringify(box)}`;
+          assert.ok(Math.abs(box.header - (coarse ? DASH_HEADER_COARSE : DASH_HEADER)) <= 1, where);
+          // The controls of the header: 28 px as the host picker of ClickHouse Dash, 44 px on a coarse pointer.
+          assert.equal(box.trigger, coarse ? 44 : 28, where);
+          assert.equal(box.theme, coarse ? 44 : 28, where);
+          assert.ok(box.spread <= 2, where);
+          assert.equal(box.overlap, false, where);
+          assert.equal(box.inside, true, where);
+          assert.ok(box.scroll <= 0, where);
+        }
+      }
     }
+    assert.deepEqual(page.errors, []);
+    await page.context().close();
   }
+});
+
+test('header: a narrow window hides the name of the brand, then its version, and the text of "Back to panel"', async () => {
+  const page = await newPage({ viewport: { width: 1440, height: 900 } });
+  await open(page, MAIN);
+  await page.evaluate(() => { document.getElementById('backLink').hidden = false; });
+  const seen = () => page.evaluate(() => {
+    const shown = node => node.getBoundingClientRect().width > 2;
+    return { name: shown(document.querySelector('.appBrand__name')), version: document.querySelector('#versionBadge').getClientRects().length > 0,
+      back: shown(document.querySelector('.backLink__text')), mark: shown(document.querySelector('.appBrand__logo')) };
+  });
+  for (const [width, expected] of [[1440, { name: true, version: true, back: true, mark: true }], [601, { name: true, version: true, back: true, mark: true }],
+    [600, { name: false, version: true, back: false, mark: true }], [421, { name: false, version: true, back: false, mark: true }],
+    [420, { name: false, version: false, back: false, mark: true }], [320, { name: false, version: false, back: false, mark: true }]]) {
+    await page.setViewportSize({ width, height: 900 });
+    assert.deepEqual(await seen(), expected, String(width));
+  }
+  // The link keeps its name for a screen reader and in its tooltip.
+  assert.equal(await page.getAttribute('#backLink', 'title'), 'Back to panel');
+  assert.equal((await page.textContent('#backLink')).trim(), 'Back to panel');
+  await page.context().close();
 });
 
 // The look of an open menu: the alpha of its background colour (rgb(), rgba(), rgb( / ) and color(srgb / ) forms), the
@@ -1863,11 +1910,70 @@ async function assertOpaqueMenu(page, selector, where) {
   assert.deepEqual(surface.covered, [], text);
 }
 
-// Closes the open menu: Escape, then a click on the brand of the header (or the title of the preview).
+// Closes the open menu: Escape, then a click on the mark of the brand of the header (or the title of the preview).
 async function closeMenu(page) {
   await page.keyboard.press('Escape');
-  await page.click('.appBrand__name, .previewTitle .doc-name');
+  await page.click('.appBrand__logo, .previewTitle .doc-name');
 }
+
+test('header: the trigger of the selector is one row while the buckets load', async () => {
+  const page = await newPage({ viewport: { width: 900, height: 800 } });
+  let release;
+  const wait = new Promise(resolve => { release = resolve; });
+  await page.route(/\/api\/instances(\?|$)/, async route => { await wait; await route.continue(); });
+  await page.goto(BASE + MAIN);
+  await page.waitForSelector('.storageSwitcher__skeleton');
+  const box = await headerRow(page);
+  assert.ok(Math.abs(box.header - DASH_HEADER) <= 1 && box.trigger === 28 && box.spread <= 2, JSON.stringify(box));
+  release();
+  await page.waitForSelector('.dataTable, .empty');
+  await page.context().close();
+});
+
+// The geometry of the bar of the preview: its height, the vertical centres of its controls, and the scroll of the page.
+function previewRow(page) {
+  return page.evaluate(() => {
+    const bar = document.querySelector('.previewBar');
+    const shown = node => node.getClientRects().length > 0 && node.getBoundingClientRect().width > 0;
+    const centre = node => Math.round(node.getBoundingClientRect().top + node.getBoundingClientRect().height / 2);
+    const controls = Array.from(bar.querySelectorAll('.previewBar__back, #docName, .previewBar__tools > :not([hidden]), .themeSelect__button')).filter(shown);
+    const tools = document.querySelector('.previewBar__tools').getBoundingClientRect();
+    return { height: bar.getBoundingClientRect().height, spread: Math.max(...controls.map(centre)) - Math.min(...controls.map(centre)),
+      name: Math.round(document.querySelector('#docName').getBoundingClientRect().width), inside: tools.right <= window.innerWidth,
+      scroll: document.documentElement.scrollWidth - window.innerWidth };
+  });
+}
+
+test('preview: the bar is one row with the height of the header of ClickHouse Dash at every width; the comparison keeps one row from 761 px', async () => {
+  for (const coarse of [false, true]) {
+    const page = await newPage({ viewport: { width: 1440, height: 900 }, ...(coarse ? { isMobile: true, hasTouch: true } : {}) });
+    for (const mode of ['file', 'versions', 'compare']) {
+      await page.goto(`${BASE}${MAIN}${mode === 'file' ? 'reports/2026/q3/summary.md' : 'versions/report.txt'}`, { waitUntil: 'networkidle' });
+      if (mode !== 'file') await page.waitForSelector('.previewVersion .versionPicker__button');
+      if (mode === 'compare') {
+        await page.click('.previewVersion .versionPicker__button');
+        await page.click('.versionPicker__compare');
+        await page.waitForSelector('#compareFrom:not([hidden]) .versionPicker__button');
+      }
+      for (const colorScheme of ['light', 'dark']) {
+        await page.emulateMedia({ colorScheme });
+        for (const width of HEADER_WIDTHS) {
+          await page.setViewportSize({ width, height: 900 });
+          const box = await previewRow(page);
+          const where = `${mode} at ${width}${coarse ? ' coarse' : ''} ${colorScheme}: ${JSON.stringify(box)}`;
+          assert.ok(box.scroll <= 0 && box.inside, where);
+          assert.ok(box.name >= 40, where);
+          // The comparison below 761 px puts its versions and statistics in a row of their own under the name.
+          if (mode === 'compare' && width <= 760) continue;
+          assert.ok(Math.abs(box.height - (coarse ? DASH_HEADER_COARSE : DASH_HEADER)) <= 1, where);
+          assert.ok(box.spread <= 2, where);
+        }
+      }
+    }
+    assert.deepEqual(page.errors, []);
+    await page.context().close();
+  }
+});
 
 test('menus: the theme menu and every other menu of the portal are opaque from their first frame, in the light and the dark theme', async () => {
   const instance = 'seaweedfs-main';
@@ -1881,7 +1987,7 @@ test('menus: the theme menu and every other menu of the portal are opaque from t
       await page.click('[data-theme-trigger]');
       await assertOpaqueMenu(page, '#themeMenu', where);
       await closeMenu(page);
-      await page.click('.storageSwitcher__trigger .storageSwitcher__icon');
+      await page.click('.storageSwitcher__trigger strong');
       await assertOpaqueMenu(page, '#storageSwitcherMenu', where);
       await closeMenu(page);
       if (viewport.width === 390) {
@@ -1947,7 +2053,7 @@ test('selector: the bucket selector of the default interface, by host, with the 
   assert.equal(await trigger.locator('.permDot').count(), 0);
   assert.equal(await page.locator('.storageSwitcher__perms .permDot').count(), 3);
   assert.equal(await page.isHidden('#storageSwitcherMenu'), true);
-  await trigger.click();
+  await trigger.locator('strong').click();
   assert.equal(await trigger.getAttribute('aria-expanded'), 'true');
   // One host for each provider of the test stack; the host of the current bucket is open.
   assert.deepEqual(await page.locator('.storageHost__row').evaluateAll(rows => rows.map(row => row.dataset.host)), ['seaweedfs', 'minio', 'garage']);
@@ -1986,7 +2092,7 @@ test('selector: the bucket selector of the default interface, by host, with the 
   await until(page, () => location.pathname.endsWith('/-/seaweedfs/seaweedfs-archive/'));
   assert.match(await page.locator('.storageSwitcher__trigger').innerText(), /SeaweedFS - archive/);
   // A click outside closes the menu. The wide menu covers the centre of the listing: the click is at its left.
-  await page.click('.storageSwitcher__trigger');
+  await page.click('.storageSwitcher__trigger strong');
   await page.click('#listing', { position: { x: 10, y: 10 } });
   assert.equal(await page.isHidden('#storageSwitcherMenu'), true);
   await page.context().close();
@@ -2076,29 +2182,34 @@ test('selector: on a phone the permission icons stay in the selector, and the pa
   await page.context().close();
 });
 
-test('selector: the open menu has a rounded top-left corner and a top line up to the vertical border of the selector', async () => {
+test('selector: the open menu has the left and right edges of the selector, and the trigger covers its top line', async () => {
   const page = await newPage();
   await open(page, MAIN);
-  await page.click('.storageSwitcher__trigger');
-  const box = await page.evaluate(() => {
-    const trigger = document.querySelector('.storageSwitcher__trigger');
-    const menu = document.querySelector('#storageSwitcherMenu');
-    const t = trigger.getBoundingClientRect();
-    const m = menu.getBoundingClientRect();
-    const style = getComputedStyle(menu);
-    const triggerStyle = getComputedStyle(trigger);
-    return { stub: t.left - m.left, right: t.right - m.right, top: style.borderTopWidth, radius: style.borderTopLeftRadius,
-      rightRadius: style.borderTopRightRadius, triggerBottomLeft: triggerStyle.borderBottomLeftRadius, triggerBottom: t.bottom, menuTop: m.top,
-      triggerZ: triggerStyle.zIndex, menuZ: style.zIndex };
-  });
-  assert.equal(box.stub, 8, `the menu goes 8 px past the left border of the selector: ${JSON.stringify(box)}`);
-  assert.equal(box.right, 0);
-  assert.equal(box.top, '1px');
-  assert.equal(box.radius, '8px');
-  assert.equal(box.rightRadius, '0px');
-  assert.equal(box.triggerBottomLeft, '0px');
-  assert.ok(box.menuTop <= box.triggerBottom, `the menu touches the selector: ${JSON.stringify(box)}`);
-  assert.ok(Number(box.triggerZ) > Number(box.menuZ), 'the selector covers the line of the menu under it');
+  for (const width of [1440, 1280, 1100, 900, 600, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.click('.storageSwitcher__trigger strong');
+    const box = await page.evaluate(() => {
+      const trigger = document.querySelector('.storageSwitcher__trigger');
+      const menu = document.querySelector('#storageSwitcherMenu');
+      for (const animation of menu.getAnimations()) animation.finish();
+      const t = trigger.getBoundingClientRect();
+      const m = menu.getBoundingClientRect();
+      const style = getComputedStyle(menu);
+      const triggerStyle = getComputedStyle(trigger);
+      return { left: m.left - t.left, right: m.right - t.right, width: m.width - t.width, top: style.borderTopWidth,
+        radius: [style.borderTopLeftRadius, style.borderTopRightRadius], triggerBottom: [triggerStyle.borderBottomLeftRadius, triggerStyle.borderBottomRightRadius],
+        touch: m.top - t.bottom, triggerZ: Number(triggerStyle.zIndex), menuZ: Number(style.zIndex) };
+    });
+    const where = `${width}: ${JSON.stringify(box)}`;
+    assert.ok(Math.abs(box.left) <= 1 && Math.abs(box.right) <= 1 && Math.abs(box.width) <= 1, where);
+    // The menu has no line at its top and no round corner there: the open trigger is its top, and the two make one shape.
+    assert.equal(box.top, '0px', where);
+    assert.deepEqual(box.radius, ['0px', '0px'], where);
+    assert.deepEqual(box.triggerBottom, ['0px', '0px'], where);
+    assert.ok(box.touch <= 0 && box.touch >= -1.5, where);
+    assert.ok(box.triggerZ > box.menuZ, where);
+    await page.keyboard.press('Escape');
+  }
   await page.context().close();
 });
 
@@ -2336,7 +2447,7 @@ test('access: a bucket that refuses write and delete shows it in the selector, a
   await open(page, '-/seaweedfs/seaweedfs-archive/');
   const states = await page.locator('.storageSwitcher__perms .permDot').evaluateAll(nodes => nodes.map(node => `${node.dataset.permission}:${node.dataset.state}`));
   assert.deepEqual(states.slice(1), ['write:denied', 'delete:denied']);
-  await page.click('.storageSwitcher__trigger');
+  await page.click('.storageSwitcher__trigger strong');
   const main = await page.locator('.storageBucket[data-instance="seaweedfs-main"] .permDot').evaluateAll(nodes => nodes.map(node => node.dataset.state));
   assert.ok(!main.includes('denied'));
   assert.equal(await page.isHidden('#uploadWrap'), true);
@@ -4421,7 +4532,7 @@ const entryFacts = (page, instance) => factNames(page, `.storageBucket[data-inst
 
 // Opens the menu of the selector with every host open, and waits for the usage of each bucket.
 async function openAllBuckets(page) {
-  await page.click('.storageSwitcher__trigger');
+  await page.click('.storageSwitcher__trigger strong');
   while (await page.locator('.storageHost__row[aria-expanded="false"]').count()) await page.click('.storageHost__row[aria-expanded="false"]');
   await until(page, () => document.querySelectorAll('.storageBucket [data-fact="usage"]').length === document.querySelectorAll('.storageBucket').length
     && !document.querySelector('.storageBucket [data-level="loading"]'), null, 20000);
@@ -4437,8 +4548,9 @@ for (const [instance, provider] of Object.entries(PROVIDERS)) {
     assert.equal(answer.limitSource, 'provider');
     assert.equal(answer.level, 'ok');
     assert.equal(answer.source, instance.split('-')[0]);
-    // The answer never names the admin API or its token.
-    assert.doesNotMatch(JSON.stringify(answer), /3903|9333|8888|admin-token|minio\/admin/);
+    // The answer never names the admin API or its token. A port is the port of an address: a number of the answer (a
+    // count of bytes, the nanoseconds of a time) can hold the same digits.
+    assert.doesNotMatch(JSON.stringify(answer), /:(3903|9333|8888)\b|admin-token|minio\/admin/);
     await open(page, `-/${instance.split('-')[0]}/${instance}/`);
     await page.waitForSelector(`${FACTS} [data-fact="usage"][data-level="ok"]`);
     const text = (await usageItem(page).locator('.bucketUsage__text').textContent()).trim();
@@ -4530,7 +4642,7 @@ test('usage: the facts of seaweedfs-locked, of the encrypted buckets and of a bu
   await second.route(/\/api\/usage\?/, route => { usageRequests += 1; return route.continue(); });
   await open(second, MAIN);
   await second.waitForSelector(`${VERSIONING} [data-fact="versioning"]`);
-  await second.click('.storageSwitcher__trigger');
+  await second.click('.storageSwitcher__trigger strong');
   await sleep(500);
   assert.equal(await second.locator('[data-fact="usage"]').count(), 0);
   assert.equal(usageRequests, 0);
@@ -4616,7 +4728,7 @@ test('usage: the menu reads the usage of the buckets at most 4 at a time, with a
   // The reads wait: the page is not idle, so it opens without waiting for the network.
   await page.goto(BASE + MAIN);
   await page.waitForSelector('.dataTable');
-  await page.click('.storageSwitcher__trigger');
+  await page.click('.storageSwitcher__trigger strong');
   while (await page.locator('.storageHost__row[aria-expanded="false"]').count()) await page.click('.storageHost__row[aria-expanded="false"]');
   await page.waitForSelector('.storageBucket[data-instance="garage-main"] [data-fact="usage"][data-level="loading"]');
   assert.equal((await page.textContent('.storageBucket[data-instance="garage-main"] [data-fact="usage"]')).trim(), '…');
@@ -4721,7 +4833,7 @@ test('usage: the tooltip of a bucket in the selector has its usage', async () =>
   await open(page, MAIN);
   await page.waitForSelector(`${FACTS} [data-fact="usage"][data-used-bytes]`);
   assert.match(await page.getAttribute('.storageSwitcher__trigger', 'title'), /\nusage: ~[\d.]+ (B|KB|MB|GB) of 20 GB \([\d.]+ %\)$/);
-  await page.click('.storageSwitcher__trigger');
+  await page.click('.storageSwitcher__trigger strong');
   await until(page, () => /usage: [\d.]+ (B|KB|MB|GB) of 20 GB/.test(document.querySelector('.storageBucket[data-instance="garage-main"]')?.title || ''));
   await until(page, () => /usage: ~[\d.]+ (B|KB|MB) used$/.test(document.querySelector('.storageBucket[data-instance="minio-locked"]')?.title || ''));
   // The menu stays open while the lines change.
@@ -4730,24 +4842,26 @@ test('usage: the tooltip of a bucket in the selector has its usage', async () =>
   await page.context().close();
 });
 
-// The geometry of the bucket selector: the header, the trigger, the elements over it, and the scroll of the page. A
-// centre is the vertical centre of a box, in whole pixels.
+// The geometry of the bucket selector: the trigger, the elements over it, and the scroll of the page. A centre is the
+// vertical centre of a box, in whole pixels. Only the elements that show count.
 function selectorGeometry(page) {
   return page.evaluate(() => {
     const rect = node => node.getBoundingClientRect();
-    const centre = node => (node && rect(node).width > 0 ? Math.round(rect(node).top + rect(node).height / 2) : null);
+    const shown = node => Boolean(node) && node.getClientRects().length > 0 && rect(node).width > 0;
+    const centre = node => Math.round(rect(node).top + rect(node).height / 2);
     const facts = document.querySelector('.storageSwitcher__facts');
     const trigger = rect(document.querySelector('.storageSwitcher__trigger'));
     const name = document.querySelector('.storageSwitcher__trigger strong');
-    const usage = facts.querySelector('.bucketUsage__text');
+    const short = facts.querySelector('.bucketUsage__short');
+    const parts = [name, document.querySelector('.storageSwitcher__perms'), document.querySelector('#storageSwitcherVersioning > *'), facts,
+      ...facts.querySelectorAll('.bucketFact'), document.querySelector('.storageSwitcher__chevron'), document.querySelector('.storageSwitcher__icon')].filter(shown);
     return {
-      view: window.innerWidth, page: document.documentElement.scrollWidth, header: rect(document.querySelector('.appHeader')).height,
-      row: [centre(document.querySelector('.appBrand')), centre(document.querySelector('#storageSwitcher')), centre(document.querySelector('.themeSelect'))],
-      width: Math.round(trigger.width), height: Math.round(trigger.height),
-      centres: [centre(name), centre(document.querySelector('.storageSwitcher__perms')), centre(facts), centre(document.querySelector('.storageSwitcher__chevron'))],
-      fit: facts.scrollWidth <= facts.clientWidth, inside: rect(facts).left >= trigger.left && rect(facts).right <= trigger.right,
-      factRows: new Set(Array.from(facts.querySelectorAll('.bucketFact')).map(centre)).size, under: rect(facts).top >= rect(name).bottom - 1,
-      name: Math.round(rect(name).width), usage: usage ? Math.round(rect(usage).width) : 0
+      view: window.innerWidth, page: document.documentElement.scrollWidth,
+      width: Math.round(trigger.width), height: Math.round(trigger.height), centres: parts.map(centre),
+      fit: !shown(facts) || facts.scrollWidth <= facts.clientWidth, inside: !shown(facts) || (rect(facts).left >= trigger.left && rect(facts).right <= trigger.right),
+      name: Math.round(rect(name).width), nameFirst: parts.every(node => node === name || node.closest('.storageSwitcher__trigger') || rect(node).left >= rect(name).right - 1),
+      facts: Array.from(facts.querySelectorAll('.bucketFact')).filter(shown).map(node => node.dataset.fact + (node.dataset.fact === 'usage' && !shown(short) ? ':bar' : '')),
+      short: shown(short) ? short.textContent : ''
     };
   });
 }
@@ -4758,85 +4872,151 @@ const spread = values => Math.max(...values) - Math.min(...values);
 // encryption, no versioning.
 const LINE_INSTANCES = ['seaweedfs-main', 'seaweedfs-locked', 'seaweedfs-encrypted', 'garage-main', 'minio-main'];
 
-test('selector: on a wide window (1440 and 1280) the trigger is one line of 28 px, the facts of each bucket are fully visible, and the header has the height of ClickHouse Dash', async () => {
-  for (const viewport of [{ width: 1440, height: 900 }, { width: 1280, height: 720 }]) {
-    const page = await newPage({ viewport });
-    for (const instance of LINE_INSTANCES) {
-      await open(page, `-/${instance.split('-')[0]}/${instance}/`);
-      await page.waitForSelector(`${FACTS} [data-fact="usage"][data-used-bytes]`);
-      if (instance !== 'garage-main') await page.waitForSelector(`${VERSIONING} [data-fact="versioning"]`);
-      const box = await selectorGeometry(page);
-      const where = `${instance} at ${viewport.width}: ${JSON.stringify(box)}`;
-      // One line: the name, the permission icons, the facts and the chevron have the same vertical centre.
-      assert.ok(spread(box.centres) <= 3 && box.centres.every(Number.isInteger), where);
-      assert.equal(box.height, 28, where);
-      assert.ok(box.width >= 560 && box.width <= 640, where);
-      assert.ok(box.name >= 60, where);
-      // The facts never wrap and are never cut.
-      assert.equal(box.fit, true, where);
-      assert.equal(box.inside, true, where);
-      assert.equal(box.factRows, 1, where);
-      assert.ok(box.usage > 1, where);
-      // The header keeps one row and the height of the header of ClickHouse Dash; the page has no horizontal scroll.
-      assert.ok(Math.abs(box.header - DASH_HEADER) <= 1 && spread(box.row) <= 3, where);
-      assert.ok(box.page <= box.view, where);
+// The cases of the selector that are not in the data of the test stack: a long name with every fact and a full bucket,
+// one visible bucket (a static trigger), and a failed read of the usage.
+const WORST_NAME = 'A bucket with a very long name that never fits in the trigger of the selector';
+async function routeSelectorCase(page, name) {
+  if (name === 'worst') {
+    await page.route(/\/api\/instances(\?|$)/, async route => {
+      const response = await route.fetch();
+      const body = await response.json();
+      Object.assign(body.instances.find(item => item.id === 'seaweedfs-main'), { name: WORST_NAME, encryption: 'sse-s3', encryptionApplied: 'yes', objectLockSupported: true, lifecycleRules: 12, versioningState: 'enabled' });
+      await route.fulfill({ response, json: body });
+    });
+    await routeUsage(page, { 'seaweedfs-main': usageAnswer('seaweedfs-main', 96) });
+  } else if (name === 'single') {
+    await page.route(/\/api\/instances(\?|$)/, async route => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.instances = body.instances.filter(item => item.id === 'seaweedfs-locked');
+      await route.fulfill({ response, json: body });
+    });
+  } else if (name === 'unavailable') {
+    await page.route(/\/api\/usage\?/, route => route.fulfill({ json: { supported: true, available: false, instance: 'seaweedfs-main', source: 'seaweedfs', error: { code: 'usage_unavailable', message: 'The provider does not answer.' } } }));
+  }
+}
+
+const SELECTOR_CASES = [...LINE_INSTANCES.map(id => ({ name: id, path: `-/${id.split('-')[0]}/${id}/`, usage: true })),
+  { name: 'worst', path: MAIN, usage: true }, { name: 'single', path: '-/seaweedfs/seaweedfs-locked/', usage: true }, { name: 'unavailable', path: MAIN, usage: false }];
+
+test('selector: the trigger is never on two lines, at every width, with a fine and a coarse pointer, for each instance, a long name with every fact, one bucket and a failed usage', async () => {
+  for (const coarse of [false, true]) {
+    for (const item of SELECTOR_CASES) {
+      const page = await newPage({ viewport: { width: 1440, height: 900 }, ...(coarse ? { isMobile: true, hasTouch: true } : {}) });
+      await routeSelectorCase(page, item.name);
+      await open(page, item.path);
+      await page.waitForSelector(item.usage ? `${FACTS} [data-fact="usage"][data-used-bytes]` : `${FACTS} [data-fact="usage"][data-level="unavailable"]`);
+      for (const colorScheme of ['light', 'dark']) {
+        await page.emulateMedia({ colorScheme });
+        for (const width of HEADER_WIDTHS) {
+          await page.setViewportSize({ width, height: 900 });
+          const box = await selectorGeometry(page);
+          const where = `${item.name} at ${width}${coarse ? ' coarse' : ''} ${colorScheme}: ${JSON.stringify(box)}`;
+          // One row: 28 px (44 px on a coarse pointer), and every element that shows has the same vertical centre.
+          assert.equal(box.height, coarse ? 44 : 28, where);
+          assert.ok(spread(box.centres) <= 2, where);
+          // The facts never wrap, are never cut, and stay in the trigger, after the name. The selector is 460 px at most.
+          assert.equal(box.fit, true, where);
+          assert.equal(box.inside, true, where);
+          assert.equal(box.nameFirst, true, where);
+          assert.ok(box.width <= 460, where);
+          assert.ok(box.name >= 40, where);
+          assert.ok(box.page <= box.view, where);
+        }
+      }
+      assert.deepEqual(page.errors, []);
+      await page.context().close();
     }
+  }
+});
+
+test('selector: a narrow selector drops the short text of the usage, then the usage, then the key, the padlock and the versioning icon, then the facts; the tooltip keeps each fact', async () => {
+  const page = await newPage({ viewport: { width: 1440, height: 900 } });
+  await routeSelectorCase(page, 'worst');
+  await open(page, MAIN);
+  await page.waitForSelector(`${FACTS} [data-fact="usage"][data-used-bytes]`);
+  const seen = async width => {
+    await page.setViewportSize({ width, height: 900 });
+    const box = await selectorGeometry(page);
+    const versioning = await page.evaluate(() => document.querySelector('#storageSwitcherVersioning').getClientRects().length > 0);
+    return { width: box.width, facts: box.facts, short: box.short, versioning };
+  };
+  assert.deepEqual(await seen(1440), { width: 460, facts: ['encryption', 'object-lock', 'lifecycle', 'usage'], short: '96 %', versioning: true });
+  // Each width shows the facts of the wider widths minus the first ones of the order.
+  const steps = [];
+  for (const width of [1440, 760, 600, 560, 520, 480, 440, 420, 390, 360, 320]) steps.push(await seen(width));
+  const rank = box => [box.short ? 1 : 0, box.facts.some(fact => fact.startsWith('usage')) ? 1 : 0, box.facts.includes('encryption') ? 1 : 0, box.facts.includes('lifecycle') ? 1 : 0];
+  for (let index = 1; index < steps.length; index += 1) {
+    const [before, after] = [rank(steps[index - 1]), rank(steps[index])];
+    assert.ok(after.every((value, position) => value <= before[position]), JSON.stringify(steps));
+  }
+  // The order: the short text goes before the bar, the usage before the key, the key with the padlock and the versioning
+  // icon, and the lifecycle button last. At 320 px the trigger has the name, the permission icons and the chevron.
+  assert.ok(steps.some(box => !box.short && box.facts.includes('usage:bar')), JSON.stringify(steps));
+  assert.ok(steps.some(box => !box.facts.some(fact => fact.startsWith('usage')) && box.facts.includes('encryption')), JSON.stringify(steps));
+  assert.ok(steps.some(box => !box.facts.includes('encryption') && !box.versioning && box.facts.includes('lifecycle')), JSON.stringify(steps));
+  assert.deepEqual(steps.at(-1).facts, []);
+  for (const box of steps) assert.equal(box.facts.includes('object-lock'), box.facts.includes('encryption'), JSON.stringify(box));
+  // The tooltip of the trigger gives each fact at every width.
+  const title = await page.getAttribute('.storageSwitcher__trigger', 'title');
+  for (const line of ['versioning: on', 'encryption: Encrypted: SSE-S3 for each new object', 'object lock: Object Lock is on', 'lifecycle rules: ']) {
+    assert.ok(title.includes(`\n${line}`), `${line} in ${title}`);
+  }
+  assert.match(title, /\nusage: [\d.]+ GB of 20 GB \(96 %\)$/);
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+test('selector: each bucket and each host of the menu is one line at every width; a root prefix follows the name, and the menu has the edges of the selector', async () => {
+  for (const coarse of [false, true]) {
+    const page = await newPage({ viewport: { width: 1440, height: 900 }, ...(coarse ? { isMobile: true, hasTouch: true } : {}) });
+    await page.route(/\/api\/instances(\?|$)/, async route => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.instances.find(item => item.id === 'seaweedfs-archive').rootPrefix = 'tenant-a/with/a/long/root/prefix/';
+      await route.fulfill({ response, json: body });
+    });
+    await open(page, MAIN);
+    await openAllBuckets(page);
+    await until(page, () => document.querySelectorAll('.storageBucket [data-fact="usage"][data-used-bytes]').length >= 6);
+    for (const width of HEADER_WIDTHS) {
+      await page.setViewportSize({ width, height: 900 });
+      const menu = await page.evaluate(() => {
+        const rect = node => node.getBoundingClientRect();
+        const shown = node => Boolean(node) && node.getClientRects().length > 0 && rect(node).width > 0;
+        const centre = node => Math.round(rect(node).top + rect(node).height / 2);
+        const box = rect(document.querySelector('#storageSwitcherMenu'));
+        const trigger = rect(document.querySelector('.storageSwitcher__trigger'));
+        const rows = Array.from(document.querySelectorAll('.storageBucket, .storageHost__row')).map(node => {
+          const name = node.querySelector('strong');
+          const parts = [name, node.querySelector('small'), node.querySelector('.bucketFacts'), node.querySelector('.permDots')].filter(shown);
+          const facts = node.querySelector('.bucketFacts');
+          const prefix = node.querySelector('.storageBucket__prefix');
+          return { id: node.dataset.instance || node.dataset.host, height: Math.round(rect(node).height), spread: Math.max(...parts.map(centre)) - Math.min(...parts.map(centre)),
+            fit: !shown(facts) || facts.scrollWidth <= facts.clientWidth, inside: rect(node).right <= box.right + 0.5,
+            order: parts.every((part, index) => index === 0 || rect(part).left >= rect(parts[index - 1]).right - 1),
+            prefix: prefix ? { text: prefix.textContent, after: !shown(prefix) || rect(prefix).left >= rect(name).right - 1 } : null };
+        });
+        return { left: box.left - trigger.left, right: box.right - trigger.right, rows, scroll: document.documentElement.scrollWidth - window.innerWidth };
+      });
+      const where = `${width}${coarse ? ' coarse' : ''}: ${JSON.stringify(menu)}`;
+      assert.ok(Math.abs(menu.left) <= 1 && Math.abs(menu.right) <= 1, where);
+      assert.ok(menu.scroll <= 0, where);
+      assert.equal(menu.rows.length, 12, where);
+      for (const row of menu.rows) {
+        assert.ok(row.height <= (coarse ? 48 : 40) && row.spread <= 2 && row.fit && row.inside && row.order, `${JSON.stringify(row)} at ${width}`);
+        if (row.id === 'seaweedfs-archive') assert.deepEqual(row.prefix, { text: '/tenant-a/with/a/long/root/prefix/', after: true }, `${width}`);
+      }
+    }
+    // A host is one line: its name, then the provider and the number of buckets.
+    assert.match(await page.textContent('.storageHost__row'), /seaweedfs\s*S3 · 4 buckets/);
     assert.deepEqual(page.errors, []);
     await page.context().close();
   }
 });
 
-test('selector: on a wide window each bucket of the menu is one line, and a bucket with a root prefix has it under its name', async () => {
-  const page = await newPage({ viewport: { width: 1440, height: 900 } });
-  await page.route(/\/api\/instances(\?|$)/, async route => {
-    const response = await route.fetch();
-    const body = await response.json();
-    body.instances.find(item => item.id === 'seaweedfs-archive').rootPrefix = 'tenant-a/';
-    await route.fulfill({ response, json: body });
-  });
-  await open(page, MAIN);
-  await openAllBuckets(page);
-  const entries = await page.locator('.storageBucket').evaluateAll(nodes => nodes.map(node => {
-    const rect = item => item.getBoundingClientRect();
-    const centre = item => Math.round(rect(item).top + rect(item).height / 2);
-    const name = node.querySelector('strong');
-    const facts = node.querySelector('.bucketFacts');
-    const prefix = node.querySelector('small');
-    return { id: node.dataset.instance, height: Math.round(rect(node).height), centres: [centre(name), centre(facts), centre(node.querySelector('.permDots'))],
-      fit: facts.scrollWidth <= facts.clientWidth, order: rect(name).right <= rect(facts).left && rect(facts).right <= rect(node.querySelector('.permDots')).left,
-      prefix: prefix ? { text: prefix.textContent, under: rect(prefix).top >= rect(name).bottom - 1, left: Math.abs(rect(prefix).left - rect(name).left) <= 1 } : null };
-  }));
-  assert.equal(entries.length, 9);
-  for (const entry of entries) {
-    const where = JSON.stringify(entry);
-    assert.ok(spread(entry.centres) <= 3, where);
-    assert.equal(entry.fit, true, where);
-    assert.equal(entry.order, true, where);
-    if (entry.id === 'seaweedfs-archive') {
-      // The root prefix is the second line of that entry only.
-      assert.deepEqual(entry.prefix, { text: '/tenant-a/', under: true, left: true }, where);
-      assert.ok(entry.height > 44, where);
-    } else {
-      assert.equal(entry.prefix, null, where);
-      assert.ok(entry.height <= 44, where);
-    }
-  }
-  // The menu is as wide as the selector, with its 8 px at the left. The rows of the hosts keep their two lines.
-  const menu = await page.evaluate(() => {
-    const trigger = document.querySelector('.storageSwitcher__trigger').getBoundingClientRect();
-    const box = document.querySelector('#storageSwitcherMenu').getBoundingClientRect();
-    const host = document.querySelector('.storageHost__row');
-    return { left: Math.round(trigger.left - box.left), right: Math.round(box.right - trigger.right), width: Math.round(box.width),
-      host: host.querySelector('small').getBoundingClientRect().top >= host.querySelector('strong').getBoundingClientRect().bottom - 1 };
-  });
-  assert.deepEqual(menu, { left: 8, right: 0, width: 628, host: true });
-  assert.equal(await page.getAttribute('.storageBucket[data-instance="seaweedfs-main"]', 'aria-selected'), 'true');
-  assert.deepEqual(page.errors, []);
-  await page.context().close();
-});
-
-test('selector: the versioning icon follows the trash icon, in the trigger and in the menu, on one line and on two lines; Garage has none', async () => {
-  for (const viewport of [{ width: 1440, height: 900 }, { width: 1099, height: 800 }]) {
+test('selector: the versioning icon follows the trash icon, in the trigger and in the menu; Garage has none', async () => {
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 600, height: 800 }]) {
     const page = await newPage({ viewport });
     await open(page, MAIN);
     await page.waitForSelector(`${VERSIONING} [data-fact="versioning"]`);
@@ -4869,49 +5049,24 @@ test('selector: the versioning icon follows the trash icon, in the trigger and i
   }
 });
 
-test('selector: below 1100 px the trigger keeps its two lines, with no horizontal scroll and no higher header at 1099, 900, 760 and 390', async () => {
-  // The heights of the header: the header of ClickHouse Dash from 1100 px up, one row of 59 px from 761 px up, two rows
-  // below.
-  const cases = [
-    { viewport: { width: 1100, height: 800 }, lines: 1, header: DASH_HEADER + 0.5 },
-    { viewport: { width: 1099, height: 800 }, lines: 2, header: 59.5 },
-    { viewport: { width: 900, height: 800 }, lines: 2, header: 59.5 },
-    { viewport: { width: 760, height: 800 }, lines: 2, header: 99.5 },
-    { viewport: { width: 390, height: 844 }, lines: 2, header: 111.5, phone: true }
-  ];
-  for (const item of cases) {
-    const page = await newPage(item.phone ? { viewport: item.viewport, isMobile: true, hasTouch: true } : { viewport: item.viewport });
-    await open(page, '-/seaweedfs/seaweedfs-locked/');
-    await page.waitForSelector(`${FACTS} [data-fact="usage"][data-used-bytes]`);
-    await page.waitForSelector(`${VERSIONING} [data-fact="versioning"]`);
-    const box = await selectorGeometry(page);
-    const where = `${item.viewport.width}: ${JSON.stringify(box)}`;
-    assert.ok(box.page <= box.view, where);
-    assert.ok(box.header <= item.header, where);
-    assert.equal(box.fit, true, where);
-    assert.equal(box.inside, true, where);
-    assert.equal(box.factRows, 1, where);
-    if (item.lines === 1) {
-      assert.ok(spread(box.centres) <= 3 && box.height === 28, where);
-    } else {
-      assert.equal(box.under, true, where);
-      assert.ok(Math.abs(box.height - 46) < 1, where);
-    }
-    assert.deepEqual(await factNames(page), ['object-lock', 'lifecycle', 'usage']);
-    if (item.phone) {
-      // No "i" button and no popover. The menu: each bucket keeps its two lines, in the window.
-      assert.equal(await page.locator('#bucketInfoButton, #bucketChips').count(), 0);
-      await page.tap('.storageSwitcher__trigger .storageSwitcher__icon');
-      const menu = await page.evaluate(() => Array.from(document.querySelectorAll('.storageHost[data-host="seaweedfs"] .storageBucket')).map(node => {
-        const facts = node.querySelector('.bucketFacts').getBoundingClientRect();
-        return facts.height > 0 && facts.right <= window.innerWidth && facts.top >= node.querySelector('strong').getBoundingClientRect().bottom - 1;
-      }));
-      assert.deepEqual(menu, [true, true, true, true]);
-      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth) <= 390);
-    }
-    assert.deepEqual(page.errors, []);
-    await page.context().close();
-  }
+test('selector: on a phone (390 px, coarse pointer) the trigger is one row with the lifecycle button, the menu is in the window, and the buttons work', async () => {
+  const page = await newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  await open(page, '-/seaweedfs/seaweedfs-locked/');
+  await page.waitForSelector(`${FACTS} [data-fact="usage"][data-used-bytes]`, { state: 'attached' });
+  const box = await selectorGeometry(page);
+  assert.equal(box.height, 44, JSON.stringify(box));
+  assert.deepEqual(box.facts, ['lifecycle'], JSON.stringify(box));
+  // No "i" button and no popover. The lifecycle button opens the rules.
+  assert.equal(await page.locator('#bucketInfoButton, #bucketChips').count(), 0);
+  await page.tap(`${FACTS} [data-fact="lifecycle"]`);
+  await page.waitForSelector('.bb-modal');
+  await closeWindow(page);
+  await page.tap('.storageSwitcher__trigger strong');
+  const menu = await page.evaluate(() => Array.from(document.querySelectorAll('.storageHost[data-host="seaweedfs"] .storageBucket')).map(node => node.getBoundingClientRect().right <= window.innerWidth));
+  assert.deepEqual(menu, [true, true, true, true]);
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth) <= 390);
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
 });
 
 // The answer of /api/usage for a part of the limit of 20 GiB, as the server gives it.
@@ -4954,7 +5109,7 @@ test('usage: a bucket at 90 % or more of its limit gives a banner, a mark on the
     await page.evaluate(() => getComputedStyle(document.querySelector('.storageSwitcher__trigger [data-mark="full"]')).color));
   assert.match(await usageItem(page).getAttribute('class'), /is-full/);
   const red = await page.evaluate(() => getComputedStyle(document.querySelector('.storageSwitcher__facts .usageMeter__fill')).backgroundColor);
-  await page.click('.storageSwitcher__trigger');
+  await page.click('.storageSwitcher__trigger strong');
   assert.equal(await page.locator('.storageBucket[data-instance="seaweedfs-main"] [data-mark="full"] .ic-alert-triangle').count(), 1);
   assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.storageBucket[data-instance="seaweedfs-main"] .usageMeter__fill')).backgroundColor), red);
   await page.keyboard.press('Escape');
@@ -4991,7 +5146,7 @@ test('usage: a bucket without a limit of bytes never warns, and a full bucket ot
   assert.equal(await page.locator('.storageSwitcher.is-full, .storageSwitcher__trigger [data-mark="full"]').count(), 0);
   // The other bucket: a small mark on the trigger with its name, and the alert icon and a red bar in its entry.
   assert.equal(await page.getAttribute('.storageSwitcher__trigger [data-mark="other"]', 'title'), 'Another bucket is almost full: SeaweedFS - archive');
-  await page.click('.storageSwitcher__trigger');
+  await page.click('.storageSwitcher__trigger strong');
   assert.equal(await page.locator('.storageBucket[data-instance="seaweedfs-archive"] [data-mark="full"]').count(), 1);
   assert.match(await page.getAttribute('.storageBucket[data-instance="seaweedfs-archive"] [data-fact="usage"]', 'class'), /is-full/);
   assert.equal(await page.locator('.storageBucket[data-instance="seaweedfs-main"] [data-mark]').count(), 0);

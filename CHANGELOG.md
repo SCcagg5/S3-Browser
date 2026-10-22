@@ -208,17 +208,20 @@ The main additions are:
 ### Interface `portal`: facts of the buckets in the selector, warning of a full bucket, summary of the details
 
 - The trigger of the bucket selector shows the facts of the current bucket: the encryption (a key), Object Lock (a
-  padlock, with the default retention), the lifecycle rules (an hourglass and the count) and the usage, for example
-  `12.3 GB of 20 GB` with a thin bar or `12.3 GB used`. Each fact has a tooltip and shows only when it is true. An
+  padlock, with the default retention), the lifecycle rules (an hourglass and the count) and the usage, a thin bar
+  with the part of the limit (`62 %`) or the used bytes (`12.3 GB`). The tooltip has the whole text (`12.3 GB of
+  20 GB`). Each fact has a tooltip and shows only when it is true. An
   approximate number starts with `~`. The bar has the colour of a warning from 80 % and of an error from 95 %.
 - The versioning icon (Tabler `git-commit`, the tooltip says "Versioning: on" or "Versioning: suspended") is directly
   after the read, write and delete icons of the bucket, in the trigger and in each bucket of the list. It is not a part
   of the button of the permissions, and it does not act. A bucket that never had versioning shows no versioning icon.
-- From 1100 px up, the trigger of the selector is one line of 28 px: the name, the permission and versioning icons, the
-  facts and the chevron. The selector is 620 px wide (less when the header has less space), and the list is as wide.
-  The name keeps 120 px at least, and the facts never wrap: the usage text gets an ellipsis first. Each bucket of the
-  list is one line too, with its root prefix under the name when it has one. Below 1100 px, the trigger and each
-  bucket have two lines: the name and the icons, then the facts. The header never gets higher.
+- The trigger of the selector is one line of 28 px at every width: the name, the permission and versioning icons, the
+  facts and the chevron. It is never on two lines. The selector is 460 px wide (less when the header has less space),
+  and the list of the buckets has the same left and right edges. A narrower selector drops facts in this order: the
+  short text of the usage, the usage, the key, the padlock and the versioning icon, then the lifecycle button. The
+  tooltip of the trigger gives each fact. The facts never wrap and the name gets an ellipsis.
+- Each bucket of the list is one line too, with its root prefix after the name in small muted text. Each host of the
+  list is one line: its name, the provider and the number of buckets.
 - The chip of the lifecycle rules opens the rules. It is a button next to the trigger, not in it. The keyboard goes
   from the trigger to the permission icons, then to this chip.
 - Each bucket in the list of the selector has the same facts, with the values of that bucket. The page reads the
@@ -246,17 +249,25 @@ The main additions are:
 
 ### Interface `portal`: height of the header, opaque menus
 
-- The header has the height of the header of ClickHouse Dash: 45 px from 1100 px up (44 px and its border line), and
-  57 px on a coarse pointer. A measurement of the Dash header in a browser, with its own stylesheet, gives these
-  values. The bucket selector and the theme button are 28 px high, as the host picker of ClickHouse Dash (44 px on a
-  coarse pointer). The trigger stays one line, with its permission icons, its facts and its usage bar.
-- Below 1100 px the header does not change: one row of 59 px from 761 px, two rows on a phone.
+- The header has the height of the header of ClickHouse Dash at every width from 320 px: one row of 45 px (44 px and
+  its border line), and 57 px on a coarse pointer. A measurement of the Dash header in a browser, with its own
+  stylesheet, gives these values. The bucket selector and the theme button are 28 px high, as the host picker of
+  ClickHouse Dash (44 px on a coarse pointer).
+- A narrow window keeps the one row. At 600 px and less, the name of the brand and the text of "Back to panel" go (the
+  chevron stays). At 420 px and less, the version goes. The mark of the brand stays.
+- The bar of the preview page is one row of 45 px too (57 px on a coarse pointer): the way back, the name of the file,
+  its size and its path on one line, then the tools. The path gets an ellipsis before the name. At 760 px and less,
+  the path and the date of the version go. A comparison keeps one row from 761 px; below, its versions and its
+  statistics take a row under the name.
 - The menus open with a short move and no fade, so the page never shows through a menu, also in its first frame. This
   applies to the theme menu, the list of the buckets, the menus Actions and settings, the version picker and the
   suggestions of the metadata editor. Each menu has the opaque colour `--panel`.
 - An open menu of the header is above the upload dock.
-- New browser tests: the header is 45 px at 1440 and 1280 px (57 px on a coarse pointer) in the two themes, with no
-  horizontal scroll. The background of each menu has an alpha of 1, the menu has an opacity of 1 in its first frame,
+- New browser tests: the header is one row of 45 px (57 px on a coarse pointer) at 14 widths from 320 to 1920 px, in
+  the two themes, also with "Back to panel", with no horizontal scroll. The trigger is one row of 28 px (44 px) at each
+  width for five instances, a long name with every fact and a full bucket, one bucket and a failed read of the usage.
+  Each bucket and each host of the list is one line, and the list has the edges of the trigger. The bar of the preview
+  is one row at each width. The background of each menu has an alpha of 1, the menu has an opacity of 1 in its first frame,
   and no element of the page is over it, in the two themes.
 
 ### Uploads and deletes
@@ -314,10 +325,8 @@ The main additions are:
   the usage after an upload on Garage and SeaweedFS, the tooltips of the selector, the pills of the details and the
   sections that close with the keyboard.
 - Other tests check the facts of `seaweedfs-locked` and of the encrypted buckets, the facts of each bucket in the list,
-  4 reads of the usage at a time, and the chip of the lifecycle rules (mouse and keyboard). At 1440 and 1280 px, the
-  trigger is one line for five instances, its facts are fully visible, each bucket of the list is one line (a root
-  prefix gives a second line), and the header keeps its height. The versioning icon is within 12 px of the delete
-  icon, and Garage has none. At 1099, 900, 760 and 390 px, the two lines stay, with no horizontal scroll. Tests answer `/api/usage` with 91 %, 100 % and 50 % and
+  4 reads of the usage at a time, and the chip of the lifecycle rules (mouse and keyboard). The versioning icon is
+  within 12 px of the delete icon, and Garage has none. Tests answer `/api/usage` with 91 %, 100 % and 50 % and
   check the banner, its role, its texts, the marks of the selector, the mark of another full bucket, and no warning
   without a limit. A test checks that Storage object and Tags are side by side in the details at 1440 px, and one under
   the other at 390 px. The settings menu has no part wider
