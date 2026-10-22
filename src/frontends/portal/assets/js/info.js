@@ -80,9 +80,6 @@
       body);
   }
 
-  // Two cards side by side on a wide window: the larger one first.
-  const grid = (main, side) => h('div', { class: 'infoGrid' }, h('div', { class: 'infoGrid__main' }, main), side ? h('div', { class: 'infoGrid__side' }, side) : null);
-
   // A row of a key-value list: the term, the value (text or nodes) and a note. A row without a value is left out.
   const row = (term, value, note = '', key = '') => (value === null || value === undefined || value === '' ? null : { term, value, note, key });
 
@@ -290,14 +287,14 @@
 
   function functionCards(instance, lifecycle) {
     if (isVolume(instance)) {
-      return grid(card('volume', 'Functions of a mounted folder', {}, kv([
+      return [card('volume', 'Functions of a mounted folder', {}, kv([
         row('Folders', chip('on', 'Real folders'), '', 'folders'),
         row('Incomplete uploads', supported(instance.multipartUploadsSupported === true), '', 'multipart'),
         checksumRow(instance)
-      ], 'Functions')));
+      ], 'Functions'))];
     }
     const lockDefault = instance.objectLockSupported === true && instance.objectLockDefault ? `Default retention: ${BB.objectLock.defaultText(instance.objectLockDefault)}` : '';
-    return grid(
+    return [
       card('protection', 'Data protection', {}, kv([
         versioningRow(instance, lifecycle),
         ...encryptionRows(instance),
@@ -309,7 +306,7 @@
         row('Edit of the metadata', supported(instance.metadataEditSupported === true), '', 'metadata'),
         row('Incomplete uploads', supported(instance.multipartUploadsSupported === true), '', 'multipart'),
         checksumRow(instance)
-      ], 'Operations')));
+      ], 'Operations'))];
   }
 
   // --- Page -----------------------------------------------------------------------------------------------------------
@@ -328,12 +325,12 @@
   function render() {
     const instance = page.instance;
     const sections = byId('infoSections');
-    sections.replaceChildren(
-      part('access', 'Identity and permissions', '',
-        grid(card('identity', 'Identity', {}, kv(identityRows(instance), 'Identity')),
-          card('permissions', 'Permissions', {}, kv(permissionRows(instance), 'Permissions')))),
-      part('storage', 'Storage', page.usage?.source ? BB.usage.sourceName(page.usage) : '', storageBody(instance, page.usage)),
-      part('functions', 'Functions', '', functionCards(instance, page.lifecycle)));
+    // Three columns: the identity, then the permissions and the functions, then the storage.
+    sections.replaceChildren(h('div', { class: 'infoColumns' },
+      h('div', { class: 'infoColumn', 'data-column': 'identity' }, card('identity', 'Identity', {}, kv(identityRows(instance), 'Identity'))),
+      h('div', { class: 'infoColumn', 'data-column': 'functions' },
+        card('permissions', 'Permissions', {}, kv(permissionRows(instance), 'Permissions')), ...functionCards(instance, page.lifecycle)),
+      h('div', { class: 'infoColumn', 'data-column': 'storage' }, storageBody(instance, page.usage))));
     sections.removeAttribute('aria-busy');
     const banner = byId('infoBanner');
     const text = page.usage ? BB.usage.fullText(page.usage) : '';

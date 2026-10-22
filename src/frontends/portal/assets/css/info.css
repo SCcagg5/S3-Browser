@@ -105,23 +105,19 @@ html:has(> body.infoPage),
   min-width: 0;
 }
 
-/* Two cards side by side on a wide window (3 / 2), one under the other on a narrow window. */
-.infoGrid {
+/* Three columns on a wide window: the identity, the permissions and the functions, the storage. One column on a narrow
+   window. */
+.infoColumns {
   display: grid;
-  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: start;
   gap: 6px 12px;
 }
 
-.infoGrid__main,
-.infoGrid__side {
+.infoColumn {
   display: grid;
   gap: 6px;
   min-width: 0;
-}
-
-.infoGrid > .infoGrid__main:only-child {
-  grid-column: 1 / -1;
 }
 
 .infoCard {
@@ -253,8 +249,7 @@ html:has(> body.infoPage),
 /* Gauges, as the disk cards of Dash: the name and its chips, the percent over a track, a summary, then facts. */
 .infoGauges {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
-  gap: 8px;
+  gap: 6px;
 }
 
 .infoGauge {
@@ -415,8 +410,8 @@ html:has(> body.infoPage),
   font-size: var(--fs-sm);
 }
 
-@media (max-width: 820px) {
-  .infoGrid {
+@media (max-width: 1000px) {
+  .infoColumns {
     grid-template-columns: minmax(0, 1fr);
   }
 }
