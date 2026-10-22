@@ -27,7 +27,7 @@ RUN set -eux; \
         -tags=netgo,osusergo \
         -trimpath \
         -ldflags="-s -w -buildid= -X main.buildVersion=${VERSION} -X main.buildCommit=${COMMIT} -X main.buildDate=${BUILD_DATE} -X main.multipartCopyThresholdBuild=${MULTIPART_COPY_THRESHOLD} -X main.multipartCopyPartSizeBuild=${MULTIPART_COPY_PART_SIZE}" \
-        -o /out/rootfs/s3-browser .; \
+        -o /out/rootfs/stowr .; \
     mkdir -p /out/rootfs/config /out/rootfs/etc/ssl/certs; \
     cp /etc/ssl/certs/ca-certificates.crt /out/rootfs/etc/ssl/certs/ca-certificates.crt
 
@@ -39,7 +39,7 @@ USER 65532:65532
 WORKDIR /
 EXPOSE 8080
 STOPSIGNAL SIGTERM
-ENTRYPOINT ["/s3-browser"]
+ENTRYPOINT ["/stowr"]
 CMD ["-c", "/config/config.hcl"]
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD ["/s3-browser", "healthcheck", "-c", "/config/config.hcl"]
+  CMD ["/stowr", "healthcheck", "-c", "/config/config.hcl"]

@@ -1,4 +1,4 @@
-// Puts the test objects in the buckets of the three providers through the API of S3-Browser (PUT /s3), and the test
+// Puts the test objects in the buckets of the three providers through the API of Stowr (PUT /s3), and the test
 // files of the volume "files": through the API, and through the Docker volume for the links and the old temporary file.
 const { request } = require('playwright');
 const { PROVIDERS, LOCKED, ENCRYPTED, VOLUMES } = require('./providers');
@@ -65,7 +65,7 @@ const VOLUME_FILES = {
 
 // The test files that the API cannot make: a hidden file, an empty folder, a link to a folder of the volume, a link to
 // a file of the volume, a link that leaves the volume, and a temporary file of an upload that stopped three days ago.
-// They belong to the user of S3-Browser, as the files of the API.
+// They belong to the user of Stowr, as the files of the API.
 function seedVolumeFiles(volume) {
   const root = volume.mount;
   const own = target => fs.lchownSync(target, volume.uid, volume.uid);
@@ -85,7 +85,7 @@ function seedVolumeFiles(volume) {
     fs.symlinkSync(target, link);
     own(link);
   }
-  const stale = path.join(mkdir('uploads'), '.s3b-tmp-5eed0000000000000000000000000001-stale.bin');
+  const stale = path.join(mkdir('uploads'), '.stowr-tmp-5eed0000000000000000000000000001-stale.bin');
   fs.writeFileSync(stale, Buffer.alloc(4096, 's'));
   own(stale);
   const old = new Date(Date.now() - 3 * 24 * 3600 * 1000);

@@ -1,5 +1,5 @@
 // The browser smoke test of a volume on a real FUSE mount of SeaweedFS (weed mount). run.sh runs it in the Playwright
-// container, on the network of the service "mount". The volume "sw" is /mnt/sw/s3b of that container (config.hcl):
+// container, on the network of the service "mount". The volume "sw" is /mnt/sw/stowr of that container (config.hcl):
 // the test sees it only through the page and the API. It makes the folder smoke/ and removes it at the end.
 const { chromium } = require('playwright');
 const assert = require('assert/strict');

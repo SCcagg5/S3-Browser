@@ -26,13 +26,13 @@ Open:
 http://localhost:8080/
 ```
 
-To expose the application under `/s3-browser/`, configure the reverse proxy to remove that prefix before forwarding. The frontend resolves all URLs relative to the public document path and requires no HCL path setting.
+To expose the application under `/stowr/`, configure the reverse proxy to remove that prefix before forwarding. The frontend resolves all URLs relative to the public document path and requires no HCL path setting.
 
 The fixed credentials in `config.hcl` and `secrets/` belong only to the isolated SeaweedFS service. Do not reuse them outside this test environment. The secret key is in `secrets/s3_secret_access_key`, because the browser refuses a secret in clear text in the HCL file. The compose file mounts `secrets/` at `/config/secrets` in both containers.
 
 ## Portal test stack: three providers
 
-`portal-frontend/compose.yaml` starts three S3 providers next to S3-Browser. `portal-frontend/run.sh` starts the stack, puts the test objects and runs the browser tests. Refer to [docs/DEVELOPMENT.md](../docs/DEVELOPMENT.md#browser-tests-of-the-portal-frontend).
+`portal-frontend/compose.yaml` starts three S3 providers next to Stowr. `portal-frontend/run.sh` starts the stack, puts the test objects and runs the browser tests. Refer to [docs/DEVELOPMENT.md](../docs/DEVELOPMENT.md#browser-tests-of-the-portal-frontend).
 
 | Provider | Image | Instance | Endpoint |
 | --- | --- | --- | --- |
@@ -46,7 +46,7 @@ Each provider reads the first `access_key_id` and the first `secret_access_key_f
 
 The seed (`portal-frontend/seed.js`) enables the versioning of the bucket `default` on SeaweedFS and MinIO. It puts the same objects in `smoke/` on each provider: one file with tags where the provider has tags, and one file with two versions. On SeaweedFS, the seed also puts the data of the other tests: files with several versions in `versions/`, tags, a lifecycle rule, and a JSON file, a CSV file and a binary file for the comparison. The other browser tests use SeaweedFS only.
 
-The image of S3-Browser in this stack copies in parts from 8 KiB up, in parts of 5 MiB (the build arguments `MULTIPART_COPY_THRESHOLD` and `MULTIPART_COPY_PART_SIZE` of `browser/Dockerfile`). The seed puts `copy/source.bin` (11 MiB, three parts) with standard headers, a user metadata and tags on each provider. On SeaweedFS and MinIO, it also puts `copy/versioned.bin` with two versions. The tests of the copy in parts copy and rename `source.bin` through the page and compare the SHA-256, the headers and the tags. They also restore the older version of `versioned.bin`.
+The image of Stowr in this stack copies in parts from 8 KiB up, in parts of 5 MiB (the build arguments `MULTIPART_COPY_THRESHOLD` and `MULTIPART_COPY_PART_SIZE` of `browser/Dockerfile`). The seed puts `copy/source.bin` (11 MiB, three parts) with standard headers, a user metadata and tags on each provider. On SeaweedFS and MinIO, it also puts `copy/versioned.bin` with two versions. The tests of the copy in parts copy and rename `source.bin` through the page and compare the SHA-256, the headers and the tags. They also restore the older version of `versioned.bin`.
 
 The seed also puts the objects of the metadata tests in `meta/` on each provider: `small.txt` (under the threshold of the copy in parts), `large.bin` (20000 bytes, above it) and `conflict.txt`, each with `Cache-Control: max-age=60` and the user metadata `owner`. `small.txt` and `large.bin` have tags where the provider has them. `versioned.txt` has two versions on SeaweedFS and MinIO. The metadata tests edit these objects through the details on each provider. They check each sentence that the form shows before the save against the result: the date, the ETag, the versions and the tags. They also check that the form shows and sends the stored `Cache-Control`, not the value of the gateway (`private, no-store, max-age=60`). Refer to the section "Edit of the metadata" of [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md).
 
@@ -56,7 +56,7 @@ The tests of the lifecycle editor write the rules of the bucket `default` throug
 
 The tests of Object Lock use the instances `seaweedfs-locked` and `minio-locked`. Each test makes its own object with a unique key. The first test makes two versions, because the details show the version picker only for a file with two versions or more. It sets a legal hold on the current version through the details, and tries to delete this version with the Delete button of the picker. It reads the message that names the lock, removes the hold and deletes the version. A second test extends a Governance retention, and shortens it with the confirmation of the bypass. A third test checks that the page and the server refuse to shorten a Compliance retention. The retentions end after a few seconds, and each test then deletes its version: a run leaves no locked version. `run.sh` also removes the volumes of the stack after each run. A test checks that the section is hidden on `garage-main` and on the buckets without Object Lock. On each locked bucket, a test deletes a file and a folder through the page. The confirmation and a warning say that the locked version stays, and the version stays behind a delete marker. A bucket without Object Lock has no such sentence. Refer to the section "Object Lock" of [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md).
 
-SeaweedFS and MinIO really encrypt with SSE-S3 in this stack. The entrypoint of SeaweedFS gives the S3 server a random key encryption key (`WEED_S3_SSE_KEK`, 32 bytes in hexadecimal). The entrypoint of MinIO gives it a random KMS key (`MINIO_KMS_SECRET_KEY`, `s3-browser-test:` and 32 bytes in base64). Each start makes new keys. They stay in the environment of the process: no file, no log, no output. The data of the stack does not outlive its containers. Both entrypoints also create the bucket `encrypted`. The instances `seaweedfs-encrypted` and `minio-encrypted` use it with `encryption = "sse-s3"`, and `portal-frontend/providers.js` lists them in `ENCRYPTED`. The instance `garage-encrypted` uses the bucket `default` of Garage with `encryption = "sse-s3"`. Two instances can use the same bucket. The seed enables the versioning of the buckets `encrypted`. It puts `enc/customer-key.txt` with a key of the client (SSE-C) on SeaweedFS and Garage, with a random key that only the seed process knows. It also puts `enc/kms.txt` with SSE-KMS on MinIO.
+SeaweedFS and MinIO really encrypt with SSE-S3 in this stack. The entrypoint of SeaweedFS gives the S3 server a random key encryption key (`WEED_S3_SSE_KEK`, 32 bytes in hexadecimal). The entrypoint of MinIO gives it a random KMS key (`MINIO_KMS_SECRET_KEY`, `stowr-test:` and 32 bytes in base64). Each start makes new keys. They stay in the environment of the process: no file, no log, no output. The data of the stack does not outlive its containers. Both entrypoints also create the bucket `encrypted`. The instances `seaweedfs-encrypted` and `minio-encrypted` use it with `encryption = "sse-s3"`, and `portal-frontend/providers.js` lists them in `ENCRYPTED`. The instance `garage-encrypted` uses the bucket `default` of Garage with `encryption = "sse-s3"`. Two instances can use the same bucket. The seed enables the versioning of the buckets `encrypted`. It puts `enc/customer-key.txt` with a key of the client (SSE-C) on SeaweedFS and Garage, with a random key that only the seed process knows. It also puts `enc/kms.txt` with SSE-KMS on MinIO.
 
 The tests of the encryption upload a file through the page to each encrypted instance, in one request and in parts. They copy, rename, move, copy in parts, edit the metadata (also in parts) and restore an older version. Each source is not encrypted. After each operation, the HEAD request on the provider says `AES256`, and the details say "SSE-S3 (AES256)". On MinIO, a metadata edit and a restore keep `aws:kms` and its key. Other tests put a default encryption on the bucket `default` of SeaweedFS and MinIO, check the row "Bucket default", and remove it. They also check the details of the SSE-KMS and SSE-C objects. On Garage, an upload to `garage-encrypted` works, the object has no encryption, and the details show no encryption section.
 
@@ -101,7 +101,7 @@ reverse) with a faked `/api/usage`. The test of the volume compares the size tha
 
 The portal test stack also has the volume `files`: the Docker volume `volume-data` at `/data/volume` of the browser
 container. The root file system of the browser container stays read only. The one-shot service `volume-init` gives the
-Docker volume to the user of S3-Browser (65532) before S3-Browser starts, because the start checks that the process can
+Docker volume to the user of Stowr (65532) before Stowr starts, because the start checks that the process can
 write in the folder. `portal-frontend/run.sh` also mounts the Docker volume at `/volume` of the Playwright container.
 `portal-frontend/providers.js` lists the volume in `VOLUMES`.
 
@@ -127,11 +127,11 @@ the banner of a full volume.
 
 - The service `seaweedfs` is the SeaweedFS 4.41 of the portal tests, with its configuration.
 - The service `mount` (`volume-fuse/Dockerfile`) has the same pinned `weed` binary, FUSE 3, the Go toolchain and
-  S3-Browser. Only this container has `/dev/fuse`, `SYS_ADMIN` and `apparmor:unconfined`. Its entrypoint runs `weed
+  Stowr. Only this container has `/dev/fuse`, `SYS_ADMIN` and `apparmor:unconfined`. Its entrypoint runs `weed
   mount -filer=seaweedfs:8888 -filer.path=/ -dir=/mnt/sw -volumeServerAccess=filerProxy`. The volume servers of the
-  service `seaweedfs` listen on their own address only, so the data goes through the filer. S3-Browser then starts
-  with the volume `sw` on `/mnt/sw/s3b` (`volume-fuse/config.hcl`).
-- `run.sh` runs the Go tests of the volumes on the mount (`go test -run TestVolume -args -volume-dir=/mnt/sw/s3b-go`),
+  service `seaweedfs` listen on their own address only, so the data goes through the filer. Stowr then starts
+  with the volume `sw` on `/mnt/sw/stowr` (`volume-fuse/config.hcl`).
+- `run.sh` runs the Go tests of the volumes on the mount (`go test -run TestVolume -args -volume-dir=/mnt/sw/stowr-go`),
   then `volume-fuse/smoke.js` in the Playwright container: the list, a folder, an upload with SHA-256, a rename, a
   copy, a range read, a resumed upload of 40 MiB, and the copy, the move and the delete of a folder.
 
@@ -141,7 +141,7 @@ These facts come from the run of 2026-10-21 on a Debian 13 host (Linux 6.12, Doc
 - The 22 Go tests of the volumes pass on the mount, also the symbolic links, the rename that keeps the inode, the
   dates of the files (`os.Chtimes`), `O_EXCL`, `fsync` and the hard links. The test of a folder that the process cannot
   write is skipped, because the process is root.
-- The six steps of the browser smoke test pass. The writes of S3-Browser are visible at once through the mount.
+- The six steps of the browser smoke test pass. The writes of Stowr are visible at once through the mount.
 - The count of the folder of the volume works on the mount: after the smoke uploads, the volume holds 41943084 bytes
   in 3 files, as the browser smoke test expects. The page showed "40 MB, 3 files" and the storage with `~`.
 - `statfs` of the mount gives the capacity of the volume servers: 30 volumes of 64 MiB (2013265920 bytes). One run
@@ -242,8 +242,8 @@ Notes for the code:
   rules" of [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md).
 - Delete the lifecycle configuration with `DeleteBucketLifecycle`: MinIO and Garage refuse a configuration with no rule.
 - Send `Content-MD5` or an `x-amz-checksum-*` header with DeleteObjects: MinIO refuses the request without one.
-- On MinIO, list the multipart uploads with no prefix. Then S3-Browser filters the keys.
+- On MinIO, list the multipart uploads with no prefix. Then Stowr filters the keys.
 - The lock refusal codes are different: 403 AccessDenied on SeaweedFS, 400 InvalidRequest on MinIO. The bypass header does not remove a legal hold or a Compliance retention. After such a refusal, read the lock of the version: the code alone does not tell a lock from a missing permission.
 - A delete with no `versionId` in a bucket with Object Lock writes a delete marker. Only the delete of a version can meet a lock.
-- SSE-S3 needs a key service: a KEK for SeaweedFS (`WEED_S3_SSE_KEK`, or `s3.sse.kek` in `security.toml`), a KMS for MinIO. Without it, the write fails. Garage accepts the header and does not encrypt: S3-Browser writes a warning at start for a Garage bucket with `encryption = "sse-s3"`.
+- SSE-S3 needs a key service: a KEK for SeaweedFS (`WEED_S3_SSE_KEK`, or `s3.sse.kek` in `security.toml`), a KMS for MinIO. Without it, the write fails. Garage accepts the header and does not encrypt: Stowr writes a warning at start for a Garage bucket with `encryption = "sse-s3"`.
 - A copy without `x-amz-server-side-encryption` loses the SSE-S3 of its source on SeaweedFS and MinIO. Send the header with each copy.

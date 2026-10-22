@@ -1,7 +1,7 @@
 #!/bin/sh
 # Browser tests of the "portal" interface (server.frontend = "portal").
 #
-# The script starts the stack of compose.yaml (SeaweedFS, MinIO, Garage and S3-Browser with the volume "files") under
+# The script starts the stack of compose.yaml (SeaweedFS, MinIO, Garage and Stowr with the volume "files") under
 # its own project name, puts the test objects in the buckets and in the volume (seed.js), runs browser-tests.js in the
 # Playwright container, and stops the stack. The Playwright container mounts the Docker volume of the volume "files" at
 # /volume: the seed makes the files that the API cannot make (symbolic links, old temporary files).

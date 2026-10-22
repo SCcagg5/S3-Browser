@@ -23,7 +23,7 @@ const ENCRYPTED = {
   'minio-encrypted': { name: 'MinIO', host: 'minio:9000', region: 'us-east-1', bucket: 'encrypted', provider: 'minio-main' },
 };
 
-// The volume of the test stack: the Docker volume volume-data, at /data/volume in S3-Browser and at /volume in the
+// The volume of the test stack: the Docker volume volume-data, at /data/volume in Stowr and at /volume in the
 // Playwright container (run.sh). It has no tags, no versions, no lifecycle, no Object Lock and no encryption of S3: the
 // page hides them. Its usage is the size of its file system.
 const VOLUMES = {

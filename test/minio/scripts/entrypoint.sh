@@ -39,7 +39,7 @@ rm -f "$READY_FILE"
 mkdir -p /data
 # MinIO encrypts with SSE-S3 only with a KMS. The static key of MINIO_KMS_SECRET_KEY is enough for the tests: a new
 # random key at each start, never written to a file or to the log. The data of the stack does not outlive the container.
-KMS_KEY="s3-browser-test:$(head -c 32 /dev/urandom | base64)"
+KMS_KEY="stowr-test:$(head -c 32 /dev/urandom | base64)"
 MINIO_ROOT_USER="$KEY_ID" MINIO_ROOT_PASSWORD="$KEY_SECRET" MINIO_BROWSER=off MINIO_KMS_SECRET_KEY="$KMS_KEY" \
   minio server /data --address :9000 --quiet >/tmp/minio.log 2>&1 &
 SERVER_PID=$!

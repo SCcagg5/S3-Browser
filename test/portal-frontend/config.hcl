@@ -56,7 +56,7 @@ bucket "seaweedfs-locked" {
   max_scan_pages = 15
 }
 
-# encryption = "sse-s3": each write of S3-Browser asks for SSE-S3. SeaweedFS encrypts with its test KEK
+# encryption = "sse-s3": each write of Stowr asks for SSE-S3. SeaweedFS encrypts with its test KEK
 # (test/seaweedfs/scripts/entrypoint.sh). The tests of the encryption use it.
 bucket "seaweedfs-encrypted" {
   name           = "SeaweedFS - encrypted"
@@ -146,7 +146,7 @@ bucket "garage-encrypted" {
   encryption     = "sse-s3"
 }
 
-# A volume: the folder /data/volume of the container of S3-Browser, a Docker volume (compose.yaml). The seed puts its
+# A volume: the folder /data/volume of the container of Stowr, a Docker volume (compose.yaml). The seed puts its
 # test files in it through the API and through the volume, which the Playwright container also mounts (run.sh). It
 # has no auth block. The tests of the volumes use it.
 volume "files" {

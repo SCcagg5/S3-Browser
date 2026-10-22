@@ -1,12 +1,12 @@
 // Requests to the S3 API of the providers of the test stack, signed with SigV4. seed.js and browser-tests.js use
-// them for what has no route in S3-Browser, or to check the result of a page action on the provider.
+// them for what has no route in Stowr, or to check the result of a page action on the provider.
 const crypto = require('crypto');
 const fs = require('fs');
 const { PROVIDERS, LOCKED, ENCRYPTED } = require('./providers');
 const ACCESS_KEY = 'GK0123456789abcdef01234567';
 
 // A request to the provider of an instance (the versioning and the lifecycle of a bucket have no route in
-// S3-Browser). The instance is a key of PROVIDERS, LOCKED or ENCRYPTED. The extra headers are signed too. It gives the
+// Stowr). The instance is a key of PROVIDERS, LOCKED or ENCRYPTED. The extra headers are signed too. It gives the
 // status, the headers (names in lowercase) and the text of the answer.
 async function s3Raw(instance, method, path, query, body = Buffer.alloc(0), extra = {}) {
   const { host, region } = PROVIDERS[instance] || LOCKED[instance] || ENCRYPTED[instance];

@@ -1,4 +1,4 @@
-# The S3-Browser of the FUSE test: one volume on the FUSE mount of SeaweedFS (scripts/entrypoint.sh). The tests of
+# The Stowr of the FUSE test: one volume on the FUSE mount of SeaweedFS (scripts/entrypoint.sh). The tests of
 # test/volume-fuse/smoke.js use it.
 server {
   frontend = "portal"
@@ -7,7 +7,7 @@ server {
 
 volume "sw" {
   name           = "SeaweedFS mount"
-  path           = "/mnt/sw/s3b"
+  path           = "/mnt/sw/stowr"
   max_scan_pages = 15
 }
 

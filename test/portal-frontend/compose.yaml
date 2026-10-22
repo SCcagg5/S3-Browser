@@ -1,6 +1,6 @@
-# The test stack of the "portal" interface: three S3 providers (SeaweedFS, MinIO and Garage) and one S3-Browser with
+# The test stack of the "portal" interface: three S3 providers (SeaweedFS, MinIO and Garage) and one Stowr with
 # server.frontend = "portal". Each provider reads its identity from config.hcl and test/secrets, and creates its
-# buckets at start. S3-Browser also shows the Docker volume volume-data as the volume "files". run.sh starts it under
+# buckets at start. Stowr also shows the Docker volume volume-data as the volume "files". run.sh starts it under
 # its own project name. No port is published: the Playwright container joins the network.
 services:
   seaweedfs:
@@ -37,7 +37,7 @@ services:
       - ../secrets:/config/secrets:ro
 
   # The Docker volume of the volume "files" starts empty and belongs to root. This one-shot service gives it to the user
-  # of S3-Browser (65532) before S3-Browser starts: the start checks that the process can write in the folder.
+  # of Stowr (65532) before Stowr starts: the start checks that the process can write in the folder.
   volume-init:
     image: alpine:3.21
     command: ["sh", "-c", "chown 65532:65532 /data/volume && chmod 0755 /data/volume"]

@@ -2,8 +2,8 @@
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-IMAGE=${SCRATCH_IMAGE_NAME:-s3-browser:scratch-test}
-CONTAINER="s3-browser-scratch-test-$$"
+IMAGE=${SCRATCH_IMAGE_NAME:-stowr:scratch-test}
+CONTAINER="stowr-scratch-test-$$"
 
 cleanup() {
   docker rm -fv "$CONTAINER" >/dev/null 2>&1 || true
@@ -68,7 +68,7 @@ docker run \
 
 attempt=0
 while [ "$attempt" -lt 30 ]; do
-  if docker exec "$CONTAINER" /s3-browser healthcheck -c /config/config.hcl >/dev/null 2>&1; then
+  if docker exec "$CONTAINER" /stowr healthcheck -c /config/config.hcl >/dev/null 2>&1; then
     echo "scratch runtime healthcheck passed"
     exit 0
   fi

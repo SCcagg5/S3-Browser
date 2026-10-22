@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 # The container of the FUSE test of the volumes: weed mount (the pinned SeaweedFS release of test/seaweedfs), FUSE 3,
-# the Go toolchain for the Go tests of the volumes on the mount, and the static S3-Browser binary. compose.yaml gives
+# the Go toolchain for the Go tests of the volumes on the mount, and the static Stowr binary. compose.yaml gives
 # this container /dev/fuse and SYS_ADMIN for the mount. No other container of the tests has them.
 ARG GO_VERSION=1.22
 FROM golang:${GO_VERSION}
@@ -27,9 +27,9 @@ RUN set -eu; \
 
 WORKDIR /src
 COPY src/ ./
-RUN CGO_ENABLED=0 go build -tags=netgo,osusergo -trimpath -o /usr/local/bin/s3-browser .
+RUN CGO_ENABLED=0 go build -tags=netgo,osusergo -trimpath -o /usr/local/bin/stowr .
 
 COPY test/volume-fuse/scripts/entrypoint.sh /bin/entrypoint.sh
 ENTRYPOINT ["/bin/sh", "/bin/entrypoint.sh"]
 HEALTHCHECK --interval=5s --timeout=3s --start-period=5s --retries=20 \
-  CMD ["/usr/local/bin/s3-browser", "healthcheck", "-c", "/config/config.hcl"]
+  CMD ["/usr/local/bin/stowr", "healthcheck", "-c", "/config/config.hcl"]

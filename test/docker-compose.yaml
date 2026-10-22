@@ -1,10 +1,10 @@
 services:
-  s3-browser:
+  stowr:
     build:
       context: ..
       dockerfile: test/browser/Dockerfile
       target: runtime
-    container_name: s3-browser
+    container_name: stowr
     restart: unless-stopped
     command: ["-c", "/config/config.hcl"]
     read_only: true
@@ -17,7 +17,7 @@ services:
       seaweedfs:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "/s3-browser", "healthcheck", "-c", "/config/config.hcl"]
+      test: ["CMD", "/stowr", "healthcheck", "-c", "/config/config.hcl"]
       interval: 10s
       timeout: 3s
       retries: 10

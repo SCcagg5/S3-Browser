@@ -2,7 +2,7 @@
 # The real test of a volume on a FUSE mount of SeaweedFS (weed mount).
 #
 # The script starts the stack of compose.yaml under its own project name: the SeaweedFS of the tests, and the container
-# "mount" with weed mount on /mnt/sw and S3-Browser with the volume "sw" on /mnt/sw/s3b. Only "mount" has /dev/fuse,
+# "mount" with weed mount on /mnt/sw and Stowr with the volume "sw" on /mnt/sw/stowr. Only "mount" has /dev/fuse,
 # SYS_ADMIN and no AppArmor profile. Then it runs the Go tests of the volumes in a folder of the mount, and the browser
 # smoke test (smoke.js) in the Playwright container. At the end, it stops the stack and removes its volumes.
 #
@@ -31,7 +31,7 @@ fi
 compose exec -T mount grep ' /mnt/sw ' /proc/mounts
 
 echo "Go tests of the volumes on the FUSE mount"
-compose exec -T mount sh -c 'mkdir -p /mnt/sw/s3b-go && cd /src && status=0 && go test -count=1 -run "TestVolume" -v . -args -volume-dir=/mnt/sw/s3b-go >/tmp/go-test.log 2>&1 || status=$?; grep -E "^(--- |ok|FAIL|PASS)" /tmp/go-test.log; [ "$status" -eq 0 ] || tail -n 60 /tmp/go-test.log; exit "$status"'
+compose exec -T mount sh -c 'mkdir -p /mnt/sw/stowr-go && cd /src && status=0 && go test -count=1 -run "TestVolume" -v . -args -volume-dir=/mnt/sw/stowr-go >/tmp/go-test.log 2>&1 || status=$?; grep -E "^(--- |ok|FAIL|PASS)" /tmp/go-test.log; [ "$status" -eq 0 ] || tail -n 60 /tmp/go-test.log; exit "$status"'
 
 if [ -n "${PLAYWRIGHT_NODE_MODULES:-}" ]; then
   modules="$PLAYWRIGHT_NODE_MODULES:/deps/node_modules:ro"

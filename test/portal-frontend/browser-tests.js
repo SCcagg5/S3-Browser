@@ -7,7 +7,7 @@
 // SSE-KMS, SSE-C and the default encryption of the bucket), 12 the usage and the quota of a bucket (the facts of each
 // bucket in the selector, the warning of a full bucket, the tooltips) and the summary strip and the columns of the details,
 // 13 the volumes (a folder of the server: listing, links, writes, uploads, previews, incomplete uploads, usage).
-// run.sh starts S3-Browser and the three providers, puts the test objects (seed.js) and runs this file in the
+// run.sh starts Stowr and the three providers, puts the test objects (seed.js) and runs this file in the
 // Playwright container. The tests of parts 1 to 4 use SeaweedFS.
 // The tests change the answers of the server with page.route where a case needs it (403, 401, no answer, access).
 const { chromium } = require('playwright');
@@ -3256,7 +3256,7 @@ for (const [instance, provider] of Object.entries(PROVIDERS)) {
   });
 }
 
-test('incomplete uploads: an upload that this S3-Browser sends now cannot be aborted', async () => {
+test('incomplete uploads: an upload that this Stowr process sends now cannot be aborted', async () => {
   const page = await newPage();
   // A resumable upload of the page: the server creates the multipart upload and keeps the session.
   const created = await page.request.post(`${BASE}api/uploads`, { data: { instance: 'seaweedfs-main', key: 'mpu/active.bin', size: 6 * 1024 * 1024, contentType: 'application/octet-stream' } });
@@ -3276,7 +3276,7 @@ test('incomplete uploads: an upload that this S3-Browser sends now cannot be abo
     assert.equal(refused.aborted.length, 0);
     assert.equal(refused.skipped.length, 1);
   } finally {
-    await page.request.delete(`${BASE}api/uploads`, { headers: { 'X-S3-Browser-Resume-Token': session.resumeToken } });
+    await page.request.delete(`${BASE}api/uploads`, { headers: { 'X-Stowr-Resume-Token': session.resumeToken } });
   }
   assert.equal((await apiMultiparts(page, 'seaweedfs-main', 'mpu/')).uploads.some(upload => upload.key === 'mpu/active.bin'), false);
   assert.deepEqual(page.errors, []);
@@ -4271,7 +4271,7 @@ test('encryption: MinIO keeps the SSE-KMS of the source in the edit of the metad
   await saveMetadata(page, '2-edited');
   // The source says aws:kms and the instance asks for AES256: the edit keeps the encryption of the source.
   const edited = await assertSSE(instance, key, 'aws:kms');
-  assert.match(edited['x-amz-server-side-encryption-aws-kms-key-id'], /s3-browser-test/);
+  assert.match(edited['x-amz-server-side-encryption-aws-kms-key-id'], /stowr-test/);
   await page.waitForSelector('[data-encryption-section] [data-encryption-field="kmsKey"]');
   assert.equal(await encryptionText(page, 'object'), 'SSE-KMS (aws:kms)');
   await closeWindow(page);
@@ -4335,7 +4335,7 @@ test('encryption: MinIO shows the SSE-KMS of an object with its KMS key', async 
   await open(page, `-/${info.host}/minio-main/enc/`);
   await openEncryptionDetails(page, 'kms.txt');
   assert.equal(await encryptionText(page, 'object'), 'SSE-KMS (aws:kms)');
-  assert.match(await encryptionText(page, 'kmsKey'), /^arn:aws:kms:s3-browser-test/);
+  assert.match(await encryptionText(page, 'kmsKey'), /^arn:aws:kms:stowr-test/);
   assert.equal(await page.locator('[data-encryption-note]').count(), 0);
   // The object has a normal HEAD answer, so the metadata section stays.
   await page.waitForSelector('[data-metadata-section] .metaEditor__view');
@@ -4567,7 +4567,7 @@ test('encryption: the setting is on by default for seaweedfs-main, goes off for 
   const minio = await lockedHostOf(page, 'minio-main');
   await open(page, `-/${minio.host}/minio-main/enc/`);
   await noLockPending(page);
-  assert.match(await fileLock(page, 'kms.txt'), /^Encrypted: SSE-KMS, key arn:aws:kms:s3-browser-test/);
+  assert.match(await fileLock(page, 'kms.txt'), /^Encrypted: SSE-KMS, key arn:aws:kms:stowr-test/);
   // The reset gives the default again.
   await open(page, `${MAIN}enc/`);
   await page.click('#settingsButton');
@@ -5635,7 +5635,7 @@ const VOLUME = '-/volume/files/';
 const volumeFS = require('fs');
 const volumePath = require('path');
 const volumeFile = relative => volumePath.join(VOLUMES.files.mount, relative);
-const temporaryNames = relative => volumeFS.readdirSync(volumeFile(relative)).filter(name => name.startsWith('.s3b-tmp-'));
+const temporaryNames = relative => volumeFS.readdirSync(volumeFile(relative)).filter(name => name.startsWith('.stowr-tmp-'));
 const rowNames = page => page.locator('tbody tr[data-name]').evaluateAll(rows => rows.map(row => row.dataset.name));
 
 // Removes a test folder of the volume, also when an earlier run stopped in the middle.
@@ -5673,7 +5673,7 @@ test('volumes: the volume lists real folders, an empty folder, hidden files and 
   assert.equal(await page.locator('tbody tr[data-name]').count(), 0);
   await open(page, `${VOLUME}uploads/`);
   assert.equal(await page.locator('tbody tr[data-name]').count(), 0);
-  assert.deepEqual(temporaryNames('uploads'), ['.s3b-tmp-5eed0000000000000000000000000001-stale.bin']);
+  assert.deepEqual(temporaryNames('uploads'), ['.stowr-tmp-5eed0000000000000000000000000001-stale.bin']);
   assert.deepEqual(page.errors, []);
   await page.context().close();
 });
@@ -5843,7 +5843,7 @@ test('volumes: a large upload goes in chunks to a temporary file, resumes after 
   await page.setInputFiles('#fileInput', [{ name: 'large.bin', mimeType: 'application/octet-stream', buffer: content }]);
   await page.waitForSelector('.uploadDock[data-state="done"]', { timeout: 120000 });
   assert.equal(duringUpload.length, 1, `temporary files during the upload: ${duringUpload}`);
-  assert.match(duringUpload[0], /^\.s3b-tmp-[0-9a-f]{32}-large\.bin$/);
+  assert.match(duringUpload[0], /^\.stowr-tmp-[0-9a-f]{32}-large\.bin$/);
   assert.ok(chunks >= 3, `chunks: ${chunks}`);
   assert.equal(sha256(volumeFS.readFileSync(volumeFile('t-upload/large.bin'))), sha256(content));
   assert.deepEqual(temporaryNames('t-upload'), []);
@@ -5885,7 +5885,7 @@ test('volumes: the previews of a CSV file, a Markdown file and an image, the ins
 
 test('volumes: the window Incomplete uploads lists the temporary file of an old upload, with its last write, and aborts it', async () => {
   const page = await newPage();
-  const stale = 'uploads/.s3b-tmp-5eed0000000000000000000000000001-stale.bin';
+  const stale = 'uploads/.stowr-tmp-5eed0000000000000000000000000001-stale.bin';
   await open(page, `${VOLUME}uploads/`);
   await openMultiparts(page);
   assert.deepEqual(await multipartRows(page), ['uploads/stale.bin']);
@@ -5908,7 +5908,7 @@ test('volumes: the window Incomplete uploads lists the temporary file of an old 
   await page.context().close();
 });
 
-// The size of the files of the volume, as S3-Browser counts it: the regular files, no symbolic link, no temporary file.
+// The size of the files of the volume, as Stowr counts it: the regular files, no symbolic link, no temporary file.
 function volumeSize(relative = '') {
   let bytes = 0;
   let files = 0;
@@ -5918,7 +5918,7 @@ function volumeSize(relative = '') {
       const inner = volumeSize(child);
       bytes += inner.bytes;
       files += inner.files;
-    } else if (entry.isFile() && !entry.name.startsWith('.s3b-tmp-')) {
+    } else if (entry.isFile() && !entry.name.startsWith('.stowr-tmp-')) {
       bytes += volumeFS.statSync(volumeFile(child)).size;
       files += 1;
     }

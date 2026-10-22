@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-BASE_URL="${1:-http://127.0.0.1:8080/s3-browser}"
+BASE_URL="${1:-http://127.0.0.1:8080/stowr}"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT INT TERM
 
@@ -113,7 +113,7 @@ request 201 "$TMP_DIR/upload-create.json" -X POST \
   --data '{"instance":"seaweedfs-main","key":"smoke/large.bin","size":17825792,"contentType":"application/octet-stream"}' \
   "$BASE_URL/api/uploads"
 # The upload API keeps no server state that the client must name: each chunk
-# carries the resume token of the session in X-S3-Browser-Resume-Token.
+# carries the resume token of the session in X-Stowr-Resume-Token.
 resume_token="$(json_string "$TMP_DIR/upload-create.json" resumeToken)"
 [ -n "$resume_token" ]
 dd if="$TMP_DIR/large.bin" of="$TMP_DIR/part-1.bin" bs=1048576 count=16 2>/dev/null
@@ -121,14 +121,14 @@ dd if="$TMP_DIR/large.bin" of="$TMP_DIR/part-2.bin" bs=1048576 skip=16 count=1 2
 request 200 "$TMP_DIR/upload-part-1.json" -X PUT \
   -H 'Content-Type: application/octet-stream' \
   -H 'Content-Range: bytes 0-16777215/17825792' \
-  -H "X-S3-Browser-Resume-Token: $resume_token" \
+  -H "X-Stowr-Resume-Token: $resume_token" \
   --data-binary "@$TMP_DIR/part-1.bin" \
   "$BASE_URL/api/uploads"
 grep -q '"uploadedBytes":16777216' "$TMP_DIR/upload-part-1.json"
 request 200 "$TMP_DIR/upload-part-2.json" -X PUT \
   -H 'Content-Type: application/octet-stream' \
   -H 'Content-Range: bytes 16777216-17825791/17825792' \
-  -H "X-S3-Browser-Resume-Token: $resume_token" \
+  -H "X-Stowr-Resume-Token: $resume_token" \
   --data-binary "@$TMP_DIR/part-2.bin" \
   "$BASE_URL/api/uploads"
 grep -q '"status":"completed"' "$TMP_DIR/upload-part-2.json"
