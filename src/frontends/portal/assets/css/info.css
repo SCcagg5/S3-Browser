@@ -14,10 +14,6 @@ html:has(> body.infoPage),
   background: var(--panel);
 }
 
-.infoPage .storageSwitcher[hidden] ~ .appHeader__right {
-  margin-left: auto;
-}
-
 /* The link back to the listing is after the brand: its line is at its left. */
 .infoBack {
   min-width: 0;
@@ -431,13 +427,4 @@ html:has(> body.infoPage),
   .infoKv__value {
     padding-top: 2px;
   }
-}
-
-/* The selector of the page: the classes of the selector of the listing, with links in place of buttons. */
-.storageSwitcher[hidden] {
-  display: none;
-}
-
-a.storageBucket {
-  text-decoration: none;
 }

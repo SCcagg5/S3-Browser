@@ -333,88 +333,18 @@
       ], 'Operations')));
   }
 
-  // --- Selector ---------------------------------------------------------------------------------------------------------
-  // The selector of the page: the same hosts and buckets as the selector of the listing. An entry opens the information
-  // page of the bucket, not its listing. The classes are the classes of the selector of the listing.
-
-  const infoURL = instance => `${BB.api.browserPageURL('', { instance: instance.id })}?info`;
-
-  function statesOf(instance) {
-    const rules = Number.isInteger(instance.lifecycleRules) ? instance.lifecycleRules : null;
-    return BB.states.list(instance, { versioning: String(instance.versioningState || ''), rules });
-  }
-
-  function renderSelector(instances, current) {
-    const root = byId('storageSwitcher');
-    if (!root || instances.length < 2) return;
-    const hosts = [];
-    instances.forEach(item => {
-      const id = String(item.host || item.id || '');
-      let host = hosts.find(entry => entry.id === id);
-      if (!host) { host = { id, provider: String(item.provider || ''), instances: [] }; hosts.push(host); }
-      host.instances.push(item);
-    });
-    const trigger = h('button', {
-      type: 'button', class: 'storageSwitcher__trigger', 'aria-haspopup': 'dialog', 'aria-expanded': 'false', 'aria-controls': 'storageSwitcherMenu',
-      title: [current.name || current.id, `id: ${current.id}`, `host: ${current.host}`].join('\n')
-    }, ic(isVolume(current) ? 'folder-open' : 'database'),
-    h('span', { class: 'storageSwitcher__copy' }, h('span', { class: 'storageSwitcher__titleRow' }, h('strong', {}, current.name || current.id))),
-    ic('chevron-down'));
-    trigger.firstChild.classList.add('storageSwitcher__icon');
-    trigger.lastChild.classList.add('storageSwitcher__chevron');
-    const menu = h('div', { id: 'storageSwitcherMenu', class: 'storageSwitcher__menu', role: 'dialog', 'aria-label': 'Storage hosts and buckets', hidden: true },
-      hosts.map(host => {
-        const expanded = host.id === String(current.host || current.id || '');
-        const list = h('div', { class: 'storageHost__buckets', role: 'group', 'aria-label': `${host.id} buckets`, hidden: !expanded },
-          host.instances.map(entry => {
-            const states = statesOf(entry);
-            const link = h('a', { class: 'storageBucket__info', href: infoURL(entry), 'data-volume': isVolume(entry) ? 'true' : null, 'aria-label': states.map(item => item.text).join(', ') },
-              h('span', { class: 'stateGroup' }, BB.states.nodes(states, { tip: false })), h('span', { class: 'bucketFacts' }));
-            return h('div', { class: 'storageBucket__row', 'data-instance': entry.id },
-              h('a', { class: 'storageBucket', href: infoURL(entry), 'aria-current': entry.id === current.id ? 'true' : null,
-                title: [entry.name || entry.id, `id: ${entry.id}`, `host: ${entry.host}`].join('\n') },
-              h('span', { class: 'storageBucket__copy' }, h('span', { class: 'storageBucket__titleRow' }, h('strong', {}, entry.name || entry.id),
-                entry.rootPrefix ? h('small', { class: 'storageBucket__prefix' }, `/${entry.rootPrefix}`) : null))),
-              link);
-          }));
-        const row = h('button', {
-          type: 'button', class: 'storageHost__row', 'aria-expanded': expanded ? 'true' : 'false', 'data-host': host.id,
-          onclick: () => {
-            const open = row.getAttribute('aria-expanded') !== 'true';
-            row.setAttribute('aria-expanded', String(open));
-            list.hidden = !open;
-          }
-        }, ic('chevron-right'), ic(isVolume(host) ? 'folder-open' : 'database'),
-        h('span', { class: 'storageHost__copy' }, h('strong', {}, host.id),
-          h('small', {}, `${host.provider.toUpperCase()} · ${host.instances.length} ${isVolume(host) ? 'volume' : 'bucket'}${host.instances.length === 1 ? '' : 's'}`)));
-        row.querySelector('.ic-chevron-right').classList.add('storageHost__chevron');
-        return h('section', { class: 'storageHost', 'data-host': host.id }, row, list);
-      }));
-    const close = focus => {
-      if (menu.hidden) return;
-      menu.hidden = true;
-      root.classList.remove('is-open');
-      trigger.setAttribute('aria-expanded', 'false');
-      if (focus) trigger.focus();
-    };
-    trigger.addEventListener('click', event => {
-      event.stopPropagation();
-      if (menu.hidden) {
-        menu.hidden = false;
-        root.classList.add('is-open');
-        trigger.setAttribute('aria-expanded', 'true');
-      } else close(false);
-    });
-    menu.addEventListener('click', event => event.stopPropagation());
-    document.addEventListener('click', () => close(false));
-    document.addEventListener('keydown', event => { if (event.key === 'Escape') close(true); });
-    root.replaceChildren(trigger, menu);
-    root.hidden = false;
-  }
-
   // --- Page -----------------------------------------------------------------------------------------------------------
 
   const page = { instance: null, usage: undefined, lifecycle: undefined };
+
+  // The selector of the header: the selector of the listing (switcher.js). A bucket of the list opens its information
+  // page. The page reads the rules itself (the editor of the rules needs the whole answer), and gives them to the
+  // selector for its state icons.
+  const selector = BB.switcher.create({
+    root: byId('storageSwitcher'),
+    onSelect: entry => { if (entry.id !== page.instance?.id) window.location.assign(BB.switcher.infoPageURL(entry)); },
+    watchLifecycle: false
+  });
 
   function render() {
     const instance = page.instance;
@@ -452,9 +382,20 @@
     byId('infoSections').removeAttribute('aria-busy');
   }
 
+  // The rules and the versioning of the bucket, for the part Functions and for the state icons of the selector.
+  async function loadLifecycle(instance) {
+    try {
+      page.lifecycle = await BB.api.lifecycle(instance.id);
+      selector.setBucketInfo(instance.id, page.lifecycle);
+    } catch (_) {
+      page.lifecycle = null;
+    }
+  }
+
   // The usage. While the count of the files of a volume runs, the page reads it again every 3 seconds, 20 times at most.
   async function loadUsage(instance, fresh, rounds = 20) {
     page.usage = await BB.usage.load(instance, { fresh });
+    selector.refresh();
     if (page.usage?.selfState === 'computing' && rounds > 0) {
       window.setTimeout(() => { void loadUsage(instance, true, rounds - 1).then(render); }, 3000);
     }
@@ -466,18 +407,23 @@
     try {
       payload = await BB.api.instances();
     } catch (error) {
+      selector.setState({ instances: [], currentId: '', loading: false, loadError: String(error?.message || error) });
       fail('The information cannot be loaded', String(error?.message || error));
       return;
     }
     renderBuild(payload?.build);
     const instance = (payload?.instances || []).find(item => String(item.host || item.id || '') === route?.host && item.id === route?.bucket);
+    const instances = (payload?.instances || []).map(item => ({ ...item, host: String(item.host || item.id || '') }));
     if (!instance) {
+      selector.setState({ instances, currentId: '', loading: false, emptyText: 'This bucket does not exist, or you cannot see it' });
       fail('No such bucket', 'This bucket does not exist, or you cannot see it.');
       return;
     }
     page.instance = instance;
-    renderSelector(payload.instances || [], instance);
     BB.api.setInstance(instance);
+    selector.setState({ instances, currentId: instance.id, loading: false });
+    // The usage of the other buckets: the mark of a full bucket shows also before the list opens.
+    selector.loadAllUsage();
     const back = byId('infoBack');
     back.href = BB.api.browserPageURL('', { instance: instance.id });
     back.title = `Back to ${instance.name || instance.id}`;
@@ -489,9 +435,7 @@
     render();
     const reads = [];
     if (instance.usageSupported === true && can(instance, 'list')) reads.push(loadUsage(instance, false));
-    if (instance.lifecycleSupported !== false && !isVolume(instance) && can(instance, 'list')) {
-      reads.push(BB.api.lifecycle(instance.id).then(answer => { page.lifecycle = answer; }, () => { page.lifecycle = null; }));
-    }
+    if (instance.lifecycleSupported !== false && !isVolume(instance) && can(instance, 'list')) reads.push(loadLifecycle(instance));
     await Promise.all(reads.map(read => read.then(render)));
     render();
   }
