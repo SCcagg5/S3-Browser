@@ -649,11 +649,6 @@ BB.cfg = config;
   const loadUsage = (instance, options) => ui.selector.loadUsage(instance, options);
   const loadStatus = (instance, options) => ui.selector.loadStatus(instance, options);
 
-  function openLifecycle() {
-    ui.selector.close(false);
-    if (canRead()) BB.lifecycle.open({ prefix: state.pathPrefix, canWrite: canWrite() });
-  }
-
   const usageTimers = [];
 
   // A change of the objects (an upload, a delete, a copy, a restore, the end of a job): the usage is read again after
@@ -904,14 +899,10 @@ BB.cfg = config;
       // The usage of the other buckets: the mark of a full bucket shows also before the menu opens.
       ui.selector.loadAllUsage();
       state.pathPrefix = routeInstance === state.instanceId ? normalizePrefix(route.path) : parseLegacyHash();
-      // ?lifecycle (the link of the information page) opens the lifecycle rules after the first listing. The address
-      // of the page loses it.
-      const openRules = routeInstance === state.instanceId && new URLSearchParams(location.search).has('lifecycle');
       ui.searchInput.value = '';
       replaceLocation(state.pathPrefix);
       update();
       await refresh();
-      if (openRules && config.lifecycleSupported) openLifecycle();
     } catch (error) {
       state.isInitializing = false;
       const kind = classify(error);

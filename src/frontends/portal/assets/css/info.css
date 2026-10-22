@@ -402,11 +402,21 @@ html:has(> body.infoPage),
   font-weight: var(--fw-semibold);
 }
 
-.infoAction {
-  height: 24px;
-  padding: 0 8px;
+/* A link in a row, as the link of the rules to the part "Lifecycle rules". */
+.infoLink {
+  color: var(--accent-text);
+  font-size: var(--fs-xs);
+}
+
+.infoLink:hover {
+  text-decoration: underline;
+}
+
+/* The editor of the lifecycle rules is the width of a card of two columns, and the page keeps room under it. */
+#infoLifecycle .lifecycle {
+  max-width: 980px;
+  padding-top: 0;
   font-size: var(--fs-sm);
-  text-decoration: none;
 }
 
 @media (max-width: 820px) {

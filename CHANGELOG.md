@@ -40,14 +40,18 @@ This document uses ASD-STE100 Simplified Technical English.
 - The seven icons are one link to this page, in the trigger and in each entry of the list. The link is next to the
   button of the entry, not in it. Enter and Space open it.
 - Removed: the red and struck-through permission icons, the separate versioning icon, the key and the padlock in the
-  facts, and the button of the lifecycle rules in the trigger. The window of the rules opens from the information page.
+  facts, and the button of the lifecycle rules in the trigger. The rules are edited on the information page.
 - The selector keeps one row of 460 px at most. A narrow selector drops the amount of the usage first (440 px), then
   its short text (400 px), the usage (360 px) and the icon of the trigger (300 px). The seven icons stay at every
   width: on a window of 320 px, the selector shows the name, the seven icons and the chevron.
 - The window "Bucket permissions", the popover "Usage" and the item "Usage" of the Actions menu are removed: the
   information page has their content.
-- The button "Open the lifecycle rules" of the page opens the listing with `?lifecycle`, which opens the window of the
-  rules.
+- The lifecycle rules are edited in the part "Lifecycle rules" of the information page (`#info-lifecycle`), with no
+  window and no dialog: the forms of the rules, Add, Save, Revert, the errors and the result of the read after the
+  save are in the page. The confirmation of a save that deletes data is a box in the page, with "Save the rules" and
+  "Cancel". The listing has no window of the rules and no `?lifecycle` address any more (`BB.lifecycle.open` is
+  removed). The note of the window "Incomplete uploads" links to that part, with
+  `?info&lifecycle-abort=<folder>` for a new rule that aborts the incomplete uploads.
 - The information page has the visual language of the System page of ClickHouse Dash: parts with a heading, cards
   with a key-value list, gauges for the quota and the storage (the percent over a track), and status chips in the
   colours of the state icons. Two cards are side by side on a wide window; the page is one column on a phone. The page

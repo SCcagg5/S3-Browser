@@ -1,13 +1,15 @@
 /*
- * BB.lifecycle: the window "Lifecycle rules" of the Actions menu.
+ * BB.lifecycle: the editor of the lifecycle rules, in the part "Lifecycle rules" of the information page (info.js).
+ * It is a part of the page, not a window: mount(host, options) puts it in an element of the page.
  * - the rules of the bucket: a form for each rule that the editor knows, and a read-only row with the note "Kept as is"
  *   for each other rule (transitions, size filters and so on), which the server writes back byte for byte;
- * - Add a rule, Save and Revert. Before the save, a confirmation names each action that deletes data, with its prefix
- *   and its number of days;
- * - the window offers only the fields that the storage provider keeps. The server decides them and gives the reason
- *   for each other field. After the save, the server reads the rules again and tells what the provider changed.
- * The window of the incomplete uploads (multiparts.js) opens this window with a new rule that aborts them.
- * The server checks each request again. A provider without lifecycle rules answers 501: the menu hides the item.
+ * - Add a rule, Save and Revert. Before the save, a confirmation in the page names each action that deletes data, with
+ *   its prefix and its number of days: "Save the rules" or "Cancel". There is no dialog;
+ * - the editor offers only the fields that the storage provider keeps. The server decides them and gives the reason
+ *   for each other field. After the save, the server reads the rules again and tells what the provider changed, and
+ *   the page gets the event bb:lifecycle-changed.
+ * The window of the incomplete uploads (multiparts.js) links to the information page with a new rule that aborts them.
+ * The server checks each request again. A provider without lifecycle rules answers 501: the page shows no editor.
  */
 (function () {
   'use strict';
@@ -32,7 +34,6 @@
   }
 
   const icon = name => h('i', { class: `mdi mdi-${name}`, 'aria-hidden': 'true' });
-  const escapeHTML = value => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
   const count = value => Number(value || 0).toLocaleString('en-US');
   const dayCount = value => `${count(value)} day${Number(value) === 1 ? '' : 's'}`;
   const byteLength = text => new TextEncoder().encode(String(text)).length;
@@ -124,7 +125,7 @@
   }
 
   // ---------------------------------------------------------------------------------------------------------------
-  // The window
+  // The editor
   // ---------------------------------------------------------------------------------------------------------------
 
   const ACTIONS = [
@@ -134,7 +135,8 @@
   ];
   const DEFAULT_DAYS = { expirationDays: 30, noncurrentDays: 30, abortMultipartDays: 7 };
 
-  // prefix is the folder of the listing: a new rule starts with it. prefill adds a new rule with these values.
+  // prefix is the prefix of a new rule. prefill adds a new rule with these values. canWrite tells if the person can
+  // write in the bucket: without it, the editor shows the rules and no control.
   function mount(host, { instance = null, canWrite = false, prefix = '', prefill = null }) {
     let editor = null;
     let rules = [];
@@ -155,8 +157,35 @@
     const reloadButton = h('button', { type: 'button', class: 'bb-btn', 'data-lifecycle-reload': '' }, icon('refresh'), h('span', {}, 'Reload the rules'));
     const actions = h('div', { class: 'lifecycle__actions' }, addButton, saveButton, revertButton, reloadButton);
     const message = h('p', { class: 'lifecycle__message', role: 'status', 'data-lifecycle-message': '' });
+    // The confirmation of a save that deletes data: in the page, under the rules, in place of the buttons.
+    const confirmBox = h('div', { class: 'lifecycle__confirm', role: 'alert', 'data-lifecycle-confirm': '', hidden: true });
     const warnings = h('ul', { class: 'lifecycle__warnings', role: 'alert', 'data-lifecycle-warnings': '' });
     const say = (text, tone = '') => { message.textContent = text; message.dataset.tone = tone; };
+
+    // The person confirms the actions that delete data: true for "Save the rules", false for "Cancel".
+    function confirmInline(sentences) {
+      return new Promise(resolve => {
+        const done = value => {
+          confirmBox.hidden = true;
+          confirmBox.replaceChildren();
+          actions.hidden = false;
+          resolve(value);
+          (value ? saveButton : revertButton).focus?.();
+        };
+        const accept = h('button', { type: 'button', class: 'bb-btn bb-btn-primary', 'data-lifecycle-confirm-save': '' }, icon('check'), h('span', {}, 'Save the rules'));
+        const cancel = h('button', { type: 'button', class: 'bb-btn', 'data-lifecycle-confirm-cancel': '' }, h('span', {}, 'Cancel'));
+        accept.addEventListener('click', () => done(true));
+        cancel.addEventListener('click', () => done(false));
+        confirmBox.replaceChildren(
+          h('strong', {}, 'Save the lifecycle rules?'),
+          h('p', {}, 'The storage provider runs these actions every day, also on the objects that exist now. They cannot be undone.'),
+          h('ul', {}, sentences.map(text => h('li', {}, text))),
+          h('div', { class: 'lifecycle__confirmActions' }, accept, cancel));
+        confirmBox.hidden = false;
+        actions.hidden = true;
+        accept.focus();
+      });
+    }
 
     const writable = () => Boolean(editor?.writable) && canWrite;
     const offered = field => Boolean(editor?.fields?.[field]);
@@ -281,7 +310,7 @@
         h('div', { class: 'lifecycleRule__actions' }, actionRows));
     }
 
-    // A rule that the window does not edit: its summary and, for a rule that the editor keeps, the reason and the XML.
+    // A rule that the editor does not edit: its summary and, for a rule that the editor keeps, the reason and the XML.
     function readOnlyRow(item) {
       const rule = item.rule || {};
       const kept = item.entry && !item.entry.editable;
@@ -314,12 +343,12 @@
     function render() {
       const root = editor?.rootPrefix || '';
       intro.replaceChildren(...(root
-        ? ['The rules apply to the bucket. This window edits the rules under ', h('code', {}, root), ': a prefix of a rule starts there. The other rules stay as they are.']
+        ? ['The rules apply to the bucket. This part edits the rules under ', h('code', {}, root), ': a prefix of a rule starts there. The other rules stay as they are.']
         : ['The rules apply to the whole bucket. The storage provider runs them, not S3-Browser.']));
       intro.hidden = !editor;
       providerNote.textContent = editor?.providerNote || '';
       providerNote.hidden = !editor?.providerNote;
-      readonly.textContent = !editor ? '' : !editor.writable ? `You cannot change the rules here. ${editor.readOnlyReason || ''}`.trim() : !canWrite ? 'You cannot change the rules here: you have no write permission in this folder.' : '';
+      readonly.textContent = !editor ? '' : !editor.writable ? `You cannot change the rules here. ${editor.readOnlyReason || ''}`.trim() : !canWrite ? 'You cannot change the rules here: you have no write permission in this bucket.' : '';
       readonly.hidden = !readonly.textContent;
       hidden.replaceChildren(...(editor?.hidden || []).map(item => h('li', { 'data-field': item.field }, h('strong', {}, `${FIELD_LABELS[item.field] || item.field}: `), 'not offered. ', item.reason)));
       hidden.hidden = !writable() || !(editor?.hidden || []).length;
@@ -375,11 +404,7 @@
         .filter(({ draft }) => changedDraft(draft))
         .flatMap(({ rule }) => destructiveActions(rule, editor?.rootPrefix || ''));
       if (sentences.length) {
-        const confirmed = await BB.ui.confirm({
-          title: 'Save the lifecycle rules',
-          html: `<div class="lifecycleConfirm" data-lifecycle-confirm><p>The storage provider runs these actions every day, also on the objects that exist now. They cannot be undone.</p><ul>${sentences.map(text => `<li>${escapeHTML(text)}</li>`).join('')}</ul></div>`,
-          confirmLabel: 'Save the rules'
-        });
+        const confirmed = await confirmInline(sentences);
         if (!confirmed) return;
       }
       busy = true;
@@ -388,7 +413,7 @@
       warnings.replaceChildren();
       try {
         const response = await BB.api.putLifecycle({ hash: editor.hash, rules: prepared.map(item => item.rule), instance });
-        // Without a state, the server could not read the rules again after the write: the window reads them.
+        // Without a state, the server could not read the rules again after the write: the editor reads them.
         if (response.editor) apply(response);
         else { busy = false; await load(); }
         const changes = response.warnings || [];
@@ -397,7 +422,7 @@
         document.dispatchEvent(new CustomEvent('bb:lifecycle-changed', { detail: { instance } }));
       } catch (failure) {
         if (failure?.code === 'lifecycle_changed') {
-          say('The lifecycle rules of the bucket changed after this window read them. Reload the rules, then make your change again.', 'error');
+          say('The lifecycle rules of the bucket changed after this page read them. Reload the rules, then make your change again.', 'error');
           reloadButton.hidden = false;
         } else if (failure?.code === 'lifecycle_write_denied' || failure?.code === 'lifecycle_write_unsupported') {
           busy = false;
@@ -429,24 +454,9 @@
     reloadButton.addEventListener('click', () => { say(''); warnings.replaceChildren(); void load(); });
     reloadButton.hidden = true;
 
-    host.replaceChildren(intro, providerNote, readonly, hidden, state, list, actions, message, warnings);
+    host.replaceChildren(intro, providerNote, readonly, hidden, state, list, actions, confirmBox, message, warnings);
     render();
     void load();
-  }
-
-  // Open the window. prefix is the folder of the listing, canWrite tells if the person can write there. prefill gives
-  // the values of a new rule, such as { id, prefix, abortMultipartDays } from the window of the incomplete uploads.
-  function open({ instance = null, canWrite = false, prefix = '', prefill = null } = {}) {
-    return BB.ui.alert({
-      title: 'Lifecycle rules',
-      large: true,
-      onOpen: ({ modal }) => {
-        const body = modal.querySelector('.bb-modal-body');
-        const root = h('div', { class: 'lifecycle', 'data-lifecycle': '' });
-        body.replaceChildren(root);
-        mount(root, { instance, canWrite, prefix, prefill });
-      }
-    });
   }
 
   // What the window of the incomplete uploads can say about a rule that aborts them: { supported, offered, writable,
@@ -464,5 +474,5 @@
     }
   }
 
-  BB.lifecycle = { open, abortRuleSupport, destructiveActions, describeRule, checkRules };
+  BB.lifecycle = { mount, abortRuleSupport, destructiveActions, describeRule, checkRules };
 })();

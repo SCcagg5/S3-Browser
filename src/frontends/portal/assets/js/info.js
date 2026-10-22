@@ -1,21 +1,22 @@
 /*
- * The information page of a bucket or a volume: /-/<host>/<bucket>/?info. It is read only, and the bucket selector
- * opens it (the state icons of the trigger and of each entry of the list). The page has the visual language of the
- * System page of ClickHouse Dash: a row of section links under the header, then parts with a heading, tiles for the
- * numbers, cards with key-value lists, gauges for the used parts, and status chips. Each row shows only when it is
- * known. The parts:
- * - summary: tiles with what the bucket holds, the quota, the storage, the free bytes, and read, write and delete;
+ * The information page of a bucket or a volume: /-/<host>/<bucket>/?info. The bucket selector opens it (the link of
+ * the state icons and of the usage, in the trigger and in each entry of the list). The header has the selector of the
+ * listing (switcher.js): a bucket of its list opens the information page of that bucket. The page has the visual
+ * language of the System page of ClickHouse Dash: parts with a heading, cards with key-value lists, gauges for the used
+ * parts, and status chips. It has no head: the selector names the bucket. Each row shows only when it is known. The
+ * parts, one under the other on one scroll:
  * - identity and permissions: the name, the id, the kind of storage, the host, the bucket, the root prefix and the
  *   region; read, write and delete with the reason of each decision (the ceiling of the configuration,
  *   server.access_mode = "force_read_only", the access policy). It never shows an endpoint, an admin URL, a token or
  *   the path of a volume on the server;
  * - storage: what the bucket or the volume holds, its quota, and the capacity of the storage behind it (GET /api/usage);
- * - functions: versioning, encryption, Object Lock, lifecycle rules (GET /api/lifecycle), tags, the edit of the
- *   metadata, the incomplete uploads and the SHA-256 checksum of the uploads.
+ * - functions: versioning, encryption, Object Lock, lifecycle rules, tags, the edit of the metadata, the incomplete
+ *   uploads and the SHA-256 checksum of the uploads;
+ * - lifecycle rules (#info-lifecycle): the editor of the rules (lifecycle.js), in the page, with no window. A write
+ *   needs the right to write in the bucket.
  * The chips have the colours of the state icons of the selector: green (on, allowed), orange (on, with a problem) and
  * grey (off, not available, denied). The data comes from /api/instances, /api/usage and /api/lifecycle. A source that
- * the person cannot read gives "Not allowed". The button of the lifecycle rules opens the listing of the bucket with
- * ?lifecycle, which opens the editor there.
+ * the person cannot read gives "Not allowed".
  */
 (function () {
   'use strict';
@@ -295,9 +296,8 @@
     } else {
       state = rules == null ? chip('off', 'Unknown') : chip(rules > 0 ? 'on' : 'off', rules > 0 ? plural(rules, 'rule') : 'No rule');
     }
-    const target = `${BB.api.browserPageURL('', { instance: instance.id })}?lifecycle`;
-    const open = h('a', { class: 'button infoAction', href: target, 'data-info-lifecycle': '' }, ic('hourglass'), 'Open the lifecycle rules');
-    return row('Lifecycle rules', [state, open], 'The editor opens on the listing of the bucket.', 'lifecycle');
+    const link = h('a', { class: 'infoLink', href: '#info-lifecycle', 'data-info-lifecycle': '' }, 'Edit them below');
+    return row('Lifecycle rules', [state, link], '', 'lifecycle');
   }
 
   function checksumRow(instance) {
@@ -392,6 +392,30 @@
     }
   }
 
+  // The part "Lifecycle rules": the editor of the rules (lifecycle.js) in the page, under the part Functions. The page
+  // builds it one time: a new read of the usage does not touch the form. ?info&lifecycle-abort=<prefix> (the link of
+  // the window of the incomplete uploads) adds a new rule that aborts the incomplete uploads under that prefix.
+  function renderLifecycle(instance) {
+    const box = byId('infoLifecycle');
+    let body;
+    if (isVolume(instance)) body = empty('Not available for a mounted folder', 'A volume has no lifecycle rules.', 'volume');
+    else if (instance.lifecycleSupported === false) body = empty('Not available', 'This storage provider has no lifecycle rules.', 'unsupported');
+    else if (!can(instance, 'list')) body = empty('Not allowed', NOT_ALLOWED, 'not-allowed');
+    else {
+      const query = new URLSearchParams(window.location.search);
+      const abort = query.has('lifecycle-abort') ? String(query.get('lifecycle-abort') || '') : null;
+      if (abort !== null) window.history.replaceState(null, '', `${window.location.pathname}?info${window.location.hash}`);
+      body = h('div', { class: 'lifecycle', 'data-lifecycle': '' });
+      BB.lifecycle.mount(body, {
+        instance: instance.id,
+        canWrite: can(instance, 'upload'),
+        prefill: abort === null ? null : { id: 'abort-incomplete-uploads', prefix: abort, abortMultipartDays: 7 }
+      });
+    }
+    box.replaceChildren(part('lifecycle', 'Lifecycle rules', '', body));
+    if (window.location.hash === '#info-lifecycle') byId('info-lifecycle')?.scrollIntoView({ block: 'start' });
+  }
+
   // The usage. While the count of the files of a volume runs, the page reads it again every 3 seconds, 20 times at most.
   async function loadUsage(instance, fresh, rounds = 20) {
     page.usage = await BB.usage.load(instance, { fresh });
@@ -433,6 +457,9 @@
     document.title = `${instance.name || instance.id} - Information`;
     byId('infoTitle').textContent = `Information of the ${noun(instance)} ${instance.name || instance.id}`;
     render();
+    renderLifecycle(instance);
+    // A save of the rules changes the part Functions and the state icons of the selector.
+    document.addEventListener('bb:lifecycle-changed', () => { void loadLifecycle(instance).then(render); });
     const reads = [];
     if (instance.usageSupported === true && can(instance, 'list')) reads.push(loadUsage(instance, false));
     if (instance.lifecycleSupported !== false && !isVolume(instance) && can(instance, 'list')) reads.push(loadLifecycle(instance));

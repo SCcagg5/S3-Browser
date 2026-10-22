@@ -109,8 +109,8 @@
   // The window
   // ---------------------------------------------------------------------------------------------------------------
 
-  // The note about the lifecycle rules. The button closes this window and opens the window of the lifecycle rules, with
-  // a new rule that aborts the uploads of the folder after 7 days where the provider keeps such a rule.
+  // The note about the lifecycle rules. The link opens the part "Lifecycle rules" of the information page of the bucket,
+  // with a new rule that aborts the uploads of the folder after 7 days where the provider keeps such a rule.
   async function renderLifecycleNote(note, { prefix, canWrite, instance, close }) {
     if (BB.cfg?.provider === 'fs') {
       note.replaceChildren('An upload that stops before its end leaves a temporary file in the folder of the file. The date is the last write to the temporary file.');
@@ -122,12 +122,10 @@
     const support = await BB.lifecycle.abortRuleSupport(instance);
     if (!support.supported || !note.isConnected) return;
     const prefill = support.offered && support.writable && canWrite;
-    const button = h('button', { type: 'button', class: 'bb-btn multiparts__lifecycle', 'data-multipart-lifecycle': '' },
+    // ?info&lifecycle-abort=<prefix>#info-lifecycle: the information page adds the rule to its editor.
+    const target = `${BB.api.browserPageURL('', { instance: instance || BB.api.getInstance() })}?info${prefill ? `&lifecycle-abort=${encodeURIComponent(prefix)}` : ''}#info-lifecycle`;
+    const button = h('a', { class: 'bb-btn multiparts__lifecycle', href: target, 'data-multipart-lifecycle': '', onclick: () => close() },
       icon('timer-sand'), h('span', {}, prefill ? 'Add a lifecycle rule' : 'Lifecycle rules'));
-    button.addEventListener('click', () => {
-      close();
-      void BB.lifecycle.open({ instance, canWrite, prefix, prefill: prefill ? { id: 'abort-incomplete-uploads', prefix, abortMultipartDays: 7 } : null });
-    });
     const unsupported = support.offered ? '' : support.reason || 'This storage provider does not keep a lifecycle rule that aborts them.';
     note.replaceChildren(h('span', {}, lead, unsupported ? ` ${unsupported}` : ''), button);
     note.dataset.abortRule = support.offered ? 'offered' : 'not-offered';

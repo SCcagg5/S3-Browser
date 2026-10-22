@@ -2658,6 +2658,7 @@ button.versionCount:focus-visible {
   color: var(--text);
   font-size: var(--fs-md);
   font-weight: var(--fw-semibold);
+  text-decoration: none;
   white-space: nowrap;
   cursor: pointer;
 }
@@ -3684,8 +3685,9 @@ button.versionCount:focus-visible {
   gap: 8px 12px;
 }
 
-/* Lifecycle rules: the window of the Actions menu. The notes, the rules (a form for each editable rule, a read-only
-   row for each other rule), the buttons, one line of message and the changes of the provider after a save. */
+/* Lifecycle rules: the editor in the part "Lifecycle rules" of the information page. The notes, the rules (a form for
+   each editable rule, a read-only row for each other rule), the buttons, the confirmation of a save that deletes data,
+   one line of message and the changes of the provider after a save. */
 .lifecycle {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -3860,9 +3862,31 @@ button.versionCount:focus-visible {
   display: none;
 }
 
-.lifecycleConfirm ul {
-  margin: 8px 0 0;
+/* The confirmation in the page, in place of the buttons: the actions that delete data, then Save and Cancel. */
+.lifecycle__confirm {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--warning) 55%, var(--border));
+  border-left-width: 4px;
+  border-radius: var(--radius-control);
+  background: var(--warning-bg);
+  font-size: var(--fs-sm);
+}
+
+.lifecycle__confirm[hidden] {
+  display: none;
+}
+
+.lifecycle__confirm ul {
+  margin: 0;
   padding-left: 1.2em;
+}
+
+.lifecycle__confirmActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 /* On a phone the name of a field goes above its input. */
