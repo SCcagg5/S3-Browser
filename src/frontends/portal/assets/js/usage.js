@@ -83,78 +83,143 @@
   // The last answer of an instance in the page, or null. loading: a read of the instance is in flight.
   const cached = id => answers.get(String(id || ''))?.answer || null;
   const loading = id => Boolean(answers.get(String(id || ''))?.pending);
-  const shown = answer => answer?.supported === true && answer.available === true;
+  // An answer with numbers: the part of the bucket, or the storage behind it (the read of the bucket part can fail).
+  const shown = answer => answer?.supported === true && (answer.available === true || Boolean(answer.storage));
+  const bucketShown = answer => answer?.supported === true && answer.available === true;
+  // The part that gives the percent, the colour and the warning: "quota", "storage" or "" (no limit). An answer of an
+  // older server has no constraint: its limit of bytes is the quota.
+  const constraint = answer => (answer?.constraint !== undefined ? String(answer.constraint || '') : (Number(answer?.limitBytes) > 0 ? 'quota' : ''));
+  const hasLimit = answer => shown(answer) && constraint(answer) !== '';
+  const mark = approximate => (approximate ? '~' : '');
 
-  // The short text of the chip of the header: "~12.3 GB of 20 GB" or "12.3 GB used".
+  // The short text of the chip of the selector: the percent of the constraining part, or the used bytes.
+  function shortText(answer) {
+    if (!shown(answer)) return '';
+    if (hasLimit(answer)) {
+      const percent = Number(answer.percent) || 0;
+      const approximate = constraint(answer) === 'storage' ? answer.storage?.approximate : answer.approximate;
+      return percent > 0 && percent < 1 ? '<1 %' : `${mark(approximate)}${Math.floor(percent)} %`;
+    }
+    return bucketShown(answer) ? `${mark(answer.approximate)}${formatBytes(answer.usedBytes)}` : '';
+  }
+
+  // The text of the chip for a screen reader: "~12.3 GB of 20 GB", "Storage: 910 GB of 1000 GB" or "12.3 GB used".
   function text(answer) {
     if (!shown(answer)) return '';
-    const used = `${answer.approximate ? '~' : ''}${formatBytes(answer.usedBytes)}`;
+    if (constraint(answer) === 'storage') {
+      return `Storage: ${mark(answer.storage.approximate)}${formatBytes(answer.storage.usedBytes)} of ${formatBytes(answer.storage.totalBytes)}`;
+    }
+    const used = `${mark(answer.approximate)}${formatBytes(answer.usedBytes)}`;
     return Number(answer.limitBytes) > 0 ? `${used} of ${formatBytes(answer.limitBytes)}` : `${used} used`;
   }
 
+  // What a volume holds: "10 GB", "at least 10 GB" while the count runs or when it stopped at its budget.
+  function selfText(answer) {
+    const bytes = formatBytes(answer.selfBytes ?? answer.usedBytes);
+    if (answer.selfState === 'computing') return Number(answer.selfBytes) > 0 ? `at least ${bytes} (counting…)` : 'computing…';
+    if (answer.selfState === 'partial') return `at least ${bytes} (the count stopped at its limit)`;
+    return bytes;
+  }
+
+  // The lines of the usage: the term, the value, the bar (percent and level) and a note. The popover and the tooltip
+  // show them. Each line is there only when it is known.
+  function lines(answer) {
+    const out = [];
+    if (!answer || answer.supported !== true) return out;
+    const volume = volumeAnswer(answer);
+    if (bucketShown(answer)) {
+      const objects = Number(answer.usedObjects) >= 0 ? `, ${count(answer.usedObjects)} ${volume ? 'files' : 'objects'}` : '';
+      out.push({ term: volume ? 'This volume holds' : 'This bucket holds', value: volume ? `${selfText(answer)}${answer.selfState === 'ready' ? objects : ''}` : `${mark(answer.approximate)}${formatBytes(answer.usedBytes)}${objects}`,
+        note: answer.rootPrefix && !volume ? `The numbers are for the whole bucket ${answer.bucket}, not only for ${answer.rootPrefix}.` : (answer.approximate ? answer.approximateReason || '' : '') });
+      if (Number(answer.limitBytes) > 0) {
+        out.push({ term: 'Quota', value: `${mark(answer.approximate)}${formatBytes(answer.usedBytes)} of ${formatBytes(answer.limitBytes)} (${answer.quotaPercent ?? answer.percent} %)`,
+          percent: Number(answer.quotaPercent ?? answer.percent) || 0, level: answer.quotaLevel ?? answer.level,
+          note: answer.limitSource === 'config' ? 'The configuration of S3-Browser sets this limit. The provider does not enforce it.' : '' });
+      }
+      if (Number(answer.limitObjects) > 0 && Number(answer.usedObjects) >= 0) {
+        out.push({ term: 'Objects', value: `${count(answer.usedObjects)} of ${count(answer.limitObjects)}` });
+      }
+    } else if (answer.error) {
+      out.push({ term: volume ? 'This volume holds' : 'This bucket holds', value: 'unavailable', note: answer.error.message || '' });
+    }
+    const storage = answer.storage;
+    if (storage) {
+      out.push({ term: 'Storage', value: `${mark(storage.approximate)}${formatBytes(storage.usedBytes)} of ${formatBytes(storage.totalBytes)} (${storage.percent} %), ${formatBytes(storage.freeBytes)} left`,
+        percent: Number(storage.percent) || 0, level: storage.level,
+        note: [volume ? 'The file system of the volume: the other folders on it count too.' : capitalize(storage.note || ''),
+          storage.approximate ? `~ Approximate: ${storage.approximateReason || 'the storage counts with a delay.'}` : ''].filter(Boolean).join(' ') });
+    } else if (answer.storageError) {
+      out.push({ term: 'Storage', value: 'unavailable', note: answer.storageError.message || '' });
+    }
+    return out;
+  }
+
+  const capitalize = value => (value ? `${value.charAt(0).toUpperCase()}${value.slice(1)}${value.endsWith('.') ? '' : '.'}` : '');
+
   // The lines of the tooltip.
   function title(answer) {
-    if (answer?.supported === true && answer.available !== true) return answer.error?.message || `The usage of the ${noun(answer)} is unavailable.`;
+    if (answer?.supported === true && !shown(answer)) return answer.error?.message || `The usage of the ${noun(answer)} is unavailable.`;
     if (!shown(answer)) return '';
-    const lines = [];
-    if (volumeAnswer(answer)) {
-      lines.push(`Usage of the file system of the volume ${answer.bucket}`);
-      lines.push('The numbers are for the whole file system: the other folders on it count too.');
-    } else {
-      lines.push(answer.rootPrefix
-        ? `Usage of the whole bucket ${answer.bucket}, not only of ${answer.rootPrefix}`
-        : `Usage of the whole bucket ${answer.bucket}`);
-    }
-    lines.push(`Used: ${formatBytes(answer.usedBytes)} (${count(answer.usedBytes)} bytes)`);
-    if (Number(answer.limitBytes) > 0) {
-      lines.push(`Limit: ${formatBytes(answer.limitBytes)} (${count(answer.limitBytes)} bytes), ${answer.percent} % used`);
-      if (answer.limitSource === 'config') lines.push('The configuration of S3-Browser sets this limit. The provider does not enforce it.');
-    } else {
-      lines.push('No limit');
-    }
-    if (Number(answer.usedObjects) >= 0) {
-      lines.push(Number(answer.limitObjects) > 0
-        ? `Objects: ${count(answer.usedObjects)} of ${count(answer.limitObjects)}`
-        : `Objects: ${count(answer.usedObjects)}`);
-    }
-    if (answer.level === 'error') lines.push('More than 95 % of the limit is used.');
-    else if (answer.level === 'warning') lines.push('More than 80 % of the limit is used.');
-    const counted = answer.asOf ? BB.runtime.formatDateTimeUTC(answer.asOf) : '';
-    lines.push(`Source: ${SOURCES[answer.source] || answer.source}${counted ? `, counted ${counted}` : ''}`);
-    if (answer.approximate) lines.push(`~ Approximate: ${answer.approximateReason || 'the provider counts with a delay.'}`);
-    return lines.join('\n');
+    const out = lines(answer).map(line => `${line.term}: ${line.value}${line.note ? `\n  ${line.note}` : ''}`);
+    if (answer.level === 'error') out.push(`More than 95 % of the ${constraint(answer) === 'storage' ? 'storage' : 'limit'} is used.`);
+    else if (answer.level === 'warning') out.push(`More than 80 % of the ${constraint(answer) === 'storage' ? 'storage' : 'limit'} is used.`);
+    const counted = answer.asOf && bucketShown(answer) ? BB.runtime.formatDateTimeUTC(answer.asOf) : '';
+    out.push(`Source: ${SOURCES[answer.source] || answer.source}${counted ? `, counted ${counted}` : ''}`);
+    return out.join('\n');
   }
 
   // The line of the tooltip of a bucket in the selector, or ''.
   function selectorLine(answer) {
-    if (answer?.supported === true && answer.available !== true) return 'usage: unavailable';
+    if (answer?.supported === true && !shown(answer)) return 'usage: unavailable';
     if (!shown(answer)) return '';
-    return `usage: ${text(answer)}${Number(answer.limitBytes) > 0 ? ` (${answer.percent} %)` : ''}`;
+    const parts = [];
+    if (bucketShown(answer)) {
+      parts.push(`usage: ${volumeAnswer(answer) ? selfText(answer) : text({ ...answer, constraint: Number(answer.limitBytes) > 0 ? 'quota' : '' })}${Number(answer.limitBytes) > 0 ? ` (${answer.quotaPercent ?? answer.percent} %)` : ''}`);
+    }
+    if (answer.storage) parts.push(`storage: ${mark(answer.storage.approximate)}${formatBytes(answer.storage.usedBytes)} of ${formatBytes(answer.storage.totalBytes)} (${answer.storage.percent} %), ${formatBytes(answer.storage.freeBytes)} left`);
+    return parts.join('\n');
   }
 
-  // A full bucket: FULL_PERCENT or more of a limit of bytes. A bucket without a limit of bytes is never full.
-  const full = answer => shown(answer) && Number(answer.limitBytes) > 0 && Number(answer.percent) >= FULL_PERCENT;
+  // A full bucket: FULL_PERCENT or more of the constraining part (the quota or the storage). A bucket without a limit
+  // is never full.
+  const full = answer => hasLimit(answer) && Number(answer.percent) >= FULL_PERCENT;
 
-  // The text of the warning of a full bucket, or ''. The percent of the server is the larger part of the limit of bytes
-  // and of the limit of objects: the text names the objects when they fill the bucket first. note: the reason of an
-  // approximate number, as a second sentence.
+  // The text of the warning of a full bucket, or ''. The percent of the server is the larger part: the text names the
+  // storage, the objects or the bytes of the quota. note: the reason of an approximate number, as a second sentence.
   function fullText(answer, { note = true } = {}) {
     if (!full(answer)) return '';
-    const mark = answer.approximate ? '~' : '';
     const percent = Math.floor(Number(answer.percent));
+    const reason = note ? approximateNote(answer) : '';
+    const tail = reason ? ` ${reason}` : '';
+    if (constraint(answer) === 'storage') {
+      const storage = answer.storage;
+      const sign = mark(storage.approximate);
+      const amount = `${sign}${formatBytes(storage.usedBytes)} of ${formatBytes(storage.totalBytes)}, ${formatBytes(storage.freeBytes)} left`;
+      const where = volumeAnswer(answer) ? 'This volume is on a file system that is' : 'The storage of this bucket is';
+      return percent >= 100
+        ? `${where} full: ${amount}. New uploads fail.${tail}`
+        : `${where} ${sign}${percent} % full: ${amount}. New uploads can fail.${tail}`;
+    }
+    const sign = mark(answer.approximate);
     const objects = Number(answer.limitObjects) > 0 && Number(answer.usedObjects) >= 0
       && Number(answer.usedObjects) / Number(answer.limitObjects) > Number(answer.usedBytes) / Number(answer.limitBytes);
     const amount = objects
       ? `${count(answer.usedObjects)} objects of ${count(answer.limitObjects)}`
-      : `${mark}${formatBytes(answer.usedBytes)} used of ${formatBytes(answer.limitBytes)}`;
-    const reason = note ? approximateNote(answer) : '';
+      : `${sign}${formatBytes(answer.usedBytes)} used of ${formatBytes(answer.limitBytes)}`;
     return percent >= 100
-      ? `This ${noun(answer)} is full: ${amount} (${mark}${percent} %). New uploads fail.${reason ? ` ${reason}` : ''}`
-      : `This ${noun(answer)} is ${mark}${percent} % full: ${amount}. New uploads can fail.${reason ? ` ${reason}` : ''}`;
+      ? `This ${noun(answer)} is full: ${amount} (${sign}${percent} %). New uploads fail.${tail}`
+      : `This ${noun(answer)} is ${sign}${percent} % full: ${amount}. New uploads can fail.${tail}`;
   }
 
-  // The reason of an approximate number, or ''.
-  const approximateNote = answer => (answer?.approximate ? `The numbers are approximate: ${answer.approximateReason || 'the provider counts with a delay.'}` : '');
+  // The reason of an approximate number of the constraining part, or ''.
+  function approximateNote(answer) {
+    if (constraint(answer) === 'storage') {
+      return answer?.storage?.approximate ? `The numbers are approximate: ${answer.storage.approximateReason || 'the storage counts with a delay.'}` : '';
+    }
+    return answer?.approximate ? `The numbers are approximate: ${answer.approximateReason || 'the provider counts with a delay.'}` : '';
+  }
 
-  BB.usage = { load, cached, loading, shown, text, title, selectorLine, full, fullText, approximateNote, formatBytes };
+  const sourceName = answer => SOURCES[answer?.source] || String(answer?.source || '');
+
+  BB.usage = { load, cached, loading, shown, hasLimit, sourceName, constraint, shortText, text, lines, title, selectorLine, full, fullText, approximateNote, formatBytes };
 })();

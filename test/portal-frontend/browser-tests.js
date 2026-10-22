@@ -4602,14 +4602,20 @@ for (const [instance, provider] of Object.entries(PROVIDERS)) {
     assert.doesNotMatch(JSON.stringify(answer), /:(3903|9333|8888)\b|admin-token|minio\/admin/);
     await open(page, `-/${instance.split('-')[0]}/${instance}/`);
     await page.waitForSelector(`${FACTS} [data-fact="usage"][data-level="ok"]`);
+    // The storage of each provider is a tmpfs of 4 GiB, for all the buckets of the provider. The chip shows the more
+    // constraining part: the storage, or the quota of 20 GiB for an equal part (Garage compresses the data that it stores).
+    const storageFirst = answer.storage.percent > answer.quotaPercent;
+    assert.equal(answer.constraint, storageFirst ? 'storage' : 'quota', JSON.stringify(answer));
+    assert.equal(answer.storage.totalBytes, 4 * 1024 ** 3);
+    assert.equal(answer.storage.usedBytes + answer.storage.freeBytes <= answer.storage.totalBytes, true);
     const text = (await usageItem(page).locator('.bucketUsage__text').textContent()).trim();
-    assert.match(text, /^~?[\d.]+ (B|KB|MB|GB) of 20 GB$/);
-    // SeaweedFS and MinIO count with a delay: the number has a "~" and the tooltip says why.
-    assert.equal(text.startsWith('~'), answer.approximate === true);
+    assert.match(text, storageFirst ? /^Storage: [\d.]+ (B|KB|MB|GB) of 4 GB$/ : /^~?[\d.]+ (B|KB|MB|GB) of 20 GB$/);
     const title = await usageItem(page).getAttribute('title');
-    assert.match(title, /^Usage of the whole bucket default\n/);
-    assert.match(title, /Limit: 20 GB \(21,474,836,480 bytes\)/);
-    if (answer.approximate) assert.match(title, /~ Approximate: /);
+    // SeaweedFS and MinIO count the bucket with a delay: its number has a "~" and the tooltip says why.
+    assert.match(title, answer.approximate ? /^This bucket holds: ~[\d.]+ (B|KB|MB|GB)/ : /^This bucket holds: [\d.]+ (B|KB|MB|GB)/);
+    assert.match(title, /\nQuota: ~?[\d.]+ (B|KB|MB|GB) of 20 GB \([\d.]+ %\)\n/);
+    assert.match(title, /\nStorage: [\d.]+ (B|KB|MB|GB) of 4 GB \([\d.]+ %\), [\d.]+ (MB|GB) left\n/);
+    assert.match(title, { 'seaweedfs-main': /of the disks of 1 volume server/, 'minio-main': /of 1 drive/, 'garage-main': /of 1 storage node/ }[instance]);
     if (instance === 'garage-main') assert.match(title, /Objects: [\d,]+ of 100,000/);
     assert.equal(await usageItem(page).locator('.usageMeter[role="meter"]').count(), 1);
     // The facts are in the trigger of the selector, on the line of the name (a wide window): no chip in the header.
@@ -4657,11 +4663,11 @@ test('usage: the facts of seaweedfs-locked, of the encrypted buckets and of a bu
   const looks = await page.locator(`${FACTS} .bucketFact`).evaluateAll(nodes => nodes.map(node => [node.dataset.fact, Boolean(node.title), node.getBoundingClientRect().height <= 20]));
   assert.deepEqual(looks, [['object-lock', true, true], ['lifecycle', true, true], ['usage', true, true]]);
   assert.equal((await page.textContent(`${FACTS} [data-fact="lifecycle"] .bucketFact__short`)).trim(), '0');
-  // No limit: "used", no bar.
-  assert.match(await usageItem(page).locator('.bucketUsage__text').textContent(), /^~[\d.]+ (B|KB|MB) used$/);
-  assert.equal(await usageItem(page).locator('.usageMeter').count(), 0);
-  assert.match(await usageItem(page).getAttribute('title'), /\nNo limit\n/);
-  assert.equal(await usageItem(page).getAttribute('data-level'), 'none');
+  // No quota: the chip shows the storage behind the bucket, with its bar, and the tooltip has no line of a quota.
+  assert.match(await usageItem(page).locator('.bucketUsage__text').textContent(), /^Storage: [\d.]+ (B|KB|MB|GB) of 4 GB$/);
+  assert.equal(await usageItem(page).locator('.usageMeter').count(), 1);
+  assert.doesNotMatch(await usageItem(page).getAttribute('title'), /\nQuota: /);
+  assert.equal(await usageItem(page).getAttribute('data-constraint'), 'storage');
 
   // The key of an encrypted bucket; the key of Garage in the colour of a warning.
   await open(page, '-/seaweedfs/seaweedfs-encrypted/');
@@ -4675,7 +4681,7 @@ test('usage: the facts of seaweedfs-locked, of the encrypted buckets and of a bu
 
   await open(page, '-/seaweedfs/seaweedfs-archive/');
   await page.waitForSelector(`${FACTS} [data-fact="usage"]:not([data-level="loading"])`);
-  assert.match(await usageItem(page).locator('.bucketUsage__text').textContent(), / of 10 GB$/);
+  assert.match(await usageItem(page).getAttribute('title'), /\nQuota: ~?[\d.]+ (B|KB|MB|GB) of 10 GB /);
   assert.match(await usageItem(page).getAttribute('title'), /The configuration of S3-Browser sets this limit\. The provider does not enforce it\./);
   assert.equal((await apiUsage(page, 'seaweedfs-archive')).limitSource, 'config');
 
@@ -4735,11 +4741,11 @@ test('usage: each bucket of the menu has its facts and its versioning icon, from
   assert.deepEqual(await entryFacts(page, 'garage-main'), [...garageRules, 'usage']);
   assert.deepEqual(await entryFacts(page, 'garage-encrypted'), ['encryption', ...garageRules, 'usage']);
   assert.match(await page.getAttribute('.storageBucket[data-instance="garage-encrypted"] [data-fact="encryption"]', 'class'), /is-warning/);
-  for (const id of ['seaweedfs-main', 'minio-main', 'garage-main', 'seaweedfs-archive']) {
-    assert.match(await page.textContent(`.storageBucket[data-instance="${id}"] .bucketUsage__text`), /^~?[\d.]+ (B|KB|MB|GB) of (10|20) GB$/, id);
+  // The more constraining part of each bucket: the storage of 4 GiB, or the quota for an equal part.
+  for (const id of ['seaweedfs-main', 'minio-main', 'garage-main', 'seaweedfs-archive', 'minio-locked']) {
+    assert.match(await page.textContent(`.storageBucket[data-instance="${id}"] .bucketUsage__text`), /^(Storage: [\d.]+ (B|KB|MB|GB) of 4 GB|~?[\d.]+ (B|KB|MB|GB) of (10|20) GB)$/, id);
     assert.equal(await page.locator(`.storageBucket[data-instance="${id}"] .usageMeter`).count(), 1, id);
   }
-  assert.match(await page.textContent('.storageBucket[data-instance="minio-locked"] .bucketUsage__text'), /^~?[\d.]+ (B|KB|MB) used$/);
   // The facts are on the line of the name (a wide window), in the button of the bucket, with no button: a button cannot
   // hold a button.
   assert.equal(await page.locator('.storageBucket button, .storageSwitcher__trigger button').count(), 0);
@@ -4820,12 +4826,12 @@ test('usage: the chip of the lifecycle rules opens the window of the rules, with
     await until(page, () => !document.querySelector('[data-lifecycle] .lifecycle__intro')?.hidden, null, 15000);
     await closeWindow(page);
   }
-  // A click on the line of the facts outside the chip opens the menu of the buckets, as a click on the trigger.
-  const usage = await usageItem(page).boundingBox();
-  await page.mouse.click(usage.x + 4, usage.y + usage.height / 2);
-  assert.equal(await page.isVisible('#storageSwitcherMenu'), true);
-  await page.mouse.click(usage.x + 4, usage.y + usage.height / 2);
+  // The usage is a button too: a click opens the popover "Usage", not the menu of the buckets, and a second click closes it.
+  await usageItem(page).click();
+  assert.equal(await page.isVisible('#usagePopover'), true);
   assert.equal(await page.isHidden('#storageSwitcherMenu'), true);
+  await usageItem(page).click();
+  assert.equal(await page.locator('#usagePopover').count(), 0);
   assert.deepEqual(page.errors, []);
   await page.context().close();
 });
@@ -4881,10 +4887,10 @@ test('usage: the tooltip of a bucket in the selector has its usage', async () =>
   const page = await newPage();
   await open(page, MAIN);
   await page.waitForSelector(`${FACTS} [data-fact="usage"][data-used-bytes]`);
-  assert.match(await page.getAttribute('.storageSwitcher__trigger', 'title'), /\nusage: ~[\d.]+ (B|KB|MB|GB) of 20 GB \([\d.]+ %\)$/);
+  assert.match(await page.getAttribute('.storageSwitcher__trigger', 'title'), /\nusage: ~[\d.]+ (B|KB|MB|GB) of 20 GB \([\d.]+ %\)\nstorage: [\d.]+ (B|KB|MB|GB) of 4 GB \([\d.]+ %\), [\d.]+ (MB|GB) left$/);
   await page.click('.storageSwitcher__trigger strong');
   await until(page, () => /usage: [\d.]+ (B|KB|MB|GB) of 20 GB/.test(document.querySelector('.storageBucket[data-instance="garage-main"]')?.title || ''));
-  await until(page, () => /usage: ~[\d.]+ (B|KB|MB) used$/.test(document.querySelector('.storageBucket[data-instance="minio-locked"]')?.title || ''));
+  await until(page, () => /usage: ~[\d.]+ (B|KB|MB) used\nstorage: /.test(document.querySelector('.storageBucket[data-instance="minio-locked"]')?.title || ''));
   // The menu stays open while the lines change.
   assert.equal(await page.isVisible('#storageSwitcherMenu'), true);
   assert.deepEqual(page.errors, []);
@@ -5631,33 +5637,84 @@ test('volumes: the window Incomplete uploads lists the temporary file of an old 
   await page.context().close();
 });
 
-test('volumes: the usage is the size of the file system, in the selector, its tooltip, and the banner of a full volume', async () => {
+// The size of the files of the volume, as S3-Browser counts it: the regular files, no symbolic link, no temporary file.
+function volumeSize(relative = '') {
+  let bytes = 0;
+  let files = 0;
+  for (const entry of volumeFS.readdirSync(volumeFile(relative), { withFileTypes: true })) {
+    const child = volumePath.join(relative, entry.name);
+    if (entry.isDirectory()) {
+      const inner = volumeSize(child);
+      bytes += inner.bytes;
+      files += inner.files;
+    } else if (entry.isFile() && !entry.name.startsWith('.s3b-tmp-')) {
+      bytes += volumeFS.statSync(volumeFile(child)).size;
+      files += 1;
+    }
+  }
+  return { bytes, files };
+}
+
+// A usage answer of a volume with a file system at a part of its size.
+function volumeUsageAnswer(usage, percent, { approximate = false } = {}) {
+  const totalBytes = 1000 * 1024 ** 3;
+  const usedBytes = Math.round(totalBytes * percent / 100);
+  return { ...usage, constraint: 'storage', percent, level: percent >= 95 ? 'error' : percent >= 80 ? 'warning' : 'ok',
+    storage: { ...usage.storage, usedBytes, totalBytes, freeBytes: totalBytes - usedBytes, percent, level: percent >= 95 ? 'error' : percent >= 80 ? 'warning' : 'ok',
+      approximate, approximateReason: approximate ? 'The volume is on a FUSE or network file system: it can count the used bytes with a delay.' : '' } };
+}
+
+test('volumes: the usage gives what the volume holds and its file system, in the selector, the popover and the banner of a full file system', async () => {
   const page = await newPage();
-  const usage = await (await page.request.get(`${BASE}api/usage?instance=files`)).json();
-  assert.equal(usage.supported, true);
-  assert.equal(usage.available, true);
+  // A write through the API makes the count of the folder old; the count then gives the files of the Docker volume.
+  await page.request.put(`${BASE}s3?instance=files&key=${encodeURIComponent('t-size/one.bin')}`, { data: Buffer.alloc(1234, 1) });
+  let usage;
+  for (let tries = 0; tries < 100; tries += 1) {
+    usage = await (await page.request.get(`${BASE}api/usage?instance=files`)).json();
+    if (usage.selfState === 'ready') break;
+    await sleep(100);
+  }
+  const expected = volumeSize();
   assert.equal(usage.source, 'statfs');
-  assert.equal(usage.approximate, false);
-  assert.ok(usage.limitBytes > 0 && usage.usedBytes >= 0 && usage.usedBytes <= usage.limitBytes, JSON.stringify(usage));
+  assert.equal(usage.selfState, 'ready', JSON.stringify(usage));
+  assert.equal(usage.selfBytes, expected.bytes);
+  assert.equal(usage.usedObjects, expected.files);
+  assert.equal(usage.limitBytes, 0);
+  // The file system of the volume is a tmpfs of 1 GiB (compose.yaml).
+  assert.equal(usage.storage.scope, 'filesystem');
+  assert.equal(usage.storage.totalBytes, 1024 ** 3);
+  assert.equal(usage.storage.approximate, false);
+  assert.equal(usage.constraint, 'storage');
   await open(page, VOLUME);
   await page.waitForSelector('#storageSwitcherFacts [data-fact="usage"] .usageMeter');
-  assert.match(await page.textContent('#storageSwitcherFacts .bucketUsage__text'), /^[\d.]+ (B|KB|MB|GB|TB) of [\d.]+ (KB|MB|GB|TB|PB)$/);
+  assert.match(await page.textContent('#storageSwitcherFacts .bucketUsage__text'), /^Storage: [\d.]+ (B|KB|MB) of 1 GB$/);
   const title = await page.getAttribute('#storageSwitcherFacts [data-fact="usage"]', 'title');
-  assert.match(title, /^Usage of the file system of the volume files\nThe numbers are for the whole file system/);
+  assert.match(title, new RegExp(`^This volume holds: [\\d.]+ (B|KB|MB), ${expected.files} files\\n`));
+  assert.match(title, /\nStorage: [\d.]+ (B|KB|MB) of 1 GB \([\d.]+ %\), [\d.]+ (MB|GB) left\n  The file system of the volume: the other folders on it count too\./);
   assert.match(title, /Source: the file system of the server \(statfs\)/);
-  assert.doesNotMatch(title, /Approximate/);
-  // A file system at 95 %: the banner, the mark and the tooltip of the upload name the volume.
-  await page.route(/\/api\/usage\?instance=files/, route => route.fulfill({ json: { ...usage, usedBytes: Math.floor(usage.limitBytes * 0.95), percent: 95, level: 'error' } }));
+  // The popover: what the volume holds, then the storage with its bar.
+  await page.click('#storageSwitcherFacts [data-fact="usage"]');
+  await page.waitForSelector('#usagePopover');
+  const terms = await page.locator('#usagePopover dt').allInnerTexts();
+  assert.deepEqual(terms, ['This volume holds', 'Storage']);
+  assert.match(await page.textContent('#usagePopover dd:nth-of-type(1)'), new RegExp(`, ${expected.files} files$`));
+  assert.match(await page.textContent('#usagePopover dd:nth-of-type(2) .usagePopover__value'), /^[\d.]+ (B|KB|MB) of 1 GB \([\d.]+ %\), [\d.]+ (MB|GB) left$/);
+  assert.equal(await page.locator('#usagePopover [role="meter"]').count(), 1);
+  await page.keyboard.press('Escape');
+  await page.request.delete(`${BASE}s3?instance=files&key=${encodeURIComponent('t-size/one.bin')}`);
+  await page.request.delete(`${BASE}s3?instance=files&key=${encodeURIComponent('t-size/')}`);
+  // A file system at 91 %: the banner, the mark and the tooltip of the upload name the file system of the volume.
+  await page.route(/\/api\/usage\?instance=files/, route => route.fulfill({ json: volumeUsageAnswer(usage, 91) }));
   await page.reload({ waitUntil: 'networkidle' });
   await page.waitForSelector('#usageBanner:not([hidden])');
-  assert.match(await page.textContent('#usageBanner'), /^This volume is 95 % full: [\d.]+ (KB|MB|GB|TB) used of [\d.]+ (KB|MB|GB|TB|PB)\. New uploads can fail\.$/);
-  assert.match(await page.getAttribute('#uploadButton', 'title'), /^This volume is 95 % full/);
-  // The short text of the selector is the percent; a FUSE or network file system counts with a delay: "~".
-  assert.equal((await page.textContent('#storageSwitcherFacts .bucketUsage__short')).trim(), '95 %');
+  assert.equal((await page.textContent('#usageBanner')).trim(), 'This volume is on a file system that is 91 % full: 910 GB of 1000 GB, 90 GB left. New uploads can fail.');
+  assert.match(await page.getAttribute('#uploadButton', 'title'), /^This volume is on a file system that is 91 % full/);
+  assert.equal((await page.textContent('#storageSwitcherFacts .bucketUsage__short')).trim(), '91 %');
+  // A FUSE or network file system counts with a delay: "~" and the reason.
   await page.unroute(/\/api\/usage\?instance=files/);
-  await page.route(/\/api\/usage\?instance=files/, route => route.fulfill({ json: { ...usage, approximate: true, approximateReason: 'The volume is on a FUSE or network file system: it can count the used bytes with a delay.' } }));
+  await page.route(/\/api\/usage\?instance=files/, route => route.fulfill({ json: volumeUsageAnswer(usage, 20, { approximate: true }) }));
   await page.reload({ waitUntil: 'networkidle' });
-  await until(page, () => /^~\d+ %$|^<1 %$/.test(document.querySelector('#storageSwitcherFacts .bucketUsage__short')?.textContent.trim() || ''));
+  await until(page, () => document.querySelector('#storageSwitcherFacts .bucketUsage__short')?.textContent.trim() === '~20 %');
   assert.match(await page.getAttribute('#storageSwitcherFacts [data-fact="usage"]', 'title'), /~ Approximate: The volume is on a FUSE or network file system/);
   // The selector groups the volume under the host word "volume". The trigger and each row of the menu are one line,
   // on a wide window and on a phone.
@@ -5684,6 +5741,122 @@ test('volumes: the usage is the size of the file system, in the selector, its to
   }
   assert.match(await page.getAttribute('.storageHost__row[data-host="volume"]', 'title'), /folders of the server/);
   assert.match(await page.getAttribute('.storageBucket[data-instance="files"]', 'title'), /volume: files\nprovider: a folder of the server \(FS\)/);
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+for (const [instance, provider] of Object.entries(PROVIDERS)) {
+  test(`usage: ${provider.name}: the popover of the usage gives what the bucket holds, its quota and the storage of the provider, with the keyboard`, async () => {
+    const page = await newPage();
+    const answer = await apiUsage(page, instance);
+    await open(page, `-/${instance.split('-')[0]}/${instance}/`);
+    const chip = usageItem(page);
+    await page.waitForSelector(`${FACTS} [data-fact="usage"][data-used-bytes]`);
+    assert.equal(await chip.evaluate(node => node.tagName), 'BUTTON');
+    assert.equal(await chip.evaluate(node => node.parentElement.closest('button')), null);
+    assert.equal(await chip.getAttribute('aria-haspopup'), 'dialog');
+    // Enter opens the popover; Escape closes it, and the focus goes back to the chip.
+    await chip.focus();
+    await page.keyboard.press('Enter');
+    await page.waitForSelector('#usagePopover');
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'usagePopover');
+    assert.equal(await page.getAttribute('#usagePopover', 'role'), 'dialog');
+    const terms = await page.locator('#usagePopover dt').allInnerTexts();
+    assert.deepEqual(terms, instance === 'garage-main' ? ['This bucket holds', 'Quota', 'Objects', 'Storage'] : ['This bucket holds', 'Quota', 'Storage']);
+    const values = await page.locator('#usagePopover .usagePopover__value').allInnerTexts();
+    assert.match(values[0], answer.approximate ? /^~[\d.]+ (B|KB|MB)/ : /^[\d.]+ (B|KB|MB)/);
+    assert.match(values[1], /^~?[\d.]+ (B|KB|MB) of 20 GB \([\d.]+ %\)$/);
+    assert.match(values[values.length - 1], /^[\d.]+ (B|KB|MB|GB) of 4 GB \([\d.]+ %\), [\d.]+ (MB|GB) left$/);
+    assert.equal(await page.locator('#usagePopover [role="meter"]').count(), 2);
+    const note = await page.locator('#usagePopover dd').last().locator('.usagePopover__note').innerText();
+    assert.match(note, { 'seaweedfs-main': /^Raw capacity of the disks of 1 volume server, before the replication\.$/,
+      'minio-main': /^Raw capacity of 1 drive, before the erasure code\.$/,
+      'garage-main': /^Raw capacity of the data partitions of 1 storage node, before the replication \(the admin API does not give the replication factor\)\.$/ }[instance]);
+    // The popover is opaque, as the menus.
+    const background = await page.evaluate(() => getComputedStyle(document.querySelector('#usagePopover')).backgroundColor);
+    assert.doesNotMatch(background, /rgba\([^)]*,\s*0(\.\d+)?\)$/, background);
+    await page.keyboard.press('Escape');
+    assert.equal(await page.locator('#usagePopover').count(), 0);
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.fact), 'usage');
+    // Space opens it too; a click outside closes it.
+    await page.keyboard.press('Space');
+    await page.waitForSelector('#usagePopover');
+    await page.mouse.click(10, 400);
+    assert.equal(await page.locator('#usagePopover').count(), 0);
+    assert.deepEqual(page.errors, []);
+    await page.context().close();
+  });
+}
+
+test('usage: the popover is in the menu entry of the current bucket and in the Actions menu, also when the selector has no room for the usage', async () => {
+  const page = await newPage({ viewport: { width: 390, height: 844 } });
+  await open(page, MAIN);
+  await page.waitForSelector(`${FACTS} [data-fact="usage"][data-used-bytes]`, { state: 'attached' });
+  // On a phone the trigger has no usage: the Actions menu gives it.
+  assert.equal(await usageItem(page).isVisible(), false);
+  await page.click('#actionsButton');
+  assert.equal(await page.isVisible('#usageItem'), true);
+  await page.click('#usageItem');
+  await page.waitForSelector('#usagePopover');
+  const box = await page.evaluate(() => { const rect = document.querySelector('#usagePopover').getBoundingClientRect(); return { left: rect.left, right: rect.right, width: window.innerWidth }; });
+  assert.ok(box.left >= 16 && box.right <= box.width - 16, JSON.stringify(box));
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('#usagePopover').count(), 0);
+  // A wide window: the usage of the current bucket in the menu opens the popover, and the menu closes.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.click('.storageSwitcher__trigger strong');
+  await page.waitForSelector('.storageBucket[data-instance="seaweedfs-main"] [data-fact="usage"]');
+  await page.click('.storageBucket[data-instance="seaweedfs-main"] [data-fact="usage"]');
+  await page.waitForSelector('#usagePopover');
+  assert.equal(await page.isHidden('#storageSwitcherMenu'), true);
+  assert.equal(await page.getAttribute('.storageBucket[data-instance="seaweedfs-main"]', 'aria-selected'), 'true');
+  await page.keyboard.press('Escape');
+  // An instance without a usage block: no usage, and no item "Usage".
+  const second = await newPage();
+  await second.route(/\/api\/instances(\?|$)/, async route => {
+    const response = await route.fetch();
+    const body = await response.json();
+    for (const item of body.instances) item.usageSupported = false;
+    await route.fulfill({ response, json: body });
+  });
+  await open(second, MAIN);
+  await second.click('#actionsButton');
+  assert.equal(await second.isHidden('#usageItem'), true);
+  assert.equal(await second.locator('[data-fact="usage"]').count(), 0);
+  assert.deepEqual(page.errors, []);
+  assert.deepEqual(second.errors, []);
+  await page.context().close();
+  await second.context().close();
+});
+
+test('usage: the warning names the more constraining part: the storage at 91 % with a quota at 50 %, and the quota at 93 % with the storage at 10 %', async () => {
+  const page = await newPage();
+  const storage = percent => {
+    const totalBytes = 1000 * 1024 ** 3;
+    const usedBytes = Math.round(totalBytes * percent / 100);
+    return { scope: 'cluster', usedBytes, totalBytes, freeBytes: totalBytes - usedBytes, percent, level: percent >= 95 ? 'error' : percent >= 80 ? 'warning' : 'ok',
+      approximate: false, note: 'raw capacity of the data partitions of 3 storage nodes, before the replication', asOf: new Date().toISOString() };
+  };
+  const plan = { 'seaweedfs-main': { ...usageAnswer('seaweedfs-main', 50), quotaPercent: 50, quotaLevel: 'ok', constraint: 'storage', percent: 91, level: 'warning', storage: storage(91) } };
+  await routeUsage(page, plan);
+  await open(page, MAIN);
+  await page.waitForSelector('#usageBanner:not([hidden])');
+  const storageText = 'The storage of this bucket is 91 % full: 910 GB of 1000 GB, 90 GB left. New uploads can fail.';
+  assert.equal((await page.textContent('#usageBanner')).trim(), storageText);
+  assert.equal(await page.getAttribute('#uploadButton', 'title'), storageText);
+  assert.equal((await page.textContent(`${FACTS} .bucketUsage__short`)).trim(), '91 %');
+  assert.equal(await usageItem(page).getAttribute('data-constraint'), 'storage');
+  await usageItem(page).click();
+  await page.waitForSelector('#usagePopover');
+  const values = await page.locator('#usagePopover .usagePopover__value').allInnerTexts();
+  assert.deepEqual(values, ['10 GB, 10 objects', '10 GB of 20 GB (50 %)', '910 GB of 1000 GB (91 %), 90 GB left']);
+  await page.keyboard.press('Escape');
+  // The reverse: the quota is the constraining part.
+  plan['seaweedfs-main'] = { ...usageAnswer('seaweedfs-main', 93), quotaPercent: 93, quotaLevel: 'warning', constraint: 'quota', storage: storage(10) };
+  await page.click('#refreshButton');
+  await until(page, () => /^This bucket is 93 % full/.test(document.querySelector('#usageBanner').textContent));
+  assert.equal((await page.textContent('#usageBanner')).trim(), 'This bucket is 93 % full: 18.6 GB used of 20 GB. New uploads can fail.');
+  assert.equal(await usageItem(page).getAttribute('data-constraint'), 'quota');
   assert.deepEqual(page.errors, []);
   await page.context().close();
 });

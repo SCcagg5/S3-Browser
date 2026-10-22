@@ -5273,6 +5273,85 @@ button.bucketFact:focus-visible {
   }
 }
 
+/* The popover "Usage": the lines of the usage of the current bucket, in a table, with a bar for the quota and for the
+   storage. It has the look of the menus, and its own place under the control that opened it. */
+.usagePopover {
+  position: fixed;
+  z-index: var(--z-menu);
+  display: grid;
+  gap: 8px;
+  max-width: calc(100vw - 32px);
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pop);
+  background: var(--panel);
+  box-shadow: var(--shadow-overlay);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  line-height: 18px;
+}
+
+.usagePopover:focus-visible {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: 2px;
+}
+
+.usagePopover__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.usagePopover__head span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usagePopover__list {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px 12px;
+  margin: 0;
+}
+
+.usagePopover__list dt {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.usagePopover__list dd {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.usagePopover__meter {
+  width: 100%;
+}
+
+.usagePopover__meter.is-warning .usageMeter__fill {
+  background: var(--warning);
+}
+
+.usagePopover__meter.is-error .usageMeter__fill {
+  background: var(--danger);
+}
+
+.usagePopover__note,
+.usagePopover__source {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  line-height: 16px;
+}
+
 /* The banner of a full bucket, at the top of the listing. */
 .usageBanner {
   display: flex;

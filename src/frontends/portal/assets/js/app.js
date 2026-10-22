@@ -541,7 +541,17 @@ BB.cfg = config;
               'aria-selected': entry.id === state.instanceId ? 'true' : 'false',
               'data-instance': entry.id,
               title: storageDetails(entry),
-              onclick: () => { closeSwitcher(true); selectInstance(entry.id); }
+              onclick: event => {
+                // The usage of the current bucket in the menu opens the popover "Usage", also when the trigger has no
+                // room for its usage.
+                if (entry.id === state.instanceId && event.target.closest('[data-fact="usage"]') && BB.usage.shown(BB.usage.cached(entry.id))) {
+                  closeSwitcher(false);
+                  openUsage(ui.switcherTrigger);
+                  return;
+                }
+                closeSwitcher(true);
+                selectInstance(entry.id);
+              }
             },
             h('span', { class: 'storageBucket__copy' },
               h('span', { class: 'storageBucket__titleRow' }, h('strong', {}, storageName(entry)),
@@ -768,6 +778,8 @@ BB.cfg = config;
     ui.insightsItem.disabled = !read || Boolean(state.listError);
     ui.insightsItem.querySelector('span').textContent = state.pathPrefix ? 'Folder insights' : `${capitalized(storageNoun(instance))} insights`;
     ui.newFolderItem.hidden = !isVolume(instance);
+    ui.usageItem.hidden = !instance || instance.usageSupported !== true;
+    ui.usageItem.disabled = !read || !BB.usage.shown(BB.usage.cached(instance?.id));
     ui.newFolderItem.disabled = !read || !canWrite() || Boolean(state.listError);
     ui.uploadWrap.hidden = !instance || !canWrite() || Boolean(state.listError);
     ui.folderTagsItem.hidden = state.tagsUnsupported;
@@ -952,18 +964,18 @@ BB.cfg = config;
     if (canRead()) BB.lifecycle.open({ prefix: state.pathPrefix, canWrite: canWrite() });
   }
 
-  // The usage: the text, a short text, the thin bar of the used part of the limit, and the tooltip. A full bucket has a
-  // red bar. The selector shows the short text (the percent of the limit, or the used bytes). The whole text is for a
-  // screen reader only.
-  function usageFact(usage) {
-    const limited = Number(usage.limitBytes) > 0;
-    const percent = Number(usage.percent) || 0;
-    const short = limited ? (percent > 0 && percent < 1 ? '<1 %' : `${usage.approximate ? '~' : ''}${Math.floor(percent)} %`)
-      : BB.usage.text(usage).replace(/ used$/, '');
-    const node = h('span', {
+  // The usage: the text, a short text, the thin bar of the used part, and the tooltip. A full bucket has a red bar. The
+  // used part is the more constraining of the quota of the bucket and the storage behind it (data-constraint). The
+  // selector shows the short text (the percent, or the used bytes). The whole text is for a screen reader only. In the
+  // trigger, the usage is a button that opens the popover "Usage".
+  function usageFact(usage, { trigger = false } = {}) {
+    const limited = BB.usage.hasLimit(usage);
+    const node = h(trigger ? 'button' : 'span', {
+      type: trigger ? 'button' : null, 'aria-haspopup': trigger ? 'dialog' : null,
       class: ['bucketFact', 'bucketUsage', usage.level && `is-${usage.level}`, BB.usage.full(usage) && 'is-full'], 'data-fact': 'usage',
-      'data-level': usage.level || 'none', 'data-used-bytes': String(usage.usedBytes), title: BB.usage.title(usage)
-    }, h('span', { class: 'bucketUsage__text' }, BB.usage.text(usage)), h('span', { class: 'bucketUsage__short', 'aria-hidden': 'true' }, short),
+      'data-level': usage.level || 'none', 'data-constraint': BB.usage.constraint(usage) || 'none', 'data-used-bytes': String(usage.usedBytes), title: BB.usage.title(usage),
+      onclick: trigger ? event => { event.stopPropagation(); toggleUsage(event.currentTarget); } : null
+    }, h('span', { class: 'bucketUsage__text' }, BB.usage.text(usage)), h('span', { class: 'bucketUsage__short', 'aria-hidden': 'true' }, BB.usage.shortText(usage)),
     limited ? h('span', { class: 'usageMeter', role: 'meter', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(usage.percent), 'aria-label': 'Used part of the limit' },
       h('span', { class: 'usageMeter__fill' })) : null);
     const fill = node.querySelector('.usageMeter__fill');
@@ -1014,7 +1026,7 @@ BB.cfg = config;
     if (instance.usageSupported === true && can('list', instance)) {
       const usage = BB.usage.cached(instance.id);
       if (BB.usage.shown(usage)) {
-        items.push(usageFact(usage));
+        items.push(usageFact(usage, { trigger }));
       } else if (!usage && BB.usage.loading(instance.id)) {
         items.push(h('span', { class: 'bucketFact bucketUsage is-loading', 'data-fact': 'usage', 'data-level': 'loading', title: `Reading the usage of the ${storageNoun(instance)}` }, '…'));
       } else if (usage?.supported === true && trigger) {
@@ -1025,6 +1037,60 @@ BB.cfg = config;
       }
     }
     return items;
+  }
+
+  // The popover "Usage": the lines of the usage of the current bucket (what it holds, its quota, the storage behind it),
+  // each with its bar and its note. The usage of the trigger opens it (a click, Enter or Space), and so do the usage of
+  // the current bucket in the menu and the item "Usage" of the Actions menu. Escape, a click outside and a second click
+  // close it; the focus goes back to the control that opened it.
+  function usageMeter(line) {
+    const meter = h('span', { class: ['usageMeter', 'usagePopover__meter', line.level && `is-${line.level}`], role: 'meter', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(line.percent), 'aria-label': `Used part: ${line.term}` },
+      h('span', { class: 'usageMeter__fill' }));
+    meter.firstChild.style.width = `${Math.min(100, Math.max(line.percent, line.percent > 0 ? 2 : 0))}%`;
+    return meter;
+  }
+
+  function closeUsage({ focus = true } = {}) {
+    const open = ui.usagePopover;
+    if (!open) return;
+    ui.usagePopover = null;
+    open.node.remove();
+    open.anchor?.setAttribute?.('aria-expanded', 'false');
+    if (focus && open.opener?.isConnected) open.opener.focus();
+  }
+
+  function toggleUsage(anchor) {
+    if (ui.usagePopover?.anchor === anchor) closeUsage();
+    else openUsage(anchor);
+  }
+
+  function openUsage(anchor) {
+    closeUsage({ focus: false });
+    const instance = currentInstance();
+    const usage = BB.usage.cached(instance?.id);
+    if (!instance || !anchor || !BB.usage.shown(usage)) return;
+    const opener = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : anchor;
+    const rows = BB.usage.lines(usage).flatMap(line => [
+      h('dt', {}, line.term),
+      h('dd', {}, h('span', { class: 'usagePopover__value' }, line.value), line.percent !== undefined ? usageMeter(line) : null,
+        line.note ? h('small', { class: 'usagePopover__note' }, line.note) : null)]);
+    const counted = usage.asOf ? BB.runtime.formatDateTimeUTC(usage.asOf) : '';
+    const node = h('div', {
+      id: 'usagePopover', class: 'usagePopover', role: 'dialog', 'aria-label': `Usage of ${storageName(instance)}`, tabindex: '-1',
+      onclick: event => event.stopPropagation(),
+      onkeydown: event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeUsage(); } }
+    }, h('div', { class: 'usagePopover__head' }, h('strong', {}, 'Usage'), h('span', {}, storageName(instance))),
+    h('dl', { class: 'usagePopover__list' }, rows),
+    h('p', { class: 'usagePopover__source' }, `Source: ${BB.usage.sourceName(usage)}${counted ? `, ${counted}` : ''}`));
+    document.body.append(node);
+    const box = anchor.getBoundingClientRect();
+    const width = Math.min(360, window.innerWidth - 32);
+    node.style.width = `${width}px`;
+    node.style.left = `${Math.max(16, Math.min(box.right - width, window.innerWidth - width - 16))}px`;
+    node.style.top = `${Math.round(box.bottom + 6)}px`;
+    anchor.setAttribute?.('aria-expanded', 'true');
+    ui.usagePopover = { node, anchor, opener };
+    node.focus();
   }
 
   // Puts nodes in a container when they differ from the nodes that it has. The focus stays on the same fact.
@@ -2117,7 +2183,7 @@ BB.cfg = config;
       insightsItem: 'insightsItem', accessBadge: 'accessBadge', uploadWrap: 'uploadWrap',
       uploadButton: 'uploadButton', uploadMenu: 'uploadMenu', uploadFilesItem: 'uploadFilesItem',
       uploadFolderItem: 'uploadFolderItem', uploadTagsInput: 'uploadTagsInput', uploadTagsMessage: 'uploadTagsMessage', folderTagsItem: 'folderTagsItem', multipartsItem: 'multipartsItem',
-      newFolderItem: 'newFolderItem',
+      newFolderItem: 'newFolderItem', usageItem: 'usageItem',
       tagFilterWrap: 'tagFilterWrap', settingsButton: 'settingsButton', settingsMenu: 'settingsMenu', settingsReset: 'settingsReset',
       tagFilterToggle: 'tagFilterToggle', encryptionToggle: 'encryptionToggle', tagFilter: 'tagFilter', tagStatus: 'tagStatus', listing: 'listing', dropOverlay: 'dropOverlay', dropTarget: 'dropTarget',
       uploadDock: 'uploadDock', fileInput: 'fileInput', dirInput: 'dirInput'
@@ -2145,6 +2211,12 @@ BB.cfg = config;
     ui.folderTagsItem.addEventListener('click', () => { if (canWrite()) void tagFolder(state.pathPrefix); });
     ui.multipartsItem.addEventListener('click', () => { if (canRead()) BB.multiparts.open({ prefix: state.pathPrefix, canWrite: canWrite() }); });
     ui.newFolderItem.addEventListener('click', () => { void makeFolder(); });
+    // The item "Usage" opens the popover under the Actions button: it is the way to it on a narrow selector.
+    ui.usageItem.addEventListener('click', event => {
+      event.stopPropagation();
+      closeMenu({ focus: true });
+      openUsage(ui.actionsButton);
+    });
     ui.tagFilter.addEventListener('input', () => { state.tagFilter = ui.tagFilter.value; applyTagFilter(); });
     document.addEventListener('bb:tags-changed', event => forgetTags(event.detail?.key));
     // A save of the metadata changes the date and the versions of the object: the listing reads them again.
@@ -2159,10 +2231,15 @@ BB.cfg = config;
     window.addEventListener('popstate', updateFromLocation);
     document.addEventListener('click', event => {
       if (openMenu && !openMenu.menu.contains(event.target) && !openMenu.trigger.contains(event.target)) closeMenu();
+      if (ui.usagePopover && !ui.usagePopover.node.contains(event.target) && !ui.usagePopover.anchor.contains(event.target)) closeUsage({ focus: false });
       if (ui.switcher && !ui.switcher.contains(event.target)) closeSwitcher(false);
     });
     document.addEventListener('keydown', event => {
       if (event.key === 'Escape') {
+        if (ui.usagePopover) {
+          closeUsage();
+          return;
+        }
         closeMenu({ focus: true });
         closeSwitcher(false);
       }

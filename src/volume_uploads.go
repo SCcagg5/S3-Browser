@@ -169,6 +169,7 @@ func openTemporary(real string) (*os.File, error) {
 
 // finishUpload gives the complete temporary file the name of the target.
 func (b *volumeBackend) finishUpload(session volumeSession, real string) error {
+	b.sizer.invalidate()
 	key, err := b.parse(session.key, true)
 	if err != nil {
 		return err

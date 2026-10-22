@@ -82,6 +82,19 @@ The browser tests start each page with all the sections of the details open (the
 
 The smoke test of each provider lists `smoke/`, uploads a file with its SHA-256 checksum, downloads it and deletes it. It checks the versions and the tags where the provider has them. Where the provider does not have them, it checks that the page hides them. `portal-frontend/providers.js` has the flags of each provider.
 
+## Capacity of the storage in the portal test stack
+
+The data of each provider of the portal test stack is on a tmpfs of 4 GiB (`/data` of SeaweedFS and MinIO,
+`/var/lib/garage` of Garage), and the Docker volume of the volume `files` is a tmpfs of 1 GiB. Thus the capacity of the
+storage behind each bucket (`storage` of `/api/usage`) is the same on each test host, and far from full. The tests of
+the usage check the popover "Usage" on each provider: what the bucket holds, the quota of 20 GiB, and the storage of 4
+GiB with its note (1 volume server for SeaweedFS, 1 drive for MinIO, 1 storage node for Garage). The storage of 4 GiB
+holds all the buckets of a provider, so the chip of the selector shows the storage, or the quota for an equal part
+(Garage compresses its data). Other tests check the popover from the Actions menu on a phone and from the list of the
+buckets, an instance without a `usage` block, and the banner of a storage at 91 % with a quota at 50 % (and the
+reverse) with a faked `/api/usage`. The test of the volume compares the size that the server counts with the files of
+`/volume`.
+
 ## Volume of the portal test stack
 
 The portal test stack also has the volume `files`: the Docker volume `volume-data` at `/data/volume` of the browser
@@ -127,7 +140,11 @@ These facts come from the run of 2026-10-21 on a Debian 13 host (Linux 6.12, Doc
   dates of the files (`os.Chtimes`), `O_EXCL`, `fsync` and the hard links. The test of a folder that the process cannot
   write is skipped, because the process is root.
 - The six steps of the browser smoke test pass. The writes of S3-Browser are visible at once through the mount.
-- `statfs` of the mount gives the capacity of the volume servers: 30 volumes of 64 MiB (2013265920 bytes). The used
+- The count of the folder of the volume works on the mount: after the smoke uploads, the volume holds 41943084 bytes
+  in 3 files, as the browser smoke test expects. The popover shows "40 MB, 3 files" and the storage with `~`.
+- `statfs` of the mount gives the capacity of the volume servers: 30 volumes of 64 MiB (2013265920 bytes). One run
+  gave a size of 0 after the delete of a folder: the server then gives `storageError` ("a size of 0") and keeps what the
+  volume holds. The used
   bytes follow with a delay: two runs gave 0 bytes after the first writes, and 0 or 256512 bytes after an upload of
   40 MiB and its delete. The
   server finds the type FUSE in the answer of `statfs`: the usage of the volume is approximate, and the page shows it

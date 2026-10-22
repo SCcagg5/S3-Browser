@@ -155,6 +155,7 @@ func (b *volumeBackend) PutIfAbsent(ctx context.Context, full string, body io.Re
 }
 
 func (b *volumeBackend) put(ctx context.Context, full string, body io.Reader, size int64, exclusive bool) error {
+	b.sizer.invalidate()
 	key, err := b.parse(full, true)
 	if err != nil {
 		return err
@@ -178,6 +179,7 @@ func (b *volumeBackend) put(ctx context.Context, full string, body io.Reader, si
 // Delete removes a file, or an empty folder for a key that ends with "/". A key that does not exist, and a folder that
 // is not empty, are not errors: a delete of S3 does the same. A symbolic link is removed, not its target.
 func (b *volumeBackend) Delete(_ context.Context, full string) error {
+	b.sizer.invalidate()
 	key, err := b.parse(full, false)
 	if err != nil {
 		return err
@@ -251,6 +253,7 @@ func (b *volumeBackend) CopyMultipart(ctx context.Context, source, destination s
 }
 
 func (b *volumeBackend) copyFile(ctx context.Context, source, destination string, progress func(int64)) error {
+	b.sizer.invalidate()
 	from, err := b.parse(source, false)
 	if err != nil {
 		return err
@@ -319,6 +322,7 @@ func (r *volumeProgressReader) flush() {
 // move of a symbolic link, copy the content and remove the source. A folder key makes the destination folder and
 // removes the source folder when it is empty.
 func (b *volumeBackend) Move(ctx context.Context, source, destination string) error {
+	b.sizer.invalidate()
 	from, err := b.parse(source, true)
 	if err != nil {
 		return err
@@ -379,6 +383,7 @@ func (b *volumeBackend) Move(ctx context.Context, source, destination string) er
 // RemoveEmptyFolders removes the folder of prefix and each folder below it that has no file, from the bottom. A folder
 // with a file stays: a delete of the folders never removes a file. The root of the volume stays.
 func (b *volumeBackend) RemoveEmptyFolders(ctx context.Context, full string) error {
+	b.sizer.invalidate()
 	key, err := b.parse(full, false)
 	if err != nil {
 		return err

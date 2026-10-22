@@ -51,11 +51,12 @@ step('the volume on the mount is an instance with the host word volume and the u
   assert.equal(info.tagsSupported, false);
   const usage = await (await page.request.get(`${BASE}api/usage?instance=sw`)).json();
   assert.equal(usage.source, 'statfs');
-  assert.ok(usage.limitBytes > 0, JSON.stringify(usage));
-  // A FUSE file system can count with a delay: the usage is approximate, with its reason.
-  assert.equal(usage.approximate, true, JSON.stringify(usage));
-  assert.match(usage.approximateReason, /FUSE or network file system/);
-  console.log(`      statfs of the mount: ${usage.usedBytes} bytes used of ${usage.limitBytes}`);
+  assert.equal(usage.storage.scope, 'filesystem');
+  assert.ok(usage.storage.totalBytes > 0, JSON.stringify(usage));
+  // A FUSE file system can count with a delay: the capacity is approximate, with its reason.
+  assert.equal(usage.storage.approximate, true, JSON.stringify(usage));
+  assert.match(usage.storage.approximateReason, /FUSE or network file system/);
+  console.log(`      statfs of the mount: ${usage.storage.usedBytes} bytes used of ${usage.storage.totalBytes}, ${usage.storage.freeBytes} free`);
   await open(page, VOLUME);
   await page.waitForSelector('#storageSwitcherFacts [data-fact="usage"]');
 });
@@ -116,6 +117,22 @@ step('a large upload resumes after a lost chunk; its temporary file is an incomp
   assert.equal(stored.body.length, content.length);
   assert.equal(sha256(stored.body), sha256(content));
   assert.equal((await (await page.request.get(`${BASE}api/multiparts?instance=sw&prefix=smoke/`)).json()).uploads.length, 0);
+  // The count of the folder of the volume: the two files of smoke/ (the copy of hello.txt and the large file).
+  let usage;
+  await eventually(async () => {
+    usage = await (await page.request.get(`${BASE}api/usage?instance=sw`)).json();
+    return usage.selfState === 'ready' && usage.selfBytes === content.length + 2 * 22;
+  }, 'the size of the folder of the volume');
+  assert.equal(usage.usedObjects, 3);
+  console.log(`      the volume holds ${usage.selfBytes} bytes in ${usage.usedObjects} files; statfs: ${usage.storage.usedBytes} of ${usage.storage.totalBytes}`);
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.waitForSelector('#storageSwitcherFacts [data-fact="usage"][data-used-bytes]');
+  await page.click('#storageSwitcherFacts [data-fact="usage"]');
+  await page.waitForSelector('#usagePopover');
+  const values = await page.locator('#usagePopover .usagePopover__value').allInnerTexts();
+  assert.match(values[0], /^40 MB, 3 files$/);
+  assert.match(values[1], /^~[\d.]+ (B|KB|MB|GB) of [\d.]+ (GB|TB) \([\d.]+ %\), [\d.]+ (GB|TB) left$/);
+  await page.keyboard.press('Escape');
 });
 
 step('copy, rename and delete of a folder with a nested folder', async () => {
@@ -143,7 +160,8 @@ step('the delete of the folder smoke/ leaves the volume empty', async () => {
   await page.waitForSelector('tr[data-name="smoke"]', { state: 'detached', timeout: 60000 });
   await eventually(async () => (await listNames(page, '')).length === 0, 'the delete of smoke/');
   const usage = await (await page.request.get(`${BASE}api/usage?instance=sw&fresh=1`)).json();
-  console.log(`      statfs of the mount after the writes: ${usage.usedBytes} bytes used of ${usage.limitBytes}`);
+  console.log(`      after the writes: the volume holds ${usage.selfBytes} bytes (${usage.selfState}); statfs: ${usage.storage
+    ? `${usage.storage.usedBytes} bytes used of ${usage.storage.totalBytes}` : usage.storageError?.message}`);
 });
 
 (async () => {

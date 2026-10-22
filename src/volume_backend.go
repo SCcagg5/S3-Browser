@@ -48,6 +48,8 @@ type volumeBackend struct {
 	prefix string
 	// writes is true when the start checked that the process can write in the root.
 	writes bool
+	// sizer counts the size of the files of the root in the background. A write marks its count old.
+	sizer *volumeSizer
 }
 
 // newVolumeBackend opens the folder of a volume block. When the server can write in the volume (the permissions
@@ -64,6 +66,7 @@ func newVolumeBackend(volume volumeConfig, forceReadOnly bool) (*volumeBackend, 
 		}
 	}
 	backend := &volumeBackend{cfg: volume.bucketConfig(), root: root, prefix: volume.RootPrefix}
+	backend.sizer = newVolumeSizer(root)
 	if volume.writes() && !forceReadOnly {
 		if err := backend.probeWrite(); err != nil {
 			return nil, fmt.Errorf("volume %q: the process cannot write in path %q, and the permissions include write or delete (a block without permissions has all three): %v; give permissions = [\"read\"] for a volume that is read only", volume.ID, volume.Path, err)
@@ -84,7 +87,7 @@ func newVolumeInstance(volume volumeConfig, policy runtimePolicy, concurrency *s
 	discovered, err := backend.DiscoverCapabilities(context.Background())
 	instance.caps = mergeCapabilitiesWithPolicy(backend.cfg, instance.forceReadOnly, discovered, err)
 	if volumeUsageSupported {
-		instance.usage.reader, instance.usage.source = &volumeUsageReader{root: backend.root}, usageSourceStatfs
+		instance.usage.reader, instance.usage.source = &volumeUsageReader{root: backend.root, sizer: backend.sizer}, usageSourceStatfs
 	}
 	return instance, nil
 }
@@ -616,17 +619,34 @@ func (b *volumeBackend) DiscoverCapabilities(_ context.Context) (discoveredCapab
 	return discoveredCapabilities{States: states}, nil
 }
 
-// volumeUsageReader gives the usage of the file system of a volume (statfs): used = size - available, limit = size.
-// The numbers are for the whole file system, not only for the folder. They are exact at the time of the read, except
-// on a FUSE or network file system, which can count with a delay: the numbers are then approximate.
+// volumeUsageReader gives the usage of a volume. The part of the bucket is the size of the files of the folder, from
+// the count of its sizer (volume_size.go): the read never walks the tree. The part of the storage is the file system of
+// the folder (statfs): used = size - available, total = size, free = available. These numbers are for the whole file
+// system. They are exact at the time of the read, except on a FUSE or network file system, which can count with a
+// delay: they are then approximate.
 type volumeUsageReader struct {
-	root string
+	root  string
+	sizer *volumeSizer
 	// statfs gives the size and the available bytes of a file system, and tells if it counts with a delay. Nil is
 	// volumeStatfs. Tests set it.
 	statfs func(string) (uint64, uint64, bool, error)
 }
 
+// liveUsage: a read of a volume costs no request, so the server reads it at each request.
+func (r *volumeUsageReader) liveUsage() {}
+
+// volumeDelayedReason is the reason of an approximate capacity of a FUSE or network file system.
+const volumeDelayedReason = "The volume is on a FUSE or network file system: it can count the used bytes with a delay."
+
 func (r *volumeUsageReader) BucketUsage(_ context.Context, _ string) (bucketUsage, error) {
+	if r.sizer == nil {
+		return bucketUsage{UsedBytes: -1, UsedObjects: -1, AsOf: timeNowUTC()}, nil
+	}
+	count := r.sizer.snapshot()
+	return bucketUsage{UsedBytes: count.bytes, UsedObjects: count.files, SelfState: count.state, AsOf: count.at}, nil
+}
+
+func (r *volumeUsageReader) StorageCapacity(_ context.Context) (storageCapacity, error) {
 	statfs := r.statfs
 	if statfs == nil {
 		statfs = volumeStatfs
@@ -635,15 +655,26 @@ func (r *volumeUsageReader) BucketUsage(_ context.Context, _ string) (bucketUsag
 	if err != nil {
 		var errno syscall.Errno
 		if errors.As(err, &errno) {
-			return bucketUsage{}, fmt.Errorf("statfs: the file system of the volume does not give its size: %s", errno.Error())
+			return storageCapacity{}, fmt.Errorf("statfs: the file system of the volume does not give its size: %s", errno.Error())
 		}
-		return bucketUsage{}, fmt.Errorf("statfs: the file system of the volume does not give its size")
+		return storageCapacity{}, fmt.Errorf("statfs: the file system of the volume does not give its size")
+	}
+	if total == 0 {
+		// weed mount of SeaweedFS 4.41 can give a size of 0 for a short time, for example after a delete.
+		return storageCapacity{}, fmt.Errorf("statfs: the file system of the volume gives a size of 0")
 	}
 	used := uint64(0)
 	if total > available {
 		used = total - available
 	}
-	return bucketUsage{UsedBytes: clampToInt64(used), UsedObjects: -1, LimitBytes: clampToInt64(total), Approximate: delayed, AsOf: timeNowUTC()}, nil
+	capacity := storageCapacity{
+		Scope: storageScopeFilesystem, UsedBytes: clampToInt64(used), TotalBytes: clampToInt64(total), FreeBytes: clampToInt64(available),
+		Note: "the file system of the folder of the volume", AsOf: timeNowUTC(),
+	}
+	if delayed {
+		capacity.Approximate, capacity.Reason = true, volumeDelayedReason
+	}
+	return capacity, nil
 }
 
 // clampToInt64 gives value, or the largest int64 for a larger value (a file system of more than 8 EiB).

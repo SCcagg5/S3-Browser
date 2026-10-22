@@ -9,8 +9,9 @@ import (
 )
 
 // The usage reader of MinIO: two requests to the admin API (/minio/admin/v3), signed with SigV4 (service "s3") and the
-// S3 credentials of the auth block. The credentials need the admin actions admin:GetBucketQuota and
-// admin:DataUsageInfo (for example the policy "consoleAdmin" or the root user).
+// S3 credentials of the auth block. The credentials need the admin actions admin:GetBucketQuota,
+// admin:DataUsageInfo and admin:StorageInfo (for the capacity of the storage, usage_capacity.go), for example the policy
+// "consoleAdmin" or the root user.
 //
 // Measured on MinIO RELEASE.2025-10-15T17-29-55Z:
 //   - GET /minio/admin/v3/get-bucket-quota?bucket=<bucket> gives {"quota": <bytes>, "size": <bytes>, "rate": 0,

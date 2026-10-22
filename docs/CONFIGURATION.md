@@ -108,7 +108,7 @@ The endpoint must use HTTP or HTTPS and may not contain credentials, a query str
 
 ## Usage of the buckets
 
-A `usage` block in an `s3` auth block gives the usage and the quota of its buckets. The bucket selector of the `portal` interface shows them in the facts of each bucket, and warns about a bucket that uses 90 % or more of its limit. Without the block, the server makes no admin request and the interface shows no usage. Refer to "Usage and quota of a bucket" in [ARCHITECTURE.md](ARCHITECTURE.md).
+A `usage` block in an `s3` auth block gives the usage and the quota of its buckets, and the capacity of the storage behind them (the disks or the nodes of the provider). The bucket selector of the `portal` interface shows them in the facts of each bucket, and warns about a bucket that uses 90 % or more of its limit. Without the block, the server makes no admin request and the interface shows no usage. Refer to "Usage and quota of a bucket" in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ```hcl
 auth "garage" {
@@ -130,9 +130,9 @@ auth "garage" {
 |---|---|---|---|---|
 | `garage` | Required: the admin API (port 3903 by default) | Not allowed | Required, `token_env` or `token_file` only: the admin token | The bearer token |
 | `seaweedfs` | Required: the master (port 9333 by default) | Required: the filer (port 8888 by default) | Not allowed | None: keep the master and the filer on a closed network |
-| `minio` | Optional: the endpoint of the auth block by default | Not allowed | Not allowed | The S3 credentials of the auth block, mode `access_key` only. They need `admin:GetBucketQuota` and `admin:DataUsageInfo` |
+| `minio` | Optional: the endpoint of the auth block by default | Not allowed | Not allowed | The S3 credentials of the auth block, mode `access_key` only. They need `admin:GetBucketQuota`, `admin:DataUsageInfo` and `admin:StorageInfo` |
 
-Write `source` in lower case: the server does not change its case. A key that another source needs is a contradiction and stops the start. A `usage` block in a `gcs` auth block also stops the start. AWS S3 has no quota: give no block. The URLs use HTTP or HTTPS, without credentials, query, fragment or a `/` at the end. `print-config` shows the URLs and hides the token.
+For the capacity of the storage, the reader of `seaweedfs` also asks each volume server that the master gives (`/status`): keep them on the closed network of the master. Write `source` in lower case: the server does not change its case. A key that another source needs is a contradiction and stops the start. A `usage` block in a `gcs` auth block also stops the start. AWS S3 has no quota: give no block. The URLs use HTTP or HTTPS, without credentials, query, fragment or a `/` at the end. `print-config` shows the URLs and hides the token.
 
 ## GCS authentication
 

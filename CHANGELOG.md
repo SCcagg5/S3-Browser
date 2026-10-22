@@ -4,6 +4,29 @@ This document uses ASD-STE100 Simplified Technical English.
 
 ## Unreleased
 
+### Usage: what a bucket or a volume holds, and the capacity of the storage behind it
+
+- `GET /api/usage` also gives the capacity of the storage behind a bucket, for the sources that can tell it, with the
+  endpoint and the credentials of the `usage` block. No key of the configuration changes. Garage: the data partitions
+  of the storage nodes (`GetClusterStatus`). SeaweedFS: the disks of each volume server of the master (`/dir/status`,
+  then `/status` of each volume server). MinIO: the online drives (`storageinfo`; the credentials need
+  `admin:StorageInfo`). The numbers are raw, before the replication or the erasure code. AWS S3 and an auth block
+  without a `usage` block show nothing about the storage.
+- The answer has `storage` (`scope`, used, total and free bytes, `percent`, `level`, `approximate`, `note`) or
+  `storageError`. A failure of one part does not hide the other part. `percent`, `level` and the new field
+  `constraint` are the more constraining part: the quota or the storage. `quotaPercent` and `quotaLevel` give the quota
+  alone.
+- A volume gives what its folder holds (`selfBytes`, the number of files, and `selfState`: `computing`, `partial` or
+  `ready`), from a count in the background with a budget (1,000,000 entries, 20 seconds, 5 minutes of life, made old by
+  each write of S3-Browser), and its file system as the storage.
+- Interface `portal`: the usage of the trigger is a button that opens the popover "Usage" (what the bucket or the
+  volume holds, the quota, the storage with the free bytes, a bar for each). The item "Usage" of the Actions menu and the
+  usage of the current bucket in the list also open it, for a narrow selector. The chip keeps its one-row form. The
+  warning of a full bucket names the part: "The storage of this bucket is 91 % full: 910 GB of 1000 GB, 90 GB left." or
+  "This volume is on a file system that is 91 % full: ...".
+- Tests: the data of each provider of the portal test stack is on a tmpfs of 4 GiB, and the volume `files` on a tmpfs
+  of 1 GiB, so the numbers are the same on each test host.
+
 ### Volumes
 
 A new block `volume "<id>" { path = "..." }` shows a folder of the server as a bucket: a Docker volume, an NFS or

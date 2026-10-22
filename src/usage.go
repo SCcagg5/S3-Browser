@@ -68,6 +68,9 @@ type bucketUsage struct {
 	Approximate bool
 	// AsOf is the time of the count at the source.
 	AsOf time.Time
+	// SelfState is the state of the count of the files of a volume: "computing", "partial" or "ready". It is "" for a
+	// bucket.
+	SelfState string
 }
 
 // BucketUsageReader reads the usage and the quota of one bucket from the admin API of a provider. The usage block of
@@ -76,11 +79,43 @@ type BucketUsageReader interface {
 	BucketUsage(ctx context.Context, bucket string) (bucketUsage, error)
 }
 
+// The scopes of the capacity of the storage behind a bucket or a volume.
+const (
+	// storageScopeCluster is the data partitions of the nodes of a Garage cluster.
+	storageScopeCluster = "cluster"
+	// storageScopeDisks is the disks of the volume servers of SeaweedFS or the drives of MinIO.
+	storageScopeDisks = "disks"
+	// storageScopeFilesystem is the file system of a volume (statfs).
+	storageScopeFilesystem = "filesystem"
+)
+
+// storageCapacity is the capacity of the storage behind a bucket: the disks or the nodes of the provider, for all its
+// buckets. For a volume, it is the file system of the folder. The numbers are raw: the replication or the erasure code
+// of the provider uses more than one byte of the disks for one byte of an object.
+type storageCapacity struct {
+	Scope      string
+	UsedBytes  int64
+	TotalBytes int64
+	FreeBytes  int64
+	// Approximate tells that a part of the storage did not answer, or that the storage counts with a delay. Reason then
+	// says why.
+	Approximate bool
+	Reason      string
+	// Note says what the numbers count, for example "raw capacity of 3 storage nodes".
+	Note string
+	AsOf time.Time
+}
+
+// StorageCapacityReader is optional: a usage reader that also reads the capacity of the storage behind the buckets.
+// AWS S3 has none: its storage has no limit for the client.
+type StorageCapacityReader interface {
+	StorageCapacity(ctx context.Context) (storageCapacity, error)
+}
+
 // usageApproximateReasons tells why the numbers of a source are approximate. The page shows the text in a tooltip.
 var usageApproximateReasons = map[string]string{
 	usageSourceSeaweedFS: "SeaweedFS gives the size of the volumes of the bucket, with a delay of some seconds. The number of objects is not known.",
 	usageSourceMinIO:     "MinIO counts the usage in a background scan, about one time each minute or less often on a large server.",
-	usageSourceStatfs:    "The volume is on a FUSE or network file system: it can count the used bytes with a delay.",
 }
 
 // newBucketUsageReader makes the reader of the usage block of an auth block. It gives nil without a usage block.
@@ -188,11 +223,25 @@ type usageCapability struct {
 	source string
 
 	mu     sync.Mutex
-	value  bucketUsage
-	err    error
+	result usageResult
 	readAt time.Time
 	// flight is open while a read runs. The other requests wait for it.
 	flight chan struct{}
+}
+
+// usageResult is one read of the usage of an instance: the part of the bucket and the part of the storage behind it,
+// each with its error. A failure of one part does not hide the other. storage is nil for a reader without the capacity
+// of the storage, and for a failed read of it.
+type usageResult struct {
+	value      bucketUsage
+	err        error
+	storage    *storageCapacity
+	storageErr error
+}
+
+// failed tells if a part of the read failed: the cache then keeps it for usageRetryInterval only.
+func (r usageResult) failed() bool {
+	return r.err != nil || r.storageErr != nil
 }
 
 // errUsageUnsupported is the answer for an instance without a usage block.
@@ -203,25 +252,40 @@ func (s *storageInstance) usageAvailable() bool {
 	return s != nil && s.usage.reader != nil
 }
 
-// bucketUsage gives the usage of the bucket of the instance from the cache, or reads it. One read at a time runs for
-// the instance: the other requests wait for its result. With fresh, a result older than usageRetryInterval is read
-// again. The read does not stop when the request that started it stops, so the other requests get its result.
+// bucketUsage gives the part of the bucket of usageRead.
 func (s *storageInstance) bucketUsage(ctx context.Context, fresh bool) (bucketUsage, error) {
+	result := s.usageRead(ctx, fresh)
+	return result.value, result.err
+}
+
+// liveUsageReader marks a reader whose read costs no request (a volume: a statfs call and the count in memory of the
+// size of the folder). The server reads it at each request, without the cache.
+type liveUsageReader interface {
+	liveUsage()
+}
+
+// usageRead gives the usage of the instance from the cache, or reads it. One read at a time runs for the instance: the
+// other requests wait for its result. With fresh, a result older than usageRetryInterval is read again. The read does
+// not stop when the request that started it stops, so the other requests get its result.
+func (s *storageInstance) usageRead(ctx context.Context, fresh bool) usageResult {
 	usage := &s.usage
 	if usage.reader == nil {
-		return bucketUsage{}, errUsageUnsupported
+		return usageResult{err: errUsageUnsupported}
+	}
+	if _, live := usage.reader.(liveUsageReader); live {
+		return s.readUsage(ctx)
 	}
 	for {
 		usage.mu.Lock()
 		if usage.flight == nil && !usage.readAt.IsZero() {
 			life := usageCacheTTL
-			if usage.err != nil || fresh {
+			if usage.result.failed() || fresh {
 				life = usageRetryInterval
 			}
 			if timeNowUTC().Sub(usage.readAt) < life {
-				value, err := usage.value, usage.err
+				result := usage.result
 				usage.mu.Unlock()
-				return value, err
+				return result
 			}
 		}
 		if flight := usage.flight; flight != nil {
@@ -230,35 +294,51 @@ func (s *storageInstance) bucketUsage(ctx context.Context, fresh bool) (bucketUs
 			case <-flight:
 				continue
 			case <-ctx.Done():
-				return bucketUsage{}, ctx.Err()
+				return usageResult{err: ctx.Err(), storageErr: ctx.Err()}
 			}
 		}
 		flight := make(chan struct{})
 		usage.flight = flight
 		usage.mu.Unlock()
-		return s.readBucketUsage(ctx, flight)
-	}
-}
-
-// readBucketUsage makes one read for bucketUsage, keeps its result and opens the flight.
-func (s *storageInstance) readBucketUsage(ctx context.Context, flight chan struct{}) (value bucketUsage, err error) {
-	usage := &s.usage
-	defer func() {
+		result := s.readUsage(ctx)
 		usage.mu.Lock()
-		usage.value, usage.err, usage.readAt = value, err, timeNowUTC()
+		usage.result, usage.readAt = result, timeNowUTC()
 		usage.flight = nil
 		usage.mu.Unlock()
 		close(flight)
-	}()
+		return result
+	}
+}
+
+// readUsage makes one read of the two parts at the same time, in usageTimeout for the two.
+func (s *storageInstance) readUsage(ctx context.Context) (result usageResult) {
+	usage := &s.usage
 	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), usageTimeout)
 	defer cancel()
-	value, err = usage.reader.BucketUsage(readCtx, s.cfg.Bucket)
+	var wg sync.WaitGroup
+	if capacity, ok := usage.reader.(StorageCapacityReader); ok {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			storage, err := capacity.StorageCapacity(readCtx)
+			if err != nil {
+				log.Printf("usage.error bucket=%q source=%s part=storage: %v", s.cfg.ID, usage.source, err)
+				result.storageErr = err
+				return
+			}
+			result.storage = &storage
+		}()
+	}
+	value, err := usage.reader.BucketUsage(readCtx, s.cfg.Bucket)
+	wg.Wait()
 	if err != nil {
 		log.Printf("usage.error bucket=%q source=%s: %v", s.cfg.ID, usage.source, err)
-		return bucketUsage{}, err
+		result.err = err
+		return result
 	}
 	value.Source = usage.source
-	return value, nil
+	result.value = value
+	return result
 }
 
 // probeUsage compares the source of the usage block with the provider that the lifecycle probe found. The source of
@@ -295,6 +375,11 @@ func usageLevel(value bucketUsage) (float64, string) {
 	return math.Floor(ratio*1000) / 10, "ok"
 }
 
+// storageLevel gives the used part of the storage in percent, with one decimal, and the level, as usageLevel does.
+func storageLevel(storage storageCapacity) (float64, string) {
+	return usageLevel(bucketUsage{UsedBytes: storage.UsedBytes, LimitBytes: storage.TotalBytes})
+}
+
 // --- HTTP -----------------------------------------------------------------------------------------------------------
 
 type usageResponse struct {
@@ -316,8 +401,34 @@ type usageResponse struct {
 	Approximate       bool      `json:"approximate"`
 	ApproximateReason string    `json:"approximateReason,omitempty"`
 	AsOf              time.Time `json:"asOf"`
+	// Percent and Level are the more constraining part: the quota of the bucket or the storage behind it. Constraint
+	// names it: "quota", "storage", or "" when the answer has no limit.
+	Percent    float64 `json:"percent"`
+	Level      string  `json:"level"`
+	Constraint string  `json:"constraint"`
+	// QuotaPercent and QuotaLevel are the used part of the quota of the bucket alone.
+	QuotaPercent float64 `json:"quotaPercent"`
+	QuotaLevel   string  `json:"quotaLevel"`
+	// SelfBytes and SelfState are the size of the files of a volume, and the state of its count: "computing" (the count
+	// runs: at least SelfBytes), "partial" (the count stopped at its budget: at least SelfBytes) or "ready".
+	SelfBytes *int64 `json:"selfBytes,omitempty"`
+	SelfState string `json:"selfState,omitempty"`
+	// Storage is the capacity of the storage behind the bucket. StorageError is the reason of a failed read of it.
+	Storage      *storageJSON    `json:"storage,omitempty"`
+	StorageError *usageErrorJSON `json:"storageError,omitempty"`
+}
+
+type storageJSON struct {
+	Scope             string    `json:"scope"`
+	UsedBytes         int64     `json:"usedBytes"`
+	TotalBytes        int64     `json:"totalBytes"`
+	FreeBytes         int64     `json:"freeBytes"`
 	Percent           float64   `json:"percent"`
 	Level             string    `json:"level"`
+	Approximate       bool      `json:"approximate"`
+	ApproximateReason string    `json:"approximateReason,omitempty"`
+	Note              string    `json:"note,omitempty"`
+	AsOf              time.Time `json:"asOf"`
 }
 
 type usageErrorJSON struct {
@@ -343,6 +454,47 @@ func usageAnswer(instance *storageInstance, value bucketUsage) usageResponse {
 		answer.ApproximateReason = usageApproximateReasons[value.Source]
 	}
 	answer.Percent, answer.Level = usageLevel(bucketUsage{UsedBytes: answer.UsedBytes, UsedObjects: answer.UsedObjects, LimitBytes: answer.LimitBytes, LimitObjects: answer.LimitObjects})
+	answer.QuotaPercent, answer.QuotaLevel = answer.Percent, answer.Level
+	if answer.Level != "" {
+		answer.Constraint = "quota"
+	}
+	if value.SelfState != "" {
+		self := value.UsedBytes
+		answer.SelfBytes, answer.SelfState = &self, value.SelfState
+	}
+	return answer
+}
+
+// usageAnswerOf makes the answer of GET /api/usage from the two parts of a read. A failed part gives its error, and
+// the other part stays. Percent, Level and Constraint are the part with the larger used part.
+func usageAnswerOf(instance *storageInstance, result usageResult) usageResponse {
+	noun := "bucket"
+	if instance.cfg.Provider == providerVolume {
+		noun = "volume"
+	}
+	var answer usageResponse
+	if result.err != nil {
+		answer = usageResponse{
+			Supported: true, Instance: instance.cfg.ID, Bucket: instance.cfg.Bucket, RootPrefix: instance.cfg.RootPrefix, Source: instance.usage.source,
+			Error: &usageErrorJSON{Code: "usage_unavailable", Message: "The usage of the " + noun + " is unavailable: " + result.err.Error() + "."},
+		}
+	} else {
+		answer = usageAnswer(instance, result.value)
+	}
+	if result.storageErr != nil {
+		answer.StorageError = &usageErrorJSON{Code: "storage_unavailable", Message: "The capacity of the storage is unavailable: " + result.storageErr.Error() + "."}
+	}
+	if storage := result.storage; storage != nil {
+		percent, level := storageLevel(*storage)
+		answer.Storage = &storageJSON{
+			Scope: storage.Scope, UsedBytes: storage.UsedBytes, TotalBytes: storage.TotalBytes, FreeBytes: storage.FreeBytes,
+			Percent: percent, Level: level, Approximate: storage.Approximate, ApproximateReason: storage.Reason, Note: storage.Note,
+			AsOf: storage.AsOf.UTC(),
+		}
+		if level != "" && (answer.Constraint == "" || percent > answer.Percent) {
+			answer.Percent, answer.Level, answer.Constraint = percent, level, "storage"
+		}
+	}
 	return answer
 }
 
@@ -368,17 +520,5 @@ func (a *application) handleUsage(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]bool{"supported": false})
 		return
 	}
-	value, err := instance.bucketUsage(r.Context(), r.URL.Query().Get("fresh") == "1")
-	if err != nil {
-		noun := "bucket"
-		if instance.cfg.Provider == providerVolume {
-			noun = "volume"
-		}
-		writeJSON(w, http.StatusOK, usageResponse{
-			Supported: true, Instance: instance.cfg.ID, Bucket: instance.cfg.Bucket, RootPrefix: instance.cfg.RootPrefix, Source: instance.usage.source,
-			Error: &usageErrorJSON{Code: "usage_unavailable", Message: "The usage of the " + noun + " is unavailable: " + err.Error() + "."},
-		})
-		return
-	}
-	writeJSON(w, http.StatusOK, usageAnswer(instance, value))
+	writeJSON(w, http.StatusOK, usageAnswerOf(instance, instance.usageRead(r.Context(), r.URL.Query().Get("fresh") == "1")))
 }

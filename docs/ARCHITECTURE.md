@@ -538,6 +538,37 @@ These facts come from the test stack:
 
 The numbers of SeaweedFS and MinIO are approximate. The numbers are for the whole bucket, also for an instance with a root prefix.
 
+### Capacity of the storage
+
+The usage of a bucket also gives the capacity of the storage behind it: the disks or the nodes of the provider, for all
+its buckets. The reader of the `usage` block reads it with the same endpoint, the same credentials, the same time limit
+and the same size limits. No key of the configuration changes. The two parts of a read run at the same time, and a
+failure of one part does not hide the other part. The numbers are raw: the replication or the erasure code of the
+provider uses more than one byte of the disks for one byte of an object.
+
+| Source | Requests | Scope | Total, used, free |
+| --- | --- | --- | --- |
+| `garage` | `GET <endpoint>/v2/GetClusterStatus` with the admin token | `cluster` | The sum of `dataPartition.total` and `dataPartition.available` of each node with a role and a capacity. A gateway node stores no data. Used = total - available |
+| `seaweedfs` | `GET <endpoint>/dir/status` (the master), then `GET http://<volume server>/status` for each volume server, 4 at a time, 64 at most | `disks` | The sum of `all`, `used` and `free` of the `DiskStatuses` of each volume server, one time for each folder |
+| `minio` | `GET <endpoint>/minio/admin/v3/storageinfo`, signed | `disks` | The sum of `totalspace`, `usedspace` and `availspace` of each drive with the state `ok` |
+| volume (`statfs`) | `statfs` of the root of the volume | `filesystem` | Used = size - available, total = size, free = available |
+
+These facts come from the test stack:
+
+- Garage v2.4.1 does not give the replication factor in its admin API: `GetClusterLayout` gives `zoneRedundancy` only.
+  The note of the answer says it. `/v1/status` answers `400`: the v1 API is no longer supported.
+- The master of SeaweedFS 4.41 gives no bytes of the disks. `/dir/status` lists the volume servers with their
+  addresses, and each volume server gives its disks in `/status`. A volume server with a loopback address (for example
+  `weed server -ip=127.0.0.1`) is on the host of the master: the reader asks the host of the master at the port of the
+  volume server. The volume servers must be on the closed network of the master.
+- MinIO RELEASE.2025-10-15T17-29-55Z gives `StandardSCParity` in `Backend`. The note gives the parity when it is more
+  than 0. `usedspace` + `availspace` can be less than `totalspace`: the file system keeps blocks for itself. The
+  credentials need the admin action `admin:StorageInfo`.
+
+A storage node or a volume server that does not answer, and a drive that is offline, are not counted: the capacity is
+then approximate, and `approximateReason` says why. AWS S3, an `s3` auth block without a `usage` block and GCS have no
+capacity: the page shows nothing about it.
+
 ### Cost and safety
 
 - The server makes an admin request only for an instance whose `auth` block has a `usage` block. The probe at start makes no admin request.
@@ -555,8 +586,12 @@ The numbers of SeaweedFS and MinIO are approximate. The numbers are for the whol
 - An instance without a `usage` block: `{"supported": false}`.
 - A read that works: `supported` and `available` are `true`, with `instance`, `bucket`, `rootPrefix`, `source`, `usedBytes`, `usedObjects` (`-1` when unknown), `limitBytes` and `limitObjects` (`0` is no limit), `limitSource`, `approximate`, `approximateReason`, `asOf`, `percent` and `level`.
 - A read that fails: `200` with `available: false` and `error` (`code` `usage_unavailable` and `message`). An answer `502` would tell the page that the server does not answer.
+- The capacity of the storage, when the reader gives it: `storage` with `scope` (`cluster`, `disks` or `filesystem`), `usedBytes`, `totalBytes`, `freeBytes`, `percent`, `level`, `approximate`, `approximateReason`, `note` and `asOf`. A failed read of it gives `storageError` (`code` `storage_unavailable`), and the part of the bucket stays.
+- A volume also gives `selfBytes` (the size of its files) and `selfState`: `computing` while the count runs (at least `selfBytes`), `partial` when the count stopped at its budget (at least `selfBytes`), or `ready`. Refer to "Volumes".
 
-`limitSource` is `provider`, `config` or `""`. The key `quota_bytes` of a bucket block gives the limit when the source gives no byte limit. The server does not enforce this limit. `percent` is the used part of the limit in percent, with one decimal. The server cuts the next decimals: 99.99 % gives 99.9. With a byte limit and an object limit, the larger part applies. `level` is `""` without a limit, `ok`, `warning` from 80 %, and `error` from 95 %.
+`limitSource` is `provider`, `config` or `""`. The key `quota_bytes` of a bucket block gives the limit when the source gives no byte limit. The server does not enforce this limit. `quotaPercent` is the used part of the quota in percent, with one decimal. The server cuts the next decimals: 99.99 % gives 99.9. With a byte limit and an object limit, the larger part applies. `quotaLevel` is `""` without a limit, `ok`, `warning` from 80 %, and `error` from 95 %. `storage.percent` and `storage.level` are the same values for the storage.
+
+`percent` and `level` are the more constraining part: the quota or the storage, the part with the larger percent. `constraint` names it: `quota`, `storage`, or `""` when the answer has no limit. An equal percent keeps the quota. The colour of the bar, the short text of the chip and the warning of a full bucket follow `percent`.
 
 ### The facts of the buckets in the bucket selector
 
@@ -568,7 +603,7 @@ The trigger of the bucket selector has the name of the current bucket, its permi
 | Encryption (a key): "Encrypted: SSE-S3 for each new object" or the default encryption of the bucket | `encryption`, `defaultEncryption` and `encryptionApplied` of `/api/instances`. Garage with `"sse-s3"` gets "SSE-S3 not applied" in the colour of a warning |
 | Object Lock (a padlock), with the default retention | `objectLockSupported` and `objectLockDefault` of `/api/instances` |
 | The lifecycle rules (an hourglass and the count) | The current bucket: the rules in `GET /api/lifecycle`. The other buckets: `lifecycleRules` of `/api/instances` |
-| The usage: a thin bar and a short text, the part of the limit (`62 %`) or the used bytes (`12.3 GB`), at the right of the facts. The whole text (`12.3 GB of 20 GB`) is in the tooltip and for a screen reader | `GET /api/usage` |
+| The usage: a thin bar and a short text, the more constraining part (`62 %`, of the quota or of the storage) or the used bytes (`12.3 GB`), at the right of the facts. The whole text (`12.3 GB of 20 GB` or `Storage: 910 GB of 1000 GB`) is in the tooltip and for a screen reader. In the trigger, the usage is a button that opens the popover "Usage" | `GET /api/usage` |
 
 A bucket that never had versioning gets no versioning icon: "off" is not a fact that the line shows. An approximate number starts with `~`. The bar has the colour of a warning from 80 % and the colour of an error from 95 %. The tooltip of the usage names the bucket, the used bytes, the limit and its source, and the objects. It also gives the source, the time of the count and the reason of an approximate number. The numbers are for the whole bucket, also for an instance with a root prefix.
 
@@ -595,11 +630,27 @@ The probe at start reads them (`GetBucketVersioning` after the probe of the vers
 
 The page reads the facts of the current bucket when it opens. It reads the usage again (`fresh=1`) 1.5 seconds and 12 seconds after a change: an upload, a delete, a copy, a move, a rename, a metadata edit, a restore or the end of a job. A group of changes gives one read. A click on the reload icon reads the facts again. At load, and again when the menu opens, the page reads the usage of each bucket with `usageSupported`. It sends 4 reads at the same time at most. An entry shows "…" while its read waits. A failed read of another bucket shows nothing. The page and the server keep each answer for 60 seconds. The tooltip of each bucket also has its usage. The preview page has no facts.
 
+### The popover "Usage"
+
+A click, Enter or Space on the usage of the trigger opens a small popover with the look of the menus. Its lines are a
+table (`dl`), each line only when it is known: "This bucket holds" (or "This volume holds") with the used bytes and the
+objects; "Quota" with the used part of the quota and its bar; "Objects" for a limit of objects; "Storage" with the used
+bytes, the size, the percent and the free bytes, with its bar and its note (for example "Raw capacity of 1 storage
+node, before the replication"). An approximate number has a `~` and the reason. For a volume, the first line is
+"computing…" or "at least 10 GB" while the count runs. Escape and a click outside close the popover. The focus goes
+back to the control that opened it.
+
+On a narrow selector the usage of the trigger does not show. The popover then opens from the item "Usage" of the Actions
+menu, and from the usage of the current bucket in the list of the buckets (a click on its usage). The item "Usage" shows
+for each instance with `usageSupported`. The entries of the list keep a short chip, in their button: a button cannot
+hold a button.
+
 ### The warning of a full bucket
 
-A bucket is full when it uses 90 % or more of its limit of bytes: `percent >= 90` of `GET /api/usage`, with `limitBytes` more than 0. A bucket without a limit of bytes never gets the warning. The warning has these parts:
+A bucket is full when the more constraining part is at 90 % or more: `percent >= 90` of `GET /api/usage`, with a
+`constraint`. A bucket without a quota and without a capacity never gets the warning. The warning has these parts:
 
-- A banner at the top of the card of the listing, as wide as the listing, in the colours of an error, with the alert icon (Tabler `alert-triangle`). Its text is for example "This bucket is 93 % full: 18.6 GB used of 20 GB. New uploads can fail." From 100 %, the text is "This bucket is full: 20 GB used of 20 GB (100 %). New uploads fail." An approximate number has a `~` and the reason in a second sentence. The banner has `role="alert"`, so a screen reader reads it. It has no close button. It goes when the number goes down.
+- A banner at the top of the card of the listing, as wide as the listing, in the colours of an error, with the alert icon (Tabler `alert-triangle`). Its text names the part. The quota: "This bucket is 93 % full: 18.6 GB used of 20 GB. New uploads can fail." From 100 %, the text is "This bucket is full: 20 GB used of 20 GB (100 %). New uploads fail." The storage: "The storage of this bucket is 91 % full: 910 GB of 1000 GB, 90 GB left. New uploads can fail." A volume: "This volume is on a file system that is 91 % full: 910 GB of 1000 GB, 90 GB left. New uploads can fail." An approximate number has a `~` and the reason in a second sentence. The banner has `role="alert"`, so a screen reader reads it. It has no close button. It goes when the number goes down.
 - The trigger of the selector gets a border in the colour of an error and the alert icon after the name. The bar of the usage is red from 90 %.
 - In the list, a full bucket gets the alert icon after its name and a red bar.
 - When a bucket other than the current one is full, the trigger gets a small alert icon in the colour of a warning. The tooltip says "Another bucket is almost full: <name>".
@@ -732,11 +783,25 @@ for `versioningSupported`, `tagsSupported`, `metadataEditSupported`, `lifecycleS
 
 ### Usage
 
-`GET /api/usage` of a volume gives the size of its file system (`statfs`) with the source `statfs`: the used bytes are
-the size minus the available bytes, and the limit is the size. The number of objects is unknown (`-1`).
-`approximate` is `true` on a FUSE, NFS, CephFS, SMB 2 or CIFS file system (the type of the answer of `statfs`): such a
-file system can count the used bytes with a delay. On an other file system, it is `false`. The numbers are for the whole file system, also for the other folders on it. The warning of a full
-bucket applies to a volume from 90 %. Only a Linux build reads `statfs`: on an other system, a volume has no usage.
+`GET /api/usage` of a volume (source `statfs`) has two parts:
+
+- What the volume holds: `selfBytes` (also `usedBytes`), the sum of the sizes of the regular files of the folder, and
+  `usedObjects`, the number of these files. A sizer counts them in the background: a request never walks the tree. One
+  walk at a time runs. A walk reads at most 1,000,000 entries in 20 seconds; a larger tree gives `selfState:
+  "partial"`. While a walk runs, the answer gives its progress with `selfState: "computing"`. A walk does not follow a
+  symbolic link, and does not count the temporary files of S3-Browser. The count stays for 5 minutes. A write of
+  S3-Browser in the volume (an upload, a copy, a move, a delete) makes it old: the next read starts a new walk. A change
+  that a process outside S3-Browser makes shows after the 5 minutes. The sizes are the sizes of the files, not the
+  blocks of the disk.
+- The storage: the file system of the folder (`statfs`, scope `filesystem`). The used bytes are the size minus the
+  available bytes, the total is the size, and the free bytes are the available bytes. `storage.approximate` is `true` on a
+  FUSE, NFS, CephFS, SMB 2 or CIFS file system (the type of the answer of `statfs`): such a file system can count the
+  used bytes with a delay. The numbers are for the whole file system, also for the other folders on it. A size of 0
+  (`weed mount` gave it once, after a delete) gives `storageError`.
+
+A volume has no quota: the storage is its limit, and the warning applies from 90 % of the file system. The server reads
+a volume at each request, without the cache: a read is a `statfs` call and the count in memory. Only a Linux build reads
+`statfs`: on an other system, a volume has no usage.
 
 ### File systems
 

@@ -6,6 +6,10 @@ services:
   seaweedfs:
     build:
       context: ../seaweedfs
+    # The data of each provider is on a tmpfs of a known size: the capacity of the storage behind each bucket is then
+    # the same on each test host, and far from full.
+    tmpfs:
+      - /data:size=4g
     ulimits:
       nofile:
         soft: 262144
@@ -17,6 +21,8 @@ services:
   minio:
     build:
       context: ../minio
+    tmpfs:
+      - /data:size=4g
     volumes:
       - ./config.hcl:/config/config.hcl:ro
       - ../secrets:/config/secrets:ro
@@ -24,6 +30,8 @@ services:
   garage:
     build:
       context: ../garage
+    tmpfs:
+      - /var/lib/garage:size=4g
     volumes:
       - ./config.hcl:/config/config.hcl:ro
       - ../secrets:/config/secrets:ro
@@ -63,4 +71,9 @@ services:
         condition: service_healthy
 
 volumes:
+  # A tmpfs of a known size: the file system of the volume "files" is the same on each test host.
   volume-data:
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=1g

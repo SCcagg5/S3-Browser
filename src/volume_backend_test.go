@@ -447,26 +447,23 @@ func TestVolumeInstanceHidesTheFeaturesOfS3(t *testing.T) {
 func TestVolumeUsageIsTheSizeOfTheFileSystem(t *testing.T) {
 	t.Parallel()
 	reader := &volumeUsageReader{root: "/x", statfs: func(string) (uint64, uint64, bool, error) { return 1000, 40, false, nil }}
-	value, err := reader.BucketUsage(context.Background(), "")
-	if err != nil || value.UsedBytes != 960 || value.LimitBytes != 1000 || value.UsedObjects != -1 || value.LimitObjects != 0 || value.Approximate {
-		t.Fatalf("usage = %+v, %v", value, err)
+	capacity, err := reader.StorageCapacity(context.Background())
+	if err != nil || capacity.UsedBytes != 960 || capacity.TotalBytes != 1000 || capacity.FreeBytes != 40 || capacity.Scope != storageScopeFilesystem || capacity.Approximate {
+		t.Fatalf("capacity = %+v, %v", capacity, err)
 	}
-	app := volumeTestApplication(t, volumeTempDir(t), "")
-	instance, _ := volumeInstance(t, app)
-	instance.usage.reader = reader
-	value.Source = usageSourceStatfs
-	answer := usageAnswer(instance, value)
-	if answer.Percent != 96 || answer.Level != "error" || answer.LimitSource != "provider" || answer.Approximate {
-		t.Fatalf("answer = %+v", answer)
+	if percent, level := storageLevel(capacity); percent != 96 || level != "error" {
+		t.Fatalf("level = %v %q", percent, level)
 	}
 	delayed := &volumeUsageReader{root: "/x", statfs: func(string) (uint64, uint64, bool, error) { return 1000, 40, true, nil }}
-	if value, err := delayed.BucketUsage(context.Background(), ""); err != nil || !value.Approximate {
-		t.Fatalf("usage of a FUSE file system = %+v, %v", value, err)
-	} else if value.Source = usageSourceStatfs; usageAnswer(instance, value).ApproximateReason == "" {
-		t.Fatal("an approximate usage of a volume has no reason")
+	if capacity, err := delayed.StorageCapacity(context.Background()); err != nil || !capacity.Approximate || capacity.Reason != volumeDelayedReason {
+		t.Fatalf("capacity of a FUSE file system = %+v, %v", capacity, err)
+	}
+	empty := &volumeUsageReader{root: "/x", statfs: func(string) (uint64, uint64, bool, error) { return 0, 0, true, nil }}
+	if _, err := empty.StorageCapacity(context.Background()); err == nil || !strings.Contains(err.Error(), "size of 0") {
+		t.Fatalf("a file system of size 0: error = %v", err)
 	}
 	failing := &volumeUsageReader{root: "/x", statfs: func(string) (uint64, uint64, bool, error) { return 0, 0, false, os.ErrPermission }}
-	if _, err := failing.BucketUsage(context.Background(), ""); err == nil || strings.Contains(err.Error(), "/x") {
+	if _, err := failing.StorageCapacity(context.Background()); err == nil || strings.Contains(err.Error(), "/x") {
 		t.Fatalf("error = %v", err)
 	}
 	if !volumeUsageSupported {
@@ -476,7 +473,8 @@ func TestVolumeUsageIsTheSizeOfTheFileSystem(t *testing.T) {
 	recorder := doJSON(real, http.MethodGet, "/api/usage?instance=vol", nil)
 	var response usageResponse
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil || !response.Supported || !response.Available ||
-		response.Source != usageSourceStatfs || response.LimitBytes <= 0 || response.UsedBytes < 0 || response.UsedBytes > response.LimitBytes {
+		response.Source != usageSourceStatfs || response.Storage == nil || response.Storage.TotalBytes <= 0 || response.Storage.UsedBytes < 0 ||
+		response.Storage.UsedBytes > response.Storage.TotalBytes || response.SelfState == "" {
 		t.Fatalf("usage = %s, %v", recorder.Body.String(), err)
 	}
 }
