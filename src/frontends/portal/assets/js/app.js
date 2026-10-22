@@ -475,7 +475,16 @@ BB.cfg = config;
     fillNodes(link, stateIconNodes(states));
     const label = `Information and permissions of this ${storageNoun(instance)}${menu ? `: ${storageName(instance)}` : ''}`;
     link.setAttribute('aria-label', `${label}. ${states.map(item => item.text).join(', ')}`);
-    link.title = ['Information and permissions', ...states.map(item => item.text)].join('\n');
+    link.title = hoverText(instance);
+  }
+
+  // One tooltip for the state icons and for the usage of a bucket: the states, then the usage. The two elements show the
+  // same text, so the user reads the same box on each of them.
+  function hoverText(instance) {
+    const usage = instance.usageSupported === true && can('list', instance) ? BB.usage.cached(instance.id) : null;
+    const lines = ['Information and permissions', ...bucketStates(instance).map(item => item.text)];
+    if (usage && BB.usage.shown(usage)) lines.push('', BB.usage.title(usage));
+    return lines.join('\n');
   }
 
   function renderSwitcher() {
@@ -955,12 +964,12 @@ BB.cfg = config;
   // The selector shows the amount that the bucket holds ("3 MB", "≥ 3 MB" or "computing…" for a volume), then the short
   // text (the percent, or the used bytes when there is no limit). The whole text is for a screen reader only. The usage
   // does not act: the information page of the bucket gives each line of it.
-  function usageFact(usage) {
+  function usageFact(usage, hover = '') {
     const limited = BB.usage.hasLimit(usage);
     const amount = BB.usage.amountText(usage);
     const node = h('span', {
       class: ['bucketFact', 'bucketUsage', usage.level && `is-${usage.level}`, BB.usage.full(usage) && 'is-full'], 'data-fact': 'usage',
-      'data-level': usage.level || 'none', 'data-constraint': BB.usage.constraint(usage) || 'none', 'data-used-bytes': String(usage.usedBytes), title: BB.usage.title(usage)
+      'data-level': usage.level || 'none', 'data-constraint': BB.usage.constraint(usage) || 'none', 'data-used-bytes': String(usage.usedBytes), title: hover || BB.usage.title(usage)
     }, h('span', { class: 'bucketUsage__text' }, BB.usage.text(usage)),
     amount ? h('span', { class: 'bucketUsage__amount', 'aria-hidden': 'true' }, amount) : null,
     h('span', { class: 'bucketUsage__short', 'aria-hidden': 'true' }, BB.usage.shortText(usage)),
@@ -978,7 +987,7 @@ BB.cfg = config;
     if (instance.usageSupported === true && can('list', instance)) {
       const usage = BB.usage.cached(instance.id);
       if (BB.usage.shown(usage)) {
-        items.push(usageFact(usage));
+        items.push(usageFact(usage, hoverText(instance)));
       } else if (!usage && BB.usage.loading(instance.id)) {
         items.push(h('span', { class: 'bucketFact bucketUsage is-loading', 'data-fact': 'usage', 'data-level': 'loading', title: `Reading the usage of the ${storageNoun(instance)}` }, '…'));
       } else if (usage?.supported === true && trigger) {

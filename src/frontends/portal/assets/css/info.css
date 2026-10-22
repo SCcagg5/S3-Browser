@@ -34,50 +34,6 @@ html:has(> body.infoPage),
   text-overflow: ellipsis;
 }
 
-/* The row of the section links: the underline of the current part is on the border of the row. */
-.infoNav {
-  position: sticky;
-  top: 0;
-  z-index: 3;
-  display: flex;
-  min-width: 0;
-  min-height: 40px;
-  padding: 0 var(--header-gutter);
-  border-bottom: 1px solid var(--border);
-  background: var(--panel);
-}
-
-.infoNav__tabs {
-  display: flex;
-  min-width: 0;
-  margin-bottom: -1px;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.infoNav__tab {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  padding: 0 12px;
-  border-bottom: 2px solid transparent;
-  color: var(--muted);
-  font-size: var(--fs-md);
-  font-weight: var(--fw-semibold);
-  text-decoration: none;
-  white-space: nowrap;
-  transition: color var(--dur-quick) var(--ease), border-color var(--dur-quick) var(--ease);
-}
-
-.infoNav__tab:hover {
-  color: var(--text);
-}
-
-.infoNav__tab.is-active {
-  border-bottom-color: var(--accent-fill);
-  color: var(--text);
-}
-
 .infoMain {
   display: flex;
   flex-direction: column;
@@ -141,7 +97,7 @@ html:has(> body.infoPage),
   font-size: var(--fs-sm);
 }
 
-/* Parts: a heading and a count, then the body. The anchor of a part is under the row of the section links. */
+/* Parts: a heading and a count, then the body.  */
 .infoSections {
   display: flex;
   flex-direction: column;
@@ -149,15 +105,10 @@ html:has(> body.infoPage),
   min-width: 0;
 }
 
-.infoPart[hidden] {
-  display: none;
-}
-
 .infoPart {
   display: grid;
   gap: 10px;
   min-width: 0;
-  scroll-margin-top: 52px;
 }
 
 .infoPart__head {

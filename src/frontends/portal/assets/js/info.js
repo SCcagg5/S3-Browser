@@ -392,27 +392,6 @@
     const text = page.usage ? BB.usage.fullText(page.usage) : '';
     banner.hidden = !text;
     banner.replaceChildren(...(text ? [ic('alert-triangle'), h('span', { class: 'usageBanner__text' }, text)] : []));
-    markSection();
-  }
-
-  // The sections are tabs, as the sections of the System page of the dashboard: one part is shown, the others are
-  // hidden. The fragment of the address names the part (#info-storage). Without a known fragment, Summary is shown.
-  function markSection() {
-    const links = Array.from(document.querySelectorAll('.infoNav__tab'));
-    const keys = links.map(link => link.dataset.section);
-    const wanted = String(location.hash || '').replace(/^#info-/, '');
-    const current = Math.max(0, keys.indexOf(wanted));
-    keys.forEach((key, index) => {
-      const node = byId(`info-${key}`);
-      if (node) node.hidden = index !== current;
-    });
-    links.forEach((link, index) => {
-      link.classList.toggle('is-active', index === current);
-      link.setAttribute('role', 'tab');
-      link.setAttribute('aria-selected', String(index === current));
-      if (index === current) link.setAttribute('aria-current', 'page');
-      else link.removeAttribute('aria-current');
-    });
   }
 
   function renderBuild(build) {
@@ -439,20 +418,6 @@
   }
 
   async function start() {
-    window.addEventListener('hashchange', markSection);
-    // The page has a base address, so a link "#info-storage" would leave the page. A click changes the fragment of the
-    // address of the page, and the links carry this address.
-    document.querySelectorAll('.infoNav__tab').forEach(link => {
-      const hash = `#info-${link.dataset.section}`;
-      link.href = `${location.pathname}${location.search}${hash}`;
-      link.addEventListener('click', event => {
-        if (event.ctrlKey || event.metaKey || event.shiftKey || event.button) return;
-        event.preventDefault();
-        history.replaceState(null, '', `${location.pathname}${location.search}${hash}`);
-        markSection();
-        window.scrollTo(0, 0);
-      });
-    });
     const route = BB.runtime.storageRoute();
     let payload;
     try {
