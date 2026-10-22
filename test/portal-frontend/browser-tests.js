@@ -5051,7 +5051,8 @@ test('selector: each bucket and each host of the menu is one line at every width
       const where = `${width}${coarse ? ' coarse' : ''}: ${JSON.stringify(menu)}`;
       assert.ok(Math.abs(menu.left) <= 1 && Math.abs(menu.right) <= 1, where);
       assert.ok(menu.scroll <= 0, where);
-      assert.equal(menu.rows.length, 12, where);
+      // Nine buckets and three hosts of S3, then the volume "files" and its host "volume".
+      assert.equal(menu.rows.length, 14, where);
       for (const row of menu.rows) {
         assert.ok(row.height <= (coarse ? 48 : 40) && row.spread <= 2 && row.fit && row.inside && row.order, `${JSON.stringify(row)} at ${width}`);
         if (row.id === 'seaweedfs-archive') assert.deepEqual(row.prefix, { text: '/tenant-a/with/a/long/root/prefix/', after: true }, `${width}`);
@@ -5651,10 +5652,37 @@ test('volumes: the usage is the size of the file system, in the selector, its to
   await page.waitForSelector('#usageBanner:not([hidden])');
   assert.match(await page.textContent('#usageBanner'), /^This volume is 95 % full: [\d.]+ (KB|MB|GB|TB) used of [\d.]+ (KB|MB|GB|TB|PB)\. New uploads can fail\.$/);
   assert.match(await page.getAttribute('#uploadButton', 'title'), /^This volume is 95 % full/);
-  // The selector groups the volume under the host word "volume".
-  await page.click('.storageSwitcher__trigger');
-  await page.waitForSelector('.storageHost__row[data-host="volume"]');
-  assert.match(await page.textContent('.storageHost__row[data-host="volume"]'), /volume\s*Folders of the server · 1 volume/);
+  // The short text of the selector is the percent; a FUSE or network file system counts with a delay: "~".
+  assert.equal((await page.textContent('#storageSwitcherFacts .bucketUsage__short')).trim(), '95 %');
+  await page.unroute(/\/api\/usage\?instance=files/);
+  await page.route(/\/api\/usage\?instance=files/, route => route.fulfill({ json: { ...usage, approximate: true, approximateReason: 'The volume is on a FUSE or network file system: it can count the used bytes with a delay.' } }));
+  await page.reload({ waitUntil: 'networkidle' });
+  await until(page, () => /^~\d+ %$|^<1 %$/.test(document.querySelector('#storageSwitcherFacts .bucketUsage__short')?.textContent.trim() || ''));
+  assert.match(await page.getAttribute('#storageSwitcherFacts [data-fact="usage"]', 'title'), /~ Approximate: The volume is on a FUSE or network file system/);
+  // The selector groups the volume under the host word "volume". The trigger and each row of the menu are one line,
+  // on a wide window and on a phone.
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 860 });
+    await page.click('.storageSwitcher__trigger');
+    await page.waitForSelector('.storageHost__row[data-host="volume"]');
+    if (await page.getAttribute('.storageHost__row[data-host="volume"]', 'aria-expanded') !== 'true') await page.click('.storageHost__row[data-host="volume"]');
+    const layout = await page.evaluate(() => {
+      const rect = node => node.getBoundingClientRect();
+      const host = document.querySelector('.storageHost__row[data-host="volume"]');
+      const entry = document.querySelector('.storageBucket[data-instance="files"]');
+      const cut = node => node.scrollWidth > node.clientWidth + 1;
+      return {
+        trigger: Math.round(rect(document.querySelector('.storageSwitcher__trigger')).height),
+        host: Math.round(rect(host).height), entry: Math.round(rect(entry).height),
+        cut: [...host.querySelectorAll('strong, small')].some(cut), text: host.textContent.replace(/\s+/g, ' ').trim()
+      };
+    });
+    assert.equal(layout.trigger, 28, `${width}: ${JSON.stringify(layout)}`);
+    assert.ok(layout.host <= 40 && layout.entry <= 40 && !layout.cut, `${width}: ${JSON.stringify(layout)}`);
+    assert.equal(layout.text, 'volumeFS · 1 volume');
+    await page.keyboard.press('Escape');
+  }
+  assert.match(await page.getAttribute('.storageHost__row[data-host="volume"]', 'title'), /folders of the server/);
   assert.match(await page.getAttribute('.storageBucket[data-instance="files"]', 'title'), /volume: files\nprovider: a folder of the server \(FS\)/);
   assert.deepEqual(page.errors, []);
   await page.context().close();

@@ -550,6 +550,8 @@ BB.cfg = config;
               h('span', { class: 'storageBucket__perms' }, permissionDots(entry), h('span', { class: 'storageBucket__versioning' }))))));
           const row = h('button', {
             type: 'button', class: 'storageHost__row', 'aria-expanded': expanded ? 'true' : 'false', 'data-host': host.id,
+            // The row of a host is one line: the volumes say what they are in the tooltip.
+            title: isVolume(host) ? 'The folders of the server that the browser shows as buckets (provider FS)' : null,
             onclick: () => {
               const open = row.getAttribute('aria-expanded') !== 'true';
               state.expandedHosts = { ...state.expandedHosts, [host.id]: open };
@@ -558,9 +560,7 @@ BB.cfg = config;
             }
           }, ic('chevron-right', 'storageHost__chevron'), ic(storageIcon(host)),
           h('span', { class: 'storageHost__copy' }, h('strong', {}, host.id),
-            h('small', {}, isVolume(host)
-              ? `Folders of the server · ${plural(host.instances.length, 'volume')}`
-              : `${host.provider.toUpperCase()} · ${plural(host.instances.length, 'bucket')}`)));
+            h('small', {}, `${host.provider.toUpperCase()} · ${plural(host.instances.length, isVolume(host) ? 'volume' : 'bucket')}`)));
           return h('section', { class: 'storageHost', 'data-host': host.id }, row, list);
         }));
         root.replaceChildren(trigger, permissionsGroup(instance, true), switcherFacts(true), menu);

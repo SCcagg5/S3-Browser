@@ -31,9 +31,10 @@ change. Refer to the section "Volume block" of [docs/CONFIGURATION.md](docs/CONF
 - Uploads: a resumable upload writes a temporary file and resumes at its size. The window "Incomplete uploads" lists
   and removes the temporary files of the stopped uploads.
 - Usage: the size of the file system (`statfs`), in the selector and in the warning of a full volume.
-- Interface `portal`: the item "New folder" of the Actions menu for a volume, the words "volume" and "folder of the
-  server", a folder icon, the unreadable entries, and no control for tags, versions, lifecycle rules, Object Lock,
-  encryption and the edit of the metadata.
+- Interface `portal`: the item "New folder" of the Actions menu for a volume, the word "volume", a folder icon, the
+  unreadable entries, and no control for tags, versions, lifecycle rules, Object Lock, encryption and the edit of the
+  metadata. The selector of a volume follows the one-row header of 2.1.0: the trigger is one line of 28 px, the host
+  row is one line (`volume`, `FS · 1 volume`), and the usage is a short percent with `~` for an approximate number.
 - CI: only the files `src/volume_*.go` can write to the local file system.
 - Tests: the Go tests of the volumes, a volume in the portal test stack, and the real test on a FUSE mount of
   SeaweedFS (`test/volume-fuse/run.sh`). Refer to [test/README.md](test/README.md).
