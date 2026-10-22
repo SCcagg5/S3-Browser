@@ -3728,7 +3728,7 @@ body > .appHeader {
 
 .lifecycle__columns {
   display: grid;
-  grid-template-columns: minmax(280px, 400px) minmax(0, 1fr);
+  grid-template-columns: minmax(420px, 600px) minmax(0, 1fr);
   align-items: start;
   gap: 12px 20px;
 }
