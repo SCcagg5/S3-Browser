@@ -62,7 +62,7 @@ This document uses ASD-STE100 Simplified Technical English.
   `?info&lifecycle-abort=<folder>` for a new rule that aborts the incomplete uploads.
 - The information page has the visual language of the System page of ClickHouse Dash: parts with a heading, cards
   with a key-value list, gauges for the quota and the storage (the percent over a track), and status chips in the
-  colours of the state icons. The page has three columns on a wide window: Identity, then Permissions with the functions, then the storage. It is one column on a narrow window. The page
+  colours of the state icons. The page has three columns on a wide window: Identity, then Permissions with the functions, then the storage. It is one column on a narrow window. The storage column is compact: the three gauges are in one box, each on three thin lines. The page
   has no head and no tiles: the selector names the bucket. The state icons come from `assets/js/states.js`, one
   source for the selector and the page.
 - A click on the usage in the selector (the amount, the percent or the bar) opens the information page, as a click on the
