@@ -186,7 +186,26 @@
     const warnings = h('ul', { class: 'lifecycle__warnings', role: 'alert', 'data-lifecycle-warnings': '' });
     const formNote = h('p', { class: 'lifecycleForm__note', role: 'status', 'data-lifecycle-form-message': '' });
     const say = (text, tone = '') => { message.textContent = text; message.dataset.tone = tone; };
-    const sayForm = (text, tone = '') => { formNote.textContent = text; formNote.dataset.tone = tone; };
+    const sayForm = (text, tone = '') => { formNote.textContent = text; formNote.dataset.tone = tone; syncFormButtons(); };
+
+    // The buttons Add and Update stay grey until the rule of the form has its minimum: an ID and one valid action.
+    function formReady() {
+      return Boolean(form) && !busy && !formError();
+    }
+
+    function syncFormButtons() {
+      const add = formBox?.querySelector('[data-lifecycle-add]');
+      const reason = form ? formError() : '';
+      if (add) {
+        add.disabled = !formReady() || entries.length >= (editor?.maxRules || 1000);
+        add.title = add.disabled ? reason : '';
+      }
+      const update = formBox?.querySelector('[data-lifecycle-update]');
+      if (update) {
+        update.disabled = !formReady();
+        update.title = update.disabled ? reason : '';
+      }
+    }
 
     // The person confirms the actions that delete data: true for "Save the rules", false for "Cancel".
     function confirmInline(sentences) {
@@ -354,9 +373,9 @@
         actionRows.push(h('label', { class: 'lifecycleForm__action', title: 'Remove the delete markers that have no version left' }, marker, h('span', {}, 'Remove expired delete markers')));
       }
       const buttons = editing
-        ? [h('button', { type: 'submit', class: 'bb-btn bb-btn-primary', 'data-lifecycle-update': '' }, icon('check'), h('span', {}, 'Update')),
+        ? [h('button', { type: 'submit', class: 'bb-btn bb-btn-primary', 'data-lifecycle-update': '', disabled: !formReady() }, icon('check'), h('span', {}, 'Update')),
           h('button', { type: 'button', class: 'bb-btn', 'data-lifecycle-cancel': '', onclick: () => { newForm(); sayForm(''); render(); } }, h('span', {}, 'Cancel'))]
-        : [h('button', { type: 'submit', class: 'bb-btn', 'data-lifecycle-add': '', disabled: busy || entries.length >= (editor?.maxRules || 1000) }, icon('plus'), h('span', {}, 'Add'))];
+        : [h('button', { type: 'submit', class: 'bb-btn', 'data-lifecycle-add': '', disabled: !formReady() || entries.length >= (editor?.maxRules || 1000) }, icon('plus'), h('span', {}, 'Add'))];
       const node = h('form', { class: 'lifecycleForm', 'data-lifecycle-form': editing ? 'edit' : 'new', novalidate: true },
         h('h3', { class: 'lifecycleForm__title' }, editing ? `Edit ${form.target.id || 'rule'}` : 'New rule'),
         h('div', { class: 'lifecycleForm__fields' }, fields),
@@ -427,8 +446,7 @@
       const changes = canEdit && dirty();
       saveButton.disabled = busy || !changes;
       revertButton.disabled = busy || !changes;
-      const add = formBox.querySelector('[data-lifecycle-add]');
-      if (add) add.disabled = busy || entries.length >= (editor?.maxRules || 1000);
+      syncFormButtons();
     }
 
     // A change of the list: the message says that the change is not saved yet.
