@@ -450,11 +450,10 @@
     selector.setState({ instances, currentId: instance.id, loading: false });
     // The usage of the other buckets: the mark of a full bucket shows also before the list opens.
     selector.loadAllUsage();
-    // The way back to the files of the bucket: in the header, after the brand. A narrow window shows only the chevron.
+    // The way to the files of the bucket: the link "Browse" in the header, after the brand.
     const back = byId('infoBack');
     back.href = BB.api.browserPageURL('', { instance: instance.id });
     back.setAttribute('aria-label', `Back to the files of ${instance.name || instance.id}`);
-    back.querySelector('.backLink__text').textContent = `Back to the files of ${instance.name || instance.id}`;
     back.hidden = false;
     document.title = `${instance.name || instance.id} - Information`;
     byId('infoTitle').textContent = `Information of the ${noun(instance)} ${instance.name || instance.id}`;

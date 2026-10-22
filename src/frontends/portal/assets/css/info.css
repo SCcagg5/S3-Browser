@@ -14,26 +14,22 @@ html:has(> body.infoPage),
   background: var(--panel);
 }
 
-/* The link back to the files of the bucket is in the header, after the brand, as the link back of the preview. */
+/* The link to the files of the bucket, "Browse", is in the header, after the brand. It has no chevron. */
 .infoBack[hidden] {
   display: none;
 }
 
-.infoBack .ic {
-  --icon-size: 16px;
-}
-
-.infoBack .backLink__text {
-  overflow: hidden;
-  text-overflow: ellipsis;
+.infoBack {
+  margin-left: 0;
+  padding: 0 10px;
 }
 
 .infoMain {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
   min-width: 0;
-  padding: 8px var(--header-gutter) calc(var(--header-gutter) * 2);
+  padding: 4px var(--header-gutter) var(--header-gutter);
   font-size: var(--fs-md);
 }
 
@@ -71,13 +67,13 @@ html:has(> body.infoPage),
 .infoSections {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 8px;
   min-width: 0;
 }
 
 .infoPart {
   display: grid;
-  gap: 4px;
+  gap: 2px;
   min-width: 0;
   scroll-margin-top: 12px;
 }
@@ -86,8 +82,8 @@ html:has(> body.infoPage),
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 12px;
-  min-height: 24px;
+  gap: 2px 12px;
+  min-height: 20px;
 }
 
 .infoPart__title {
@@ -105,7 +101,7 @@ html:has(> body.infoPage),
 
 .infoPart__body {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -114,13 +110,13 @@ html:has(> body.infoPage),
   display: grid;
   grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
   align-items: start;
-  gap: 8px 16px;
+  gap: 6px 12px;
 }
 
 .infoGrid__main,
 .infoGrid__side {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -130,7 +126,7 @@ html:has(> body.infoPage),
 
 .infoCard {
   display: grid;
-  gap: 8px;
+  gap: 4px;
   min-width: 0;
 }
 
@@ -185,7 +181,7 @@ html:has(> body.infoPage),
 .infoKv__key {
   min-width: 0;
   margin: 0;
-  padding: 3px 12px 3px 8px;
+  padding: 1px 12px 1px 8px;
   color: var(--muted);
 }
 
@@ -194,7 +190,7 @@ html:has(> body.infoPage),
   gap: 2px;
   min-width: 0;
   margin: 0;
-  padding: 3px 8px;
+  padding: 1px 8px;
   overflow-wrap: anywhere;
 }
 
@@ -264,9 +260,9 @@ html:has(> body.infoPage),
 .infoGauge {
   display: grid;
   align-content: start;
-  gap: 4px;
+  gap: 2px;
   min-width: 0;
-  padding: 8px 12px;
+  padding: 6px 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-inner);
   background: var(--panel);
@@ -365,7 +361,7 @@ html:has(> body.infoPage),
 .infoGauge__facts {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
-  gap: 4px 12px;
+  gap: 2px 12px;
   margin: 0;
   font-size: var(--fs-sm);
 }
