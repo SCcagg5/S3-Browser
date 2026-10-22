@@ -4993,6 +4993,7 @@ button.versionCount:focus-visible {
   flex: 0 1 auto;
   gap: 5px;
   margin-left: auto;
+  cursor: pointer;
 }
 
 .bucketUsage__text {

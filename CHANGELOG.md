@@ -53,6 +53,10 @@ This document uses ASD-STE100 Simplified Technical English.
   storage (the percent over a track), and status chips in the colours of the state icons. Two cards are side by side
   on a wide window; the page is one column on a phone. The head shows the seven state icons of the selector
   (`assets/js/states.js`, one source for the selector and the page).
+- The row of sections of the information page is a row of tabs, as on the System page of ClickHouse Dash: the page shows
+  one part at a time, and the fragment of the address (`#info-storage`) names it.
+- A click on the usage in the selector (the amount, the percent or the bar) opens the information page, as a click on the
+  state icons does, in the trigger and in each entry of the menu.
 - The list of the buckets is a non-modal dialog, not a listbox. The current bucket has `aria-current="true"`.
 - `GET /api/instances` gives `flavour` for an S3 instance: the provider that the probe at start recognised (`aws`,
   `minio`, `seaweedfs` or `garage`). The field is absent for an unknown provider.

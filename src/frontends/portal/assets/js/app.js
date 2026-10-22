@@ -2069,6 +2069,20 @@ BB.cfg = config;
       searchByPrefix();
     });
     ui.refreshButton.addEventListener('click', manualRefresh);
+    // The usage in the selector (the amount, the percent and the bar) leads to the information page, as the state icons
+    // do. The usage of the trigger is the current bucket. The usage of a menu entry is the bucket of its row.
+    ui.switcher.addEventListener('click', event => {
+      const usage = event.target.closest('.bucketUsage');
+      if (!usage) return;
+      const row = usage.closest('.storageBucket__row');
+      const instance = row ? state.instances.find(item => item.id === row.dataset.instance) : currentInstance();
+      if (!instance) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const url = infoPageURL(instance);
+      if (event.ctrlKey || event.metaKey) window.open(url, '_blank', 'noopener');
+      else window.location.assign(url);
+    }, true);
     bindMenu(ui.actionsButton, ui.actionsMenu);
     bindMenu(ui.uploadButton, ui.uploadMenu);
     ui.zipItem.addEventListener('click', downloadAll);

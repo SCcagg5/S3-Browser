@@ -149,6 +149,10 @@ html:has(> body.infoPage),
   min-width: 0;
 }
 
+.infoPart[hidden] {
+  display: none;
+}
+
 .infoPart {
   display: grid;
   gap: 10px;

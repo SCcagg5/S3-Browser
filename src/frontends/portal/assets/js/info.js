@@ -395,17 +395,22 @@
     markSection();
   }
 
-  // The link of the part on screen in the row of the section links.
+  // The sections are tabs, as the sections of the System page of the dashboard: one part is shown, the others are
+  // hidden. The fragment of the address names the part (#info-storage). Without a known fragment, Summary is shown.
   function markSection() {
     const links = Array.from(document.querySelectorAll('.infoNav__tab'));
-    const parts = links.map(link => byId(`info-${link.dataset.section}`));
-    const line = (document.querySelector('.infoNav')?.getBoundingClientRect().bottom || 0) + 24;
-    let current = 0;
-    parts.forEach((node, index) => { if (node && node.getBoundingClientRect().top <= line) current = index; });
-    if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2) current = parts.length - 1;
+    const keys = links.map(link => link.dataset.section);
+    const wanted = String(location.hash || '').replace(/^#info-/, '');
+    const current = Math.max(0, keys.indexOf(wanted));
+    keys.forEach((key, index) => {
+      const node = byId(`info-${key}`);
+      if (node) node.hidden = index !== current;
+    });
     links.forEach((link, index) => {
       link.classList.toggle('is-active', index === current);
-      if (index === current) link.setAttribute('aria-current', 'location');
+      link.setAttribute('role', 'tab');
+      link.setAttribute('aria-selected', String(index === current));
+      if (index === current) link.setAttribute('aria-current', 'page');
       else link.removeAttribute('aria-current');
     });
   }
@@ -434,8 +439,7 @@
   }
 
   async function start() {
-    window.addEventListener('scroll', markSection, { passive: true });
-    window.addEventListener('resize', markSection);
+    window.addEventListener('hashchange', markSection);
     const route = BB.runtime.storageRoute();
     let payload;
     try {
