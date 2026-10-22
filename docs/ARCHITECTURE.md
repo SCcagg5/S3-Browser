@@ -151,7 +151,7 @@ Only the bucket selector opens the page:
 - The seven state icons of the trigger are one link to the page of the current bucket. The link is above the trigger and in its grid cell, after the name, before the usage. The trigger keeps a place for it. The rest of the trigger opens the list of the buckets.
 - In the list of the buckets, the seven icons of each entry are one link to the page of that bucket. The link is next to the button of the entry, not in it: a button cannot hold a link.
 - Enter and Space open the link. Tab goes from the trigger to the link. In the list, the arrow Right goes from an entry to its link, and the arrow Left goes back.
-- The accessible name of the link is "Information and permissions of this bucket", with the name of the bucket in the list, then the state of each icon. The tooltip has one line for each icon: "Read: allowed", "Encryption: off" and so on.
+- The accessible name of the link is "Information and permissions of this bucket", with the name of the bucket in the list, then the state of each icon. The link has no tooltip: the accessible name and the information page give each state.
 
 The page has the header of the listing in one row: the brand at the left edge, the link "Back to <bucket>" after it, and the theme at the right edge. The page has the visual language of the System page of ClickHouse Dash:
 
@@ -609,7 +609,7 @@ capacity: the page shows nothing about it.
 - The server keeps the result of each instance for 60 seconds, and a failure for 10 seconds. One read at a time runs for an instance: the other requests wait for its result. The read does not stop when the request that started it stops.
 - `fresh=1` reads again a result that is older than 10 seconds. The page sends it after a change and after a click on the reload icon.
 - The token and the URLs of the admin API never go into an answer or into a log line. An error names the step and the HTTP status only. `print-config` and the effective configuration in the log show the URLs and hide the token.
-- A failure does not break the page. The usage of the bucket selector shows no number, and the tooltip gives the reason.
+- A failure does not break the page. The usage of the bucket selector shows no number, and the information page gives the reason.
 - At start, the server compares the source with the provider that the lifecycle probe found. A different known provider gives a warning in the log. The source of the file applies.
 
 ### Route
@@ -642,9 +642,9 @@ The seven state icons are always there, in this order. Each icon is grey (off, n
 
 A volume has its read, write and delete icons, and the four icons of S3 are grey with the title "...: not available for a mounted folder". Colour is not the only sign: each icon has a title and a hidden text with the word of its state, for example "Encryption: on (SSE-S3)", "Encryption: requested but not applied by this provider" or "Versioning: off".
 
-The usage follows the icons: the amount that the bucket holds (`3 MB`), then a thin bar and a short text. The short text is the more constraining part (`62 %`, of the quota or of the storage), or the used bytes (`12.3 GB`) for a bucket without a limit. A bucket without a limit has no amount: the short text is the amount. For a volume, the amount is what its folder holds: `computing…` before the first bytes, and `≥ 3 MB` while the count runs or after it stopped at its limit. The whole text (`12.3 GB of 20 GB` or `Storage: 910 GB of 1000 GB`) is in the tooltip and for a screen reader. A click on the usage (the amount, the short text or the bar) opens the information page of the bucket, as a click on the state icons does. The state icons and the usage have the same tooltip: the states, then the usage. In a menu entry, this click does not select the bucket. Its source is `GET /api/usage`.
+The usage follows the icons: the amount that the bucket holds (`3 MB`), then a thin bar and a short text. The short text is the more constraining part (`62 %`, of the quota or of the storage), or the used bytes (`12.3 GB`) for a bucket without a limit. A bucket without a limit has no amount: the short text is the amount. For a volume, the amount is what its folder holds: `computing…` before the first bytes, and `≥ 3 MB` while the count runs or after it stopped at its limit. The whole text (`12.3 GB of 20 GB` or `Storage: 910 GB of 1000 GB`) is for a screen reader and on the information page. A click on the usage (the amount, the short text or the bar) opens the information page of the bucket, as a click on the state icons does. The state icons and the usage are one link, with no tooltip. In a menu entry, this click does not select the bucket. Its source is `GET /api/usage`.
 
-An approximate number starts with `~`. The bar has the colour of a warning from 80 % and the colour of an error from 95 %. The tooltip of the usage names the bucket, the used bytes, the limit and its source, and the objects. It also gives the source, the time of the count and the reason of an approximate number. The numbers are for the whole bucket, also for an instance with a root prefix.
+An approximate number starts with `~`. The bar has the colour of a warning from 80 % and the colour of an error from 95 %. The information page names the bucket, the used bytes, the limit and its source, and the objects. It also gives the time of the count and the reason of an approximate number. The numbers are for the whole bucket, also for an instance with a root prefix.
 
 The trigger is a button, and a button cannot hold a link. Thus the seven icons and the usage are elements of their own, over the trigger and in its grid. The seven icons are one link to the information page of the bucket. The window of the lifecycle rules opens from the information page ("Open the lifecycle rules"). The keyboard goes from the trigger to the link.
 

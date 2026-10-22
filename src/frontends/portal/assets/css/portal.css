@@ -657,16 +657,16 @@ html[data-theme-mode="light"] .themeSelect__current > .themeIcon--light {
 /* The bucket selector of the default interface: the buckets of each host, with their permissions. ------------------ */
 
 /* The selector sits at the right of the header, in one line at every width: the icon, the name, the seven state
-   icons, the facts and the chevron. The state icons and the facts are elements of their own over the trigger, because
+   icons, the facts and the chevron. The state icons and the usage are one link of their own over the trigger, because
    a button cannot hold a link. The trigger is a subgrid of the selector, so the elements
    over it share its columns. The selector takes 460 px of the free space of the header, and less when the header has
    less. It is a container: a narrow selector shows fewer facts (refer to "Facts of a bucket in the selector"). The
-   tooltip of the trigger gives each fact. The menu has the same left and right edges as the selector. */
+   link has no tooltip: a click opens the information page. The menu has the same left and right edges as the selector. */
 .storageSwitcher {
   position: relative;
   display: grid;
   flex: 0 1 460px;
-  grid-template-columns: [icon] max-content [name] minmax(32px, 1fr) [states] max-content [facts] auto [chevron] max-content;
+  grid-template-columns: [icon] max-content [name] minmax(32px, 1fr) [info] max-content [chevron] max-content;
   grid-template-rows: 28px;
   align-items: center;
   column-gap: 10px;
@@ -726,16 +726,37 @@ html[data-theme-mode="light"] .themeSelect__current > .themeIcon--light {
   line-height: 1;
 }
 
-/* The group of the trigger: over the trigger, in its column. */
-.storageSwitcher__states {
-  position: relative;
-  z-index: calc(var(--z-menu) + 2);
-  grid-area: 1 / states;
+/* The state icons and the usage of the trigger are one link, over the trigger, in its column: one hover, no tooltip. */
+.storageSwitcher__info,
+.storageBucket__info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 22px;
+  padding: 0 3px;
+  border-radius: var(--radius-inner);
+  color: var(--muted);
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color var(--dur-quick) var(--ease), box-shadow var(--dur-quick) var(--ease);
 }
 
-.storageSwitcher__states:hover,
-.storageSwitcher__states:focus-visible {
+.storageSwitcher__info {
+  position: relative;
+  z-index: calc(var(--z-menu) + 2);
+  grid-area: 1 / info;
+  min-width: 0;
+}
+
+.storageSwitcher__info:hover,
+.storageSwitcher__info:focus-visible {
   background: var(--row-hover);
+}
+
+.storageSwitcher__info .stateGroup,
+.storageBucket__info .stateGroup {
+  padding: 0;
+  cursor: inherit;
 }
 
 .storageSwitcher__trigger {
@@ -754,15 +775,13 @@ html[data-theme-mode="light"] .themeSelect__current > .themeIcon--light {
   transition: border-color var(--dur-quick) var(--ease), background-color var(--dur-quick) var(--ease);
 }
 
-button.storageSwitcher__trigger:hover,
-.storageSwitcher:has(> .storageSwitcher__facts:hover) > button.storageSwitcher__trigger {
+button.storageSwitcher__trigger:hover {
   border-color: var(--button-border-hover);
   background: var(--button-bg-hover);
 }
 
 /* A full bucket: the border and the alert icon of the trigger in the colour of an error. */
-.storageSwitcher.is-full > .storageSwitcher__trigger,
-.storageSwitcher.is-full:has(> .storageSwitcher__facts:hover) > button.storageSwitcher__trigger {
+.storageSwitcher.is-full > .storageSwitcher__trigger {
   border-color: var(--danger);
   background: color-mix(in srgb, var(--danger) 7%, var(--button-bg));
 }
@@ -801,17 +820,12 @@ button.storageSwitcher__trigger:hover,
 }
 
 .storageSwitcher__facts {
-  position: relative;
-  z-index: calc(var(--z-menu) + 2);
-  grid-area: 1 / facts;
   min-width: 0;
-  cursor: pointer;
 }
 
 /* A trigger without a chevron: the facts also take the gap before the empty column of the chevron. */
-.storageSwitcher__trigger.is-static ~ .storageSwitcher__facts {
+.storageSwitcher__trigger.is-static ~ .storageSwitcher__info {
   margin-right: -14px;
-  cursor: default;
 }
 
 .storageSwitcher__titleRow {
@@ -1017,20 +1031,24 @@ button.storageSwitcher__trigger:hover,
   grid-column: 1;
 }
 
-.storageBucket__states {
+.storageBucket__info {
   position: relative;
-  grid-area: 1 / 2;
+  grid-area: 1 / 2 / 2 / 4;
+  grid-template-columns: subgrid;
+  display: grid;
+  gap: 10px;
   height: 28px;
+  padding-right: 10px;
 }
 
-.storageBucket__states:hover,
-.storageBucket__states:focus-visible {
+.storageBucket__info:hover,
+.storageBucket__info:focus-visible {
   box-shadow: inset 0 0 0 1px var(--border-strong);
   background: var(--panel);
 }
 
-.storageBucket .bucketFacts {
-  grid-column: 3;
+.storageBucket__info .bucketFacts {
+  grid-column: 2;
   justify-content: flex-end;
   min-width: 0;
 }
@@ -4960,7 +4978,7 @@ button.versionCount:focus-visible {
   white-space: nowrap;
 }
 
-.storageBucket .bucketFacts:empty {
+.storageBucket__info .bucketFacts:empty {
   display: none;
 }
 
@@ -5102,7 +5120,7 @@ button.versionCount:focus-visible {
 }
 
 /* The usage in the trigger and in the menu: the amount that the bucket holds, the bar and a short text (the percent of
-   the limit, or the used bytes). The whole text is for a screen reader and in the tooltip. */
+   the limit, or the used bytes). The whole text is for a screen reader. */
 .storageSwitcher .bucketUsage__text {
   position: absolute;
   width: 1px;
@@ -5119,8 +5137,8 @@ button.versionCount:focus-visible {
    trigger a smaller padding. For a volume, the four icons of S3 (always grey) go last (210 px). The budget of the
    trigger without the name: 342 px with every part, and 182 px with the seven icons, the count and the chevron only.
    Thus the selector of a window of 320 px (220 px) has a name of 38 px. The name takes the rest, 32 px at least,
-   with an ellipsis. The tooltips of the trigger
-   and of each entry give each part. Nothing wraps. */
+   with an ellipsis. The accessible name of the link
+   gives each part. Nothing wraps. */
 @container switcher (max-width: 440px) {
   .storageSwitcher .bucketUsage__amount {
     display: none;

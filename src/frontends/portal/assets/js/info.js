@@ -395,8 +395,8 @@
         const list = h('div', { class: 'storageHost__buckets', role: 'group', 'aria-label': `${host.id} buckets`, hidden: !expanded },
           host.instances.map(entry => {
             const states = statesOf(entry);
-            const link = h('a', { class: 'stateGroup storageBucket__states', href: infoURL(entry), 'aria-label': states.map(item => item.text).join(', ') });
-            link.append(...BB.states.nodes(states));
+            const link = h('a', { class: 'storageBucket__info', href: infoURL(entry), 'data-volume': isVolume(entry) ? 'true' : null, 'aria-label': states.map(item => item.text).join(', ') },
+              h('span', { class: 'stateGroup' }, BB.states.nodes(states, { tip: false })), h('span', { class: 'bucketFacts' }));
             return h('div', { class: 'storageBucket__row', 'data-instance': entry.id },
               h('a', { class: 'storageBucket', href: infoURL(entry), 'aria-current': entry.id === current.id ? 'true' : null,
                 title: [entry.name || entry.id, `id: ${entry.id}`, `host: ${entry.host}`].join('\n') },

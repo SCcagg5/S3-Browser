@@ -431,30 +431,17 @@ BB.cfg = config;
       h('span', { class: 'storageSwitcher__titleRow' }, h('strong', {}, storageName(instance)), h('span', { class: 'bucketMarks' })));
   }
 
-  // A click on an element over the trigger, outside its buttons, acts as a click on the trigger.
-  function passClick(multiple) {
-    return event => {
-      if (event.target.closest('button, a')) return;
-      event.stopPropagation();
-      if (multiple) toggleSwitcher();
-    };
-  }
-
-  // The facts of the current bucket, in the line of the trigger.
-  function switcherFacts(multiple) {
-    return h('div', { id: 'storageSwitcherFacts', class: 'storageSwitcher__facts bucketFacts', onclick: passClick(multiple) });
-  }
-
   // The address of the information page of a bucket: /-/<host>/<bucket>/?info.
   const infoPageURL = instance => `${BB.api.browserPageURL('', { instance: instance.id })}?info`;
 
-  // The seven state icons of a bucket are one link to its information page. It is a link, so Enter opens it; Space
-  // opens it too, as on a button. In the trigger and in the menu, the link is next to the button, not in it. The
-  // accessible name and the tooltip give the state of each icon.
+  // The seven state icons and the usage of a bucket are ONE link to its information page: one element, one hover, one
+  // click. It has no tooltip: the page gives each line. In the trigger and in the menu, the link is next to the button,
+  // not in it. It is a link, so Enter opens it; Space opens it too, as on a button. The accessible name gives the state
+  // of each icon and the usage.
   function infoLink(instance, { menu = false } = {}) {
     const link = h('a', {
-      id: menu ? null : 'storageSwitcherStates',
-      class: ['stateGroup', menu ? 'storageBucket__states' : 'storageSwitcher__states'],
+      id: menu ? null : 'storageSwitcherInfo',
+      class: menu ? 'storageBucket__info' : 'storageSwitcher__info',
       href: infoPageURL(instance),
       'data-info': instance.id,
       'data-volume': isVolume(instance) ? 'true' : null,
@@ -464,27 +451,19 @@ BB.cfg = config;
         event.preventDefault();
         event.currentTarget.click();
       }
-    });
-    fillStates(link, instance, { menu });
+    }, h('span', { class: ['stateGroup', menu ? 'storageBucket__states' : 'storageSwitcher__states'] }),
+    h('span', { class: menu ? 'bucketFacts' : 'storageSwitcher__facts bucketFacts' }));
+    fillInfo(link, instance, { menu });
     return link;
   }
 
-  function fillStates(link, instance, { menu = false } = {}) {
+  function fillInfo(link, instance, { menu = false } = {}) {
     if (!link) return;
     const states = bucketStates(instance);
-    fillNodes(link, stateIconNodes(states));
-    const label = `Information and permissions of this ${storageNoun(instance)}${menu ? `: ${storageName(instance)}` : ''}`;
-    link.setAttribute('aria-label', `${label}. ${states.map(item => item.text).join(', ')}`);
-    link.title = hoverText(instance);
-  }
-
-  // One tooltip for the state icons and for the usage of a bucket: the states, then the usage. The two elements show the
-  // same text, so the user reads the same box on each of them.
-  function hoverText(instance) {
+    fillNodes(link.querySelector('.stateGroup'), BB.states.nodes(states, { tip: false }));
     const usage = instance.usageSupported === true && can('list', instance) ? BB.usage.cached(instance.id) : null;
-    const lines = ['Information and permissions', ...bucketStates(instance).map(item => item.text)];
-    if (usage && BB.usage.shown(usage)) lines.push('', BB.usage.title(usage));
-    return lines.join('\n');
+    const label = `Information and permissions of this ${storageNoun(instance)}${menu ? `: ${storageName(instance)}` : ''}`;
+    link.setAttribute('aria-label', [`${label}. ${states.map(item => item.text).join(', ')}`, usage && BB.usage.shown(usage) ? BB.usage.text(usage) : ''].filter(Boolean).join('. '));
   }
 
   function renderSwitcher() {
@@ -508,8 +487,8 @@ BB.cfg = config;
           h('span', { class: 'storageSwitcher__copy' }, h('strong', {}, 'No bucket'),
             h('small', {}, state.loadError ? 'The list of buckets cannot be loaded' : 'No bucket is visible to you'))));
       } else if (!multiple) {
-        root.replaceChildren(h('div', { class: 'storageSwitcher__trigger is-static', title: storageDetails(instance), 'aria-describedby': 'storageSwitcherStates storageSwitcherFacts' },
-          ic(storageIcon(instance), 'storageSwitcher__icon'), switcherCopy(instance)), infoLink(instance), switcherFacts(false));
+        root.replaceChildren(h('div', { class: 'storageSwitcher__trigger is-static', title: storageDetails(instance), 'aria-describedby': 'storageSwitcherInfo' },
+          ic(storageIcon(instance), 'storageSwitcher__icon'), switcherCopy(instance)), infoLink(instance));
       } else {
         const trigger = h('button', {
           type: 'button',
@@ -517,7 +496,7 @@ BB.cfg = config;
           'aria-haspopup': 'dialog',
           'aria-expanded': 'false',
           'aria-controls': 'storageSwitcherMenu',
-          'aria-describedby': 'storageSwitcherStates storageSwitcherFacts',
+          'aria-describedby': 'storageSwitcherInfo',
           title: storageDetails(instance),
           onclick: event => { event.stopPropagation(); toggleSwitcher(); },
           onkeydown: event => {
@@ -547,8 +526,7 @@ BB.cfg = config;
               },
               h('span', { class: 'storageBucket__copy' },
                 h('span', { class: 'storageBucket__titleRow' }, h('strong', {}, storageName(entry)),
-                  entry.rootPrefix ? h('small', { class: 'storageBucket__prefix' }, `/${entry.rootPrefix}`) : null, h('span', { class: 'bucketMarks' })),
-                h('span', { class: 'bucketFacts' }))),
+                  entry.rootPrefix ? h('small', { class: 'storageBucket__prefix' }, `/${entry.rootPrefix}`) : null, h('span', { class: 'bucketMarks' })))),
               infoLink(entry, { menu: true }))));
           const row = h('button', {
             type: 'button', class: 'storageHost__row', 'aria-expanded': expanded ? 'true' : 'false', 'data-host': host.id,
@@ -565,7 +543,7 @@ BB.cfg = config;
             h('small', {}, `${host.provider.toUpperCase()} · ${plural(host.instances.length, isVolume(host) ? 'volume' : 'bucket')}`)));
           return h('section', { class: 'storageHost', 'data-host': host.id }, row, list);
         }));
-        root.replaceChildren(trigger, infoLink(instance), switcherFacts(true), menu);
+        root.replaceChildren(trigger, infoLink(instance), menu);
         ui.switcherTrigger = trigger;
         ui.switcherMenu = menu;
       }
@@ -613,7 +591,7 @@ BB.cfg = config;
   // and the arrow Left goes back. Tab goes through the controls of the menu, and closes it when the focus leaves it.
   function onSwitcherKey(event) {
     const active = document.activeElement;
-    const link = active?.closest?.('.storageBucket__states');
+    const link = active?.closest?.('.storageBucket__info');
     const items = switcherItems();
     const index = items.indexOf(link ? link.previousElementSibling : active);
     if (event.key === 'ArrowDown') { event.preventDefault(); items[Math.min(items.length - 1, index + 1)]?.focus(); }
@@ -942,8 +920,8 @@ BB.cfg = config;
 
   // A fact: an icon, the tooltip, and a label for a screen reader.
   function bucketFact(name, iconName, label, detail, { tone = '' } = {}) {
-    return h('span', { class: ['bucketFact', tone && `is-${tone}`], 'data-fact': name, title: detail },
-      ic(iconName), h('span', { class: 'visually-hidden' }, `${label}. `));
+    return h('span', { class: ['bucketFact', tone && `is-${tone}`], 'data-fact': name },
+      ic(iconName), h('span', { class: 'visually-hidden' }, `${label}. ${detail ? `${detail}. ` : ''}`));
   }
 
   // The versioning and the lifecycle rules of a bucket: the read of the page for a bucket that it opened, else the probe
@@ -964,12 +942,12 @@ BB.cfg = config;
   // The selector shows the amount that the bucket holds ("3 MB", "≥ 3 MB" or "computing…" for a volume), then the short
   // text (the percent, or the used bytes when there is no limit). The whole text is for a screen reader only. The usage
   // does not act: the information page of the bucket gives each line of it.
-  function usageFact(usage, hover = '') {
+  function usageFact(usage) {
     const limited = BB.usage.hasLimit(usage);
     const amount = BB.usage.amountText(usage);
     const node = h('span', {
       class: ['bucketFact', 'bucketUsage', usage.level && `is-${usage.level}`, BB.usage.full(usage) && 'is-full'], 'data-fact': 'usage',
-      'data-level': usage.level || 'none', 'data-constraint': BB.usage.constraint(usage) || 'none', 'data-used-bytes': String(usage.usedBytes), title: hover || BB.usage.title(usage)
+      'data-level': usage.level || 'none', 'data-constraint': BB.usage.constraint(usage) || 'none', 'data-used-bytes': String(usage.usedBytes)
     }, h('span', { class: 'bucketUsage__text' }, BB.usage.text(usage)),
     amount ? h('span', { class: 'bucketUsage__amount', 'aria-hidden': 'true' }, amount) : null,
     h('span', { class: 'bucketUsage__short', 'aria-hidden': 'true' }, BB.usage.shortText(usage)),
@@ -987,9 +965,9 @@ BB.cfg = config;
     if (instance.usageSupported === true && can('list', instance)) {
       const usage = BB.usage.cached(instance.id);
       if (BB.usage.shown(usage)) {
-        items.push(usageFact(usage, hoverText(instance)));
+        items.push(usageFact(usage));
       } else if (!usage && BB.usage.loading(instance.id)) {
-        items.push(h('span', { class: 'bucketFact bucketUsage is-loading', 'data-fact': 'usage', 'data-level': 'loading', title: `Reading the usage of the ${storageNoun(instance)}` }, '…'));
+        items.push(h('span', { class: 'bucketFact bucketUsage is-loading', 'data-fact': 'usage', 'data-level': 'loading' }, '…', h('span', { class: 'visually-hidden' }, `Reading the usage of the ${storageNoun(instance)}`)));
       } else if (usage?.supported === true && trigger) {
         // A failed read shows no number: the tooltip says why. A bucket of the menu shows nothing.
         const node = bucketFact('usage', 'database', 'Usage unavailable', BB.usage.title(usage), { tone: 'muted' });
@@ -1028,7 +1006,7 @@ BB.cfg = config;
     const current = Boolean(instance) && canRead();
     const facts = ui.switcher.querySelector('.storageSwitcher__facts');
     if (facts) fillNodes(facts, current ? bucketFacts(instance, { trigger: true }) : []);
-    if (instance) fillStates(ui.switcher.querySelector('.storageSwitcher__states'), instance);
+    if (instance) fillInfo(ui.switcher.querySelector('.storageSwitcher__info'), instance);
     const full = current && fullUsage(instance);
     const others = state.instances.filter(entry => entry !== instance && fullUsage(entry));
     const otherText = others.length === 1 ? `Another bucket is almost full: ${storageName(others[0])}`
@@ -1045,8 +1023,8 @@ BB.cfg = config;
       const entry = state.instances.find(item => item.id === node.dataset.instance);
       if (!entry) continue;
       const readable = can('list', entry);
-      fillNodes(node.querySelector('.bucketFacts'), readable ? bucketFacts(entry) : []);
-      fillStates(node.parentElement.querySelector('.storageBucket__states'), entry, { menu: true });
+      fillNodes(node.parentElement.querySelector('.bucketFacts'), readable ? bucketFacts(entry) : []);
+      fillInfo(node.parentElement.querySelector('.storageBucket__info'), entry, { menu: true });
       fillNodes(node.querySelector('.bucketMarks'), fullUsage(entry) ? [fullMark(entry)] : []);
       node.classList.toggle('is-full', fullUsage(entry));
       node.title = storageDetails(entry);
@@ -2078,20 +2056,6 @@ BB.cfg = config;
       searchByPrefix();
     });
     ui.refreshButton.addEventListener('click', manualRefresh);
-    // The usage in the selector (the amount, the percent and the bar) leads to the information page, as the state icons
-    // do. The usage of the trigger is the current bucket. The usage of a menu entry is the bucket of its row.
-    ui.switcher.addEventListener('click', event => {
-      const usage = event.target.closest('.bucketUsage');
-      if (!usage) return;
-      const row = usage.closest('.storageBucket__row');
-      const instance = row ? state.instances.find(item => item.id === row.dataset.instance) : currentInstance();
-      if (!instance) return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      const url = infoPageURL(instance);
-      if (event.ctrlKey || event.metaKey) window.open(url, '_blank', 'noopener');
-      else window.location.assign(url);
-    }, true);
     bindMenu(ui.actionsButton, ui.actionsMenu);
     bindMenu(ui.uploadButton, ui.uploadMenu);
     ui.zipItem.addEventListener('click', downloadAll);

@@ -80,9 +80,10 @@
   }
 
   // The count of the lifecycle rules follows the hourglass when a rule is on.
-  function nodes(items) {
+  // tip: false gives no tooltip on the icons (the selector shows none: the click opens the information page).
+  function nodes(items, { tip = true } = {}) {
     return items.map(item => h('span', {
-      class: ['stateIcon', `is-${item.tone}`], 'data-state-icon': item.key, 'data-tone': item.tone, 'data-s3': item.s3 ? 'true' : null, title: item.text
+      class: ['stateIcon', `is-${item.tone}`], 'data-state-icon': item.key, 'data-tone': item.tone, 'data-s3': item.s3 ? 'true' : null, title: tip ? item.text : null
     }, ic(item.icon), item.count ? h('span', { class: 'stateIcon__count', 'aria-hidden': 'true' }, item.count.toLocaleString('en-US')) : null,
     h('span', { class: 'visually-hidden' }, `${item.text}. `)));
   }
