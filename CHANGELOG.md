@@ -82,7 +82,7 @@ This document uses ASD-STE100 Simplified Technical English.
   under the header and ends at the right edge of the window. This applies to the listing, the preview page, the
   information page and the 404 page.
 - The link "Browse" is in the header of the information page, after the brand, with no chevron. It opens the files
-  of the bucket. The page is more compact: small gaps between the parts, the cards and the rows. Identity has only
+  of the bucket. The content has 32 px of space at its left and at its right, and 16 px under the header (12 px on a phone). The page is more compact: small gaps between the parts, the cards and the rows. Identity has only
   the name, the kind, the host, the bucket and the region. The three permissions are on one line, with no description.
   The rows and the cards have no explanatory text; the page keeps the warnings and the errors.
 - The list of the buckets is a non-modal dialog, not a listbox. The current bucket has `aria-current="true"`.

@@ -29,7 +29,7 @@ html:has(> body.infoPage),
   flex-direction: column;
   gap: 4px;
   min-width: 0;
-  padding: 4px var(--header-gutter) var(--header-gutter);
+  padding: 16px 32px var(--header-gutter);
   font-size: var(--fs-md);
 }
 
@@ -476,6 +476,12 @@ html:has(> body.infoPage),
 }
 
 
+
+@media (max-width: 600px) {
+  .infoMain {
+    padding: 12px var(--header-gutter) var(--header-gutter);
+  }
+}
 
 @media (max-width: 1000px) {
   .infoColumns {
