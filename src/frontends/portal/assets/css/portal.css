@@ -656,18 +656,17 @@ html[data-theme-mode="light"] .themeSelect__current > .themeIcon--light {
 
 /* The bucket selector of the default interface: the buckets of each host, with their permissions. ------------------ */
 
-/* The selector sits at the right of the header, in one line at every width: the icon, the name, the permission icons
-   with the versioning icon, the facts and the chevron. The permission icons and the facts are elements of their own
-   over the trigger, because a button cannot hold a button. The trigger is a subgrid of the selector, so the elements
+/* The selector sits at the right of the header, in one line at every width: the icon, the name, the seven state
+   icons, the facts and the chevron. The state icons and the facts are elements of their own over the trigger, because
+   a button cannot hold a link. The trigger is a subgrid of the selector, so the elements
    over it share its columns. The selector takes 460 px of the free space of the header, and less when the header has
    less. It is a container: a narrow selector shows fewer facts (refer to "Facts of a bucket in the selector"). The
    tooltip of the trigger gives each fact. The menu has the same left and right edges as the selector. */
 .storageSwitcher {
-  --perms-width: 60px;
   position: relative;
   display: grid;
   flex: 0 1 460px;
-  grid-template-columns: [icon] max-content [name] minmax(60px, 1fr) [perms] max-content [facts] auto [chevron] max-content;
+  grid-template-columns: [icon] max-content [name] minmax(32px, 1fr) [states] max-content [facts] auto [chevron] max-content;
   grid-template-rows: 28px;
   align-items: center;
   column-gap: 10px;
@@ -680,45 +679,62 @@ html[data-theme-mode="light"] .themeSelect__current > .themeIcon--light {
   grid-area: 1 / 1 / 2 / -1;
 }
 
-/* The button of the permission icons, then the versioning icon. A click on the versioning icon opens the menu. */
-.storageSwitcher__permsGroup {
+/* The seven state icons of a bucket, in this order: read, write, delete, encryption, Object Lock, versioning and
+   lifecycle rules. Each icon is grey (off, not available or denied), green (on or allowed) or orange (on, with a
+   problem). The group is one link to the information page of the bucket. The title and a hidden text of each icon give
+   its state, so colour is not the only sign. The icons are 14 px with a gap of 2 px: the group is 116 px, and 124 px
+   with the count of the lifecycle rules. */
+.stateGroup {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  height: 22px;
+  padding: 0 3px;
+  border-radius: var(--radius-inner);
+  color: var(--muted);
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--dur-quick) var(--ease), box-shadow var(--dur-quick) var(--ease);
+}
+
+.stateIcon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 1px;
+  height: 16px;
+  color: var(--muted);
+}
+
+.stateIcon .ic {
+  --icon-size: 14px;
+}
+
+.stateIcon.is-on {
+  color: var(--success);
+}
+
+.stateIcon.is-warn {
+  color: var(--warning);
+}
+
+.stateIcon__count {
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+/* The group of the trigger: over the trigger, in its column. */
+.storageSwitcher__states {
   position: relative;
   z-index: calc(var(--z-menu) + 2);
-  display: flex;
-  grid-area: 1 / perms;
-  align-items: center;
-  cursor: pointer;
+  grid-area: 1 / states;
 }
 
-.storageSwitcher__trigger.is-static ~ .storageSwitcher__permsGroup {
-  cursor: default;
-}
-
-.storageSwitcher__versioning {
-  display: inline-flex;
-}
-
-.storageSwitcher__versioning:empty {
-  display: none;
-}
-
-.storageSwitcher__perms {
-  display: inline-grid;
-  place-items: center;
-  width: var(--perms-width);
-  height: 22px;
-  padding: 0;
-  border: 0;
-  border-radius: var(--radius-control);
-  background: transparent;
-  color: inherit;
-  text-decoration: none;
-  cursor: pointer;
-  transition: background-color var(--dur-quick) var(--ease);
-}
-
-.storageSwitcher__perms:hover,
-.storageSwitcher__perms:focus-visible {
+.storageSwitcher__states:hover,
+.storageSwitcher__states:focus-visible {
   background: var(--row-hover);
 }
 
@@ -739,14 +755,14 @@ html[data-theme-mode="light"] .themeSelect__current > .themeIcon--light {
 }
 
 button.storageSwitcher__trigger:hover,
-.storageSwitcher:has(> .storageSwitcher__facts:hover, > .storageSwitcher__permsGroup > .storageSwitcher__versioning:hover) > button.storageSwitcher__trigger {
+.storageSwitcher:has(> .storageSwitcher__facts:hover) > button.storageSwitcher__trigger {
   border-color: var(--button-border-hover);
   background: var(--button-bg-hover);
 }
 
 /* A full bucket: the border and the alert icon of the trigger in the colour of an error. */
 .storageSwitcher.is-full > .storageSwitcher__trigger,
-.storageSwitcher.is-full:has(> .storageSwitcher__facts:hover, > .storageSwitcher__permsGroup > .storageSwitcher__versioning:hover) > button.storageSwitcher__trigger {
+.storageSwitcher.is-full:has(> .storageSwitcher__facts:hover) > button.storageSwitcher__trigger {
   border-color: var(--danger);
   background: color-mix(in srgb, var(--danger) 7%, var(--button-bg));
 }
@@ -789,9 +805,6 @@ button.storageSwitcher__trigger:hover,
   z-index: calc(var(--z-menu) + 2);
   grid-area: 1 / facts;
   min-width: 0;
-  /* The button of the lifecycle rules is larger than its icon: the 4 px at each end keep it in the box. */
-  margin: 0 -4px;
-  padding: 0 4px;
   cursor: pointer;
 }
 
@@ -816,29 +829,6 @@ button.storageSwitcher__trigger:hover,
   font-weight: var(--fw-semibold);
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.storageSwitcher__titleRow .permDots {
-  flex: none;
-  margin-left: auto;
-}
-
-/* The versioning icon after the permission icons: the size of a permission icon, in muted colour. */
-.versionMark {
-  display: inline-grid;
-  flex: none;
-  place-items: center;
-  width: 16px;
-  height: 16px;
-  color: var(--muted);
-}
-
-.versionMark .ic {
-  --icon-size: 13px;
-}
-
-.versionMark.is-muted {
-  opacity: 0.7;
 }
 
 /* The marks after the name of a bucket: the alert icon of a full bucket, and on the trigger the alert icon of another
@@ -900,47 +890,6 @@ button.storageSwitcher__trigger:hover,
   background: var(--skeleton);
 }
 
-/* Read, write and delete of a bucket: an icon each. A denied right is red and struck through; the word is in the
-   title and in a hidden text, so colour is not the only sign. */
-.permDots {
-  display: inline-flex;
-  flex: none;
-  gap: 3px;
-}
-
-.permDot {
-  position: relative;
-  display: inline-grid;
-  place-items: center;
-  width: 16px;
-  height: 16px;
-  color: var(--muted);
-}
-
-.permDot .ic {
-  --icon-size: 13px;
-}
-
-.permDot.is-allowed {
-  color: var(--success);
-}
-
-.permDot.is-denied {
-  color: var(--danger);
-}
-
-.permDot.is-denied::after {
-  content: "";
-  position: absolute;
-  top: 50%;
-  left: 1px;
-  right: 1px;
-  height: 1.5px;
-  border-radius: 1px;
-  background: currentColor;
-  transform: rotate(-40deg);
-}
-
 .storageSwitcher__menu {
   position: absolute;
   top: 100%;
@@ -948,8 +897,9 @@ button.storageSwitcher__trigger:hover,
   left: 0;
   z-index: var(--z-menu);
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 4px;
+  /* The name, the state icons and the facts: the hosts and their lists share these columns. */
+  grid-template-columns: minmax(0, 1fr) max-content max-content;
+  gap: 4px 10px;
   max-height: min(70vh, 520px);
   margin-top: -1px;
   padding: 6px;
@@ -967,10 +917,17 @@ button.storageSwitcher__trigger:hover,
   display: none;
 }
 
+/* The hosts and their lists share the three columns of the menu (subgrid): the name, the state icons and the facts.
+   Thus the state icons of every bucket make one column. A host row spans the three columns. */
 .storageHost {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 2px;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  row-gap: 2px;
+}
+
+.storageHost__row {
+  grid-column: 1 / -1;
 }
 
 .storageHost__row,
@@ -1035,61 +992,46 @@ button.storageSwitcher__trigger:hover,
   min-width: 0;
 }
 
-/* An entry of a bucket is one line: the name with its root prefix and its marks, the facts, then the permission icons
-   at the right end. The permission icons are a link to the information page of the bucket, next to the button of the
-   bucket and over its right end: the button keeps a free part for it. The versioning icon keeps its place, so that
-   the permission icons make one column. */
+/* An entry of a bucket is one line: the name with its root prefix and its marks, the seven state icons, then the facts.
+   The state icons are a link to the information page of the bucket, next to the button of the bucket and over it. The
+   rows of a host share the columns of its list (subgrid), so the icons of the buckets make one column. */
 .storageBucket__row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
   align-items: center;
 }
 
 .storageBucket__row > .storageBucket {
-  grid-area: 1 / 1;
-  padding-right: calc(var(--perms-width) + 34px);
+  display: grid;
+  grid-area: 1 / 1 / 2 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
 }
 
-.storageBucket__copy {
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  column-gap: 12px;
+.storageBucket__row .storageBucket__copy {
+  display: contents;
 }
 
 .storageBucket__titleRow {
-  grid-area: 1 / 1;
+  grid-column: 1;
 }
 
-.storageBucket__perms {
+.storageBucket__states {
   position: relative;
-  display: inline-flex;
-  grid-area: 1 / 1;
-  justify-self: end;
-  align-items: center;
-  gap: 3px;
+  grid-area: 1 / 2;
   height: 28px;
-  margin-right: 6px;
-  padding: 0 4px;
-  border-radius: var(--radius-inner);
-  color: inherit;
-  text-decoration: none;
-  cursor: pointer;
-  transition: box-shadow var(--dur-quick) var(--ease);
 }
 
-.storageBucket__perms:hover,
-.storageBucket__perms:focus-visible {
+.storageBucket__states:hover,
+.storageBucket__states:focus-visible {
   box-shadow: inset 0 0 0 1px var(--border-strong);
   background: var(--panel);
 }
 
-.storageBucket__versioning {
-  display: inline-grid;
-  width: 16px;
-}
-
 .storageBucket .bucketFacts {
-  grid-area: 1 / 2;
+  grid-column: 3;
+  justify-content: flex-end;
   min-width: 0;
 }
 
@@ -1113,8 +1055,9 @@ button.storageSwitcher__trigger:hover,
 
 .storageHost__buckets {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 2px;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  row-gap: 2px;
   padding-left: 14px;
 }
 
@@ -5038,22 +4981,6 @@ button.versionCount:focus-visible {
   --icon-size: 13px;
 }
 
-/* The button of the lifecycle rules: a larger target than its icon and its count. */
-button.bucketFact {
-  height: 20px;
-  margin: -3px -4px;
-  padding: 0 4px;
-  border-radius: var(--radius-inner);
-  cursor: pointer;
-  transition: color var(--dur-quick) var(--ease), background-color var(--dur-quick) var(--ease);
-}
-
-button.bucketFact:hover,
-button.bucketFact:focus-visible {
-  background: var(--row-hover);
-  color: var(--accent-text);
-}
-
 .bucketFact.is-warning {
   color: var(--warning);
 }
@@ -5185,33 +5112,33 @@ button.bucketFact:focus-visible {
   white-space: nowrap;
 }
 
-/* A narrow selector shows fewer facts, in the trigger and in the menu, in this order: first the amount of the usage
-   goes, then its short text (the bar stays), then the usage, then the encryption key, the padlock of Object Lock, the
-   versioning icon and the icon of the trigger. The narrowest selector shows the name, the permission icons and the
-   chevron. The tooltips of the trigger and of each entry give each fact. Nothing wraps. */
+/* A narrow selector shows fewer parts, in the trigger and in the menu, in this order: first the amount of the usage
+   goes (440 px), then its short text (400 px, the bar stays), then the usage (360 px), then the icon of the trigger
+   (300 px). The seven state icons of a bucket stay at every width. At 240 px and less the icons have a gap of 1 px and the
+   trigger a smaller padding. For a volume, the four icons of S3 (always grey) go last (210 px). The budget of the
+   trigger without the name: 342 px with every part, and 182 px with the seven icons, the count and the chevron only.
+   Thus the selector of a window of 320 px (220 px) has a name of 38 px. The name takes the rest, 32 px at least,
+   with an ellipsis. The tooltips of the trigger
+   and of each entry give each part. Nothing wraps. */
 @container switcher (max-width: 440px) {
   .storageSwitcher .bucketUsage__amount {
     display: none;
   }
 }
 
-@container switcher (max-width: 420px) {
+@container switcher (max-width: 400px) {
   .storageSwitcher .bucketUsage__short {
     display: none;
   }
 }
 
-@container switcher (max-width: 380px) {
+@container switcher (max-width: 360px) {
   .storageSwitcher [data-fact="usage"] {
     display: none;
   }
 }
 
-@container switcher (max-width: 330px) {
-  .storageSwitcher [data-fact="encryption"],
-  .storageSwitcher [data-fact="object-lock"],
-  .storageSwitcher__versioning,
-  .storageBucket__versioning,
+@container switcher (max-width: 300px) {
   .storageSwitcher__icon {
     display: none;
   }
@@ -5222,9 +5149,19 @@ button.bucketFact:focus-visible {
   }
 }
 
-@container switcher (max-width: 250px) {
-  .storageSwitcher__facts,
-  .storageBucket .bucketFacts {
+@container switcher (max-width: 240px) {
+  .storageSwitcher .stateGroup {
+    gap: 1px;
+    padding: 0 1px;
+  }
+
+  .storageSwitcher > .storageSwitcher__trigger {
+    padding-right: 6px;
+  }
+}
+
+@container switcher (max-width: 210px) {
+  .storageSwitcher [data-volume] [data-s3] {
     display: none;
   }
 }

@@ -31,8 +31,19 @@ This document uses ASD-STE100 Simplified Technical English.
   has four sections: identity, permissions (with the reason of each decision), storage and functions. It shows no
   endpoint, no admin URL, no token and no path of a volume on the server. Refer to the section "Information page of a
   bucket" of [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-- The permission icons of the trigger of the bucket selector, and of each entry of its list, are a link to this page.
-  The link is next to the button of the entry, not in it. Enter and Space open it.
+- The bucket selector has one set of seven state icons for each bucket and volume, always in this order: read,
+  write, delete, encryption, Object Lock, versioning and lifecycle rules (with the count of the rules that are on).
+  Each icon is grey (off, not available or denied), green (on or allowed) or orange (on with a problem: SSE-S3 that
+  Garage does not apply, suspended versioning). The trigger and each entry of the list have the same set, after the
+  name and before the usage. A volume has its three permissions and four grey icons. Each icon has a title and a hidden
+  word for its state.
+- The seven icons are one link to this page, in the trigger and in each entry of the list. The link is next to the
+  button of the entry, not in it. Enter and Space open it.
+- Removed: the red and struck-through permission icons, the separate versioning icon, the key and the padlock in the
+  facts, and the button of the lifecycle rules in the trigger. The window of the rules opens from the information page.
+- The selector keeps one row of 460 px at most. A narrow selector drops the amount of the usage first (440 px), then
+  its short text (400 px), the usage (360 px) and the icon of the trigger (300 px). The seven icons stay at every
+  width: on a window of 320 px, the selector shows the name, the seven icons and the chevron.
 - The window "Bucket permissions", the popover "Usage" and the item "Usage" of the Actions menu are removed: the
   information page has their content.
 - The button "Open the lifecycle rules" of the page opens the listing with `?lifecycle`, which opens the window of the

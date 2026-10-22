@@ -148,10 +148,10 @@ Each bucket and each volume has one information page at `/-/<host>/<bucket>/?inf
 
 Only the bucket selector opens the page:
 
-- The read, write and delete icons of the trigger are a link to the page of the current bucket. The link is above the trigger and in its grid cell, on the line of the name, before the chevron. The trigger keeps a place for it. The rest of the trigger opens the list of the buckets.
-- In the list of the buckets, the icons of each entry are a link to the page of that bucket. The link is next to the button of the entry, not in it: a button cannot hold a link.
-- Enter and Space open the link. In the list, the arrow Right goes from an entry to its link, and the arrow Left goes back.
-- The accessible name of the link is "Information and permissions of this bucket", with the name of the bucket in the list. The tooltip is "Information and permissions: Read: ..., Write: ..., Delete: ...".
+- The seven state icons of the trigger are one link to the page of the current bucket. The link is above the trigger and in its grid cell, after the name, before the usage. The trigger keeps a place for it. The rest of the trigger opens the list of the buckets.
+- In the list of the buckets, the seven icons of each entry are one link to the page of that bucket. The link is next to the button of the entry, not in it: a button cannot hold a link.
+- Enter and Space open the link. Tab goes from the trigger to the link. In the list, the arrow Right goes from an entry to its link, and the arrow Left goes back.
+- The accessible name of the link is "Information and permissions of this bucket", with the name of the bucket in the list, then the state of each icon. The tooltip has one line for each icon: "Read: allowed", "Encryption: off" and so on.
 
 The page has the header of the listing in one row: the brand at the left edge, the link "Back to <bucket>" after it, and the theme at the right edge. The sections are in two columns on a wide window, and in one column on a phone. Each section is a list of terms and values, and each row shows only when the server knows its value:
 
@@ -615,31 +615,39 @@ capacity: the page shows nothing about it.
 
 `percent` and `level` are the more constraining part: the quota or the storage, the part with the larger percent. `constraint` names it: `quota`, `storage`, or `""` when the answer has no limit. An equal percent keeps the quota. The colour of the bar, the short text of the chip and the warning of a full bucket follow `percent`.
 
-### The facts of the buckets in the bucket selector
+### The state icons and the facts of the buckets in the bucket selector
 
-The trigger of the bucket selector has the name of the current bucket, its permission icons, its versioning icon and its facts, in small muted text. Each entry of the list of the buckets has the same parts, with the values of that bucket. Each fact is an icon with a tooltip, and each fact shows only when it is true:
+The trigger of the bucket selector has the name of the current bucket, its seven state icons and its usage. Each entry of the list of the buckets has the same parts, in the same order, with the values of that bucket. A volume has the same parts.
 
-| Fact | Source of the fact |
-| --- | --- |
-| Versioning (Tabler `git-commit`), directly after the read, write and delete icons. The tooltip says "Versioning: on" or "Versioning: suspended" | The current bucket: the versioning status in `GET /api/lifecycle`. The other buckets: `versioningState` of `/api/instances` |
-| Encryption (a key): "Encrypted: SSE-S3 for each new object" or the default encryption of the bucket | `encryption`, `defaultEncryption` and `encryptionApplied` of `/api/instances`. Garage with `"sse-s3"` gets "SSE-S3 not applied" in the colour of a warning |
-| Object Lock (a padlock), with the default retention | `objectLockSupported` and `objectLockDefault` of `/api/instances` |
-| The lifecycle rules (an hourglass and the count) | The current bucket: the rules in `GET /api/lifecycle`. The other buckets: `lifecycleRules` of `/api/instances` |
-| The usage, at the right of the facts: the amount that the bucket holds (`3 MB`), then a thin bar and a short text. The short text is the more constraining part (`62 %`, of the quota or of the storage), or the used bytes (`12.3 GB`) for a bucket without a limit. A bucket without a limit has no amount: the short text is the amount. For a volume, the amount is what its folder holds: `computing…` before the first bytes, and `≥ 3 MB` while the count runs or after it stopped at its limit. The whole text (`12.3 GB of 20 GB` or `Storage: 910 GB of 1000 GB`) is in the tooltip and for a screen reader. The usage does not act | `GET /api/usage` |
+The seven state icons are always there, in this order. Each icon is grey (off, not available or denied), green (on, allowed or active) or orange (on, with a problem):
 
-A bucket that never had versioning gets no versioning icon: "off" is not a fact that the line shows. An approximate number starts with `~`. The bar has the colour of a warning from 80 % and the colour of an error from 95 %. The tooltip of the usage names the bucket, the used bytes, the limit and its source, and the objects. It also gives the source, the time of the count and the reason of an approximate number. The numbers are for the whole bucket, also for an instance with a root prefix.
+| Icon | Green | Orange | Grey | Source |
+| --- | --- | --- | --- | --- |
+| Read (Tabler `eye`), write (`pencil`), delete (`trash`) | The permission is allowed, or allowed on use | - | The permission is denied | `capabilities` of `/api/instances` |
+| Encryption (`key`) | The provider applies `encryption = "sse-s3"`, or the bucket has a default encryption | `encryption = "sse-s3"`, and the provider does not apply it (Garage) | No encryption | `encryption`, `defaultEncryption` and `encryptionApplied` of `/api/instances` |
+| Object Lock (`lock`) | Object Lock is on. The title gives the default retention | - | Object Lock is off | `objectLockSupported` and `objectLockDefault` of `/api/instances` |
+| Versioning (`git-commit`) | Versioning is enabled | Versioning is suspended | Never enabled, or not available | The current bucket: `GET /api/lifecycle`. The other buckets: `versioningState` of `/api/instances` |
+| Lifecycle rules (`hourglass`) | One rule or more is on. The count of these rules follows the icon | - | No rule, or not available | The current bucket: the rules in `GET /api/lifecycle`. The other buckets: `lifecycleRules` of `/api/instances` |
 
-The trigger is a button, and a button cannot hold a button or a link. Thus the permission icons and the facts are elements of their own, over the trigger and in its grid. The permission icons are a link to the information page of the bucket. The versioning icon follows them in the same group, but it is not a part of this link and it does not act. In the facts, the lifecycle rules are a button: a click, Enter or Space opens the window of the rules. This button shows also for a bucket without rule ("0"): it is the way to add the first rule. The keyboard goes from the trigger to the link of the permission icons, then to this button.
+A volume has its read, write and delete icons, and the four icons of S3 are grey with the title "...: not available for a mounted folder". Colour is not the only sign: each icon has a title and a hidden text with the word of its state, for example "Encryption: on (SSE-S3)", "Encryption: requested but not applied by this provider" or "Versioning: off".
 
-A click on the rest of the selector, also on the versioning icon, opens the list of the buckets. A failed read of the usage of the current bucket gives a muted icon, with the reason in its tooltip. In the list, the facts are a part of the button of each bucket and have no button. They show the lifecycle rules only for a bucket with rules. Each fact and the versioning icon have a label for a screen reader. The trigger names them in `aria-describedby`.
+The usage follows the icons: the amount that the bucket holds (`3 MB`), then a thin bar and a short text. The short text is the more constraining part (`62 %`, of the quota or of the storage), or the used bytes (`12.3 GB`) for a bucket without a limit. A bucket without a limit has no amount: the short text is the amount. For a volume, the amount is what its folder holds: `computing…` before the first bytes, and `≥ 3 MB` while the count runs or after it stopped at its limit. The whole text (`12.3 GB of 20 GB` or `Storage: 910 GB of 1000 GB`) is in the tooltip and for a screen reader. The usage does not act. Its source is `GET /api/usage`.
+
+An approximate number starts with `~`. The bar has the colour of a warning from 80 % and the colour of an error from 95 %. The tooltip of the usage names the bucket, the used bytes, the limit and its source, and the objects. It also gives the source, the time of the count and the reason of an approximate number. The numbers are for the whole bucket, also for an instance with a root prefix.
+
+The trigger is a button, and a button cannot hold a link. Thus the seven icons and the usage are elements of their own, over the trigger and in its grid. The seven icons are one link to the information page of the bucket. The window of the lifecycle rules opens from the information page ("Open the lifecycle rules"). The keyboard goes from the trigger to the link.
+
+A click on the rest of the selector, also on the usage, opens the list of the buckets. A failed read of the usage of the current bucket gives a muted icon, with the reason in its tooltip. The trigger names the link and the usage in `aria-describedby`.
 
 The selector has one layout at every width. The trigger is never on two lines:
 
-- The trigger is one line of 28 px, as the host picker of ClickHouse Dash (44 px on a coarse pointer). The selector is a grid with five columns: the icon, the name, the permission and versioning icons, the facts and the chevron. The trigger is a subgrid that spans the five columns, so the elements over it share its columns.
-- The selector is 460 px wide, and less when the header has less space. The selector is a CSS container. A narrower selector shows fewer facts, in this order: first the amount of the usage goes (440 px and less), then the short text of the usage (420 px), then the usage (380 px), then the key, the padlock, the versioning icon and the icon of the trigger (330 px), and then the lifecycle button (250 px). The narrowest selector shows the name, the permission icons and the chevron.
-- The tooltip of the trigger gives each fact at every width: the versioning, the encryption, Object Lock, the number of lifecycle rules and the usage. The facts never wrap and are never cut. The name gets an ellipsis.
+- The trigger is one line of 28 px, as the host picker of ClickHouse Dash (44 px on a coarse pointer). The selector is a grid with five columns: the icon, the name, the seven icons, the usage and the chevron. The trigger is a subgrid that spans the five columns, so the elements over it share its columns.
+- The icons are 14 px with a gap of 2 px. The link is 116 px, and 124 px with the count of the lifecycle rules. Without the name, the trigger needs 342 px with every part.
+- The selector is 460 px wide, and less when the header has less space. The selector is a CSS container. A narrower selector shows fewer parts, in this order: first the amount of the usage goes (440 px and less), then the short text of the usage (400 px), then the usage (360 px), then the icon of the trigger (300 px). At 240 px and less, the icons have a gap of 1 px and the trigger has a smaller padding. For a volume, the four grey icons of S3 go last (210 px).
+- The seven icons of a bucket stay at every width. On a window of 320 px, the selector is 220 px: the name (38 px, with an ellipsis), the seven icons with the count, and the chevron. The name keeps 32 px at least.
+- The tooltip of the trigger gives each part at every width. The parts never wrap and are never cut. The name gets an ellipsis.
 - The list of the buckets has the same left and right edges as the selector. The open trigger covers the top of the list, and the two make one shape.
-- Each entry of the list is one line: the name, a root prefix after it in small muted text, the facts, then the permission and versioning icons at the right end. The icons are a link next to the button of the entry, over its right end. The current bucket has `aria-current="true"`. The list is a non-modal dialog with buttons and links, not a listbox. The prefix gets an ellipsis before the name. The versioning icon keeps its place also when it does not show, so the permission icons make one column. A narrow list drops the facts of its entries in the order of the trigger. Each host of the list is one line: its name, then the provider and the number of buckets.
+- Each entry of the list is one line: the name, a root prefix after it in small muted text, the seven icons, then the usage. The icons are a link next to the button of the entry, over it. The menu, its hosts and their lists share three columns (CSS subgrid): the name, the icons and the usage. Thus the icons of all the buckets make one column. The current bucket has `aria-current="true"`. The list is a non-modal dialog with buttons and links, not a listbox. The prefix gets an ellipsis before the name. A narrow list drops the usage of its entries in the order of the trigger. Each host of the list is one line: its name, then the provider and the number of buckets.
 
 `/api/instances` gives two facts of each bucket for the list:
 

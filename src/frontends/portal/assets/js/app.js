@@ -410,17 +410,55 @@ BB.cfg = config;
     ];
   }
 
-  function permissionSummary(instance) {
-    return permissionStates(instance).map(item => `${item.label}: ${BB.capabilities.stateLabel(item.state)}`).join(', ');
+  const ENCRYPTION_NAMES = { AES256: 'SSE-S3', 'aws:kms': 'SSE-KMS', 'aws:kms:dsse': 'DSSE-KMS' };
+  const MOUNTED_FOLDER = 'not available for a mounted folder';
+
+  // The seven state icons of a bucket, always in this order: read, write, delete, encryption, Object Lock, versioning
+  // and lifecycle rules. Each icon has one of three tones: "on" (green: allowed, on, active), "off" (grey: off, not
+  // available or denied) or "warn" (orange: on, with a problem). text is the word of the state: the title of the icon,
+  // a hidden text, and a line of the tooltip. A volume has the same seven icons: the four of S3 are off.
+  function bucketStates(instance) {
+    const out = permissionStates(instance).map(item => {
+      const name = BB.capabilities.normalizeState(item.state);
+      return { key: item.key, icon: item.icon, tone: name === 'denied' ? 'off' : 'on', text: `${item.label}: ${BB.capabilities.stateLabel(item.state).toLowerCase()}` };
+    });
+    if (isVolume(instance)) {
+      return out.concat([['encryption', 'key', 'Encryption'], ['object-lock', 'lock', 'Object Lock'], ['versioning', 'git-commit', 'Versioning'], ['lifecycle', 'hourglass', 'Lifecycle rules']]
+        .map(([key, icon, label]) => ({ key, icon, tone: 'off', s3: true, text: `${label}: ${MOUNTED_FOLDER}` })));
+    }
+    const lock = BB.encryption?.bucketLock(instance);
+    const algorithm = instance.encryption === 'sse-s3' && instance.encryptionApplied === 'yes' ? 'AES256' : String(instance.defaultEncryption || (instance.encryption === 'sse-s3' ? 'AES256' : ''));
+    const encryption = !lock ? { tone: 'off', text: 'Encryption: off' }
+      : lock.tone === 'warn'
+        ? { tone: 'warn', text: instance.encryptionApplied === 'no' ? 'Encryption: requested but not applied by this provider' : 'Encryption: requested, the provider may not apply it' }
+        : { tone: 'on', text: `Encryption: on (${ENCRYPTION_NAMES[algorithm] || algorithm})` };
+    out.push({ key: 'encryption', icon: 'key', ...encryption });
+    const retention = instance.objectLockDefault ? `, default retention ${BB.objectLock.defaultText(instance.objectLockDefault)}` : '';
+    out.push(instance.objectLockSupported === true
+      ? { key: 'object-lock', icon: 'lock', tone: 'on', text: `Object Lock: on${retention}` }
+      : { key: 'object-lock', icon: 'lock', tone: 'off', text: 'Object Lock: off' });
+    const { versioning, rules } = bucketState(instance);
+    out.push({ key: 'versioning', icon: 'git-commit', ...(versioning === 'enabled' ? { tone: 'on', text: 'Versioning: on' }
+      : versioning === 'suspended' ? { tone: 'warn', text: 'Versioning: suspended' }
+        : instance.versioningSupported === false ? { tone: 'off', text: 'Versioning: not available on this provider' } : { tone: 'off', text: 'Versioning: off' }) });
+    if (instance.lifecycleSupported === false || rules == null) {
+      out.push({ key: 'lifecycle', icon: 'hourglass', tone: 'off', text: instance.lifecycleSupported === false ? 'Lifecycle rules: not available on this provider' : 'Lifecycle rules: unknown' });
+    } else {
+      // The read of the page gives each rule and its state; the probe of the server gives the number of rules.
+      const total = Array.isArray(rules) ? rules.length : rules;
+      const enabled = Array.isArray(rules) ? rules.filter(rule => rule.enabled).length : rules;
+      out.push({ key: 'lifecycle', icon: 'hourglass', tone: enabled > 0 ? 'on' : 'off', count: enabled > 0 ? enabled : 0,
+        text: !total ? 'Lifecycle rules: none' : `Lifecycle rules: ${enabled.toLocaleString('en-US')} on${Array.isArray(rules) ? ` of ${total.toLocaleString('en-US')}` : ''}` });
+    }
+    return out;
   }
 
-  function permissionDots(instance, { title = true } = {}) {
-    return h('span', { class: 'permDots', title: title ? permissionSummary(instance) : null },
-      permissionStates(instance).map(item => {
-        const name = BB.capabilities.normalizeState(item.state);
-        return h('span', { class: ['permDot', `is-${name}`], 'data-permission': item.key, 'data-state': name },
-          ic(item.icon), h('span', { class: 'visually-hidden' }, `${item.label} ${BB.capabilities.stateLabel(item.state).toLowerCase()}`));
-      }));
+  // The nodes of the seven icons. The count of the lifecycle rules follows the hourglass when a rule is on.
+  function stateIconNodes(states) {
+    return states.map(item => h('span', {
+      class: ['stateIcon', `is-${item.tone}`], 'data-state-icon': item.key, 'data-tone': item.tone, 'data-s3': item.s3 ? 'true' : null, title: item.text
+    }, ic(item.icon), item.count ? h('span', { class: 'stateIcon__count', 'aria-hidden': 'true' }, item.count.toLocaleString('en-US')) : null,
+    h('span', { class: 'visually-hidden' }, `${item.text}. `)));
   }
 
   // One label for a bucket: its display name. The id, the host and the bucket name are in the tooltip.
@@ -435,29 +473,13 @@ BB.cfg = config;
       `host: ${instance.host}`,
       `${storageNoun(instance)}: ${instance.rootPrefix ? `${instance.bucket}/${instance.rootPrefix}` : instance.bucket}`,
       isVolume(instance) ? 'provider: a folder of the server (FS)' : `provider: ${String(instance.provider || '').toUpperCase()}`,
-      permissionSummary(instance),
-      ...factLines(instance),
+      ...bucketStates(instance).map(item => item.text),
       BB.usage?.selectorLine(BB.usage.cached(instance.id)) || null
     ].filter(Boolean).join('\n');
   }
 
-  // The facts of a bucket as lines of its tooltip. A narrow selector shows fewer facts: the tooltip gives each one.
-  function factLines(instance) {
-    if (!can('list', instance)) return [];
-    const { versioning, rules } = bucketState(instance);
-    const lock = BB.encryption?.bucketLock(instance);
-    const lockTitle = BB.objectLock?.bucketLockTitle(instance);
-    const count = Array.isArray(rules) ? rules.length : rules;
-    return [
-      versioning === 'enabled' || versioning === 'suspended' ? `versioning: ${versioning === 'enabled' ? 'on' : 'suspended'}` : null,
-      lock ? `encryption: ${lock.title}` : null,
-      lockTitle ? `object lock: ${lockTitle}` : null,
-      count != null && instance.lifecycleSupported !== false ? `lifecycle rules: ${count}` : null
-    ];
-  }
-
-  // The name of the bucket and the marks of a full bucket. The permission icons and the facts are elements of their own
-  // over the trigger, because a button cannot hold a button.
+  // The name of the bucket and the marks of a full bucket. The state icons and the facts are elements of their own over
+  // the trigger, because a button cannot hold a link.
   function switcherCopy(instance) {
     return h('span', { class: 'storageSwitcher__copy' },
       h('span', { class: 'storageSwitcher__titleRow' }, h('strong', {}, storageName(instance)), h('span', { class: 'bucketMarks' })));
@@ -480,31 +502,34 @@ BB.cfg = config;
   // The address of the information page of a bucket: /-/<host>/<bucket>/?info.
   const infoPageURL = instance => `${BB.api.browserPageURL('', { instance: instance.id })}?info`;
 
-  // The link of the permission icons to the information page of a bucket. It is a link, so Enter opens it; Space opens
-  // it too, as on a button. In the menu, the link is next to the button of the bucket, not in it.
+  // The seven state icons of a bucket are one link to its information page. It is a link, so Enter opens it; Space
+  // opens it too, as on a button. In the trigger and in the menu, the link is next to the button, not in it. The
+  // accessible name and the tooltip give the state of each icon.
   function infoLink(instance, { menu = false } = {}) {
-    return h('a', {
-      class: menu ? 'storageBucket__perms' : 'storageSwitcher__perms',
+    const link = h('a', {
+      id: menu ? null : 'storageSwitcherStates',
+      class: ['stateGroup', menu ? 'storageBucket__states' : 'storageSwitcher__states'],
       href: infoPageURL(instance),
       'data-info': instance.id,
-      'aria-label': `Information and permissions of this ${storageNoun(instance)}${menu ? `: ${storageName(instance)}` : ''}`,
-      title: `Information and permissions: ${permissionSummary(instance)}`,
+      'data-volume': isVolume(instance) ? 'true' : null,
       onclick: event => event.stopPropagation(),
       onkeydown: event => {
         if (event.key !== ' ') return;
         event.preventDefault();
         event.currentTarget.click();
       }
-    }, permissionDots(instance, { title: false }), menu ? h('span', { class: 'storageBucket__versioning' }) : null);
+    });
+    fillStates(link, instance, { menu });
+    return link;
   }
 
-  // The read, write and delete icons of the current bucket, then the versioning icon. The three icons are the link to
-  // the information page of the bucket. The versioning icon does not act: the rest of the selector opens the list of
-  // the buckets.
-  function permissionsGroup(instance, multiple) {
-    return h('div', { class: 'storageSwitcher__permsGroup', onclick: passClick(multiple) },
-      infoLink(instance),
-      h('span', { id: 'storageSwitcherVersioning', class: 'storageSwitcher__versioning' }));
+  function fillStates(link, instance, { menu = false } = {}) {
+    if (!link) return;
+    const states = bucketStates(instance);
+    fillNodes(link, stateIconNodes(states));
+    const label = `Information and permissions of this ${storageNoun(instance)}${menu ? `: ${storageName(instance)}` : ''}`;
+    link.setAttribute('aria-label', `${label}. ${states.map(item => item.text).join(', ')}`);
+    link.title = ['Information and permissions', ...states.map(item => item.text)].join('\n');
   }
 
   function renderSwitcher() {
@@ -528,8 +553,8 @@ BB.cfg = config;
           h('span', { class: 'storageSwitcher__copy' }, h('strong', {}, 'No bucket'),
             h('small', {}, state.loadError ? 'The list of buckets cannot be loaded' : 'No bucket is visible to you'))));
       } else if (!multiple) {
-        root.replaceChildren(h('div', { class: 'storageSwitcher__trigger is-static', title: storageDetails(instance), 'aria-describedby': 'storageSwitcherVersioning storageSwitcherFacts' },
-          ic(storageIcon(instance), 'storageSwitcher__icon'), switcherCopy(instance)), permissionsGroup(instance, false), switcherFacts(false));
+        root.replaceChildren(h('div', { class: 'storageSwitcher__trigger is-static', title: storageDetails(instance), 'aria-describedby': 'storageSwitcherStates storageSwitcherFacts' },
+          ic(storageIcon(instance), 'storageSwitcher__icon'), switcherCopy(instance)), infoLink(instance), switcherFacts(false));
       } else {
         const trigger = h('button', {
           type: 'button',
@@ -537,7 +562,7 @@ BB.cfg = config;
           'aria-haspopup': 'dialog',
           'aria-expanded': 'false',
           'aria-controls': 'storageSwitcherMenu',
-          'aria-describedby': 'storageSwitcherVersioning storageSwitcherFacts',
+          'aria-describedby': 'storageSwitcherStates storageSwitcherFacts',
           title: storageDetails(instance),
           onclick: event => { event.stopPropagation(); toggleSwitcher(); },
           onkeydown: event => {
@@ -551,8 +576,8 @@ BB.cfg = config;
         }, storageHosts().map(host => {
           const expanded = state.expandedHosts[host.id] === true;
           const list = h('div', { class: 'storageHost__buckets', role: 'group', 'aria-label': `${host.id} buckets`, hidden: !expanded },
-            // An entry is the button of the bucket, and next to it the link of its permission icons to its
-            // information page: a button cannot hold a link.
+            // An entry is the button of the bucket, and next to it the link of its state icons to its information
+            // page: a button cannot hold a link. The rows of a host share their columns, so the icons make one column.
             host.instances.map(entry => h('div', { class: 'storageBucket__row', 'data-instance': entry.id },
               h('button', {
                 type: 'button',
@@ -585,7 +610,7 @@ BB.cfg = config;
             h('small', {}, `${host.provider.toUpperCase()} · ${plural(host.instances.length, isVolume(host) ? 'volume' : 'bucket')}`)));
           return h('section', { class: 'storageHost', 'data-host': host.id }, row, list);
         }));
-        root.replaceChildren(trigger, permissionsGroup(instance, true), switcherFacts(true), menu);
+        root.replaceChildren(trigger, infoLink(instance), switcherFacts(true), menu);
         ui.switcherTrigger = trigger;
         ui.switcherMenu = menu;
       }
@@ -629,11 +654,11 @@ BB.cfg = config;
     else closeSwitcher(false);
   }
 
-  // The arrows Up and Down go from row to row. The arrow Right goes from a bucket to the link of its permission icons,
+  // The arrows Up and Down go from row to row. The arrow Right goes from a bucket to the link of its state icons,
   // and the arrow Left goes back. Tab goes through the controls of the menu, and closes it when the focus leaves it.
   function onSwitcherKey(event) {
     const active = document.activeElement;
-    const link = active?.closest?.('.storageBucket__perms');
+    const link = active?.closest?.('.storageBucket__states');
     const items = switcherItems();
     const index = items.indexOf(link ? link.previousElementSibling : active);
     if (event.key === 'ArrowDown') { event.preventDefault(); items[Math.min(items.length - 1, index + 1)]?.focus(); }
@@ -960,16 +985,11 @@ BB.cfg = config;
     for (const wait of [1500, 12000]) usageTimers.push(window.setTimeout(() => loadUsage(currentInstance(), { fresh: true }), wait));
   }
 
-  // A fact: an icon, an optional short text, the tooltip, and a label for a screen reader. A fact that acts is a button.
-  function bucketFact(name, iconName, label, detail, { short = '', onclick = null, tone = '' } = {}) {
-    return h(onclick ? 'button' : 'span', {
-      type: onclick ? 'button' : null, class: ['bucketFact', tone && `is-${tone}`], 'data-fact': name, title: detail,
-      'aria-label': onclick ? `${label}. ${detail}` : null, onclick
-    }, ic(iconName), short ? h('span', { class: 'bucketFact__short', 'aria-hidden': 'true' }, short) : null,
-    onclick ? null : h('span', { class: 'visually-hidden' }, `${label}. `));
+  // A fact: an icon, the tooltip, and a label for a screen reader.
+  function bucketFact(name, iconName, label, detail, { tone = '' } = {}) {
+    return h('span', { class: ['bucketFact', tone && `is-${tone}`], 'data-fact': name, title: detail },
+      ic(iconName), h('span', { class: 'visually-hidden' }, `${label}. `));
   }
-
-  const ENCRYPTION_NAMES = { AES256: 'SSE-S3', 'aws:kms': 'SSE-KMS', 'aws:kms:dsse': 'DSSE-KMS' };
 
   // The versioning and the lifecycle rules of a bucket: the read of the page for a bucket that it opened, else the probe
   // of the server at start. versioning: 'enabled', 'suspended', 'off' or '' (unknown). rules: a list, a count or null.
@@ -1005,46 +1025,10 @@ BB.cfg = config;
     return node;
   }
 
-  // The versioning icon of a bucket, after its permission icons: on or suspended. A bucket that never had versioning
-  // has no icon. The icon does not act: it has a tooltip and a label for a screen reader.
-  function versionMark(instance) {
-    const { versioning } = bucketState(instance);
-    if (versioning !== 'enabled' && versioning !== 'suspended') return null;
-    const [label, detail] = versioning === 'enabled'
-      ? ['Versioning: on', 'Versioning: on. A change or a delete keeps the older versions of a file.']
-      : ['Versioning: suspended', 'Versioning: suspended. The bucket keeps the older versions that it has, and makes no new ones.'];
-    return h('span', { class: ['versionMark', versioning === 'suspended' && 'is-muted'], 'data-fact': 'versioning', 'data-state': versioning, title: detail },
-      ic('git-commit'), h('span', { class: 'visually-hidden' }, `${label}. `));
-  }
-
-  // The facts of a bucket that are true, in this order: encryption, Object Lock, lifecycle rules, usage. The line of the
-  // trigger has the button of the lifecycle rules, also for a bucket without rule: it is the way to the editor. The
-  // line of a bucket in the menu has no button: it is in the button of the bucket.
+  // The facts of a bucket after its state icons: the usage. The line of the trigger also shows a failed read of the
+  // usage, as a muted icon with the reason in its tooltip.
   function bucketFacts(instance, { trigger = false } = {}) {
     const items = [];
-    const { rules } = bucketState(instance);
-    const lock = BB.encryption?.bucketLock(instance);
-    if (lock) {
-      const algorithm = instance.encryption === 'sse-s3' ? 'AES256' : String(instance.defaultEncryption || '');
-      const name = ENCRYPTION_NAMES[algorithm] || algorithm;
-      items.push(lock.tone === 'warn'
-        ? bucketFact('encryption', 'key', `${name} not applied`, lock.title, { tone: 'warning' })
-        : bucketFact('encryption', 'key', `Encrypted: ${name}`, lock.title));
-    }
-    const lockTitle = BB.objectLock?.bucketLockTitle(instance);
-    if (lockTitle) {
-      const retention = instance.objectLockDefault ? `: ${BB.objectLock.defaultText(instance.objectLockDefault)}` : '';
-      items.push(bucketFact('object-lock', 'lock', `Object Lock${retention}`, lockTitle));
-    }
-    const count = Array.isArray(rules) ? rules.length : rules;
-    if (count != null && instance.lifecycleSupported !== false && (count > 0 || trigger)) {
-      const enabled = Array.isArray(rules) ? `, ${plural(rules.filter(rule => rule.enabled).length, 'rule')} on` : '';
-      const detail = count
-        ? `${plural(count, 'lifecycle rule')}${enabled}.${trigger ? ' Open the lifecycle rules of the bucket.' : ''}`
-        : 'The bucket has no lifecycle rule. Open the lifecycle rules of the bucket to add one.';
-      items.push(bucketFact('lifecycle', 'hourglass', count ? plural(count, 'lifecycle rule') : 'No lifecycle rule', detail,
-        { short: count.toLocaleString('en-US'), tone: count ? '' : 'muted', onclick: trigger ? openLifecycle : null }));
-    }
     if (instance.usageSupported === true && can('list', instance)) {
       const usage = BB.usage.cached(instance.id);
       if (BB.usage.shown(usage)) {
@@ -1089,10 +1073,7 @@ BB.cfg = config;
     const current = Boolean(instance) && canRead();
     const facts = ui.switcher.querySelector('.storageSwitcher__facts');
     if (facts) fillNodes(facts, current ? bucketFacts(instance, { trigger: true }) : []);
-    const versioning = ui.switcher.querySelector('.storageSwitcher__versioning');
-    const mark = current ? versionMark(instance) : null;
-    if (versioning) fillNodes(versioning, [mark].filter(Boolean));
-    ui.switcher.classList.toggle('has-versioning', Boolean(versioning && mark));
+    if (instance) fillStates(ui.switcher.querySelector('.storageSwitcher__states'), instance);
     const full = current && fullUsage(instance);
     const others = state.instances.filter(entry => entry !== instance && fullUsage(entry));
     const otherText = others.length === 1 ? `Another bucket is almost full: ${storageName(others[0])}`
@@ -1110,7 +1091,7 @@ BB.cfg = config;
       if (!entry) continue;
       const readable = can('list', entry);
       fillNodes(node.querySelector('.bucketFacts'), readable ? bucketFacts(entry) : []);
-      fillNodes(node.parentElement.querySelector('.storageBucket__versioning'), [readable ? versionMark(entry) : null].filter(Boolean));
+      fillStates(node.parentElement.querySelector('.storageBucket__states'), entry, { menu: true });
       fillNodes(node.querySelector('.bucketMarks'), fullUsage(entry) ? [fullMark(entry)] : []);
       node.classList.toggle('is-full', fullUsage(entry));
       node.title = storageDetails(entry);
