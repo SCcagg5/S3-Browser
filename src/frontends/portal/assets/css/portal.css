@@ -1092,6 +1092,11 @@ button.storageSwitcher__trigger:hover {
   display: none;
 }
 
+/* The list of a host with one bucket has no row above it: no indent at the left. */
+.storageHost__buckets:first-child {
+  padding-left: 0;
+}
+
 .storageBucket__titleRow {
   display: grid;
   grid-template-columns: fit-content(100%) auto minmax(0, 1fr);
