@@ -2,22 +2,22 @@
 
 This document uses ASD-STE100 Simplified Technical English.
 
-S3-Browser obeys section 11 of the MCP server contract ("Access of humans (AuthZEN)"). This section applies to
-the pages, to the API and to the object gateway of S3-Browser. S3-Browser has no MCP endpoint.
+Stowr obeys section 11 of the MCP server contract ("Access of humans (AuthZEN)"). This section applies to
+the pages, to the API and to the object gateway of Stowr. Stowr has no MCP endpoint.
 
 ## Principle
 
 The access has three parts:
 
-1. **Authentication.** An access gateway in front of S3-Browser identifies the human. It puts a signed identity
-   token in a request header. The reverse proxy sends the request to S3-Browser. S3-Browser verifies the token on
+1. **Authentication.** An access gateway in front of Stowr identifies the human. It puts a signed identity
+   token in a request header. The reverse proxy sends the request to Stowr. Stowr verifies the token on
    each request.
-2. **Decision.** For each action, S3-Browser asks a PDP (Policy Decision Point) with the OpenID AuthZEN
+2. **Decision.** For each action, Stowr asks a PDP (Policy Decision Point) with the OpenID AuthZEN
    Authorization API 1.0. The decision depends only on the human, the action and the resource.
-3. **Enforcement.** S3-Browser applies the decision on the server side, for each route. It does not trust the
+3. **Enforcement.** Stowr applies the decision on the server side, for each route. It does not trust the
    page to hide an action.
 
-The access gateway decides only the action `access` (the entry into S3-Browser). S3-Browser decides all its other
+The access gateway decides only the action `access` (the entry into Stowr). Stowr decides all its other
 actions.
 
 ## Configuration
@@ -32,13 +32,13 @@ access {
     header           = "X-Identity-Token"
     issuer           = "portal.home"
     audience         = "infra-s3"        # the id of this server at the access gateway
-    public_keys_file = "/run/secrets/s3_browser_identity_keys"   # or public_keys, or public_keys_env
+    public_keys_file = "/run/secrets/stowr_identity_keys"   # or public_keys, or public_keys_env
     max_age          = "5m"
   }
 
   pdp {
     url             = "http://portal-pdp.edge.svc.cluster.local:4182"   # or url_env, or url_file
-    token_file      = "/run/secrets/s3_browser_pdp_token"               # or token_env
+    token_file      = "/run/secrets/stowr_pdp_token"               # or token_env
     timeout         = "500ms"
     cache_ttl       = "30s"
     max_evaluations = 64
@@ -51,7 +51,7 @@ The generated list of the keys, with their defaults and their ranges, is in
 
 | Key | Default | Use |
 |---|---|---|
-| `mode` | (required) | `authzen`: S3-Browser obeys all of this document. `open`: S3-Browser checks no identity and no permission. |
+| `mode` | (required) | `authzen`: Stowr obeys all of this document. `open`: Stowr checks no identity and no permission. |
 | `identity.header` | `X-Identity-Token` | The request header that holds the token. `Cookie`, `Authorization`, `Host`, `Content-Type` and `Content-Length` are refused. |
 | `identity.issuer` | (required) | The value that the `iss` claim must have. |
 | `identity.audience` | (required) | The id of this server: 1 to 256 bytes of UTF-8, no control character. The `aud` claim must contain it. It is also the `id` of the `service` resource and the `server` of the list of actions. |
@@ -60,7 +60,7 @@ The generated list of the keys, with their defaults and their ranges, is in
 | `pdp.url` | (required) | The base URL of the PDP: `http` or `https`. It has the forms `url`, `url_env` and `url_file`. |
 | `pdp.token_env`, `pdp.token_file` | (required) | The bearer token of this server at the PDP. It is a secret. A token in clear text (`token = "..."`) stops the start. |
 | `pdp.timeout` | `500ms` | The longest time of one request to the PDP. From `10ms` to `1m`. |
-| `pdp.cache_ttl` | `30s` | The longest time that S3-Browser keeps an answer of the PDP. From `0s` (no cache) to `1h`. |
+| `pdp.cache_ttl` | `30s` | The longest time that Stowr keeps an answer of the PDP. From `0s` (no cache) to `1h`. |
 | `pdp.max_evaluations` | `64` | The most questions in one batch request. From 1 to 1024. Use the limit of the PDP or less. |
 
 These items stop the start:
@@ -73,20 +73,20 @@ These items stop the start:
 - A token of the PDP that has a space, a control character or more than 4096 bytes. The error does not show the token.
 - With `mode = "authzen"`, a label of a `bucket` block that has more than 256 bytes.
 
-With `mode = "open"`, S3-Browser writes the warning `config.warning` at each start. Use the open mode only for a
-server alone on a closed network. The open mode keeps the behavior of S3-Browser 1.0.13.
+With `mode = "open"`, Stowr writes the warning `config.warning` at each start. Use the open mode only for a
+server alone on a closed network. The open mode keeps the behavior of the version 1.0.13.
 
-`s3-browser print-config -c <file>` (or `s3-browser -c <file> --print-config`) shows each value with its source. It
+`stowr print-config -c <file>` (or `stowr -c <file> --print-config`) shows each value with its source. It
 shows the keys as their type and their JWK thumbprint (RFC 7638), for example `["Ed25519 kid=kPrK_..."]`. It shows
 the token of the PDP as `<hidden>`.
 
 ## Identity token
 
-The identity token is a JWT (RFC 7519) in the compact JWS form. S3-Browser verifies these items on each request:
+The identity token is a JWT (RFC 7519) in the compact JWS form. Stowr verifies these items on each request:
 
 | Item | Rule |
 |---|---|
-| Header | `alg` is `EdDSA` (Ed25519) or `ES256` (P-256, SHA-256). A header with `crit`, or a `typ` that is not `JWT`, is refused. S3-Browser never fetches a key: `jku`, `x5u` and `jwk` have no effect. S3-Browser tries each configured key of the algorithm, so a rotation can use two keys. |
+| Header | `alg` is `EdDSA` (Ed25519) or `ES256` (P-256, SHA-256). A header with `crit`, or a `typ` that is not `JWT`, is refused. Stowr never fetches a key: `jku`, `x5u` and `jwk` have no effect. Stowr tries each configured key of the algorithm, so a rotation can use two keys. |
 | Signature | It must be valid for one of the configured keys. |
 | `iss` | It must be equal to `identity.issuer`. |
 | `aud` | A text equal to `identity.audience`, or a list that contains it. |
@@ -94,18 +94,18 @@ The identity token is a JWT (RFC 7519) in the compact JWS form. S3-Browser verif
 | `nbf` | When it is present, it can be 60 seconds in the future at most. |
 | `sub` | The name of the human: 1 to 256 bytes of UTF-8, no control character. It is the AuthZEN subject `id`. |
 
-S3-Browser accepts the token only in the configured header. It does not accept a token in a cookie or in a query
+Stowr accepts the token only in the configured header. It does not accept a token in a cookie or in a query
 parameter. Two copies of the header are refused. The reverse proxy must replace a header of the same name that the
 client sends.
 
-If the token is absent or not valid, S3-Browser sends status `401` with
+If the token is absent or not valid, Stowr sends status `401` with
 `{"error": {"code": "unauthenticated", "message": "A valid identity token is required."}}`. It does not show a login
 page and does not redirect: the access gateway does that. The log line `access.unauthenticated` gives the reason
 (`missing`, `malformed`, `algorithm`, `signature`, `issuer`, `audience`, `expired`, `not_yet_valid`, `max_age`,
 `subject`). The answer does not give it.
 
-S3-Browser keeps a verified token (its SHA-256, its subject and its `exp`) in memory until its `exp`. The cache
-holds 4096 tokens at most. S3-Browser checks the token when a request starts. A download that started with a valid
+Stowr keeps a verified token (its SHA-256, its subject and its `exp`) in memory until its `exp`. The cache
+holds 4096 tokens at most. Stowr checks the token when a request starts. A download that started with a valid
 token continues after the `exp` of the token.
 
 These routes need no token: `GET /healthz` and `GET /.well-known/access-actions`. Each other route needs a valid
@@ -113,7 +113,7 @@ token. The static files of the user interface need a token and no action.
 
 ## Resources and actions
 
-S3-Browser publishes its actions at `GET /.well-known/access-actions`, without a token:
+Stowr publishes its actions at `GET /.well-known/access-actions`, without a token:
 
 ```json
 {
@@ -130,7 +130,7 @@ S3-Browser publishes its actions at `GET /.well-known/access-actions`, without a
 }
 ```
 
-`server` is `identity.audience` (`s3-browser` in the open mode). The list does not contain `access`.
+`server` is `identity.audience` (`stowr` in the open mode). The list does not contain `access`.
 
 ### The tree
 
@@ -153,7 +153,7 @@ service (identity.audience, for example "infra-s3")
 
 ### Why one level of folders
 
-S3-Browser declares one `prefix` level only. A type cannot be its own parent. Thus a tree of nested folders needs one
+Stowr declares one `prefix` level only. A type cannot be its own parent. Thus a tree of nested folders needs one
 type for each level (for example `prefix1`, `prefix2`, `prefix3`). The contract permits a depth of 4 at most, so
 `bucket` and three levels of folders would be the limit. A grant on a folder at a deeper level would still be
 impossible. One level keeps the tree simple and the grants easy to read. A top-level folder is the usual unit of
@@ -168,7 +168,7 @@ on its top-level folder.
 | `objects.write` | `service`, `bucket`, `prefix` | Upload objects, make folders and restore a version. Change the tags and the metadata of an object. Set or remove the legal hold of a version, and set or extend its retention. Shorten a Governance retention with the bypass. Abort an incomplete multipart upload. Change the lifecycle rules of a prefix. Be the destination of a copy, a move or an archive extraction. |
 | `objects.delete` | `service`, `bucket`, `prefix` | Delete objects, versions and folders. Be the source of a move or a rename. Make or change a lifecycle rule that deletes objects. |
 
-S3-Browser has no administration of a bucket (no creation, no policy). Thus it has no action for it. A change of the
+Stowr has no administration of a bucket (no creation, no policy). Thus it has no action for it. A change of the
 lifecycle rules uses `objects.write` on the node of the prefix of each rule. A rule that deletes objects also uses
 `objects.delete` there.
 When you remove or rename an action, or change its resource types, write the change in the release notes.
@@ -242,14 +242,14 @@ Rules:
 
 ### Hidden buckets
 
-S3-Browser shows only the buckets on which the human holds one action at least:
+Stowr shows only the buckets on which the human holds one action at least:
 
 - One batch asks each action on each bucket, with the match `subtree`. A bucket is visible when one decision on the
   bucket is `true`. A grant on the service, on the bucket or on a prefix of the bucket makes the bucket visible.
 - `GET /api/instances` lists only the visible buckets. `default` is the first visible bucket. For each action that
   the human holds nowhere in a bucket, `capabilities` and `operations` show `denied` with the source `access`.
 - A request for a hidden bucket gets the same answer as a request for a bucket that does not exist: `403` with the
-  action of the route. For a bucket that does not exist, S3-Browser asks the action on the service. Thus a human with
+  action of the route. For a bucket that does not exist, Stowr asks the action on the service. Thus a human with
   a grant on the service gets `404` (`unknown_instance`), and the other humans get `403`.
 - The page of a hidden bucket (`/-/<auth>/<bucket>/...`) is the `404` page of a bucket that does not exist. The
   information page of a bucket (`/-/<auth>/<bucket>/?info`) obeys the same rule. It has no route of its own: it reads
@@ -263,7 +263,7 @@ A human with a grant on a prefix only must still see the path to that prefix:
 - `GET /api/list` asks the three actions on the node of the listing (match `node`). The answer gives the decisions
   in `access` (`read`, `write`, `delete`). The user interface uses `write` and `delete` to hide the upload and the
   delete controls in the folder.
-- When `read` is `false` on the bucket, S3-Browser lists the bucket and keeps only the items of the top-level folders
+- When `read` is `false` on the bucket, Stowr lists the bucket and keeps only the items of the top-level folders
   that the human can read. It asks `objects.read` on each of these prefixes with the match `subtree`, in batches of
   `pdp.max_evaluations` questions. It removes the objects at the root of the bucket.
 - When `read` is `false` on a prefix, the answer is `403`. A prefix has no level below it.
@@ -275,7 +275,7 @@ object at the root, another folder, Insights of the whole bucket and an upload g
 
 ### Requests to the PDP
 
-S3-Browser asks the PDP with AuthZEN:
+Stowr asks the PDP with AuthZEN:
 
 ```json
 POST {pdp.url}/access/v1/evaluation
@@ -293,29 +293,29 @@ POST {pdp.url}/access/v1/evaluation
 
 - A question on the service has no `ancestors`. A question on a bucket has the ancestors `[service]`. A question on a
   prefix has the ancestors `[service, bucket]`.
-- For more than one question, S3-Browser sends one batch to `POST {pdp.url}/access/v1/evaluations`. The subject is at
+- For more than one question, Stowr sends one batch to `POST {pdp.url}/access/v1/evaluations`. The subject is at
   the top. Only a question of the navigation has a `context`: `{"match": "subtree"}`. The other questions use the
-  default match `node`. A batch has `pdp.max_evaluations` questions at most. S3-Browser sends more batches for more
+  default match `node`. A batch has `pdp.max_evaluations` questions at most. Stowr sends more batches for more
   questions.
 - Each call has `Authorization: Bearer <pdp token>` and `X-Request-ID`. The id is the `X-Request-ID` of the request
   (1 to 128 characters of `A-Z`, `a-z`, `0-9`, `.`, `_`, `:` and `-`), else a new random id.
 - **Fail closed.** No answer before `pdp.timeout`, a connection error, a redirect, a status that is not `200`, a body
   that is larger than 256 KiB, and a body that is not a valid answer give the decision `false` for each question of
-  the call. S3-Browser writes the line `access.pdp_failed` and never keeps a failure.
+  the call. Stowr writes the line `access.pdp_failed` and never keeps a failure.
 - A `false` decision with `"context": {"reason": "unknown_subject"}` tells that the PDP does not know the subject.
-  S3-Browser has no resource that a human owns. Thus it only writes the reason in the log. Every other `false`
+  Stowr has no resource that a human owns. Thus it only writes the reason in the log. Every other `false`
   decision means "no permission".
-- S3-Browser keeps an answer for `pdp.cache_ttl` at most. The key is the subject, the action, the chain of the
+- Stowr keeps an answer for `pdp.cache_ttl` at most. The key is the subject, the action, the chain of the
   resource and the match. Thus a `subtree` answer never answers a `node` question. A change of the policy applies after
   `cache_ttl` at most.
-- The cache holds 16384 answers and 8 MiB at most. When the cache is full, S3-Browser removes the expired answers. If
-  the cache is still full, S3-Browser empties it. These bounds are not settings.
+- The cache holds 16384 answers and 8 MiB at most. When the cache is full, Stowr removes the expired answers. If
+  the cache is still full, Stowr empties it. These bounds are not settings.
 
 ## Enforcement
 
-- S3-Browser checks the decision of each route before the route reads or changes the storage, also when the page does
+- Stowr checks the decision of each route before the route reads or changes the storage, also when the page does
   not show the action.
-- If the decision is `false`, S3-Browser sends status `403` with
+- If the decision is `false`, Stowr sends status `403` with
   `{"error": {"code": "forbidden", "action": "<action>", "message": "The action <action> is not allowed."}}`. The
   answer does not give the reason of the PDP. The object gateway (`/s3`, `/open/`) sends the same JSON body.
 - The user interface hides what the human cannot do. It reads `capabilities` of `GET /api/instances` for the bucket,
@@ -331,18 +331,18 @@ POST {pdp.url}/access/v1/evaluation
 - The request log adds `subject` and `request_id` to each request with a verified token. The anonymous log mode still
   hides the object keys of the paths. The subject is not hidden: the contract requires it.
 - `access.unauthenticated` and `access.pdp_failed` are the lines of a refused token and of a failed call to the PDP.
-- S3-Browser has no OpenTelemetry export. Thus the call to the PDP is not a CLIENT span. This is a difference from
+- Stowr has no OpenTelemetry export. Thus the call to the PDP is not a CLIENT span. This is a difference from
   contract 11.7.
 
 ## Deviation from AuthZEN: TLS
 
-AuthZEN requires a secure connection to the PDP. S3-Browser accepts `https` and verifies the certificate with the
+AuthZEN requires a secure connection to the PDP. Stowr accepts `https` and verifies the certificate with the
 system roots. It also accepts `http` for a private network. With `http`, the deployment must limit the network to
-S3-Browser and the PDP. For example, a NetworkPolicy admits only the pods of S3-Browser to the port of the PDP.
+Stowr and the PDP. For example, a NetworkPolicy admits only the pods of Stowr to the port of the PDP.
 
 ## Upgrade from 1.0.13
 
-S3-Browser 2.0.0 adds the access of humans. [CHANGELOG.md](../CHANGELOG.md) gives all the upgrade steps of 2.0.0.
+The version 2.0.0 adds the access of humans. [CHANGELOG.md](../CHANGELOG.md) gives all the upgrade steps of 2.0.0.
 
 - Add the `access` block. `access { mode = "open" }` keeps the behavior of 1.0.13.
 - For `authzen`, give the public key of the access gateway and a token at the PDP. Then give the grants in the PDP.

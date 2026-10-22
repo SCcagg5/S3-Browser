@@ -50,7 +50,7 @@ A process restart discards all of this state. No hidden object is written to a c
 
 ## Upload resume protocol
 
-A resumable upload creates a provider-side S3 multipart upload or GCS resumable session. The server returns an opaque `s3br1` token containing the encrypted and authenticated provider coordinates, target object, size, media type, chunk size, and expiry.
+A resumable upload creates a provider-side S3 multipart upload or GCS resumable session. The server returns an opaque `stowr1` token containing the encrypted and authenticated provider coordinates, target object, size, media type, chunk size, and expiry.
 
 The token key is derived from the configured provider credential material when available. This allows another process with the same HCL credentials to open the token without a server-side record. The server then reconciles the actual provider state:
 
@@ -216,7 +216,7 @@ The engine does these steps:
 4. It sends one `UploadPartCopy` for each part of 256 MiB, with `x-amz-copy-source-range`. Four parts go at the same time. Above 10000 parts, the parts become larger.
 5. It sends `CompleteMultipartUpload`.
 
-Each part has `x-amz-copy-source-if-match` with the ETag of the source. A source that changes during the copy makes the copy fail. On an error or a cancel, the engine sends `AbortMultipartUpload`. The abort has its own time limit of 30 seconds, because the context of the copy can be canceled. No byte of the object goes through S3-Browser.
+Each part has `x-amz-copy-source-if-match` with the ETag of the source. A source that changes during the copy makes the copy fail. On an error or a cancel, the engine sends `AbortMultipartUpload`. The abort has its own time limit of 30 seconds, because the context of the copy can be canceled. No byte of the object goes through Stowr.
 
 Each request of the engine takes a slot of the concurrency gates of the bucket. Thus the limits `max_concurrent_requests_per_storage` and `max_concurrent_storage_requests` apply. A request of the engine waits for its slot with no time limit.
 
@@ -246,7 +246,7 @@ A wrong value gives `400 invalid_metadata` with the name of the field. The serve
 2. Under the threshold of the copy in parts, it sends `CopyObject` onto the same key with `x-amz-metadata-directive: REPLACE`, `x-amz-tagging-directive: COPY` and `x-amz-copy-source-if-match` with the ETag of the form. A provider answer `412` also gives `412 object_changed`.
 3. From the threshold up, it uses the engine of the copy in parts, with the new metadata at `CreateMultipartUpload`, the tags of the source and the ETag of the form.
 
-The copy also sends the storage class, the website redirect and the server-side encryption of the source again, when the HEAD answer has them. Else AWS would change them. An object with an encryption key of the customer (SSE-C) gives `400`: S3-Browser does not have the key.
+The copy also sends the storage class, the website redirect and the server-side encryption of the source again, when the HEAD answer has them. Else AWS would change them. An object with an encryption key of the customer (SSE-C) gives `400`: Stowr does not have the key.
 
 A request with `version` copies that version onto the key. The version becomes the current version, as a restore does. The tags of that version stay.
 
@@ -263,7 +263,7 @@ The details of a file have the section "Metadata" with the stored values and a f
 | The modification date changes. | Always | Yes | Yes | Yes |
 | A new version is created. | Versioning is on | Yes | Yes | No versioning: the sentence is not shown |
 | This version becomes the current version. | The form shows an older version | Yes | Yes | No versioning |
-| The ETag changes: S3-Browser copies an object of this size in parts. | `copyInParts` | Yes (`<digest>-<parts>`) | Yes | Yes |
+| The ETag changes: Stowr copies an object of this size in parts. | `copyInParts` | Yes (`<digest>-<parts>`) | Yes | Yes |
 | The ETag can change: the object was uploaded in parts. | `multipartETag`, under the threshold | No: the ETag stays | Yes: the ETag becomes the MD5 of the object | No: the ETag stays |
 | (No sentence) | One part, under the threshold | The ETag stays | The ETag stays | The ETag stays |
 
@@ -294,7 +294,7 @@ The server reads the list with these rules:
 
 The job counts `aborted`, `skippedUndated`, `skippedRecent`, `skippedActive` and `failed` in `multipartAbort`. These safety rules apply:
 
-- The job never aborts an upload without a start date. The provider does not let S3-Browser know its age.
+- The job never aborts an upload without a start date. The provider does not let Stowr know its age.
 - The job never aborts an upload younger than 24 hours, also when the cutoff is later.
 - No request aborts an upload that the resumable-upload store of this process sends now (status `uploading`, `src/uploads.go`). The list shows such an upload with `active: true`.
 
@@ -360,16 +360,16 @@ S3 has no condition on `PutBucketLifecycleConfiguration`. The lock and the hash 
 
 ### The fields of each provider
 
-S3-Browser never writes to a bucket to find what the provider keeps. It uses a table for each provider that it knows. The facts come from requests to the providers of the test stack (refer to `test/README.md`) and from the documentation of AWS S3.
+Stowr never writes to a bucket to find what the provider keeps. It uses a table for each provider that it knows. The facts come from requests to the providers of the test stack (refer to `test/README.md`) and from the documentation of AWS S3.
 
-At start, the server reads the configuration of each instance with the read permission. A provider that answers `501` or `405` gets `lifecycleSupported: false` in `/api/instances`, and the page hides the item. The server also sends one `GetObject` for the key `.s3-browser-provider-probe` under the root prefix. The object does not exist. The answer tells the provider:
+At start, the server reads the configuration of each instance with the read permission. A provider that answers `501` or `405` gets `lifecycleSupported: false` in `/api/instances`, and the page hides the item. The server also sends one `GetObject` for the key `.stowr-provider-probe` under the root prefix. The object does not exist. The answer tells the provider:
 
 - An endpoint under `amazonaws.com`, or the header `Server: AmazonS3`, is AWS S3.
 - `Server: MinIO` is MinIO. `Server: SeaweedFS <size> <version>` is SeaweedFS.
 - Garage v2.4.1 sends no `Server` header and no request id. Its error document has a `Region` element and no `RequestId` element.
-- Any other answer is a provider that S3-Browser does not know.
+- Any other answer is a provider that Stowr does not know.
 
-| Field | AWS S3 | SeaweedFS | MinIO | Garage | Provider that S3-Browser does not know |
+| Field | AWS S3 | SeaweedFS | MinIO | Garage | Provider that Stowr does not know |
 | --- | --- | --- | --- | --- | --- |
 | Expiration after N days, with a prefix | Yes | Yes | Yes | Yes | Yes |
 | Tag filter | Yes | Yes | Yes | No: dropped, and the rule applies to every object under the prefix | Only when a rule of the bucket has one |
@@ -423,7 +423,7 @@ The GCS backend has no Object Lock: the routes answer `501 object_lock_unsupport
 | `legalHold` | `true` when the legal hold is on. |
 | `bucketDefault` | `null`, or the default retention of the bucket: `mode` and `days` or `years`. |
 | `now` | The date of the server. |
-| `maxRetentionDays` | 36500, the latest date that S3-Browser sets, in days from now. |
+| `maxRetentionDays` | 36500, the latest date that Stowr sets, in days from now. |
 
 The providers give "no lock" with different answers. SeaweedFS gives `404 ObjectLockConfigurationNotFoundError` for a version without a retention, and `404 NoSuchObjectLegalHold` without a legal hold. MinIO gives `400 NoSuchObjectLockConfiguration` for both, and AWS S3 gives `404 NoSuchObjectLockConfiguration`. The server reads each of these codes as "no lock". `NoSuchKey` stays an error.
 
@@ -432,7 +432,7 @@ The providers give "no lock" with different answers. SeaweedFS gives `404 Object
 `PUT /api/object-lock` changes the lock of one version. The body has `key`, `version` (required), and `legalHold`, `retention` (`mode` and `retainUntil`) or both. The server checks the body before a request to the provider:
 
 - `mode` is `GOVERNANCE` or `COMPLIANCE`, in uppercase. No other value is accepted.
-- `retainUntil` is an RFC 3339 date in the future and at most 36500 days from now. S3-Browser sends it with a precision of one second.
+- `retainUntil` is an RFC 3339 date in the future and at most 36500 days from now. Stowr sends it with a precision of one second.
 - `version` has 1 to 1024 printable ASCII characters.
 
 A wrong value gives `400 invalid_object_lock`. The server then reads the lock of the version and applies these rules:
@@ -447,7 +447,7 @@ A wrong value gives `400 invalid_object_lock`. The server then reads the lock of
 
 The comparison of the dates uses the seconds: SeaweedFS keeps the seconds, and MinIO keeps the milliseconds. The server sends the retention first and then the legal hold. It does not send a part that does not change. A provider that refuses a change gives `409 object_lock_refused` with the status and the code of the provider. The answer of a save is the new state. The server writes one log line for each change. The line has the key, the version, the change, the use of the bypass and the subject of the request.
 
-The read needs `objects.read`, and a change needs `objects.write` on the node of the key. No new right exists. The bypass also needs the bypass permission of the provider for the credentials of the instance (on AWS S3, `s3:BypassGovernanceRetention`). Refer to [ACCESS.md](ACCESS.md). S3-Browser does not set a retention at upload, and does not change the default retention of a bucket.
+The read needs `objects.read`, and a change needs `objects.write` on the node of the key. No new right exists. The bypass also needs the bypass permission of the provider for the credentials of the instance (on AWS S3, `s3:BypassGovernanceRetention`). Refer to [ACCESS.md](ACCESS.md). Stowr does not set a retention at upload, and does not change the default retention of a bucket.
 
 ### Deletes that a lock refuses
 
@@ -490,7 +490,7 @@ The form refuses an earlier date for an active Compliance retention, and says wh
 
 ## Encryption
 
-The code is in `src/encryption.go`. S3-Browser shows the server-side encryption that the provider reports. It can also ask for SSE-S3 for each object that it writes. It does not support SSE-C or SSE-KMS for the writes. It never shows, asks for or keeps a key of the client.
+The code is in `src/encryption.go`. Stowr shows the server-side encryption that the provider reports. It can also ask for SSE-S3 for each object that it writes. It does not support SSE-C or SSE-KMS for the writes. It never shows, asks for or keeps a key of the client.
 
 ### Encryption of the writes
 
@@ -541,9 +541,9 @@ The preview page of an SSE-C object shows the name and the path of the object, a
 | --- | --- |
 | `encryption` | The key `encryption` of the bucket: `""` or `"sse-s3"` |
 | `defaultEncryption` | The algorithm of the default encryption of the bucket at start (`AES256`, `aws:kms`), or `""` |
-| `encryptionApplied` | For `"sse-s3"` only: `"yes"` on AWS S3, MinIO and SeaweedFS, `"no"` on Garage, `"unknown"` for a provider that S3-Browser does not know |
+| `encryptionApplied` | For `"sse-s3"` only: `"yes"` on AWS S3, MinIO and SeaweedFS, `"no"` on Garage, `"unknown"` for a provider that Stowr does not know |
 
-The mark of the encryption is a key (Tabler `key`). The mark of Object Lock is a closed padlock (Tabler `lock`). The bucket selector shows a key in the facts of a bucket that encrypts. The tooltip says "Encrypted: SSE-S3 for each new object" or "Default encryption of the bucket: AES256". The key tells the truth of the provider. Garage accepts the header and does not encrypt, so a Garage bucket with `"sse-s3"` gets a key in the colour of a warning. For a provider that S3-Browser does not know, the tooltip says "SSE-S3 requested; the provider may not encrypt". A bucket with Object Lock also gets its padlock: the two marks are separate, and each shows only when it is true.
+The mark of the encryption is a key (Tabler `key`). The mark of Object Lock is a closed padlock (Tabler `lock`). The bucket selector shows a key in the facts of a bucket that encrypts. The tooltip says "Encrypted: SSE-S3 for each new object" or "Default encryption of the bucket: AES256". The key tells the truth of the provider. Garage accepts the header and does not encrypt, so a Garage bucket with `"sse-s3"` gets a key in the colour of a warning. For a provider that Stowr does not know, the tooltip says "SSE-S3 requested; the provider may not encrypt". A bucket with Object Lock also gets its padlock: the two marks are separate, and each shows only when it is true.
 
 A listing does not give the encryption of an object. Thus the listing reads it with a HEAD request for each file on the page, as it reads the tags: 4 requests at the same time, 100 files at most. A file waits with a mark, and an answer stays for the ETag and the date of the file. An encrypted file gets a small key at the right of its name, in the cell of the name. The padlock of a lock follows the key. The tooltip of the key names the encryption: SSE-S3, SSE-KMS with its key, or "key of the client" (SSE-C). A HEAD request of an SSE-C object fails with `400`, and `GET /api/media-info` then confirms the key of the client. Such a file gets no padlock, because its HEAD answer gives no header. A file without an encryption gets no key.
 
@@ -739,10 +739,10 @@ block". The test with a real `weed mount` is in [test/README.md](../test/README.
 - Hidden files (a name that starts with `.`) are visible. The names keep the case that the file system gives.
 - A name that is not valid UTF-8 shows with the replacement character. The server cannot read, write or delete it.
   A key of a write must be valid UTF-8.
-- The names that start with `.s3b-tmp-` are for the temporary files of S3-Browser. A write with such a name is
+- The names that start with `.stowr-tmp-` are for the temporary files of Stowr. A write with such a name is
   refused, and the listings do not show these files.
-- Limit: a process outside S3-Browser that changes a symbolic link between the check and the use of a path can race
-  the check. The API of S3-Browser cannot make a symbolic link.
+- Limit: a process outside Stowr that changes a symbolic link between the check and the use of a path can race
+  the check. The API of Stowr cannot make a symbolic link.
 
 ### Listing
 
@@ -773,7 +773,7 @@ block". The test with a real `weed mount` is in [test/README.md](../test/README.
 
 ### Writes
 
-- A write of a file goes to a new temporary file `.s3b-tmp-<random>` in the folder of the target. The server writes
+- A write of a file goes to a new temporary file `.stowr-tmp-<random>` in the folder of the target. The server writes
   the bytes, synchronizes the file to the disk (`fsync`), and gives it the name of the target with one rename. A
   reader sees the old file or the new file, never a part. An existing file is replaced. A folder with the name of the
   target stops the write (`409 volume_folder_exists`).
@@ -796,7 +796,7 @@ block". The test with a real `weed mount` is in [test/README.md](../test/README.
 ### Uploads and incomplete uploads
 
 - A resumable upload (`/api/uploads`) writes its chunks to a temporary file in the folder of the target:
-  `.s3b-tmp-<random>-<name of the target>`. The next chunk starts at the size of the temporary file, so a client can
+  `.stowr-tmp-<random>-<name of the target>`. The next chunk starts at the size of the temporary file, so a client can
   resume after a lost connection. The last chunk synchronizes the file and gives it the name of the target.
 - The resume token holds the path of the temporary file and the key of the target, encrypted and authenticated. A
   volume has no credential: the key of the token is a random key of the process. Thus a token does not stay valid
@@ -821,9 +821,9 @@ for `versioningSupported`, `tagsSupported`, `metadataEditSupported`, `lifecycleS
   `usedObjects`, the number of these files. A sizer counts them in the background: a request never walks the tree. One
   walk at a time runs. A walk reads at most 1,000,000 entries in 20 seconds; a larger tree gives `selfState:
   "partial"`. While a walk runs, the answer gives its progress with `selfState: "computing"`. A walk does not follow a
-  symbolic link, and does not count the temporary files of S3-Browser. The count stays for 5 minutes. A write of
-  S3-Browser in the volume (an upload, a copy, a move, a delete) makes it old: the next read starts a new walk. A change
-  that a process outside S3-Browser makes shows after the 5 minutes. The sizes are the sizes of the files, not the
+  symbolic link, and does not count the temporary files of Stowr. The count stays for 5 minutes. A write of
+  Stowr in the volume (an upload, a copy, a move, a delete) makes it old: the next read starts a new walk. A change
+  that a process outside Stowr makes shows after the 5 minutes. The sizes are the sizes of the files, not the
   blocks of the disk.
 - The storage: the file system of the folder (`statfs`, scope `filesystem`). The used bytes are the size minus the
   available bytes, the total is the size, and the free bytes are the available bytes. `storage.approximate` is `true` on a
@@ -842,7 +842,7 @@ a volume at each request, without the cache: a read is a `statfs` call and the c
 - The test with a real `weed mount` of SeaweedFS 4.41 (test/volume-fuse) passes: the Go tests of the volumes and a
   browser smoke test run on the mount. The facts of that test are in [test/README.md](../test/README.md).
 - A network file system can show a change of an other client with a delay. A listing can then be old by a few
-  seconds. The writes of S3-Browser through the same mount are visible at once.
+  seconds. The writes of Stowr through the same mount are visible at once.
 
 ## Insights treemap normalization
 
@@ -901,7 +901,7 @@ The server never writes a temporary archive or member to disk. Unsafe paths, sym
 The binary embeds two frontend trees. The HCL key `server.frontend` selects one tree at start (see [Configuration](CONFIGURATION.md#frontend-selection)). The server then gives only the files of that tree.
 
 - `default` is `src/public/`.
-- `portal` is `src/frontends/portal/`. It is a test of the s3-browser interface: the header of ClickHouse Dash, the bucket selector of the default interface, the parts of the portal and the dense tables of ClickHouse Dash. The top of `assets/css/portal.css` gives the design rules as tokens.
+- `portal` is `src/frontends/portal/`. It is a test of the Stowr interface: the header of ClickHouse Dash, the bucket selector of the default interface, the parts of the portal and the dense tables of ClickHouse Dash. The top of `assets/css/portal.css` gives the design rules as tokens.
 
 The `portal` tree contains its own pages and scripts:
 
@@ -933,4 +933,4 @@ The two trees have different fingerprints, because the fingerprint covers all th
 
 ## Frontend path model
 
-Assets and API URLs are relative to `document.baseURI`. A path-stripping reverse proxy can therefore expose the same build at `/`, `/s3-browser/`, or another prefix without an HCL public-path setting or a frontend rebuild.
+Assets and API URLs are relative to `document.baseURI`. A path-stripping reverse proxy can therefore expose the same build at `/`, `/stowr/`, or another prefix without an HCL public-path setting or a frontend rebuild.

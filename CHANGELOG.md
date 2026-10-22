@@ -2,7 +2,41 @@
 
 This document uses ASD-STE100 Simplified Technical English.
 
-## Unreleased
+## 3.0.0 (2026-10-23)
+
+The product has a new name: Stowr. It also shows the folders of a server (volumes), so the name of a browser of S3 does
+not fit any more. Version 3.0.0 is one release with the functions for S3 buckets of 2.1.0, the volumes, the new
+interface `portal` and the new name. The numbers 2.1.0 and 2.2.0 were never published. A configuration file of 2.0.0
+starts without any change of a key. The names of the binary, of the image and of some headers change: refer to
+[Upgrade steps from 2.0.0](#upgrade-steps-from-200).
+
+### Upgrade steps from 2.0.0
+
+Do these steps before you start 3.0.0:
+
+1. The binary is `stowr`, not `s3-browser`. The archives of a release are `stowr_<version>_linux_<arch>.tar.gz`, not
+   `s3-browser_<version>_linux_<arch>.tar.gz`. Change the commands of your scripts and services, for example
+   `stowr -c <file>`, `stowr print-config -c <file>`, `stowr healthcheck -c <file>` and `stowr version`.
+2. The entrypoint of the image is `/stowr`, not `/s3-browser`. Change the command and the health check of your Compose
+   files and of your Kubernetes manifests, for example `["/stowr", "healthcheck", "-c", "/config/config.hcl"]`.
+3. A client of the upload API sends the header `X-Stowr-Resume-Token`, not `X-S3-Browser-Resume-Token`. The resume
+   tokens of 2.0.0 do not continue after the upgrade: start each open upload again. The trailers of an archive and of a
+   request also change their names: `X-Stowr-Archive-Status`, `X-Stowr-Archive-Entries`, `X-Stowr-Archive-Bytes`,
+   `X-Stowr-Storage-Requests`, `X-Stowr-Storage-Bytes` and `X-Stowr-Elapsed-Ms` (before: `X-S3-Browser-…`). An
+   archive that stops before its end has the file `__STOWR_ARCHIVE_INCOMPLETE.txt` (before:
+   `__S3_BROWSER_ARCHIVE_INCOMPLETE.txt`).
+4. `access.identity.audience` is a mandatory key of the mode `authzen`, with no default value: it does not change.
+   In the mode `open`, the id of the server in `/.well-known/access-actions` and of the service resource is `stowr`,
+   not `s3-browser`. Change a tool that reads this id.
+5. The probes at start read three keys that do not exist: `.stowr-provider-probe`, `.stowr-tags-probe` and
+   `.stowr-metadata-probe` (before: `.s3-browser-provider-probe`, `.s3-browser-tags-probe` and
+   `.s3-browser-metadata-probe`), under the root prefix of each instance. Change a bucket policy or a rule of a
+   gateway that names the old keys.
+6. A temporary file of an upload to a volume starts with `.stowr-tmp-`, not `.s3b-tmp-`. Finish or stop the uploads
+   to the volumes before the upgrade. After it, the listing shows a file `.s3b-tmp-…` that stays from 2.x: delete it.
+7. The repository is `https://github.com/SCcagg5/stowr`. GitHub sends the old address to it.
+8. For a build from the source: the Go module is `stowr`. The portal keeps its last shown version in the browser
+   under the key `stowr.portal.version`: the notice of a new version shows one time after the upgrade.
 
 ### Usage: what a bucket or a volume holds, and the capacity of the storage behind it
 
@@ -18,7 +52,7 @@ This document uses ASD-STE100 Simplified Technical English.
   alone.
 - A volume gives what its folder holds (`selfBytes`, the number of files, and `selfState`: `computing`, `partial` or
   `ready`), from a count in the background with a budget (1,000,000 entries, 20 seconds, 5 minutes of life, made old by
-  each write of S3-Browser), and its file system as the storage.
+  each write of Stowr), and its file system as the storage.
 - Interface `portal`: the usage in the bucket selector starts with the amount that the bucket holds (`3 MB`), before
   the bar and the percent. For a volume, the amount is `computing…` or `≥ 3 MB` while the count runs. A narrow
   selector drops the amount first (440 px). Each entry of the list has the same amount. The chip keeps its one-row form
@@ -30,8 +64,10 @@ This document uses ASD-STE100 Simplified Technical English.
 - Interface `portal`: the product has the name Stowr in the header, the titles of the pages, the favicon and the
   texts of the page. The logo is a crate with a lid and two slats. The logo of the header has the colour
   `--accent-fill`, as the logo of ClickHouse Dash. The favicon has the colour `#2558d9` of the favicon of ClickHouse
-  Dash. The repository, the Docker image, the README and the documentation keep the old name until the next major
-  release.
+  Dash.
+- The binary, the image, the archives of a release, the headers, the hidden probe keys, the temporary files of a
+  volume, the README and the documentation have the new name. Refer to
+  [Upgrade steps from 2.0.0](#upgrade-steps-from-200).
 
 ### Information page of a bucket
 
@@ -129,7 +165,7 @@ change. Refer to the section "Volume block" of [docs/CONFIGURATION.md](docs/CONF
 - Tests: the Go tests of the volumes, a volume in the portal test stack, and the real test on a FUSE mount of
   SeaweedFS (`test/volume-fuse/run.sh`). Refer to [test/README.md](test/README.md).
 
-## 2.1.0
+## 2.1.0 (never published, included in 3.0.0)
 
 Version 2.1.0 adds the test interface `portal`, many functions for S3 buckets and a first set of tests on three
 providers (SeaweedFS, MinIO and Garage). Each new key of the configuration is optional. A configuration file of 2.0.0
@@ -183,7 +219,7 @@ The main additions are:
   uploads" of [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - New routes: `GET /api/multiparts` (the list, with pages) and `POST /api/multiparts/abort` (the selected uploads, or
   the new job `abort_multiparts` for the uploads older than N days).
-- The list sends no prefix to the provider and filters the keys in S3-Browser: MinIO gives an empty list for a prefix
+- The list sends no prefix to the provider and filters the keys in Stowr: MinIO gives an empty list for a prefix
   that is not a full key. The pages follow the markers of each provider. The count and the size of the parts come from
   the first 1000 parts, and the page says "at least" for a larger upload.
 - The abort by age never aborts an upload without a start date (SeaweedFS gives none) or an upload younger than 24

@@ -13,7 +13,7 @@ A test makes sure that this file and the table agree.
 - A key without a value in the file has its default value. A key with `(required)` must have a value.
 - The `access` block is mandatory. A file without it stops the start.
 - A file needs one `bucket` block or one `volume` block at least. A `bucket` block needs an `auth` block.
-- `s3-browser print-config -c <file>` checks the file, writes the value of each key and its source, and exits with status 0.
+- `stowr print-config -c <file>` checks the file, writes the value of each key and its source, and exits with status 0.
   The source is `file`, `env:<VAR>`, `file:<path>` or `default`. The output hides each secret.
 - At start, the server writes the same values in its log.
 

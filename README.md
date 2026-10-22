@@ -1,6 +1,6 @@
-# Object Storage Browser
+# Stowr
 
-Object Storage Browser is a self-contained Go application for browsing and operating on S3-compatible storage and Google Cloud Storage. It can also show a folder of the server, for example a FUSE mount of SeaweedFS, as a bucket (a volume). It is designed for hosts with a small memory budget and for objects that can be hundreds of gigabytes.
+Stowr is a self-contained Go application for browsing and operating on S3-compatible storage and Google Cloud Storage. It can also show a folder of the server, for example a FUSE mount of SeaweedFS, as a bucket (a volume). It is designed for hosts with a small memory budget and for objects that can be hundreds of gigabytes.
 
 Core properties:
 
@@ -22,8 +22,8 @@ Core properties:
 ```sh
 cp config.example.hcl config.hcl
 cd src
-CGO_ENABLED=0 go build -trimpath -o s3-browser .
-./s3-browser -c ../config.hcl
+CGO_ENABLED=0 go build -trimpath -o stowr .
+./stowr -c ../config.hcl
 ```
 
 The configuration must contain the `access` block (see [Access of humans](docs/ACCESS.md)), and one `bucket` block or one `volume` block at least. A `bucket` block needs an `auth` block.
@@ -117,10 +117,10 @@ The project intentionally has no global duplicate finder and no global checksum-
 
 ## Reverse proxy path prefixes
 
-The backend always serves paths from `/`. The frontend uses relative URLs. To publish it at `/s3-browser/`, strip that prefix before forwarding:
+The backend always serves paths from `/`. The frontend uses relative URLs. To publish it at `/stowr/`, strip that prefix before forwarding:
 
 ```nginx
-location /s3-browser/ {
+location /stowr/ {
     proxy_pass http://127.0.0.1:8080/;
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-Proto $scheme;

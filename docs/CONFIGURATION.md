@@ -2,7 +2,7 @@
 
 The application accepts one HCL file through `-c <path>` or `-config <path>`. Runtime settings and provider credentials come from this file only. An attribute with an `_env` form reads the environment variable that the file names, and no other variable.
 
-[configuration-reference.md](configuration-reference.md) is the generated list of every key, with its default, its range and its forms. `s3-browser print-config -c <path>` (or `s3-browser -c <path> --print-config`) checks the file, writes the value and the source of each key, and exits. The server writes the same values in its log at start. Secrets are hidden.
+[configuration-reference.md](configuration-reference.md) is the generated list of every key, with its default, its range and its forms. `stowr print-config -c <path>` (or `stowr -c <path> --print-config`) checks the file, writes the value and the source of each key, and exits. The server writes the same values in its log at start. Secrets are hidden.
 
 Supported top-level blocks:
 
@@ -212,7 +212,7 @@ These rules stop the start:
   volumes in the interface (`/-/volume/<id>/`).
 
 The address of a volume in the interface is `/-/volume/<id>/`. The access policy names it as a bucket: the resource
-`bucket:<id>`, and `prefix:<name>` for a top-level folder (refer to [ACCESS.md](ACCESS.md)). The process of S3-Browser
+`bucket:<id>`, and `prefix:<name>` for a top-level folder (refer to [ACCESS.md](ACCESS.md)). The process of Stowr
 reads and writes the files: give it the owner or the group of the folder. In a container, mount the folder with
 write access, and keep the root file system read only.
 
@@ -232,11 +232,11 @@ access {
   identity {
     issuer           = "portal.home"
     audience         = "infra-s3"
-    public_keys_file = "/run/secrets/s3_browser_identity_keys"
+    public_keys_file = "/run/secrets/stowr_identity_keys"
   }
   pdp {
     url        = "http://portal-pdp.edge.svc.cluster.local:4182"
-    token_file = "/run/secrets/s3_browser_pdp_token"
+    token_file = "/run/secrets/stowr_pdp_token"
   }
 }
 ```
