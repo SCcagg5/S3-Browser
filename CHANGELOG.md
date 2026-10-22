@@ -48,10 +48,11 @@ This document uses ASD-STE100 Simplified Technical English.
   information page has their content.
 - The button "Open the lifecycle rules" of the page opens the listing with `?lifecycle`, which opens the window of the
   rules.
-- The information page has the visual language of the System page of ClickHouse Dash: parts with a heading, tiles for the numbers, cards with a key-value list, gauges for the quota and the
-  storage (the percent over a track), and status chips in the colours of the state icons. Two cards are side by side
-  on a wide window; the page is one column on a phone. The head shows the seven state icons of the selector
-  (`assets/js/states.js`, one source for the selector and the page).
+- The information page has the visual language of the System page of ClickHouse Dash: parts with a heading, cards
+  with a key-value list, gauges for the quota and the storage (the percent over a track), and status chips in the
+  colours of the state icons. Two cards are side by side on a wide window; the page is one column on a phone. The page
+  has no head and no tiles: the selector names the bucket. The state icons come from `assets/js/states.js`, one
+  source for the selector and the page.
 - A click on the usage in the selector (the amount, the percent or the bar) opens the information page, as a click on the
   state icons does, in the trigger and in each entry of the menu. The state icons and the usage are one link (one
   element, one hover) with no tooltip: a click opens the information page, which gives each line.

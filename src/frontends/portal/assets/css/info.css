@@ -1,10 +1,9 @@
 /* The information page of a bucket or a volume (info.html), in the visual language of the System page of ClickHouse
-   Dash: the panel colour from edge to edge, then parts
-   with a heading (16 px), tiles in their own boxes for the numbers, cards with a title (14 px) and a key-value list
-   with a border and lines of two shades (12 px), gauges as the disk cards of Dash (the percent over a track of 8 px),
-   and status chips (18 px). The chips and the tiles have the colours of the state icons of the selector: green (on,
-   allowed), orange (on, with a problem) and grey (off, not available, denied). The parts are in one column on a
-   phone. The page uses the tokens of portal.css. */
+   Dash: the panel colour from edge to edge, then parts with a heading (16 px), cards with a title (14 px) and a
+   key-value list with a border and lines of two shades (12 px), gauges as the disk cards of Dash (the percent over a
+   track of 8 px), and status chips (18 px). The chips have the colours of the state icons of the selector: green (on,
+   allowed), orange (on, with a problem) and grey (off, not available, denied). The page has no head: the selector
+   names the bucket. The parts are in one column on a phone. The page uses the tokens of portal.css. */
 
 html:has(> body.infoPage),
 .infoPage {
@@ -51,50 +50,26 @@ html:has(> body.infoPage),
   display: none;
 }
 
-/* The head: the name, the chips of the kind and of the root prefix, the seven state icons, then a muted line. */
-.infoHead {
+/* The message of a page that cannot show a bucket: an unknown bucket, or a failed read of the buckets. */
+.infoFailure {
   display: grid;
-  gap: 4px;
-  min-width: 0;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border));
+  border-radius: var(--radius-inner);
+  font-size: var(--fs-sm);
 }
 
-.infoHead__row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 10px;
-  min-width: 0;
-}
-
-.infoTitle {
-  min-width: 0;
-  margin: 0;
-  overflow: hidden;
-  font-size: var(--fs-2xl);
-  font-weight: var(--fw-semibold);
-  line-height: 1.3;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.infoHead__chips {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
-.infoHead__states {
-  cursor: default;
-}
-
-.infoHead__states[hidden] {
+.infoFailure[hidden] {
   display: none;
 }
 
-.infoHead__lede {
-  margin: 0;
+.infoFailure strong {
+  font-weight: var(--fw-semibold);
+}
+
+.infoFailure span {
   color: var(--muted);
-  font-size: var(--fs-sm);
 }
 
 /* Parts: a heading and a count, then the body.  */
@@ -136,71 +111,6 @@ html:has(> body.infoPage),
   display: grid;
   gap: 12px;
   min-width: 0;
-}
-
-/* Tiles in their own boxes: an eyebrow label, the value and a sub line. */
-.infoTiles {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
-  gap: 8px;
-}
-
-.infoTile {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-inner);
-}
-
-.infoTile__label,
-.infoTile__sub {
-  overflow: hidden;
-  color: var(--muted);
-  font-size: var(--fs-xs);
-  line-height: 1.3;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.infoTile__label {
-  font-weight: var(--fw-semibold);
-}
-
-.infoTile__value {
-  overflow: hidden;
-  font-size: var(--fs-xl);
-  font-weight: var(--fw-semibold);
-  font-variant-numeric: tabular-nums;
-  line-height: 1.25;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.infoTile.is-ok .infoTile__value {
-  color: var(--success);
-}
-
-.infoTile.is-off .infoTile__value {
-  color: var(--muted);
-}
-
-.infoTile.is-warn {
-  border-color: color-mix(in srgb, var(--warning) 55%, var(--border));
-}
-
-.infoTile.is-warn .infoTile__value {
-  color: var(--warning);
-}
-
-.infoTile.is-error {
-  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
-}
-
-.infoTile.is-error .infoTile__value {
-  color: var(--danger);
 }
 
 /* Two cards side by side on a wide window (3 / 2), one under the other on a narrow window. */

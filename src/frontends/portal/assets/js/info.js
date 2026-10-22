@@ -93,10 +93,6 @@
           item.note ? h('span', { class: 'infoKv__note' }, item.note) : null))));
   }
 
-  // A tile: a label, the value and a sub line. tone: "ok", "warn", "error" or "off".
-  const tile = ({ key, label, value, sub = '', tone = '', title = '' }) => h('div', { class: ['infoTile', tone && `is-${tone}`], 'data-tile': key, title: title || null },
-    h('span', { class: 'infoTile__label' }, label), h('span', { class: 'infoTile__value' }, value), sub ? h('span', { class: 'infoTile__sub' }, sub) : null);
-
   // A gauge, as a disk of the System page of Dash: its name and chips, the percent over a track, a summary and facts.
   function gauge({ key, title, chips = [], percent = null, level = '', approximate = false, value = '', summary = '', facts = [], note = '' }) {
     const tone = levelTone(level);
@@ -194,29 +190,6 @@
     const volume = usage.source === 'statfs';
     if (volume && usage.selfState !== 'ready') return usage.selfState === 'computing' ? 'the count runs' : 'the count stopped at its limit';
     return Number(usage.usedObjects) >= 0 ? plural(usage.usedObjects, volume ? 'file' : 'object') : '';
-  }
-
-  function summaryTiles(instance, usage) {
-    const tiles = [];
-    if (usageShown(usage) && usage.available === true) {
-      tiles.push(tile({ key: 'holds', label: isVolume(instance) ? 'This volume holds' : 'This bucket holds', value: holdsText(usage), sub: holdsSub(usage) }));
-      if (Number(usage.limitBytes) > 0) {
-        const quota = usage.quotaPercent ?? usage.percent;
-        tiles.push(tile({ key: 'quota', label: 'Quota', value: percentText(quota, usage.approximate), tone: levelTone(usage.quotaLevel ?? usage.level),
-          sub: `${mark(usage.approximate)}${bytes(usage.usedBytes)} of ${bytes(usage.limitBytes)}` }));
-      }
-    }
-    if (usageShown(usage) && usage.storage) {
-      const storage = usage.storage;
-      tiles.push(tile({ key: 'storage', label: 'Storage', value: percentText(storage.percent, storage.approximate), tone: levelTone(storage.level),
-        sub: `${mark(storage.approximate)}${bytes(storage.usedBytes)} of ${bytes(storage.totalBytes)}` }));
-      tiles.push(tile({ key: 'free', label: 'Free', value: bytes(storage.freeBytes), sub: isVolume(instance) ? 'on the file system' : 'on the storage' }));
-    }
-    for (const item of BB.states.permissions(instance)) {
-      tiles.push(tile({ key: item.key, label: item.label, value: BB.capabilities.stateLabel(item.state), tone: permissionTone(item.state) === 'on' ? 'ok' : 'off',
-        title: String(item.state.reason || '') }));
-    }
-    return h('div', { class: 'infoTiles', role: 'group', 'aria-label': 'Summary' }, tiles);
   }
 
   function storageBody(instance, usage) {
@@ -443,22 +416,10 @@
 
   const page = { instance: null, usage: undefined, lifecycle: undefined };
 
-  function renderHead(instance) {
-    byId('infoChips').replaceChildren(...[chip('accent', kindText(instance)), instance.rootPrefix ? chip('off', `/${instance.rootPrefix}`) : null].filter(Boolean));
-    const states = BB.states.list(instance, { versioning: versioningOf(instance, page.lifecycle), rules: rulesOf(instance, page.lifecycle) });
-    const strip = byId('infoStates');
-    strip.replaceChildren(...BB.states.nodes(states));
-    strip.setAttribute('aria-label', states.map(item => item.text).join(', '));
-    strip.title = states.map(item => item.text).join('\n');
-    strip.hidden = false;
-  }
-
   function render() {
     const instance = page.instance;
-    renderHead(instance);
     const sections = byId('infoSections');
     sections.replaceChildren(
-      part('summary', 'Summary', '', summaryTiles(instance, page.usage)),
       part('access', 'Identity and permissions', '',
         grid(card('identity', 'Identity', {}, kv(identityRows(instance), 'Identity')),
           card('permissions', 'Permissions', { countText: permissionCount(instance) },
@@ -482,9 +443,12 @@
     badge.title = `Server version\n${badge.textContent}${build.date ? `\nBuild: ${build.date}` : ''}`;
   }
 
+  // A page that cannot show a bucket: a small message with the reason. The rest of the page stays empty.
   function fail(title, text) {
     byId('infoTitle').textContent = title;
-    byId('infoLede').textContent = text;
+    byId('infoFailureTitle').textContent = title;
+    byId('infoFailureText').textContent = text;
+    byId('infoFailure').hidden = false;
     byId('infoSections').removeAttribute('aria-busy');
   }
 
@@ -521,8 +485,7 @@
     back.setAttribute('aria-label', back.title);
     back.querySelector('.backLink__text').textContent = `Back to ${instance.name || instance.id}`;
     document.title = `${instance.name || instance.id} - Information`;
-    byId('infoTitle').textContent = instance.name || instance.id;
-    byId('infoLede').textContent = `Information and permissions of this ${noun(instance)}. Read only.`;
+    byId('infoTitle').textContent = `Information of the ${noun(instance)} ${instance.name || instance.id}`;
     render();
     const reads = [];
     if (instance.usageSupported === true && can(instance, 'list')) reads.push(loadUsage(instance, false));

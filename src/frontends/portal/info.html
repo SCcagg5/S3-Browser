@@ -47,14 +47,8 @@
 
   <main id="main" class="infoMain" tabindex="-1">
     <div id="notices" class="notices" aria-live="polite"></div>
-    <div class="infoHead">
-      <div class="infoHead__row">
-        <h1 id="infoTitle" class="infoTitle">Loading the information</h1>
-        <span id="infoChips" class="infoHead__chips"></span>
-        <span id="infoStates" class="stateGroup infoHead__states" role="img" hidden></span>
-      </div>
-      <p id="infoLede" class="infoHead__lede"></p>
-    </div>
+    <h1 id="infoTitle" class="visually-hidden">Information of the bucket</h1>
+    <div id="infoFailure" class="infoFailure" role="alert" hidden><strong id="infoFailureTitle"></strong><span id="infoFailureText"></span></div>
     <div id="infoBanner" class="usageBanner" role="alert" hidden></div>
     <div id="infoSections" class="infoSections" aria-busy="true"></div>
   </main>

@@ -156,10 +156,9 @@ Only the bucket selector opens the page:
 The page has the header of the listing in one row: the brand at the left edge, the link "Back to <bucket>" after it, and the theme at the right edge. The page has the visual language of the System page of ClickHouse Dash:
 
 - The panel colour goes from edge to edge, with the gutter of the header (12 px, 10 px on a narrow window).
-- The header has the selector of the hosts and buckets (the same classes as the listing, with links): an entry opens the information page of that bucket. The page is one page with no tabs. The parts are one under the other: "Summary", "Identity and permissions", "Storage" and "Functions".
-- The head has the name (20 px), a chip with the kind of storage, a chip with the root prefix, and the seven state icons of the selector (`assets/js/states.js`).
+- The header has the selector of the hosts and buckets (the same classes as the listing, with links): an entry opens the information page of that bucket. The page is one page with no tabs. The parts are one under the other: "Identity and permissions", "Storage" and "Functions".
+- The page has no head: the selector names the bucket. A hidden heading (h1) names the page for a screen reader. A bucket that does not exist, or a failed read of the buckets, gives a small message with the reason, and no part.
 - Each part has a heading (16 px), then its content. The parts are 32 px apart.
-- Numbers are in tiles with a border: a label, the value (16 px) and a sub line. A used part of 80 % or more has the colour of a warning, and of 95 % or more the colour of an error.
 - Two cards are side by side (3 / 2) on a wide window, and one under the other at 820 px and less. A card has a title (14 px) and a key-value list: a border, the keys in muted text, and a darker shade on each second row (12 px). On a phone, the key is above its value.
 - The quota and the storage are gauges, as the disk cards of Dash: the name and its chips, the percent (16 px) over a track of 8 px, a summary ("12 MB used of 20 GB") and facts.
 - The states are chips of 18 px, in the colours of the state icons: green (on, allowed), orange (on, with a problem) and grey (off, not available, denied). The page has no red chip: a denied permission is grey, as in the selector.
@@ -168,7 +167,6 @@ Each row shows only when the server knows its value:
 
 | Part | Content |
 | --- | --- |
-| Summary | Tiles: what the bucket or the volume holds, the quota, the storage, the free bytes, and read, write and delete |
 | Identity and permissions | The card Identity: the name, the id, the kind of storage (AWS S3, MinIO, SeaweedFS, Garage, or "S3" for a provider that the probe did not recognise; "Mounted folder of the server" for a volume), the host, the bucket, the root prefix and the region. The card Permissions: read, write and delete, with the reason of each decision (the ceiling of the configuration, `server.access_mode = "force_read_only"` or the access policy), the permissions of the configuration, and for a volume, if the process can write in the folder |
 | Storage | A card for what the bucket or the volume holds (with the source and the time of the count), a gauge for the quota (with the bytes left and the objects), and a gauge for the storage behind it (with its free bytes). An approximate number has a `~`, a chip "Approximate" and the reason. A full bucket gets the banner of the listing above the parts |
 | Functions | The card Data protection: versioning (enabled, suspended or never enabled), the encryption of the writes, the default encryption of the bucket, if the provider applies SSE-S3, and Object Lock with its default retention. The card Operations: the lifecycle rules with the button "Open the lifecycle rules", tags, the edit of the metadata, the incomplete uploads and the SHA-256 checksum of the uploads |
