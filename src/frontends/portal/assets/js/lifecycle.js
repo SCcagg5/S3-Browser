@@ -318,9 +318,8 @@
         h('div', { class: 'lifecycleRule__head' },
           h('span', { class: 'lifecycleRule__name mono' }, rule.id || (kept && !item.entry.xml ? 'Other rule' : '(no ID)')),
           h('span', { class: `badge${rule.enabled ? ' badge--ok' : ''}` }, rule.enabled ? 'Enabled' : 'Disabled'),
-          kept ? h('span', { class: 'badge badge--accent', 'data-lifecycle-kept-note': '' }, 'Kept as is') : null),
+          kept ? h('span', { class: 'badge badge--accent', 'data-lifecycle-kept-note': '', title: item.entry.reason ? `${item.entry.reason} Stowr writes it back unchanged.` : null }, 'Kept as is') : null),
         h('p', { class: 'lifecycleRule__summary' }, kept && !item.entry.xml ? 'A rule of another part of the bucket.' : describeRule(rule)),
-        kept && item.entry.reason ? h('p', { class: 'lifecycleRule__reason' }, `${item.entry.reason} Stowr writes it back unchanged.`) : null,
         kept && item.entry.xml ? h('details', { class: 'lifecycleRule__xml' }, h('summary', {}, 'XML'), h('pre', { class: 'mono' }, item.entry.xml)) : null);
     }
 
@@ -343,14 +342,18 @@
     function render() {
       const root = editor?.rootPrefix || '';
       intro.replaceChildren(...(root
-        ? ['The rules apply to the bucket. This part edits the rules under ', h('code', {}, root), ': a prefix of a rule starts there. The other rules stay as they are.']
+        ? ['Rules under ', h('code', {}, root), '.']
         : []));
       intro.hidden = !editor || !root;
-      providerNote.textContent = editor?.providerNote || '';
-      providerNote.hidden = !editor?.providerNote;
-      readonly.textContent = !editor ? '' : !editor.writable ? `You cannot change the rules here. ${editor.readOnlyReason || ''}`.trim() : !canWrite ? 'You cannot change the rules here: you have no write permission in this bucket.' : '';
+      // The note of the provider is long: the page does not show it. The reason of a field that the provider does not
+      // keep is in the title of the line "Not offered".
+      providerNote.textContent = '';
+      providerNote.hidden = true;
+      readonly.textContent = !editor ? '' : !editor.writable ? `Read only. ${editor.readOnlyReason || ''}`.trim() : !canWrite ? 'Read only: no write permission.' : '';
       readonly.hidden = !readonly.textContent;
-      hidden.replaceChildren(...(editor?.hidden || []).map(item => h('li', { 'data-field': item.field }, h('strong', {}, `${FIELD_LABELS[item.field] || item.field}: `), 'not offered. ', item.reason)));
+      const notOffered = editor?.hidden || [];
+      hidden.replaceChildren(...(notOffered.length ? [h('li', { 'data-field': notOffered.map(item => item.field).join(' '), title: notOffered.map(item => `${FIELD_LABELS[item.field] || item.field}: ${item.reason}`).join('\n') },
+        `Not offered: ${notOffered.map(item => FIELD_LABELS[item.field] || item.field).join(', ')}`)] : []));
       hidden.hidden = !writable() || !(editor?.hidden || []).length;
       state.hidden = Boolean(editor) && entries.length > 0;
       if (editor && !entries.length) state.textContent = 'No lifecycle rule.';

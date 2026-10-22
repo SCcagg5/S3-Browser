@@ -176,7 +176,7 @@ The page never shows an endpoint, an admin URL, a token or the path of a volume 
 
 The page reads `/api/instances`, `GET /api/usage` and `GET /api/lifecycle`, and no other endpoint. `/api/instances` gives `flavour`: the S3 provider that the probe at start recognised (`aws`, `minio`, `seaweedfs` or `garage`), or no field. Each read obeys the permissions of the person. A part that the person cannot read says "Not allowed", in a box with a dashed border. An instance without a `usage` block says "Not available", with the reason. While the count of a volume runs, the page reads the usage again every 3 seconds, 20 times at most.
 
-The lifecycle rules are edited in the part "Lifecycle rules" of this page, and in no other place. The listing has no window of the rules and no `?lifecycle` address. The page builds the editor one time: a new read of the usage does not touch the form. A save sends the event `bb:lifecycle-changed`: the page reads the rules again, and the state icons of the selector (the hourglass and its count) change.
+The lifecycle rules are edited in the part "Lifecycle rules" of this page, and in no other place. The part is not shown for a volume, for a provider without lifecycle rules or for a person who cannot list the bucket. The editor has little text: one line "Not offered: <fields>" with the reasons in its title, and no note of the provider. The listing has no window of the rules and no `?lifecycle` address. The page builds the editor one time: a new read of the usage does not touch the form. A save sends the event `bb:lifecycle-changed`: the page reads the rules again, and the state icons of the selector (the hourglass and its count) change.
 
 ## Tags in the listing
 

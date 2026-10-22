@@ -185,9 +185,7 @@
 
   function storageBody(instance, usage) {
     if (instance.usageSupported !== true) {
-      return empty('Not available', isVolume(instance)
-        ? 'This build of the server cannot read the size of the file system.'
-        : 'The configuration has no usage block for this bucket: the server does not read its usage. AWS S3 has no quota and no limit of its storage.', 'unsupported');
+      return empty('Not available', isVolume(instance) ? 'The size of the file system is not readable.' : 'No usage block in the configuration.', 'unsupported');
     }
     if (!can(instance, 'list')) return empty('Not allowed', NOT_ALLOWED, 'not-allowed');
     if (usage === undefined) return empty('Loading the usage…', '', 'loading');
@@ -272,8 +270,7 @@
   }
 
   function lifecycleRow(instance, lifecycle) {
-    if (instance.lifecycleSupported === false) return row('Lifecycle rules', chip('off', 'Not available'), '', 'lifecycle');
-    if (!can(instance, 'list')) return row('Lifecycle rules', chip('off', 'Not allowed'), NOT_ALLOWED, 'lifecycle');
+    if (instance.lifecycleSupported === false || !can(instance, 'list')) return null;
     if (lifecycle === undefined) return row('Lifecycle rules', 'Loading…', '', 'lifecycle');
     const rules = rulesOf(instance, lifecycle);
     let state;
@@ -381,24 +378,22 @@
   // the window of the incomplete uploads) adds a new rule that aborts the incomplete uploads under that prefix.
   function renderLifecycle(instance) {
     const box = byId('infoLifecycle');
-    let body;
-    if (isVolume(instance)) body = empty('Not available for a mounted folder', 'A volume has no lifecycle rules.', 'volume');
-    else if (instance.lifecycleSupported === false) body = empty('Not available', 'This storage provider has no lifecycle rules.', 'unsupported');
-    else if (!can(instance, 'list')) body = empty('Not allowed', NOT_ALLOWED, 'not-allowed');
-    else {
-      const query = new URLSearchParams(window.location.search);
-      const abort = query.has('lifecycle-abort') ? String(query.get('lifecycle-abort') || '') : null;
-      if (abort !== null) window.history.replaceState(null, '', `${window.location.pathname}?info${window.location.hash}`);
-      body = h('div', { class: 'lifecycle', 'data-lifecycle': '' });
-      // The editor reads the rules only in an element of the page: it mounts after the part is in the page.
-      box.replaceChildren(part('lifecycle', 'Lifecycle rules', '', body));
-      BB.lifecycle.mount(body, {
-        instance: instance.id,
-        canWrite: can(instance, 'upload'),
-        prefill: abort === null ? null : { id: 'abort-incomplete-uploads', prefix: abort, abortMultipartDays: 7 }
-      });
+    // A volume, a provider without rules or a person who cannot list: the part is not shown.
+    if (isVolume(instance) || instance.lifecycleSupported === false || !can(instance, 'list')) {
+      box.replaceChildren();
+      return;
     }
-    if (!body.isConnected) box.replaceChildren(part('lifecycle', 'Lifecycle rules', '', body));
+    const query = new URLSearchParams(window.location.search);
+    const abort = query.has('lifecycle-abort') ? String(query.get('lifecycle-abort') || '') : null;
+    if (abort !== null) window.history.replaceState(null, '', `${window.location.pathname}?info${window.location.hash}`);
+    const body = h('div', { class: 'lifecycle', 'data-lifecycle': '' });
+    // The editor reads the rules only in an element of the page: it mounts after the part is in the page.
+    box.replaceChildren(part('lifecycle', 'Lifecycle rules', '', body));
+    BB.lifecycle.mount(body, {
+      instance: instance.id,
+      canWrite: can(instance, 'upload'),
+      prefill: abort === null ? null : { id: 'abort-incomplete-uploads', prefix: abort, abortMultipartDays: 7 }
+    });
     if (window.location.hash === '#info-lifecycle') byId('info-lifecycle')?.scrollIntoView({ block: 'start' });
   }
 
