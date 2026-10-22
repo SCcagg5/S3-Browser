@@ -55,6 +55,8 @@ This document uses ASD-STE100 Simplified Technical English.
 - A click on the usage in the selector (the amount, the percent or the bar) opens the information page, as a click on the
   state icons does, in the trigger and in each entry of the menu. The state icons and the usage have the same tooltip:
   the states, then the usage.
+- The information page has the selector of the hosts and buckets in its header, with the classes of the selector of the
+  listing. An entry opens the information page of that bucket or volume. A single instance shows no selector.
 - The list of the buckets is a non-modal dialog, not a listbox. The current bucket has `aria-current="true"`.
 - `GET /api/instances` gives `flavour` for an S3 instance: the provider that the probe at start recognised (`aws`,
   `minio`, `seaweedfs` or `garage`). The field is absent for an unknown provider.

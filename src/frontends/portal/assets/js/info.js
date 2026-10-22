@@ -360,6 +360,85 @@
       ], 'Operations')));
   }
 
+  // --- Selector ---------------------------------------------------------------------------------------------------------
+  // The selector of the page: the same hosts and buckets as the selector of the listing. An entry opens the information
+  // page of the bucket, not its listing. The classes are the classes of the selector of the listing.
+
+  const infoURL = instance => `${BB.api.browserPageURL('', { instance: instance.id })}?info`;
+
+  function statesOf(instance) {
+    const rules = Number.isInteger(instance.lifecycleRules) ? instance.lifecycleRules : null;
+    return BB.states.list(instance, { versioning: String(instance.versioningState || ''), rules });
+  }
+
+  function renderSelector(instances, current) {
+    const root = byId('storageSwitcher');
+    if (!root || instances.length < 2) return;
+    const hosts = [];
+    instances.forEach(item => {
+      const id = String(item.host || item.id || '');
+      let host = hosts.find(entry => entry.id === id);
+      if (!host) { host = { id, provider: String(item.provider || ''), instances: [] }; hosts.push(host); }
+      host.instances.push(item);
+    });
+    const trigger = h('button', {
+      type: 'button', class: 'storageSwitcher__trigger', 'aria-haspopup': 'dialog', 'aria-expanded': 'false', 'aria-controls': 'storageSwitcherMenu',
+      title: [current.name || current.id, `id: ${current.id}`, `host: ${current.host}`].join('\n')
+    }, ic(isVolume(current) ? 'folder-open' : 'database'),
+    h('span', { class: 'storageSwitcher__copy' }, h('span', { class: 'storageSwitcher__titleRow' }, h('strong', {}, current.name || current.id))),
+    ic('chevron-down'));
+    trigger.firstChild.classList.add('storageSwitcher__icon');
+    trigger.lastChild.classList.add('storageSwitcher__chevron');
+    const menu = h('div', { id: 'storageSwitcherMenu', class: 'storageSwitcher__menu', role: 'dialog', 'aria-label': 'Storage hosts and buckets', hidden: true },
+      hosts.map(host => {
+        const expanded = host.id === String(current.host || current.id || '');
+        const list = h('div', { class: 'storageHost__buckets', role: 'group', 'aria-label': `${host.id} buckets`, hidden: !expanded },
+          host.instances.map(entry => {
+            const states = statesOf(entry);
+            const link = h('a', { class: 'stateGroup storageBucket__states', href: infoURL(entry), 'aria-label': states.map(item => item.text).join(', ') });
+            link.append(...BB.states.nodes(states));
+            return h('div', { class: 'storageBucket__row', 'data-instance': entry.id },
+              h('a', { class: 'storageBucket', href: infoURL(entry), 'aria-current': entry.id === current.id ? 'true' : null,
+                title: [entry.name || entry.id, `id: ${entry.id}`, `host: ${entry.host}`].join('\n') },
+              h('span', { class: 'storageBucket__copy' }, h('span', { class: 'storageBucket__titleRow' }, h('strong', {}, entry.name || entry.id),
+                entry.rootPrefix ? h('small', { class: 'storageBucket__prefix' }, `/${entry.rootPrefix}`) : null))),
+              link);
+          }));
+        const row = h('button', {
+          type: 'button', class: 'storageHost__row', 'aria-expanded': expanded ? 'true' : 'false', 'data-host': host.id,
+          onclick: () => {
+            const open = row.getAttribute('aria-expanded') !== 'true';
+            row.setAttribute('aria-expanded', String(open));
+            list.hidden = !open;
+          }
+        }, ic('chevron-right'), ic(isVolume(host) ? 'folder-open' : 'database'),
+        h('span', { class: 'storageHost__copy' }, h('strong', {}, host.id),
+          h('small', {}, `${host.provider.toUpperCase()} · ${host.instances.length} ${isVolume(host) ? 'volume' : 'bucket'}${host.instances.length === 1 ? '' : 's'}`)));
+        row.querySelector('.ic-chevron-right').classList.add('storageHost__chevron');
+        return h('section', { class: 'storageHost', 'data-host': host.id }, row, list);
+      }));
+    const close = focus => {
+      if (menu.hidden) return;
+      menu.hidden = true;
+      root.classList.remove('is-open');
+      trigger.setAttribute('aria-expanded', 'false');
+      if (focus) trigger.focus();
+    };
+    trigger.addEventListener('click', event => {
+      event.stopPropagation();
+      if (menu.hidden) {
+        menu.hidden = false;
+        root.classList.add('is-open');
+        trigger.setAttribute('aria-expanded', 'true');
+      } else close(false);
+    });
+    menu.addEventListener('click', event => event.stopPropagation());
+    document.addEventListener('click', () => close(false));
+    document.addEventListener('keydown', event => { if (event.key === 'Escape') close(true); });
+    root.replaceChildren(trigger, menu);
+    root.hidden = false;
+  }
+
   // --- Page -----------------------------------------------------------------------------------------------------------
 
   const page = { instance: null, usage: undefined, lifecycle: undefined };
@@ -433,6 +512,7 @@
       return;
     }
     page.instance = instance;
+    renderSelector(payload.instances || [], instance);
     BB.api.setInstance(instance);
     const back = byId('infoBack');
     back.href = BB.api.browserPageURL('', { instance: instance.id });

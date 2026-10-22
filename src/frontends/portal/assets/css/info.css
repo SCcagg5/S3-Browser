@@ -1,5 +1,5 @@
 /* The information page of a bucket or a volume (info.html), in the visual language of the System page of ClickHouse
-   Dash: the panel colour from edge to edge, a row of section links with an underline under the header, then parts
+   Dash: the panel colour from edge to edge, then parts
    with a heading (16 px), tiles in their own boxes for the numbers, cards with a title (14 px) and a key-value list
    with a border and lines of two shades (12 px), gauges as the disk cards of Dash (the percent over a track of 8 px),
    and status chips (18 px). The chips and the tiles have the colours of the state icons of the selector: green (on,
@@ -521,4 +521,13 @@ html:has(> body.infoPage),
   .infoKv__value {
     padding-top: 2px;
   }
+}
+
+/* The selector of the page: the classes of the selector of the listing, with links in place of buttons. */
+.storageSwitcher[hidden] {
+  display: none;
+}
+
+a.storageBucket {
+  text-decoration: none;
 }

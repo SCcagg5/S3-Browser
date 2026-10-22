@@ -156,7 +156,7 @@ Only the bucket selector opens the page:
 The page has the header of the listing in one row: the brand at the left edge, the link "Back to <bucket>" after it, and the theme at the right edge. The page has the visual language of the System page of ClickHouse Dash:
 
 - The panel colour goes from edge to edge, with the gutter of the header (12 px, 10 px on a narrow window).
-- The page is one page with no tabs. The parts are one under the other: "Summary", "Identity and permissions", "Storage" and "Functions".
+- The header has the selector of the hosts and buckets (the same classes as the listing, with links): an entry opens the information page of that bucket. The page is one page with no tabs. The parts are one under the other: "Summary", "Identity and permissions", "Storage" and "Functions".
 - The head has the name (20 px), a chip with the kind of storage, a chip with the root prefix, and the seven state icons of the selector (`assets/js/states.js`).
 - Each part has a heading (16 px), then its content. The parts are 32 px apart.
 - Numbers are in tiles with a border: a label, the value (16 px) and a sub line. A used part of 80 % or more has the colour of a warning, and of 95 % or more the colour of an error.
