@@ -9,7 +9,3 @@ volume "sw" {
   path           = "/mnt/sw/stowr"
   max_scan_pages = 15
 }
-
-access {
-  mode = "open"
-}

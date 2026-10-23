@@ -1,15 +1,17 @@
 // Browser tests of the interface. They cover these parts:
 // 1 the theme selector, 2 the breadcrumb and the toolbar row, the header and the bucket selector, 3 the bulk upload,
-// 4 the access behaviour of 2.0.0, 5 one smoke test on each S3 provider (SeaweedFS, MinIO and Garage), 6 the copy in
-// parts on each provider, 7 the edit of the metadata on each provider, 8 the cleanup of the incomplete multipart
-// uploads on each provider, 9 the editor of the lifecycle rules on each provider, 10 Object Lock (retention and legal
-// hold) on the providers with a bucket with Object Lock, 11 encryption (SSE-S3 of the writes, and the display of SSE-S3,
-// SSE-KMS, SSE-C and the default encryption of the bucket), 12 the usage and the quota of a bucket (the facts of each
-// bucket in the selector, the warning of a full bucket, the tooltips) and the summary strip and the columns of the details,
-// 13 the volumes (a folder of the server: listing, links, writes, uploads, previews, incomplete uploads, usage).
+// 4 the denied permissions and the answers 401 and 403, 5 one smoke test on each S3 provider (SeaweedFS, MinIO and
+// Garage), 6 the copy in parts on each provider, 7 the edit of the metadata on each provider, 8 the cleanup of the
+// incomplete multipart uploads on each provider, 9 the editor of the lifecycle rules on each provider, 10 Object Lock
+// (retention and legal hold) on the providers with a bucket with Object Lock, 11 encryption (SSE-S3 of the writes, and
+// the display of SSE-S3, SSE-KMS, SSE-C and the default encryption of the bucket), 12 the usage and the quota of a
+// bucket (the facts of each bucket in the selector, the warning of a full bucket, the tooltips) and the summary strip
+// and the columns of the details, 13 the volumes (a folder of the server: listing, links, writes, uploads, previews,
+// incomplete uploads, usage).
 // run.sh starts Stowr and the three providers, puts the test objects (seed.js) and runs this file in the
 // Playwright container. The tests of parts 1 to 4 use SeaweedFS.
-// The tests change the answers of the server with page.route where a case needs it (403, 401, no answer, access).
+// The tests change the answers of the server with page.route where a case needs it (403, 401, no answer, a denied
+// permission).
 const { chromium } = require('playwright');
 const assert = require('assert/strict');
 const { PROVIDERS, LOCKED, ENCRYPTED, VOLUMES } = require('./providers');
@@ -111,7 +113,8 @@ async function chooseTheme(page, value, scope = '') {
   await page.click(`${scope} [data-theme-value="${value}"]`.trim());
 }
 
-const forbidden = action => ({ status: 403, json: { error: { code: 'forbidden', action, message: `The action ${action} is not allowed.` } } });
+// A refusal of the storage provider, as the server gives it.
+const forbidden = () => ({ status: 403, json: { error: { code: 'accessdenied', message: 'The storage provider refused the request.' } } });
 
 // ------------------------------------------------------------------------------------------------------------------
 // 1. Theme control: System / Dark / Light, saved in this browser, applied before the first paint
@@ -1712,8 +1715,8 @@ test('versions: the picker shows Restore only with the write permission and Dele
     const body = await response.json();
     for (const instance of body.instances) {
       if (instance.id !== 'seaweedfs-main') continue;
-      for (const name of ['write', 'delete']) instance.capabilities[name] = { state: 'denied', allowed: false, verified: true, source: 'access', reason: 'The access policy refuses it.' };
-      for (const name of ['upload', 'overwrite', 'createFolder', 'delete', 'copy', 'move', 'rename']) instance.operations[name] = { state: 'denied', allowed: false, verified: true, source: 'access' };
+      for (const name of ['write', 'delete']) instance.capabilities[name] = { state: 'denied', allowed: false, verified: true, source: 'configuration', reason: 'The permissions of the block do not give it.' };
+      for (const name of ['upload', 'overwrite', 'createFolder', 'delete', 'copy', 'move', 'rename']) instance.operations[name] = { state: 'denied', allowed: false, verified: true, source: 'configuration' };
     }
     await route.fulfill({ response, json: body });
   });
@@ -2501,7 +2504,7 @@ test('upload: failed files with their reasons, bounded list, then "Retry failed"
   const puts = await watchPuts(page, {
     fail: url => {
       if (!refuse) return null;
-      if (/key=retry%2Fdenied-/.test(url)) return forbidden('objects.write');
+      if (/key=retry%2Fdenied-/.test(url)) return forbidden();
       if (/key=retry%2Fbroken-/.test(url)) return { status: 500, json: { error: { code: 'upstream', message: 'The provider refused the object.' } } };
       return null;
     }
@@ -2511,7 +2514,7 @@ test('upload: failed files with their reasons, bounded list, then "Retry failed"
   assert.equal(await page.textContent('.uploadDock__title'), '60 of 100 files failed');
   assert.equal(await page.locator('.fileList--failed > li:not(.fileList__more)').count(), 50);
   assert.equal(await page.textContent('.fileList--failed .fileList__more'), 'and 10 other files');
-  assert.equal(await page.textContent('.fileList--failed li:first-child .fileList__reason'), 'Not allowed: objects.write (403).');
+  assert.equal(await page.textContent('.fileList--failed li:first-child .fileList__reason'), 'Not allowed (403).');
   const reasons = await page.locator('.fileList--failed .fileList__reason').allInnerTexts();
   assert.ok(reasons.every(reason => reason.length > 0));
   assert.match(await page.textContent('.uploadDock .summary'), /^40 files uploaded \([\d.]+ KB\), 40 checked with SHA-256, 60 failed\.$/);
@@ -2581,47 +2584,10 @@ test('upload: an unreachable server gives one message, the queue waits, then the
 });
 
 // ------------------------------------------------------------------------------------------------------------------
-// 4. Access behaviour of 2.0.0: access of /api/list, hidden buckets, 401 and 403
+// 4. Denied permissions, 401 and 403
 // ------------------------------------------------------------------------------------------------------------------
 
-async function withFolderAccess(page, access) {
-  await page.route(/\/api\/list\?/, async route => {
-    const response = await route.fetch();
-    const body = await response.json();
-    body.access = access;
-    await route.fulfill({ response, json: body });
-  });
-}
-
-test('access: read only in a folder hides the upload and every change of the row menus', async () => {
-  const page = await newPage();
-  await withFolderAccess(page, { read: true, write: false, delete: false });
-  await open(page, `${MAIN}reports/2026/q3/`);
-  assert.equal(await page.isHidden('#uploadWrap'), true);
-  assert.match(await page.textContent('#accessBadge'), /Read only/);
-  const items = await page.locator('tr[data-name="orders.csv"] .bb-menu-item').allInnerTexts();
-  // SeaweedFS lists versions: the menu can have Versions, a read action. No item changes the object.
-  assert.deepEqual(items.map(item => item.trim()).filter(item => item !== 'Versions'), ['Details', 'Download']);
-  const folderItems = await page.locator('tr').first().locator('.bb-menu-item').allInnerTexts();
-  assert.ok(!folderItems.some(item => /Delete|Rename|Copy/.test(item)));
-  // A file dropped on a read-only folder is refused.
-  assert.equal(await page.evaluate(() => BB.page.state.folderAccess.write), false);
-  await page.context().close();
-});
-
-test('access: write without delete keeps the upload and the copy, and hides the delete and the rename', async () => {
-  const page = await newPage();
-  await withFolderAccess(page, { read: true, write: true, delete: false });
-  await open(page, `${MAIN}reports/2026/q3/`);
-  assert.equal(await page.isVisible('#uploadButton'), true);
-  assert.match(await page.textContent('#accessBadge'), /No delete/);
-  const items = (await page.locator('tr[data-name="orders.csv"] .bb-menu-item').allInnerTexts()).map(item => item.trim());
-  assert.ok(items.includes('Copy'));
-  assert.ok(!items.includes('Delete') && !items.includes('Rename'));
-  await page.context().close();
-});
-
-test('access: the selector shows only the visible buckets; no visible bucket gives one message', async () => {
+test('selector: one bucket makes the selector static; no bucket gives one message', async () => {
   const page = await newPage();
   await page.route(/\/api\/instances/, async route => {
     const response = await route.fetch();
@@ -2644,21 +2610,21 @@ test('access: the selector shows only the visible buckets; no visible bucket giv
   });
   await page.reload({ waitUntil: 'networkidle' });
   await page.waitForSelector('.empty');
-  assert.match(await page.textContent('.empty'), /No bucket is available to you/);
+  assert.match(await page.textContent('.empty'), /No bucket is available/);
   assert.match(await page.textContent('.storageSwitcher__trigger'), /No bucket/);
   assert.equal(await page.locator('.storageBucket').count(), 0);
   await page.context().close();
 });
 
-test('access: a bucket that refuses write and delete shows it in the selector, and no upload', async () => {
+test('permissions: a bucket that refuses write and delete shows it in the selector, and no upload', async () => {
   const page = await newPage();
   await page.route(/\/api\/instances/, async route => {
     const response = await route.fetch();
     const body = await response.json();
     for (const instance of body.instances) {
       if (instance.id !== 'seaweedfs-archive') continue;
-      for (const name of ['write', 'delete']) instance.capabilities[name] = { state: 'denied', allowed: false, verified: true, source: 'access', reason: 'The access policy refuses it.' };
-      for (const name of ['upload', 'overwrite', 'createFolder', 'delete', 'copy', 'move', 'rename']) instance.operations[name] = { state: 'denied', allowed: false, verified: true, source: 'access' };
+      for (const name of ['write', 'delete']) instance.capabilities[name] = { state: 'denied', allowed: false, verified: true, source: 'configuration', reason: 'The permissions of the block do not give it.' };
+      for (const name of ['upload', 'overwrite', 'createFolder', 'delete', 'copy', 'move', 'rename']) instance.operations[name] = { state: 'denied', allowed: false, verified: true, source: 'configuration' };
     }
     await route.fulfill({ response, json: body });
   });
@@ -2674,7 +2640,7 @@ test('access: a bucket that refuses write and delete shows it in the selector, a
   await page.goto(`${BASE}-/seaweedfs/seaweedfs-archive/?info`, { waitUntil: 'networkidle' });
   await page.waitForSelector('[data-permission="write"]');
   assert.equal(await page.getAttribute('[data-permission="write"]', 'data-state'), 'denied');
-  assert.match(await page.getAttribute('[data-permission="write"]', 'title'), /The access policy \(AuthZEN\) does not give it to you\./);
+  assert.match(await page.getAttribute('[data-permission="write"]', 'title'), /The permissions of the block in the configuration do not give it\./);
   assert.match(await page.textContent('[data-permission="write"]'), /^Write: Denied$/);
   await page.goto(`${BASE}-/seaweedfs/seaweedfs-archive/`, { waitUntil: 'networkidle' });
   await page.waitForSelector('.dataTable, .empty');
@@ -2683,9 +2649,9 @@ test('access: a bucket that refuses write and delete shows it in the selector, a
   await page.context().close();
 });
 
-test('access: 403 on a folder gives a clear state and a way back to the root', async () => {
+test('errors: 403 on a folder gives a clear state and a way back to the root', async () => {
   const page = await newPage();
-  await page.route(/\/api\/list\?/, route => (/prefix=reports/.test(route.request().url()) ? route.fulfill(forbidden('objects.read')) : route.continue()));
+  await page.route(/\/api\/list\?/, route => (/prefix=reports/.test(route.request().url()) ? route.fulfill(forbidden()) : route.continue()));
   await open(page, `${MAIN}reports/`);
   assert.match(await page.textContent('.empty'), /You cannot open this folder/);
   assert.equal(await page.isHidden('#uploadWrap'), true);
@@ -2694,22 +2660,22 @@ test('access: 403 on a folder gives a clear state and a way back to the root', a
   await page.context().close();
 });
 
-test('access: 403 on an action shows the refusal of the server', async () => {
+test('errors: 403 on an action shows the refusal of the provider', async () => {
   const page = await newPage();
   await open(page, `${MAIN}reports/2026/q3/`);
-  await page.route(/\/s3\?/, route => (route.request().method() === 'DELETE' ? route.fulfill(forbidden('objects.delete')) : route.continue()));
+  await page.route(/\/s3\?/, route => (route.request().method() === 'DELETE' ? route.fulfill(forbidden()) : route.continue()));
   await page.click('tr[data-name="orders.csv"] .bb-kebab');
   await page.click('.bb-menu.is-open .bb-menu-item >> text=Delete');
   await page.click('.bb-overlay .bb-btn-primary');
-  await page.waitForSelector('text=The action objects.delete is not allowed.', { timeout: 10000 });
+  await page.waitForSelector('text=The storage provider refused the request.', { timeout: 10000 });
   assert.ok((await listKeys(page, 'seaweedfs-main', 'reports/2026/q3/')).includes('reports/2026/q3/orders.csv'));
   await page.context().close();
 });
 
-test('access: 401 gives one notice that asks for a new sign-in', async () => {
+test('session: a 401 of the reverse proxy gives one notice that asks for a new sign-in', async () => {
   const page = await newPage();
   await open(page, MAIN);
-  await page.route(/\/api\//, route => route.fulfill({ status: 401, json: { error: { code: 'unauthenticated', message: 'A valid identity token is required.' } } }));
+  await page.route(/\/api\//, route => route.fulfill({ status: 401, json: { error: { code: 'unauthenticated', message: 'Sign in again.' } } }));
   await page.click('tr[data-name="reports"] .nameLink');
   await page.waitForSelector('#notices .callout--danger');
   assert.equal(await page.locator('#notices > .callout').count(), 1);

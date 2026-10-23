@@ -106,29 +106,3 @@ bucket "gcs-backups" {
 #   root_prefix    = "published/"
 #   max_scan_pages = 15
 # }
-
-# The access of humans (docs/ACCESS.md). The block is mandatory.
-# "open": the server checks no identity and no permission. Use it only on a
-# closed network. "authzen": an access gateway gives a signed identity token,
-# and an AuthZEN PDP decides each action on each bucket and folder.
-access {
-  mode = "authzen"
-
-  identity {
-    header           = "X-Identity-Token"
-    issuer           = "https://access.example.internal"
-    # The id of this server at the access gateway. It is the id of the service
-    # resource of the grants, for example "objects.read on service:files".
-    audience         = "files"
-    public_keys_file = "/run/secrets/identity_public_keys.pem"
-    max_age          = "5m"
-  }
-
-  pdp {
-    url             = "http://pdp.example.internal:4182"
-    token_file      = "/run/secrets/pdp_token"
-    timeout         = "500ms"
-    cache_ttl       = "30s"
-    max_evaluations = 64
-  }
-}
