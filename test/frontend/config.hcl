@@ -1,8 +1,7 @@
-# The test stack of the "portal" interface: three S3 providers and server.frontend = "portal".
+# The test stack of the interface: three S3 providers.
 # run.sh starts it with Docker Compose. The three auth blocks use the same key: the entrypoint of each provider reads
 # the first access_key_id and the first secret_access_key_file of this file.
 server {
-  frontend                             = "portal"
   listen                               = ":8080"
   job_history_limit                    = 10
   memory_limit_bytes                   = 67108864

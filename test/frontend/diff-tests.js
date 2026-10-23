@@ -1,4 +1,4 @@
-// Tests of the algorithms of src/frontends/portal/assets/js/diff.js. They run in Node, with no browser.
+// Tests of the algorithms of src/public/assets/js/diff.js. They run in Node, with no browser.
 const assert = require('assert');
 const diff = require('/src/diff.js');
 

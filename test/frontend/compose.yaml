@@ -1,6 +1,5 @@
-# The test stack of the "portal" interface: three S3 providers (SeaweedFS, MinIO and Garage) and one Stowr with
-# server.frontend = "portal". Each provider reads its identity from config.hcl and test/secrets, and creates its
-# buckets at start. Stowr also shows the Docker volume volume-data as the volume "files". run.sh starts it under
+# The test stack of the interface: three S3 providers (SeaweedFS, MinIO and Garage) and one Stowr. Each provider
+# reads its identity from config.hcl and test/secrets, and creates its buckets at start. Stowr also shows the Docker volume volume-data as the volume "files". run.sh starts it under
 # its own project name. No port is published: the Playwright container joins the network.
 services:
   seaweedfs:

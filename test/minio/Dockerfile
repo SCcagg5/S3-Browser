@@ -1,4 +1,4 @@
-# The MinIO of the portal test stack: one server with one drive. The MinIO project does not publish a server image or
+# The MinIO of the browser test stack: one server with one drive. The MinIO project does not publish a server image or
 # a server binary now, and its repository is archived. The image builds the last release from its Git tag. The build
 # checks the commit of the tag, and go.sum checks each module.
 FROM golang:1.24-alpine AS build

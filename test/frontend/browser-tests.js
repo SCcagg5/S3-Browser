@@ -1,4 +1,4 @@
-// Browser tests of the "portal" interface (server.frontend = "portal"). They cover these parts:
+// Browser tests of the interface. They cover these parts:
 // 1 the theme selector, 2 the breadcrumb and the toolbar row, the header and the bucket selector, 3 the bulk upload,
 // 4 the access behaviour of 2.0.0, 5 one smoke test on each S3 provider (SeaweedFS, MinIO and Garage), 6 the copy in
 // parts on each provider, 7 the edit of the metadata on each provider, 8 the cleanup of the incomplete multipart
@@ -2027,7 +2027,7 @@ test('preview: the bar is one row with the height of the header of ClickHouse Da
   }
 });
 
-test('menus: the theme menu and every other menu of the portal are opaque from their first frame, in the light and the dark theme', async () => {
+test('menus: the theme menu and every other menu are opaque from their first frame, in the light and the dark theme', async () => {
   const instance = 'seaweedfs-main';
   const name = `opaque-${Date.now()}.txt`;
   for (const colorScheme of ['light', 'dark']) {
@@ -2087,7 +2087,7 @@ test('menus: the theme menu and every other menu of the portal are opaque from t
 const STATE_ICONS = ['read', 'write', 'delete', 'encryption', 'object-lock', 'versioning', 'lifecycle'];
 const stateKeys = (page, selector) => page.locator(`${selector} [data-state-icon]`).evaluateAll(nodes => nodes.map(node => node.dataset.stateIcon));
 
-test('selector: the bucket selector of the default interface, by host, with the state icons', async () => {
+test('selector: the bucket selector, by host, with the state icons', async () => {
   const page = await newPage();
   await open(page, MAIN);
   const trigger = page.locator('.storageSwitcher__trigger');
@@ -2631,7 +2631,7 @@ test('access: the selector shows only the visible buckets; no visible bucket giv
     await route.fulfill({ response, json: body });
   });
   await open(page, '');
-  // One visible bucket: the selector is static (no menu), as in the default interface.
+  // One visible bucket: the selector is static (no menu).
   assert.equal(await page.locator('button.storageSwitcher__trigger').count(), 0);
   assert.match(await page.textContent('.storageSwitcher__trigger'), /SeaweedFS - archive/);
   assert.equal(await page.locator('#storageSwitcherMenu').count(), 0);
@@ -3066,7 +3066,7 @@ test('metadata: without the edit, the details keep the custom metadata and show 
   await second.context().close();
 });
 
-test('metadata: the fields suggest values in a popover of the portal; the mouse, the keyboard and free text work', async () => {
+test('metadata: the fields suggest values in a popover; the mouse, the keyboard and free text work', async () => {
   const page = await newPage();
   const instance = 'seaweedfs-main';
   const name = `suggest-${Date.now()}.txt`;

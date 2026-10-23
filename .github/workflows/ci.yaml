@@ -36,7 +36,7 @@ jobs:
       - name: Shell syntax
         working-directory: .
         run: |
-          for file in test/*.sh test/seaweedfs/scripts/*.sh test/minio/scripts/*.sh test/garage/scripts/*.sh test/portal-frontend/*.sh test/volume-fuse/*.sh test/volume-fuse/scripts/*.sh; do
+          for file in test/*.sh test/seaweedfs/scripts/*.sh test/minio/scripts/*.sh test/garage/scripts/*.sh test/frontend/*.sh test/volume-fuse/*.sh test/volume-fuse/scripts/*.sh; do
             [ -e "$file" ] || continue
             sh -n "$file"
           done
@@ -70,7 +70,7 @@ jobs:
             echo "font binaries must not be shipped" >&2
             exit 1
           fi
-          if grep -R -E --exclude-dir=vendor --include='*.html' --include='*.js' --include='*.css' 'https?://|//cdn\.' src/public src/frontends; then
+          if grep -R -E --exclude-dir=vendor --include='*.html' --include='*.js' --include='*.css' 'https?://|//cdn\.' src/public; then
             echo "runtime frontend must not contact external asset domains" >&2
             exit 1
           fi
@@ -102,11 +102,11 @@ jobs:
           BUILD_DATE: ${{ github.event.repository.updated_at }}
         run: ./test/scratch-runtime.sh
 
-  portal-frontend:
+  frontend:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Browser tests of the portal frontend
-        run: ./test/portal-frontend/run.sh
+      - name: Browser tests of the interface
+        run: ./test/frontend/run.sh

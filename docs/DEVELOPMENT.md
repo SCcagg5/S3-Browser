@@ -101,7 +101,7 @@ Tests may create fixtures inside their temporary test directories.
 ## Shell syntax
 
 ```sh
-for file in test/*.sh test/seaweedfs/scripts/*.sh test/minio/scripts/*.sh test/garage/scripts/*.sh test/portal-frontend/*.sh test/volume-fuse/*.sh test/volume-fuse/scripts/*.sh; do
+for file in test/*.sh test/seaweedfs/scripts/*.sh test/minio/scripts/*.sh test/garage/scripts/*.sh test/frontend/*.sh test/volume-fuse/*.sh test/volume-fuse/scripts/*.sh; do
   [ -e "$file" ] || continue
   sh -n "$file"
 done

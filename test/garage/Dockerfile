@@ -1,4 +1,4 @@
-# The Garage of the portal test stack: one node with a replication factor of 1. The official image has the binary only
+# The Garage of the browser test stack: one node with a replication factor of 1. The official image has the binary only
 # (no shell), so this image copies the binary into Alpine for the scripts. The digest pins the multi-arch image.
 ARG GARAGE_IMAGE=dxflrs/garage:v2.4.1@sha256:9c96caa2612d3411acc5b0e6701fb238dbfba33e533a6d7d3d811a4b12d0d020
 

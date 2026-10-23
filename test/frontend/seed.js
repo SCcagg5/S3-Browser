@@ -105,7 +105,7 @@ const objects = {
     'src/main.go': go,
     'logs/2026-10-18.log': Array.from({ length: 200 }, (_, i) => `2026-10-18T10:${String(i % 60).padStart(2, '0')}:00Z INFO request ${i} served in ${(i * 7) % 90} ms`).join('\n'),
     'archive/deep/level-3/level-4/level-5/notes.md': '# Deep notes\n\nA file five folders down.\n',
-    'README.md': '# Main bucket\n\nTest data of the portal interface.\n',
+    'README.md': '# Main bucket\n\nTest data of the interface.\n',
     'big/rows.json': rows,
     'big/blob-6mb.bin': 'x'.repeat(6 * 1024 * 1024),
   },

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Browser tests of the "portal" interface (server.frontend = "portal").
+# Browser tests of the interface.
 #
 # The script starts the stack of compose.yaml (SeaweedFS, MinIO, Garage and Stowr with the volume "files") under
 # its own project name, puts the test objects in the buckets and in the volume (seed.js), runs browser-tests.js in the
@@ -8,11 +8,11 @@
 # Everything runs in Docker. The Playwright container installs the playwright package (PLAYWRIGHT_VERSION) in a
 # Docker volume, one time. To use a copy that is already on disk, set PLAYWRIGHT_NODE_MODULES to its node_modules.
 #
-# Environment: PORTAL_TEST_PROJECT (default s3-portal-tests), PLAYWRIGHT_NODE_MODULES, ONLY (a part of a test name).
+# Environment: FRONTEND_TEST_PROJECT (default stowr-frontend-tests), PLAYWRIGHT_NODE_MODULES, ONLY (a part of a test name).
 set -eu
 
 DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-PROJECT=${PORTAL_TEST_PROJECT:-s3-portal-tests}
+PROJECT=${FRONTEND_TEST_PROJECT:-stowr-frontend-tests}
 PLAYWRIGHT_VERSION=1.48.2
 PLAYWRIGHT_IMAGE=mcr.microsoft.com/playwright:v$PLAYWRIGHT_VERSION-jammy
 
@@ -45,7 +45,7 @@ docker run --rm \
   -e ONLY="${ONLY:-}" \
   -v "$DIR:/tests:ro" \
   -v "$DIR/../secrets:/secrets:ro" \
-  -v "$DIR/../../src/frontends/portal/assets/js:/src:ro" \
+  -v "$DIR/../../src/public/assets/js:/src:ro" \
   -v "${PROJECT}_volume-data:/volume" \
   -v "$modules" \
   "$PLAYWRIGHT_IMAGE" \

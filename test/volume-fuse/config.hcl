@@ -1,7 +1,6 @@
 # The Stowr of the FUSE test: one volume on the FUSE mount of SeaweedFS (scripts/entrypoint.sh). The tests of
 # test/volume-fuse/smoke.js use it.
 server {
-  frontend = "portal"
   listen   = ":8080"
 }
 
