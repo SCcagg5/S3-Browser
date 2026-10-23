@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stowr</title>
+<meta name="description" content="Stowr is a small web application to browse S3 buckets, Google Cloud Storage and server folders. One static binary and one configuration file.">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0d0f12">
+<link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Stowr">
+<meta property="og:description" content="Browse S3 buckets, Google Cloud Storage and server folders in one place. One static binary.">
+<meta property="og:image" content="https://sccagg5.github.io/stowr/assets/img/og.png">
+<meta property="og:url" content="https://sccagg5.github.io/stowr/">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="preload" href="assets/img/browse-1440.webp" as="image" type="image/webp" fetchpriority="high">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<a class="skip" href="#run">Skip to the download</a>
+
+<header class="nav">
+  <a class="brand" href="#top" aria-label="Stowr, top of the page">
+    <svg viewBox="0 0 18 18" aria-hidden="true"><rect fill="#356fe6" x="1" y="1.5" width="16" height="2.6" rx="1.3"/><path fill="#356fe6" fill-rule="evenodd" d="M4 5.6h10a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2zM6.2 8.5h5.6a.7.7 0 0 1 0 1.4H6.2a.7.7 0 0 1 0-1.4zM6.2 12h5.6a.7.7 0 0 1 0 1.4H6.2a.7.7 0 0 1 0-1.4z"/></svg>
+    Stowr
+  </a>
+  <nav class="links" aria-label="Sections">
+    <a href="#inside">Features</a>
+    <a href="#storages">Storages</a>
+    <a href="#run">Run it</a>
+    <a href="https://github.com/SCcagg5/stowr/blob/main/docs/ARCHITECTURE.md">Documentation</a>
+  </nav>
+  <a class="gh" href="https://github.com/SCcagg5/stowr" aria-label="GitHub"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.7.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3z"/></svg></a>
+</header>
+
+<main id="top">
+  <section class="hero" aria-labelledby="h1">
+    <h1 id="h1">Browse every bucket and folder <em>in one place.</em></h1>
+    <p class="lede">Stowr shows S3 buckets, Google Cloud Storage and mounted folders in one web page. It is one 4.8 MB binary with one configuration file.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/SCcagg5/stowr/releases/latest">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v12m0 0l-5-5m5 5l5-5M5 20h14"/></svg>
+        Download v0.1.0
+      </a>
+      <a class="btn" href="#run">Run it</a>
+    </div>
+    <p class="fine">Linux, amd64 and arm64. Each file is on the page of the release, with its checksum.</p>
+    <div class="stage">
+      <div class="window">
+        <img src="assets/img/browse-1440.webp" srcset="assets/img/browse-800.webp 800w, assets/img/browse-1440.webp 1440w" sizes="(min-width: 1180px) 1180px, 100vw" width="1440" height="690" alt="Stowr shows the folders of a bucket in a table, with a bucket menu at the top right.">
+      </div>
+    </div>
+  </section>
+
+  <section id="inside" aria-labelledby="inside-h">
+    <h2 id="inside-h">What you do with your files, on one page.</h2>
+    <div class="bento">
+      <article class="feature wide">
+        <div class="shot"><img src="assets/img/selector-1440.webp" srcset="assets/img/selector-800.webp 800w, assets/img/selector-1440.webp 1440w" sizes="(min-width: 900px) 690px, 100vw" width="1440" height="570" loading="lazy" alt="The bucket menu lists three hosts with their buckets. Each bucket shows seven state icons and how full it is."></div>
+        <div class="text">
+          <h3>Every storage in one menu</h3>
+          <p>Switch between hosts and buckets. Each entry shows what you may do, the versioning, the lock, the lifecycle rules and how full the bucket is.</p>
+        </div>
+      </article>
+      <article class="feature narrow">
+        <div class="shot"><img src="assets/img/markdown-1440.webp" srcset="assets/img/markdown-800.webp 800w, assets/img/markdown-1440.webp 1440w" sizes="(min-width: 900px) 490px, 100vw" width="1440" height="420" loading="lazy" alt="A Markdown file with a table, shown in the page."></div>
+        <div class="text">
+          <h3>Read a file at once</h3>
+          <p>Markdown, PDF, images, logs and archives open in the page. Stowr reads only the bytes that it shows.</p>
+        </div>
+      </article>
+      <article class="feature narrow">
+        <div class="shot"><img src="assets/img/preview-1440.webp" srcset="assets/img/preview-800.webp 800w, assets/img/preview-1440.webp 1440w" sizes="(min-width: 900px) 490px, 100vw" width="1440" height="640" loading="lazy" alt="A CSV file with 400 rows, shown as a table with sort and filters."></div>
+        <div class="text">
+          <h3>Tables from your data files</h3>
+          <p>CSV, Excel, Parquet, SQLite and JSON lines open as tables. Sort, filter and page without a download.</p>
+        </div>
+      </article>
+      <article class="feature wide">
+        <div class="shot"><img src="assets/img/lifecycle-1440.webp" srcset="assets/img/lifecycle-800.webp 800w, assets/img/lifecycle-1440.webp 1440w" sizes="(min-width: 900px) 690px, 100vw" width="1440" height="500" loading="lazy" alt="The information page of a bucket: identity, permissions, data protection, storage gauges and the editor of the lifecycle rules."></div>
+        <div class="text">
+          <h3>One page for the bucket</h3>
+          <p>See the permissions, the versioning, the encryption, the quota and the free space. Add and edit the lifecycle rules on the same page.</p>
+        </div>
+      </article>
+    </div>
+    <div class="more" aria-label="More functions">
+      <span class="chip">Upload of very large files</span>
+      <span class="chip">Versions and comparison</span>
+      <span class="chip">Tags and tag filter</span>
+      <span class="chip">Edit of the metadata</span>
+      <span class="chip">Object Lock</span>
+      <span class="chip">Encryption SSE-S3</span>
+      <span class="chip">Abort of incomplete uploads</span>
+      <span class="chip">Access of humans (AuthZEN)</span>
+    </div>
+  </section>
+
+  <section id="storages" aria-labelledby="storages-h">
+    <h2 id="storages-h">Works with the storage that you have.</h2>
+    <p class="sub">Stowr reads the answers of each provider and shows only what the provider can do. A server folder, such as a mount of SeaweedFS, is a volume.</p>
+    <div class="compat">
+      <span class="chip">AWS S3</span>
+      <span class="chip">MinIO</span>
+      <span class="chip">SeaweedFS</span>
+      <span class="chip">Garage</span>
+      <span class="chip">Google Cloud Storage</span>
+      <span class="chip">Server folders (volumes)</span>
+    </div>
+  </section>
+
+  <section id="run" aria-labelledby="run-h">
+    <h2 id="run-h">Run it in three steps.</h2>
+    <div class="steps">
+      <div class="step">
+        <span class="n">1</span>
+        <h3>Download</h3>
+        <pre tabindex="0" aria-label="Command"><code id="cmd-download">curl -fsSLO https://github.com/SCcagg5/stowr/releases/download/v0.1.0/stowr_0.1.0_linux_amd64.tar.gz
+tar xzf stowr_0.1.0_linux_amd64.tar.gz</code></pre>
+        <button class="copy" type="button" data-copy="cmd-download">Copy</button>
+        <p class="note">For arm64, use the file <code>stowr_0.1.0_linux_arm64.tar.gz</code>.</p>
+      </div>
+      <div class="step">
+        <span class="n">2</span>
+        <h3>Name a bucket</h3>
+        <pre tabindex="0" aria-label="Configuration"><code id="cmd-config">access {
+  mode = "open"
+}
+
+auth "s3" {
+  provider               = "s3"
+  mode                   = "access_key"
+  endpoint               = "https://s3.example.internal"
+  region                 = "eu-west-1"
+  access_key_id_file     = "/run/secrets/s3-access-key-id"
+  secret_access_key_file = "/run/secrets/s3-secret-access-key"
+}
+
+bucket "documents" {
+  name        = "Documents"
+  auth        = "s3"
+  bucket      = "documents"
+  permissions = ["read", "write", "delete"]
+}</code></pre>
+        <button class="copy" type="button" data-copy="cmd-config">Copy</button>
+        <p class="note">Save it as <code>config.hcl</code>. The open mode is for a closed network.</p>
+      </div>
+      <div class="step">
+        <span class="n">3</span>
+        <h3>Run</h3>
+        <pre tabindex="0" aria-label="Command"><code id="cmd-run">./stowr -c config.hcl</code></pre>
+        <button class="copy" type="button" data-copy="cmd-run">Copy</button>
+        <p class="note">Open <code>http://localhost:8080</code>. Check the file first with <code>./stowr print-config -c config.hcl</code>.</p>
+      </div>
+    </div>
+    <p class="runfoot">
+      The archive has no runtime dependency. Next:
+      <a href="https://github.com/SCcagg5/stowr/blob/main/docs/CONFIGURATION.md">configuration</a>,
+      <a href="https://github.com/SCcagg5/stowr/blob/main/docs/ACCESS.md">access of humans</a>,
+      <a href="https://github.com/SCcagg5/stowr/blob/main/docs/ARCHITECTURE.md">architecture</a>.
+    </p>
+  </section>
+</main>
+
+<footer class="foot">
+  <span>Stowr</span>
+  <a href="https://github.com/SCcagg5/stowr">GitHub</a>
+  <a href="https://github.com/SCcagg5/stowr/blob/main/CHANGELOG.md">Changes</a>
+  <a class="sp" href="#top">Top of the page</a>
+</footer>
+<script src="assets/site.js" defer></script>
+</body>
+</html>
