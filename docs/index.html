@@ -41,7 +41,7 @@
     <div class="cta">
       <a class="btn primary" href="https://github.com/SCcagg5/stowr/releases/latest">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v12m0 0l-5-5m5 5l5-5M5 20h14"/></svg>
-        Download v0.1.0
+        Download v0.1.1
       </a>
       <a class="btn" href="#run">Run it</a>
     </div>
@@ -98,7 +98,6 @@
       <span class="chip">Object Lock</span>
       <span class="chip">Encryption SSE-S3</span>
       <span class="chip">Abort of incomplete uploads</span>
-      <span class="chip">Access of humans (AuthZEN)</span>
     </div>
   </section>
 
@@ -121,19 +120,15 @@
       <div class="step">
         <span class="n">1</span>
         <h3>Download</h3>
-        <pre tabindex="0" aria-label="Command"><code id="cmd-download">curl -fsSLO https://github.com/SCcagg5/stowr/releases/download/v0.1.0/stowr_0.1.0_linux_amd64.tar.gz
-tar xzf stowr_0.1.0_linux_amd64.tar.gz</code></pre>
+        <pre tabindex="0" aria-label="Command"><code id="cmd-download">curl -fsSLO https://github.com/SCcagg5/stowr/releases/download/v0.1.1/stowr_0.1.1_linux_amd64.tar.gz
+tar xzf stowr_0.1.1_linux_amd64.tar.gz</code></pre>
         <button class="copy" type="button" data-copy="cmd-download">Copy</button>
-        <p class="note">For arm64, use the file <code>stowr_0.1.0_linux_arm64.tar.gz</code>.</p>
+        <p class="note">For arm64, use the file <code>stowr_0.1.1_linux_arm64.tar.gz</code>.</p>
       </div>
       <div class="step">
         <span class="n">2</span>
         <h3>Name a bucket</h3>
-        <pre tabindex="0" aria-label="Configuration"><code id="cmd-config">access {
-  mode = "open"
-}
-
-auth "s3" {
+        <pre tabindex="0" aria-label="Configuration"><code id="cmd-config">auth "s3" {
   provider               = "s3"
   mode                   = "access_key"
   endpoint               = "https://s3.example.internal"
@@ -149,7 +144,7 @@ bucket "documents" {
   permissions = ["read", "write", "delete"]
 }</code></pre>
         <button class="copy" type="button" data-copy="cmd-config">Copy</button>
-        <p class="note">Save it as <code>config.hcl</code>. The open mode is for a closed network.</p>
+        <p class="note">Save it as <code>config.hcl</code>. Stowr has no sign-in of its own: put a reverse proxy that signs your users in in front of it.</p>
       </div>
       <div class="step">
         <span class="n">3</span>
@@ -162,7 +157,6 @@ bucket "documents" {
     <p class="runfoot">
       The archive has no runtime dependency. Next:
       <a href="https://github.com/SCcagg5/stowr/blob/main/docs/CONFIGURATION.md">configuration</a>,
-      <a href="https://github.com/SCcagg5/stowr/blob/main/docs/ACCESS.md">access of humans</a>,
       <a href="https://github.com/SCcagg5/stowr/blob/main/docs/ARCHITECTURE.md">architecture</a>.
     </p>
   </section>
