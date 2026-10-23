@@ -2,6 +2,29 @@
 
 This document uses ASD-STE100 Simplified Technical English.
 
+## 0.1.1 (2026-10-23)
+
+Stowr has one browser interface only. It is the interface that 0.1.0 gave with `frontend = "portal"`. The interface
+`default` of 0.1.0 and the key `server.frontend` are removed. The API, the routes, the other keys and the behaviour
+of the server do not change.
+
+### Upgrade steps from 0.1.0
+
+1. If the `server` block of your configuration has the key `frontend`, delete this line. A configuration with this
+   key stops the server at start, as each unknown attribute does: `unknown attribute "frontend" in server block`. The
+   error gives the line of the key.
+2. After the upgrade, the server gives the former interface `portal`, also to a deployment that used `default`. The
+   links to a bucket, a folder, a file and the information page (`?info`) do not change.
+
+### Changes
+
+- The binary embeds one tree of pages, scripts and styles (`src/public/`). The former tree `src/frontends/portal/` is
+  now at this place, and the tree of the interface `default` is removed. The vendored styles that only this interface
+  used (Buefy, github-markdown-css and the style of highlight.js) are removed. PDF.js, highlight.js and marked stay.
+- `print-config`, the configuration reference and the start log line do not show `frontend` any more.
+- The browser tests are in `test/frontend/`, not in `test/portal-frontend/`. The variable of the project name of
+  `run.sh` is `FRONTEND_TEST_PROJECT`, not `PORTAL_TEST_PROJECT`.
+
 ## 0.1.0 (2026-10-23)
 
 The product has a new name: Stowr. It also shows the folders of a server (volumes), so the name of a browser of S3 does

@@ -123,7 +123,7 @@ The last line of a text with no line break is not the same line as the same text
 
 The picker of versions is also in the bar of the preview page, with the same actions. It replaces the list of versions there, and the action "Versions" of the menus. The badge with the count in the listing opens the details of the file, with the picker. The page has no table of the versions.
 
-A diff that needs more than 2500 edits shows as a replacement of the lines. The algorithms are in `assets/js/diff.js`. They have no DOM, and `test/portal-frontend/diff-tests.js` tests them in Node.
+A diff that needs more than 2500 edits shows as a replacement of the lines. The algorithms are in `assets/js/diff.js`. They have no DOM, and `test/frontend/diff-tests.js` tests them in Node.
 
 ## Settings of the listing
 
@@ -896,40 +896,37 @@ ZIP-compatible archives use their central directory. A selected member is read f
 
 The server never writes a temporary archive or member to disk. Unsafe paths, symbolic links, encrypted members, collisions, oversized expansion, and existing destinations are rejected. An interrupted provider upload is aborted where the provider API allows it.
 
-## Frontend trees
+## Browser interface
 
-The binary embeds two frontend trees. The HCL key `server.frontend` selects one tree at start (see [Configuration](CONFIGURATION.md#frontend-selection)). The server then gives only the files of that tree.
+The binary embeds one browser interface: the tree `src/public/`. The top of `assets/css/portal.css` gives the design rules as tokens. Version 0.1.1 removed the interface `default` of 0.1.0 and the key `server.frontend`.
 
-- `default` is `src/public/`.
-- `portal` is `src/frontends/portal/`. It is a test of the Stowr interface: the header of ClickHouse Dash, the bucket selector of the default interface, the parts of the portal and the dense tables of ClickHouse Dash. The top of `assets/css/portal.css` gives the design rules as tokens.
+The tree contains these pages and scripts:
 
-The `portal` tree contains its own pages and scripts:
-
-- `assets/js/common/` has copies of the shared scripts of the default tree (API, previews, dialogs). `preview.js` is a copy with the header of the portal.
+- `index.html` is the browser page, `preview.html` the preview page, `info.html` the information page of an instance and `404.html` the page of an unknown path.
+- `assets/js/common/` has the shared scripts (API, previews, dialogs). `preview.js` is the preview page.
 - `assets/js/app.js` is the browser page. `uploads.js` is the bulk upload. `tags.js` and `metadata.js` are the sections of the details that edit the tags and the metadata. `theme.js` applies the theme before the first paint. `session.js` gives one message for an ended sign-in (401) or a server that does not answer.
-- `assets/css/dialogs.css` and `assets/css/viewers.css` have the rules of the default tree for the dialogs and the previews. Each colour is a token of `portal.css`, so these rules follow the theme.
+- `assets/css/dialogs.css` and `assets/css/viewers.css` have the rules for the dialogs and the previews. Each colour is a token of `portal.css`, so these rules follow the theme.
 - `assets/icons/tabler/` has one Tabler icon (MIT) for each name. `assets/css/icons.css` gives the icon for each `mdi-*` name of the shared scripts.
+- `assets/vendor/` has the vendored libraries: PDF.js, highlight.js and marked. A Go test makes sure that a page or a script loads each of them.
 
-The header of the portal has the height of the header of ClickHouse Dash. The content of the Dash header sets that height: no rule of Dash gives a height. A measurement in Chromium gives the values below. The page of the measurement has the stylesheet and the header markup of ClickHouse Dash, at 1440, 1280, 1100, 900 and 390 px, in the two themes:
+The header of Stowr has the height of the header of ClickHouse Dash. The content of the Dash header sets that height: no rule of Dash gives a height. A measurement in Chromium gives the values below. The page of the measurement has the stylesheet and the header markup of ClickHouse Dash, at 1440, 1280, 1100, 900 and 390 px, in the two themes:
 
-| Pointer | Header of ClickHouse Dash | Header of the portal |
+| Pointer | Header of ClickHouse Dash | Header of Stowr |
 | --- | --- | --- |
 | Fine | 45 px at every width: 44 px and the border line. The controls are 28 px high, with 8 px over them and under them | 45 px at every width, from 320 px up. The bucket selector and the theme button are 28 px high (`--header-h` is 44 px) |
 | Coarse | 57 px: the controls are 40 px high | 57 px at every width: the controls are 44 px high, with 6 px over them and under them |
 
-The header of the portal is one row at every width, as the header of ClickHouse Dash. It has the full width of the window, as in ClickHouse Dash: the brand is at the left gutter, the bucket selector and the theme button are at the right gutter, and the free space is between them. The gutter of the header is the gutter of the header of ClickHouse Dash: 12 px, and 10 px at 820 px and less. The content of the page keeps its own gutter of 24 px (14 px at 760 px and less). "Back to panel" stays at the left, before the brand. The content of the page under the header keeps its centred column of 1400 px, so on a wide window the edges of the header are not the edges of the content. The body of ClickHouse Dash has the full width of the window. The portal keeps its centred column. A narrow window gives less space to the brand, in this order: at 600 px and less, the name of the brand and the text of "Back to panel" go (the chevron of the link stays, and the link keeps its name for a screen reader and in its tooltip). At 420 px and less, the version goes. The mark of the brand always stays.
+The header of Stowr is one row at every width, as the header of ClickHouse Dash. It has the full width of the window, as in ClickHouse Dash: the brand is at the left gutter, the bucket selector and the theme button are at the right gutter, and the free space is between them. The gutter of the header is the gutter of the header of ClickHouse Dash: 12 px, and 10 px at 820 px and less. The content of the page keeps its own gutter of 24 px (14 px at 760 px and less). "Back to panel" stays at the left, before the brand. The content of the page under the header keeps its centred column of 1400 px, so on a wide window the edges of the header are not the edges of the content. The body of ClickHouse Dash has the full width of the window. Stowr keeps its centred column. A narrow window gives less space to the brand, in this order: at 600 px and less, the name of the brand and the text of "Back to panel" go (the chevron of the link stays, and the link keeps its name for a screen reader and in its tooltip). At 420 px and less, the version goes. The mark of the brand always stays.
 
 The bar of the preview page is one row of the same height: 45 px, or 57 px on a coarse pointer. It also has the full width of the window and the gutter of the header: the way back and the name at the left gutter, the tools and the theme button at the right gutter. It has the way back, then the name of the file, its size, its marks and its path from the bucket root on one line, then the tools and the theme button. The path gets an ellipsis before the name, and the title of the name gives the whole key. At 760 px and less, the path, the build tag and the date of the version picker go, and the way back keeps its chevron. At 420 px and less, the size goes. In a comparison, From, the statistics and To take the place of the path below 1101 px. At 760 px and less, the comparison puts its versions and its statistics in a row of their own, under the way back and the name.
 
-The scroll of each page of the portal is the scroll of ClickHouse Dash: the document never scrolls. `html` and `body` have the height of the window and no scroll. The body is a column: the header (or the bar of the preview page) stays at the top, and only the element under it scrolls (`.pageScroll`, with `data-page-scroll`). Thus the header never moves, and the scrollbar starts under the header and ends at the right edge of the window. This applies to the listing, the preview page (also a comparison of versions), the information page and the 404 page. Sticky elements, such as the head of a table, stick to the top of the element that scrolls, under the header. The upload dock, the drop overlay, the toasts and the windows are fixed to the window, outside the element that scrolls. The scripts that move the page with the wheel over a horizontal scroller use `BB.runtime.pageScroller()`.
+The scroll of each page of Stowr is the scroll of ClickHouse Dash: the document never scrolls. `html` and `body` have the height of the window and no scroll. The body is a column: the header (or the bar of the preview page) stays at the top, and only the element under it scrolls (`.pageScroll`, with `data-page-scroll`). Thus the header never moves, and the scrollbar starts under the header and ends at the right edge of the window. This applies to the listing, the preview page (also a comparison of versions), the information page and the 404 page. Sticky elements, such as the head of a table, stick to the top of the element that scrolls, under the header. The upload dock, the drop overlay, the toasts and the windows are fixed to the window, outside the element that scrolls. The scripts that move the page with the wheel over a horizontal scroller use `BB.runtime.pageScroller()`.
 
 The theme selector is the theme selector of ClickHouse Dash, measured in a browser with the stylesheet of Dash in each state (normal, pointer over it, focus, open), in the two themes, at 1440 and 390 px. The button is 34 x 28 px, with a border of 1 px and corners of 6 px. Its icon is the inline SVG icon of Dash: 18 px, 8 px from the left edge and 5 px from the top edge of the button, a stroke of 1.5 and no fill. The icon is muted text at 82 %, and the text colour under the pointer, with the focus and in an open menu. The focus ring is 2 px, on the edge of the button. The menu is 34 px wide, its edge has the colour of Dash (`--theme-menu-border`), and each choice is 34 x 32 px with its icon at 8 px and 7 px. A coarse pointer keeps the controls of 44 px.
 
-Each menu and popover of the portal has the opaque colour `--panel`, with no backdrop filter: the menus of the header (theme, buckets), the menus Actions and settings, the menus of the rows and of the preview, the version picker and the suggestions of the metadata editor. A menu opens with a short move and no fade, so the page never shows through it, also in its first frame. An open menu of the header puts the header above the upload dock.
+Each menu and popover of Stowr has the opaque colour `--panel`, with no backdrop filter: the menus of the header (theme, buckets), the menus Actions and settings, the menus of the rows and of the preview, the version picker and the suggestions of the metadata editor. A menu opens with a short move and no fade, so the page never shows through it, also in its first frame. An open menu of the header puts the header above the upload dock.
 
-The tree does not contain `assets/vendor/`: a small overlay file system (`src/frontend.go`) gives that directory from the default tree, so the binary contains the vendored libraries one time. No other file of the default tree is visible through the overlay.
-
-The two trees have different fingerprints, because the fingerprint covers all the files of the selected tree. The server also adds the fingerprint to each `@import` of a stylesheet.
+The fingerprint of the assets covers all the files of the tree. The server also adds the fingerprint to each `@import` of a stylesheet.
 
 ## Frontend path model
 

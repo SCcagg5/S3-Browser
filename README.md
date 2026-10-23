@@ -129,18 +129,6 @@ location /stowr/ {
 
 Keep the public trailing slash so browser-relative URLs resolve inside the proxy prefix. No public-path setting is required or accepted in HCL.
 
-## Alternative frontend (test)
-
-The binary also contains a test interface: `portal`. It has the header of ClickHouse Dash (name, version, theme selector), the bucket selector of the default interface, the parts of the portal and the dense tables of ClickHouse Dash. The default interface does not change. To use the test interface, set this key:
-
-```hcl
-server {
-  frontend = "portal"
-}
-```
-
-See [Configuration](docs/CONFIGURATION.md#frontend-selection) and [Architecture](docs/ARCHITECTURE.md#frontend-trees).
-
 ## PDF.js
 
 The PDF preview is a local canvas viewer using a custom `PDFDataRangeTransport`; it does not use an iframe, embed, object element, or native-browser fallback.

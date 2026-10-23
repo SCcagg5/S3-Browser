@@ -4,9 +4,6 @@ server {
   access_mode       = "inherit_credentials"
   log_mode          = "anonymous"
 
-  # "default" or "portal" (a test interface: the shell of the portal and the tables of ClickHouse Dash).
-  frontend = "default"
-
   # This is a soft Go heap target, not a container memory reservation.
   memory_limit_bytes = 67108864
 

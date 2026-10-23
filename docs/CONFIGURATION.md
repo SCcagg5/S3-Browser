@@ -24,7 +24,6 @@ server {
   job_history_limit = 10
   access_mode       = "inherit_credentials"
   log_mode          = "anonymous"
-  frontend          = "default"
 
   memory_limit_bytes = 67108864
 
@@ -49,7 +48,6 @@ server {
 | `job_history_limit` | `10` | Number of terminal job results retained in process memory. Valid range: 1-20. |
 | `access_mode` | `inherit_credentials` | `inherit_credentials` or `force_read_only`. |
 | `log_mode` | `anonymous` | `anonymous` avoids object keys in request logs; `detailed` is for controlled diagnostics. |
-| `frontend` | `default` | The embedded browser interface: `default` or `portal`. See [Frontend selection](#frontend-selection). |
 | `allow_full_object_fallback` | `false` | Allows explicitly implemented parser fallbacks that require a complete object. It never changes strict Range validation into an implicit oversized response. |
 | `memory_limit_bytes` | `0` | Optional Go soft memory limit. `0` leaves the Go runtime default unchanged. |
 | `max_storage_bytes_per_request` | 256 GiB | Provider bytes allowed for one interactive HTTP request. |
@@ -65,20 +63,9 @@ server {
 
 The server never creates a data directory. All sessions and jobs are memory-only. At most four jobs may be active or queued at once.
 
-### Frontend selection
+### Browser interface
 
-The binary contains two browser interfaces. `frontend` selects one of them at start. The two interfaces use the same routes, the same API and the same security headers.
-
-- `default`: the standard interface (`src/public/`).
-- `portal`: a test interface (`src/frontends/portal/`). It has the header of ClickHouse Dash, the bucket selector of the default interface, the parts of the portal and the dense tables of ClickHouse Dash. Its theme selector has System, Dark and Light. The browser keeps the choice.
-
-The value must be one of these two names, as written. The server does not change the case and does not remove spaces. A different value or a value that is not a string stops the server at start. The error gives the line, the key, the permitted values and the value. The start log line gives the frontend that applies (`frontend=default`).
-
-```hcl
-server {
-  frontend = "portal"
-}
-```
+The binary contains one browser interface. No key selects it. Version 0.1.1 removed the key `frontend` of 0.1.0. A `server` block with `frontend` stops the server at start, as each unknown attribute does. The error gives the line and the key. Remove the line to start the server.
 
 ## S3 authentication
 
@@ -108,7 +95,7 @@ The endpoint must use HTTP or HTTPS and may not contain credentials, a query str
 
 ## Usage of the buckets
 
-A `usage` block in an `s3` auth block gives the usage and the quota of its buckets, and the capacity of the storage behind them (the disks or the nodes of the provider). The bucket selector of the `portal` interface shows them in the facts of each bucket, and warns about a bucket that uses 90 % or more of its limit. Without the block, the server makes no admin request and the interface shows no usage. Refer to "Usage and quota of a bucket" in [ARCHITECTURE.md](ARCHITECTURE.md).
+A `usage` block in an `s3` auth block gives the usage and the quota of its buckets, and the capacity of the storage behind them (the disks or the nodes of the provider). The bucket selector shows them in the facts of each bucket, and warns about a bucket that uses 90 % or more of its limit. Without the block, the server makes no admin request and the interface shows no usage. Refer to "Usage and quota of a bucket" in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ```hcl
 auth "garage" {

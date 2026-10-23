@@ -42,22 +42,21 @@ The tests of the access of humans (`src/access_*_test.go`) start the server in t
 
 The frontend under `src/public` is plain HTML, CSS and JavaScript embedded into the binary. It has no build step and no
 JavaScript toolchain: edit the files, rebuild the binary (or the test image) and reload. The object browser page
-(`public/index.html`, `assets/js/app.js`) renders its DOM directly; there is no framework.
-
-The test frontend under `src/frontends/portal` follows the same rules. To use it, set `frontend = "portal"` in the `server` block.
+(`public/index.html`, `assets/js/app.js`) renders its DOM directly; there is no framework. The binary embeds this one
+interface: no key selects an interface.
 
 - Change a colour, a size, a radius or a duration in the tokens at the top of `assets/css/portal.css`. The components name tokens only.
 - A new icon name needs a rule in `assets/css/icons.css` and a Tabler file in `assets/icons/tabler/`.
-- `go test ./...` runs `TestPortalFrontendIsSelfContained`. It finds an external URL, a missing asset, a missing icon file and an icon name without a rule.
+- `go test ./...` runs `TestInterfaceIsSelfContained`. It finds an external URL, a missing asset, a missing icon file and an icon name without a rule.
 
-### Browser tests of the portal frontend
+### Browser tests of the interface
 
-`test/portal-frontend/run.sh` starts three S3 providers (SeaweedFS, MinIO and Garage) and Stowr with `frontend = "portal"`. Stowr also shows the Docker volume `volume-data` as the volume `files`: the Playwright container mounts the same Docker volume at `/volume`, so that the tests can read the real files. It uses Docker Compose with the project name `s3-portal-tests`. Then it puts test objects in the buckets and runs `browser-tests.js` in the Playwright container. The tests cover the theme selector, the header, the bucket selector, the breadcrumb and the toolbar row, the bulk upload and the access behaviour on SeaweedFS. A smoke test and a test of the copy in parts run on each provider. The image of this stack copies in parts from 8 KiB up: refer to the section "Copy in parts" of [ARCHITECTURE.md](ARCHITECTURE.md). At the end, the script stops the stack.
+`test/frontend/run.sh` starts three S3 providers (SeaweedFS, MinIO and Garage) and Stowr. Stowr also shows the Docker volume `volume-data` as the volume `files`: the Playwright container mounts the same Docker volume at `/volume`, so that the tests can read the real files. It uses Docker Compose with the project name `stowr-frontend-tests`. Then it puts test objects in the buckets and runs `browser-tests.js` in the Playwright container. The tests cover the theme selector, the header, the bucket selector, the breadcrumb and the toolbar row, the bulk upload and the access behaviour on SeaweedFS. A smoke test and a test of the copy in parts run on each provider. The image of this stack copies in parts from 8 KiB up: refer to the section "Copy in parts" of [ARCHITECTURE.md](ARCHITECTURE.md). At the end, the script stops the stack.
 
-`test/portal-frontend/providers.js` tells which provider has versions and tags. `test/portal-frontend/s3.js` sends signed S3 requests to the providers, for the seed and for the checks of the tests. Refer to [test/README.md](../test/README.md) for the functions of each provider. Two runs at the same time on one machine need two project names: set `PORTAL_TEST_PROJECT`.
+`test/frontend/providers.js` tells which provider has versions and tags. `test/frontend/s3.js` sends signed S3 requests to the providers, for the seed and for the checks of the tests. Refer to [test/README.md](../test/README.md) for the functions of each provider. Two runs at the same time on one machine need two project names: set `FRONTEND_TEST_PROJECT`.
 
 ```sh
-./test/portal-frontend/run.sh
+./test/frontend/run.sh
 ```
 
 The Playwright container installs the `playwright` package one time, in a Docker volume. To use a copy that is already on disk, set `PLAYWRIGHT_NODE_MODULES` to its `node_modules` directory. To run some tests only, set `ONLY` to a part of their names.
