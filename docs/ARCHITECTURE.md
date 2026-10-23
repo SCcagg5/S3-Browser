@@ -133,12 +133,12 @@ The menu is as wide as its longest line needs, with a limit of 300 px and of the
 
 | Field | Value |
 | --- | --- |
-| `version` | `2` |
+| `version` | `1` |
 | `columns` | Only the columns that the person changed, for example `{"size": false}` |
 | `tagFilterOn` | The state of the tag filter |
 | `encryption` | The choice of "Encryption and lock" for each instance id. An instance without a choice has the setting on |
 
-A saved choice wins over the default. Version 1 kept each column, also a column that the person did not change. Thus a column of version 1 with its old default (Tags off, the other columns on) is not a choice, and takes the new default.
+A saved choice wins over the default. The page ignores a stored value with another `version`.
 
 The listing has no totals at its foot. The foot has the range of the page, the rows of each page and the pager.
 
@@ -547,7 +547,7 @@ The mark of the encryption is a key (Tabler `key`). The mark of Object Lock is a
 
 A listing does not give the encryption of an object. Thus the listing reads it with a HEAD request for each file on the page, as it reads the tags: 4 requests at the same time, 100 files at most. A file waits with a mark, and an answer stays for the ETag and the date of the file. An encrypted file gets a small key at the right of its name, in the cell of the name. The padlock of a lock follows the key. The tooltip of the key names the encryption: SSE-S3, SSE-KMS with its key, or "key of the client" (SSE-C). A HEAD request of an SSE-C object fails with `400`, and `GET /api/media-info` then confirms the key of the client. Such a file gets no padlock, because its HEAD answer gives no header. A file without an encryption gets no key.
 
-The column "Encryption and lock" of the settings starts or stops these requests for each bucket. The browser keeps the choice in `stowr.listing`, with the name `encryption` of the first version of the setting. Without a choice, the setting is on for each bucket. The HEAD request of a file gives its encryption and its lock, so the lock adds no request.
+The column "Encryption and lock" of the settings starts or stops these requests for each bucket. The browser keeps the choice in `stowr.listing`, in the field `encryption`. Without a choice, the setting is on for each bucket. The HEAD request of a file gives its encryption and its lock, so the lock adds no request.
 
 The bar of the preview page shows the key and the padlock of the version on the page, next to its size, with the tooltips of the listing. The marks come from the HEAD request that the preview sends for the version: a version in `?version=` shows its own encryption and its own lock. An SSE-C object gets the key with the tooltip "Encrypted with a key of the client (SSE-C)". An entry of an archive and the comparison of two versions show no mark.
 
