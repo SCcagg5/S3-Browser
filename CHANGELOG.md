@@ -9,8 +9,8 @@ behaviour of the storage operations do not change.
 
 ### Changes
 
-- The binary embeds one browser interface. The interface `default` and the key `server.frontend` are removed. The
-  server now gives the interface that 0.1.0 gave with `frontend = "portal"`.
+- The binary embeds one browser interface: the newer of the two interfaces of 0.1.0, with the dense tables, the
+  bucket selector and the information page. The interface `default` and the key `server.frontend` are removed.
 - The `access` block is removed: the modes `authzen` and `open`, the verification of the identity token, the client
   of the AuthZEN PDP and the route `/.well-known/access-actions`. The permissions of the buckets and the volumes, and
   `server.access_mode`, do not change.
