@@ -1,0 +1,3 @@
+# Build output of go build and GoReleaser
+/src/stowr
+/src/dist/
