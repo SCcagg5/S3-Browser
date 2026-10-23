@@ -168,7 +168,7 @@ Each row shows only when the server knows its value:
 | Column | Content |
 | --- | --- |
 | Identity | The card Identity: the name, the kind of storage (AWS S3, MinIO, SeaweedFS, Garage, or "S3" for a provider that the probe did not recognise; "Mounted folder of the server" for a volume), the host, the bucket (not for a volume) and the region |
-| Permissions and functions | The card Permissions: read, write and delete on one line, with the reason of a refusal in the title of its chip (the ceiling of the configuration, `server.access_mode = "force_read_only"` or the access policy). The card Data protection: versioning, the encryption of the writes, the default encryption of the bucket, if the provider applies SSE-S3, and Object Lock with its default retention. The card Operations: the state of the lifecycle rules (a chip "on" with the number of the rules that are on, else a chip "off"; the chip is a link to the part "Lifecycle rules"), tags, the edit of the metadata, the incomplete uploads and the SHA-256 checksum of the uploads. A volume has one card with the rows that apply to a folder |
+| Permissions and functions | The card Permissions: read, write and delete on one line, with the reason of a refusal in the title of its chip (the ceiling of the configuration, `server.access_mode = "force_read_only"` or a refusal of the provider). The card Data protection: versioning, the encryption of the writes, the default encryption of the bucket, if the provider applies SSE-S3, and Object Lock with its default retention. The card Operations: the state of the lifecycle rules (a chip "on" with the number of the rules that are on, else a chip "off"; the chip is a link to the part "Lifecycle rules"), tags, the edit of the metadata, the incomplete uploads and the SHA-256 checksum of the uploads. A volume has one card with the rows that apply to a folder |
 | Storage | A card for what the bucket or the volume holds (with the source and the time of the count), a gauge for the quota (with the bytes left and the objects), and a gauge for the storage behind it (with its free bytes). An approximate number has a `~`, a chip "Approximate" and the reason. A full bucket gets the banner of the listing above the parts |
 | Lifecycle rules | The editor of the rules (`assets/js/lifecycle.js`), in the page, at the anchor `#info-lifecycle`. Refer to [The editor in the page](#the-editor-in-the-page) |
 
@@ -250,7 +250,7 @@ The copy also sends the storage class, the website redirect and the server-side 
 
 A request with `version` copies that version onto the key. The version becomes the current version, as a restore does. The tags of that version stay.
 
-The action is `objects.write` on the node of the key (refer to [ACCESS.md](ACCESS.md)). No new right exists.
+The copy needs the write permission of the instance. No new permission exists.
 
 The form is a grid of labels and fields. Each field has the width of its value, and 100% at most on a narrow window. `BB.suggest` (`assets/js/common/suggest.js`) adds the suggestions to a text field with the ARIA combobox pattern. The popover is in the large window, with the look of the menu of the version picker. The typed text filters the values, and a free value stays possible. Down and Up move the mark, Enter chooses, and Escape closes the popover and not the window. The first value of Content-Type is the type that `detect.js` guesses from the name.
 
@@ -298,7 +298,7 @@ The job counts `aborted`, `skippedUndated`, `skippedRecent`, `skippedActive` and
 - The job never aborts an upload younger than 24 hours, also when the cutoff is later.
 - No request aborts an upload that the resumable-upload store of this process sends now (status `uploading`, `src/uploads.go`). The list shows such an upload with `active: true`.
 
-`GET /api/multiparts` needs `objects.read` on the node of `prefix`. An abort needs `objects.write`: on the node of each key, or on the node of `prefix` for the job. The job also needs `objects.read`. Refer to [ACCESS.md](ACCESS.md).
+`GET /api/multiparts` needs the read permission of the instance. An abort needs the read and the write permissions.
 
 At start, the server sends `ListMultipartUploads` with `max-uploads=1` to each instance that has the read permission. A provider that answers `501` or `405` gets `multipartUploadsSupported: false` in `/api/instances`, and the page hides the item. The GCS backend has no list: it answers `501 multipart_unsupported`.
 
@@ -396,7 +396,7 @@ The editor is read only, with the reason, when `writable` is false or when the p
 
 The note of the window "Incomplete uploads" has a link to the part "Lifecycle rules" of the information page. Where the provider keeps the abort of incomplete uploads, the link "Add a lifecycle rule" is `?info&lifecycle-abort=<folder>#info-lifecycle`. The page then puts the rule `abort-incomplete-uploads` in the form, ready to add: it aborts the uploads under the folder 7 days after their start. The page removes the parameter from the address. The person adds the rule, then saves. On MinIO, the note gives the reason, and the link "Lifecycle rules" opens the part without a new rule.
 
-`GET /api/lifecycle` needs `objects.read` on the bucket. `PUT /api/lifecycle` needs the read and write permissions of the instance and `objects.read` on the bucket. It needs `objects.write` on the node of the prefix of each rule that the save adds, changes or removes. A rule deletes objects. Thus a new or changed enabled rule that deletes objects, noncurrent versions or delete markers also needs the delete permission of the instance and `objects.delete` on its prefix. The abort of incomplete uploads needs `objects.write` only, as in the window "Incomplete uploads". Refer to [ACCESS.md](ACCESS.md).
+`GET /api/lifecycle` needs the read permission of the instance. `PUT /api/lifecycle` needs the read and write permissions of the instance. A rule deletes objects. Thus a new or changed enabled rule that deletes objects, noncurrent versions or delete markers also needs the delete permission of the instance. The abort of incomplete uploads needs the write permission only, as in the window "Incomplete uploads".
 
 ## Object Lock
 
@@ -445,9 +445,9 @@ A wrong value gives `400 invalid_object_lock`. The server then reads the lock of
 | Compliance | A later date, or the same date, in Compliance | Sent |
 | Compliance | An earlier date, or the mode Governance | `409 compliance_retention`. Nobody can shorten a Compliance retention, not even the owner of the bucket |
 
-The comparison of the dates uses the seconds: SeaweedFS keeps the seconds, and MinIO keeps the milliseconds. The server sends the retention first and then the legal hold. It does not send a part that does not change. A provider that refuses a change gives `409 object_lock_refused` with the status and the code of the provider. The answer of a save is the new state. The server writes one log line for each change. The line has the key, the version, the change, the use of the bypass and the subject of the request.
+The comparison of the dates uses the seconds: SeaweedFS keeps the seconds, and MinIO keeps the milliseconds. The server sends the retention first and then the legal hold. It does not send a part that does not change. A provider that refuses a change gives `409 object_lock_refused` with the status and the code of the provider. The answer of a save is the new state. The server writes one log line for each change. The line has the key, the version, the change and the use of the bypass.
 
-The read needs `objects.read`, and a change needs `objects.write` on the node of the key. No new right exists. The bypass also needs the bypass permission of the provider for the credentials of the instance (on AWS S3, `s3:BypassGovernanceRetention`). Refer to [ACCESS.md](ACCESS.md). Stowr does not set a retention at upload, and does not change the default retention of a bucket.
+The read needs the read permission of the instance, and a change needs the write permission. No new permission exists. The bypass also needs the bypass permission of the provider for the credentials of the instance (on AWS S3, `s3:BypassGovernanceRetention`). Stowr does not set a retention at upload, and does not change the default retention of a bucket.
 
 ### Deletes that a lock refuses
 
@@ -527,7 +527,7 @@ A provider that refuses the header refuses the write: no object is written witho
 
 A provider refuses the HEAD request of an SSE-C object without its key, with `400` and no body. The server then reads one byte with `GET`, and the text of the refusal gives the reason. SeaweedFS says "Customer provided keys", Garage says "Object is encrypted", AWS S3 and MinIO say "Server Side Encryption". For such a refusal, `GET /api/media-info` answers `200` with `customerKey: true`, and the size, the ETag and the date of the listing. MinIO accepts SSE-C only over TLS.
 
-`GET /api/encryption?instance=` gives `uploads` (the value of the key) and `bucketDefault`. `bucketDefault` is `null`, or `algorithm` (`AES256`, `aws:kms` or `aws:kms:dsse`), `kmsKeyId` and `bucketKeyEnabled`, from `GetBucketEncryption`. At start, the server reads it for each instance with the read permission. An answer, or `404 ServerSideEncryptionConfigurationNotFoundError`, gives `bucketEncryptionSupported: true` in `/api/instances`. `501` (Garage), `405` and any other failure give `false`, and the route then answers `501 bucket_encryption_unsupported`. The route needs `objects.read` on the bucket.
+`GET /api/encryption?instance=` gives `uploads` (the value of the key) and `bucketDefault`. `bucketDefault` is `null`, or `algorithm` (`AES256`, `aws:kms` or `aws:kms:dsse`), `kmsKeyId` and `bucketKeyEnabled`, from `GetBucketEncryption`. At start, the server reads it for each instance with the read permission. An answer, or `404 ServerSideEncryptionConfigurationNotFoundError`, gives `bucketEncryptionSupported: true` in `/api/instances`. `501` (Garage), `405` and any other failure give `false`, and the route then answers `501 bucket_encryption_unsupported`. The route needs the read permission of the instance.
 
 The details of a file have the section "Encryption" after "Storage object". It shows the encryption of the object: SSE-S3, SSE-KMS with its key, or "Key of the client, SSE-C". It also shows the default encryption of the bucket. For an SSE-C object, a note tells that the preview, the download and the copy need the key, and the details have no metadata section. The section stays hidden when the provider reports no encryption.
 
@@ -616,7 +616,7 @@ capacity: the page shows nothing about it.
 
 ### Route
 
-`GET /api/usage?instance=<id>[&fresh=1]` needs the read permission of the instance and `objects.read` on the bucket. `/api/instances` gives `usageSupported` for each instance. The answer has these forms:
+`GET /api/usage?instance=<id>[&fresh=1]` needs the read permission of the instance. `/api/instances` gives `usageSupported` for each instance. The answer has these forms:
 
 - An instance without a `usage` block: `{"supported": false}`.
 - A read that works: `supported` and `available` are `true`, with `instance`, `bucket`, `rootPrefix`, `source`, `usedBytes`, `usedObjects` (`-1` when unknown), `limitBytes` and `limitObjects` (`0` is no limit), `limitSource`, `approximate`, `approximateReason`, `asOf`, `percent` and `level`.
@@ -713,8 +713,6 @@ block". The test with a real `weed mount` is in [test/README.md](../test/README.
   the start. An `auth` block with the label `volume` stops the start when the file has a `volume` block, because the
   two addresses would be the same.
 - The list of the interface gives the buckets first, then the volumes, each in the order of the file.
-- The access policy names a volume as a bucket: the resource `bucket:<id>` with the label of the block, and the
-  resource `prefix:<name>` for a top-level folder. Refer to [ACCESS.md](ACCESS.md).
 
 ### Checks at start
 

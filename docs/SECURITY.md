@@ -16,9 +16,9 @@ The supplied scratch image runs with a read-only root filesystem and no data vol
 
 Provider audit systems can still record every network request. The application cannot make reads or writes invisible to S3, GCS, Garage, or an intermediary proxy.
 
-## Access of humans
+## Authentication
 
-With `access.mode = "authzen"`, each request needs a signed identity token of the access gateway, and an AuthZEN PDP decides each action on each bucket and each top-level folder. The server fails closed when the PDP does not answer. A hidden bucket and an unknown bucket get the same answer. [ACCESS.md](ACCESS.md) gives the rules. With `access.mode = "open"`, the server checks no identity: put it only on a closed network.
+Stowr has no authentication of its own. Each request that reaches the server can do each operation that the permissions of the buckets and the volumes let. Put a reverse proxy that authenticates the users in front of Stowr, and do not publish the port of Stowr. The interface shows one notice when the reverse proxy answers 401.
 
 ## Permission enforcement
 
@@ -27,7 +27,6 @@ The frontend adapts to known capabilities, but every backend handler independent
 Effective access is the intersection of:
 
 - implemented operation;
-- the decision of the PDP for the human (authzen mode);
 - bucket permission ceiling;
 - provider credential policy;
 - object retention, encryption, and provider policy;

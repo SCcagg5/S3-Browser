@@ -198,37 +198,12 @@ These rules stop the start:
 - An `auth` block with the label `volume` in a file with a `volume` block: `volume` is the address word of the
   volumes in the interface (`/-/volume/<id>/`).
 
-The address of a volume in the interface is `/-/volume/<id>/`. The access policy names it as a bucket: the resource
-`bucket:<id>`, and `prefix:<name>` for a top-level folder (refer to [ACCESS.md](ACCESS.md)). The process of Stowr
-reads and writes the files: give it the owner or the group of the folder. In a container, mount the folder with
+The address of a volume in the interface is `/-/volume/<id>/`. The process of Stowr reads and writes the files: give it the owner or the group of the folder. In a container, mount the folder with
 write access, and keep the root file system read only.
 
-## Access block
+## Authentication
 
-```hcl
-# No access check: the behavior of 1.0.13. Use it only on a closed network.
-access {
-  mode = "open"
-}
-```
-
-```hcl
-# An access gateway gives an identity token, and an AuthZEN PDP decides each action.
-access {
-  mode = "authzen"
-  identity {
-    issuer           = "portal.home"
-    audience         = "infra-s3"
-    public_keys_file = "/run/secrets/stowr_identity_keys"
-  }
-  pdp {
-    url        = "http://portal-pdp.edge.svc.cluster.local:4182"
-    token_file = "/run/secrets/stowr_pdp_token"
-  }
-}
-```
-
-A file without the `access` block stops the start. [ACCESS.md](ACCESS.md) gives the keys, the resources, the actions and the rules. The `access` block is not related to `server.access_mode`: `force_read_only` still refuses each write, also when the PDP permits it.
+Stowr has no authentication of its own. Each person who can send a request to the server can do each operation that the permissions of the buckets and the volumes let. Put a reverse proxy that authenticates the users in front of Stowr. A file with an `access` block stops the start: the block is unknown.
 
 ## Version capability probe
 

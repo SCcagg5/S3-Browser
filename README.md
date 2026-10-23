@@ -15,7 +15,7 @@ Core properties:
 - bounded provider requests, transferred bytes, concurrency, cache size, and in-memory job history;
 - frontend URLs resolved relative to `document.baseURI` for deployment behind a path-stripping reverse proxy;
 - no runtime CDN or third-party asset requests;
-- optional access of humans with an identity token and an AuthZEN PDP, on each bucket and each top-level folder ([Access of humans](docs/ACCESS.md)).
+- no authentication of its own: put a reverse proxy that authenticates the users in front of Stowr.
 
 ## Quick start
 
@@ -26,7 +26,7 @@ CGO_ENABLED=0 go build -trimpath -o stowr .
 ./stowr -c ../config.hcl
 ```
 
-The configuration must contain the `access` block (see [Access of humans](docs/ACCESS.md)), and one `bucket` block or one `volume` block at least. A `bucket` block needs an `auth` block.
+The configuration must contain one `bucket` block or one `volume` block at least. A `bucket` block needs an `auth` block.
 
 ## Shared authentication and bucket-specific policy
 
@@ -146,7 +146,6 @@ The application never downloads these files at runtime.
 
 - [Configuration](docs/CONFIGURATION.md)
 - [Configuration reference](docs/configuration-reference.md) (generated)
-- [Access of humans](docs/ACCESS.md)
 - [Changes](CHANGELOG.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Preview and metadata behavior](docs/PREVIEWS.md)

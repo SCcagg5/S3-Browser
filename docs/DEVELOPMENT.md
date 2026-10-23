@@ -34,10 +34,6 @@ go run . config-reference > ../docs/configuration-reference.md
 
 The test `TestConfigurationReferenceIsCurrent` fails when the file and the table do not agree.
 
-## Access tests
-
-The tests of the access of humans (`src/access_*_test.go`) start the server in the `authzen` mode with a fake AuthZEN PDP and identity tokens that the tests sign. They need no network and no container. Refer to [ACCESS.md](ACCESS.md#tests).
-
 ## Frontend
 
 The frontend under `src/public` is plain HTML, CSS and JavaScript embedded into the binary. It has no build step and no
