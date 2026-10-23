@@ -1,0 +1,81 @@
+WEBVTT
+
+1
+00:00:00.510 --> 00:00:02.940
+Your storage lives in too many places.
+
+2
+00:00:03.127 --> 00:00:04.269
+A few S3 buckets.
+
+3
+00:00:04.289 --> 00:00:05.877
+A Google Cloud bucket.
+
+4
+00:00:05.897 --> 00:00:07.477
+A folder on a server.
+
+5
+00:00:07.849 --> 00:00:10.179
+Stowr shows all of them in one web page.
+
+6
+00:00:11.809 --> 00:00:14.619
+One menu lists every bucket and every folder.
+
+7
+00:00:14.885 --> 00:00:18.475
+Next to each name, you see what you can do there, and how full it is.
+
+8
+00:00:19.448 --> 00:00:22.198
+Open a Markdown file, and you read it right there.
+
+9
+00:00:22.580 --> 00:00:25.103
+Open a CSV file, and it is a table.
+
+10
+00:00:25.123 --> 00:00:26.290
+No download.
+
+11
+00:00:27.078 --> 00:00:28.906
+Each bucket has its own page.
+
+12
+00:00:28.926 --> 00:00:31.888
+Permissions, versioning, quota, free space.
+
+13
+00:00:32.073 --> 00:00:33.476
+And the lifecycle rules?
+
+14
+00:00:33.496 --> 00:00:35.353
+You edit them on the same page.
+
+15
+00:00:36.334 --> 00:00:40.134
+It works with S3, MinIO, SeaweedFS and Garage.
+
+16
+00:00:40.335 --> 00:00:43.905
+With Google Cloud Storage, and with plain server folders.
+
+17
+00:00:45.045 --> 00:00:46.786
+One binary of 4.8 MB.
+
+18
+00:00:46.806 --> 00:00:49.305
+One configuration file.
+
+19
+00:00:49.630 --> 00:00:51.080
+One command to run it.
+
+20
+00:00:51.374 --> 00:00:52.244
+Stowr.
