@@ -199,6 +199,21 @@
         });
         return completed;
       }
+      // A key that Object Lock keeps stays in the bucket: the job completes, and the toast says which keys stay.
+      const locked = Number(completed.locked || 0);
+      if (locked > 0) {
+        const keys = (completed.lockedKeys || []).slice(0, 3);
+        const more = locked - keys.length;
+        notification.update(`${label} completed: ${Number(completed.processed || 0).toLocaleString()} object(s) processed. ${locked.toLocaleString()} object(s) stay: Object Lock keeps them (legal hold or retention).`, {
+          persistent: false,
+          status: 'warning',
+          progress: null,
+          indeterminate: false,
+          detail: `${keys.join(', ')}${more > 0 ? ` and ${more.toLocaleString()} more` : ''}`,
+          duration: 12000
+        });
+        return completed;
+      }
       notification.update(jobCompletionMessage(completed, label), {
         persistent: false,
         status: 'success',
@@ -499,17 +514,33 @@
             ? { label: 'Scan active worksheet', icon: 'table-search', kind: 'spreadsheet' }
             : null));
 
-      const storageSection = `<section class="bb-details-section"><div class="bb-details-section-title"><i class="mdi mdi-database-outline"></i> Storage object</div><div class="bb-kv">${storageRows}</div></section>`;
+      const storageSection = `<section class="bb-details-section" data-section="storage"><div class="bb-details-section-title"><i class="mdi mdi-database-outline"></i> Storage object</div><div class="bb-kv">${storageRows}</div></section>`;
+      // The metadata section reads the stored values from the provider and has the edit. Without the edit (GCS, or a
+      // provider that refused it), the custom metadata of this read stays.
+      // An object with a key of the client (SSE-C): the provider refuses to read it, so its metadata cannot be read.
+      const customerKey = result.customerKey === true;
+      const metadataEditable = Boolean(BB.metadata) && BB.cfg?.metadataEditSupported !== false && !customerKey;
+      const metadataSection = metadataEditable ? '<section class="bb-details-section" data-section="metadata" data-metadata-section></section>' : '';
       const customSection = customMetadata
-        ? `<section class="bb-details-section"><div class="bb-details-section-title"><i class="mdi mdi-tag-multiple-outline"></i> Custom metadata</div><div class="bb-kv">${customMetadata}</div></section>`
+        ? `<section class="bb-details-section" data-section="custom" data-metadata-fallback${metadataEditable ? ' hidden' : ''}><div class="bb-details-section-title"><i class="mdi mdi-tag-multiple-outline"></i> Custom metadata</div><div class="bb-kv">${customMetadata}</div></section>`
         : '';
+      const tagsSection = BB.tags ? '<section class="bb-details-section" data-section="tags" data-tags-section></section>' : '';
+      const lockSection = BB.objectLock && BB.cfg?.objectLockSupported === true ? '<section class="bb-details-section" data-section="retention" data-lock-section></section>' : '';
+      // The encryption section shows itself only when the provider reports an encryption.
+      const encryptionSection = BB.encryption ? '<section class="bb-details-section" data-section="encryption" data-encryption-section hidden></section>' : '';
       const fileSection = fileRows
-        ? `<section class="bb-details-section"><div class="bb-details-section-title"><i class="mdi mdi-file-search-outline"></i> File metadata</div><div class="bb-kv">${fileRows}</div></section>`
+        ? `<section class="bb-details-section" data-section="file"><div class="bb-details-section-title"><i class="mdi mdi-file-search-outline"></i> File metadata</div><div class="bb-kv">${fileRows}</div></section>`
         : '';
       const countSection = countAction
-        ? `<section class="bb-details-section bb-details-count-section"><div class="bb-details-section-title"><i class="mdi mdi-${escapeHTML(countAction.icon)}"></i> Document dimensions</div><div class="bb-details-count-result" data-document-count-result><span>Not calculated. This operation reads the complete document.</span></div><button type="button" class="bb-btn bb-details-count-button" data-document-count>${escapeHTML(countAction.label)}</button></section>`
+        ? `<section class="bb-details-section bb-details-count-section" data-section="count"><div class="bb-details-section-title"><i class="mdi mdi-${escapeHTML(countAction.icon)}"></i> Document dimensions</div><div class="bb-details-count-result" data-document-count-result><span>Not calculated. This operation reads the complete document.</span></div><button type="button" class="bb-btn bb-details-count-button" data-document-count>${escapeHTML(countAction.label)}</button></section>`
         : '';
-      const overviewSections = `${storageSection}${customSection}${fileSection}${countSection}`;
+      // The summary strip at the top: the version, the encryption, the lock and the tags (summary.js).
+      const summaryStrip = BB.summary ? '<div class="detailsSummary" data-details-summary role="group" aria-label="Summary of the file" hidden></div>' : '';
+      // The sections have two columns on a wide window and one column on a narrow window. The first column has the object
+      // (storage, encryption, metadata). The second column has what describes it (tags, retention, file, dimensions). The
+      // order of the sections in the page is the reading order and the tab order in both layouts.
+      const secondColumn = `${tagsSection}${lockSection}${fileSection}${countSection}`;
+      const overviewSections = `${summaryStrip}<div class="bb-details-columns"><div class="bb-details-column">${storageSection}${encryptionSection}${metadataSection}${customSection}</div>${secondColumn ? `<div class="bb-details-column">${secondColumn}</div>` : ''}</div>`;
       const advancedPanel = `<section class="bb-details-advanced">
         <article class="bb-details-tool-card is-idle" data-details-tool-card="integrity" aria-busy="false">
           <div class="bb-details-tool-card-head"><div class="bb-details-tool-heading"><span class="bb-details-tool-icon"><i class="mdi mdi-shield-key-outline"></i></span><div><strong>Verify integrity</strong><span>Calculate checksums for the complete object and compare them with values exposed by the provider.</span></div></div><button type="button" class="bb-btn bb-details-tool-run" data-details-integrity><i class="mdi mdi-play"></i><span>Run check</span></button></div>
@@ -524,18 +555,15 @@
       </section>`;
       const icon = BB.detect.iconForType(type);
 
-      const availableVersions = objectVersions
-        .filter(version => version && !version.deleteMarker && version.version);
-      const historicalVersions = availableVersions.filter(version => !version.isCurrent);
-      const currentVersionRecord = availableVersions.find(version => version.isCurrent);
-      const selectedVersionKnown = !selectedVersion || historicalVersions.some(version => version.version === selectedVersion);
-      const versionCount = availableVersions.length;
-      const currentVersionLabel = currentVersionRecord
-        ? `Current · ${versionDateLabel(currentVersionRecord)} · ${versionDisplayLabel(currentVersionRecord)}`
-        : 'Current';
-      const versionSelector = BB.cfg?.versioningSupported === true
-        ? `<label class="bb-details-version-control" title="${versionCount.toLocaleString()} available version${versionCount === 1 ? '' : 's'}"><span>Version (${versionCount.toLocaleString()})</span><select data-details-version><option value="">${escapeHTML(currentVersionLabel)}</option>${historicalVersions.map(version => `<option value="${escapeHTML(version.version)}"${version.version === selectedVersion ? ' selected' : ''}>${escapeHTML(`${versionDateLabel(version)} · ${versionDisplayLabel(version)}`)}</option>`).join('')}${selectedVersion && !selectedVersionKnown ? `<option value="${escapeHTML(selectedVersion)}" selected>Selected · ${escapeHTML(selectedVersion)}</option>` : ''}</select></label>`
+      const versionCount = objectVersions
+        .filter(version => version && !version.deleteMarker && version.version).length;
+      const versionSelector = BB.cfg?.versioningSupported === true && BB.versions && versionCount > 1
+        ? '<div class="bb-details-version-control" data-details-versions></div>'
         : '';
+      // The number of the shown version, as the version picker gives it (v1 is the oldest).
+      const numbered = versionCount > 1 && BB.versions ? BB.versions.listVersions(objectVersions) : [];
+      const shownVersion = numbered.find(version => (selectedVersion ? version.version === selectedVersion : version.isCurrent === true));
+      const versionPlace = shownVersion ? { position: shownVersion.number, count: numbered.length } : null;
 
       window.clearTimeout(notificationTimer);
       if (detailsNotification) {
@@ -553,31 +581,15 @@
         html: `<div class="bb-details bb-details--file">
           <div class="bb-details-head"><i class="mdi mdi-${escapeHTML(icon)}"></i><div class="bb-details-titles"><div class="bb-details-name">${escapeHTML(name)}</div><div class="bb-details-prefix">${escapeHTML(key)}</div></div>${versionSelector}</div>
           <div class="bb-details-body">
-            <div class="spreadsheet-tabs bb-details-tabs" role="tablist" aria-label="File details">
-              <button type="button" class="spreadsheet-tab is-active" role="tab" aria-selected="true" data-details-tab="overview"><i class="mdi mdi-information-outline"></i><span>Overview</span></button>
-              <button type="button" class="spreadsheet-tab" role="tab" aria-selected="false" data-details-tab="advanced"><i class="mdi mdi-cogs"></i><span>Advanced</span></button>
-            </div>
-            <section class="bb-details-panel" data-details-panel="overview">${overviewSections}</section>
-            <section class="bb-details-panel" data-details-panel="advanced" hidden>${advancedPanel}</section>
+            <section class="bb-details-panel">${overviewSections}</section>
+            <section class="bb-details-panel bb-details-tools">${advancedPanel}</section>
           </div>
         </div>`,
-        onOpen: ({ overlay, modal }) => {
-          overlay?.classList.add('bb-overlay--top-anchored');
-          modal?.classList.add('bb-modal--details');
-          const tabs = Array.from(overlay.querySelectorAll('[data-details-tab]'));
-          const panels = Array.from(overlay.querySelectorAll('[data-details-panel]'));
-          const activateDetailsTab = name => {
-            const next = name === 'advanced' ? 'advanced' : 'overview';
-            tabs.forEach(tab => {
-              const active = tab.dataset.detailsTab === next;
-              tab.classList.toggle('is-active', active);
-              tab.setAttribute('aria-selected', active ? 'true' : 'false');
-              tab.tabIndex = active ? 0 : -1;
-            });
-            panels.forEach(panel => { panel.hidden = panel.dataset.detailsPanel !== next; });
-          };
-          tabs.forEach(tab => tab.addEventListener('click', () => activateDetailsTab(tab.dataset.detailsTab)));
-
+        large: true,
+        onOpen: ({ overlay }) => {
+          const summary = BB.summary
+            ? BB.summary.mount(overlay, { versions: versionPlace, headers, customerKey })
+            : { setTags() {}, setLock() {} };
           const integrityCard = overlay.querySelector('[data-details-tool-card="integrity"]');
           const integrityButton = overlay.querySelector('[data-details-integrity]');
           const integrityStatusHost = overlay.querySelector('[data-details-integrity-status]');
@@ -593,15 +605,86 @@
             void renderDetailsInspection(key, selectedVersion, selectedInstance, inspectionCard, inspectButton, inspectionStatusHost, inspectionResultHost);
           });
 
-          const versionSelect = overlay.querySelector('[data-details-version]');
-          versionSelect?.addEventListener('change', () => {
-            const nextVersion = String(versionSelect.value || '');
-            if (nextVersion === selectedVersion) return;
-            overlay.querySelector('.bb-modal-x')?.click();
-            window.setTimeout(() => {
-              void showMetadata(key, { instance: selectedInstance, version: nextVersion });
-            }, 140);
-          });
+          const encryptionHost = overlay.querySelector('[data-encryption-section]');
+          if (encryptionHost) {
+            void BB.encryption.mountSection(encryptionHost, { headers, customerKey, instance: selectedInstance });
+          }
+
+          const metadataHost = overlay.querySelector('[data-metadata-section]');
+          if (metadataHost) {
+            void BB.metadata.mountEditor(metadataHost, {
+              key,
+              instance: selectedInstance,
+              version: selectedVersion,
+              canWrite: allowed('write'),
+              versioning: BB.cfg?.versioningSupported === true,
+              onUnsupported() {
+                const fallback = overlay.querySelector('[data-metadata-fallback]');
+                if (fallback) fallback.hidden = false;
+              },
+              // The save changes the date, the ETag and the versions: the details open again on the current version.
+              onSaved() {
+                ui().toast('The metadata is saved.', { type: 'success', duration: 4000 });
+                overlay.querySelector('.bb-modal-x')?.click();
+                window.setTimeout(() => {
+                  void showMetadata(key, { instance: selectedInstance });
+                }, 140);
+              }
+            });
+          }
+
+          const tagsHost = overlay.querySelector('[data-tags-section]');
+          if (tagsHost) {
+            void BB.tags.mountEditor(tagsHost, {
+              key,
+              size: Number(result.size || 0),
+              instance: selectedInstance,
+              version: selectedVersion,
+              canWrite: allowed('write'),
+              rootPrefix: BB.cfg?.rootPrefix || '',
+              onState: tags => summary.setTags(tags)
+            });
+          }
+
+          const lockHost = overlay.querySelector('[data-lock-section]');
+          if (lockHost) {
+            void BB.objectLock.mountSection(lockHost, {
+              key,
+              instance: selectedInstance,
+              version: selectedVersion,
+              canWrite: allowed('write'),
+              onState: lock => summary.setLock(lock)
+            });
+          }
+
+          const versionHost = overlay.querySelector('[data-details-versions]');
+          if (versionHost) {
+            BB.versions.mountPicker(versionHost, {
+              versions: objectVersions,
+              selected: selectedVersion,
+              onSelect(nextVersion) {
+                overlay.querySelector('.bb-modal-x')?.click();
+                window.setTimeout(() => {
+                  void showMetadata(key, { instance: selectedInstance, version: nextVersion });
+                }, 140);
+              },
+              onCompare({ from, to }) {
+                location.href = BB.versions.compareURL({ key, instance: selectedInstance, from, to });
+              },
+              // A restore or a delete changes the versions: the details open again. They show the same version, but
+              // the current version after a restore or after the delete of the version that they showed.
+              actions: versionActions(key, {
+                instance: selectedInstance,
+                onChanged({ action, version }) {
+                  overlay.querySelector('.bb-modal-x')?.click();
+                  const next = action === 'delete' && version !== selectedVersion ? selectedVersion : '';
+                  window.setTimeout(() => {
+                    void showMetadata(key, { instance: selectedInstance, version: next });
+                  }, 140);
+                }
+              })
+            });
+          }
 
           if (!countAction) return;
           const button = overlay.querySelector('[data-document-count]');
@@ -697,6 +780,43 @@
     return `hsl(${hue} 62% 52%)`;
   }
 
+  // The label of a file tile is white or black, whichever has the higher WCAG contrast with the colour of the tile. The
+  // higher of the two ratios is 4.58 at the least, so every label has a ratio of 4.5 or more. The browser reads the
+  // colour (hex or hsl) through a canvas of one pixel.
+  const treemapLabelColors = Object.freeze({ light: '#ffffff', dark: '#000000' });
+  const treemapLabelCache = new Map();
+  let treemapColorContext = null;
+
+  function treemapColorLuminance(color) {
+    if (!treemapColorContext) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 1;
+      canvas.height = 1;
+      treemapColorContext = canvas.getContext('2d', { willReadFrequently: true });
+    }
+    treemapColorContext.clearRect(0, 0, 1, 1);
+    treemapColorContext.fillStyle = '#000000';
+    treemapColorContext.fillStyle = color;
+    treemapColorContext.fillRect(0, 0, 1, 1);
+    const channels = Array.from(treemapColorContext.getImageData(0, 0, 1, 1).data.slice(0, 3), value => {
+      const unit = value / 255;
+      return unit <= 0.04045 ? unit / 12.92 : ((unit + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+  }
+
+  function treemapLabelStyle(color) {
+    if (!treemapLabelCache.has(color)) {
+      const luminance = treemapColorLuminance(color);
+      const darkRatio = (luminance + 0.05) / 0.05;
+      const lightRatio = 1.05 / (luminance + 0.05);
+      treemapLabelCache.set(color, darkRatio >= lightRatio
+        ? `--treemap-label:${treemapLabelColors.dark};--treemap-shadow:none`
+        : `--treemap-label:${treemapLabelColors.light};--treemap-shadow:0 1px 2px rgba(0, 0, 0, .72)`);
+    }
+    return treemapLabelCache.get(color);
+  }
+
   function distributionEntries(entries, field, maximum = 7) {
     const source = Array.from(entries || []);
     const ordered = source
@@ -731,7 +851,7 @@
     return `<section class="folder-distribution"><div class="folder-distribution-title">${escapeHTML(title)}</div><div class="folder-distribution-bar" role="img" aria-label="${escapeHTML(title)}">${segments}</div><div class="folder-distribution-legend">${legend}</div></section>`;
   }
 
-  function statsFileListHTML(title, entries, mode, maximum = 6) {
+  function statsFileListHTML(title, entries, mode, maximum = 10) {
     const items = Array.from(entries || []).slice(0, maximum);
     if (!items.length) {
       return `<section class="folder-file-list"><div class="folder-file-list-title">${escapeHTML(title)}</div><div class="folder-file-list-empty">No file data available.</div></section>`;
@@ -744,9 +864,10 @@
       const dateLabel = BB.runtime.formatDateTimeUTC(entry?.lastModified) || 'Unknown date';
       const primaryMeta = mode === 'recent' ? dateLabel : formatBytes(entry?.bytes || 0);
       const secondaryMeta = mode === 'recent' ? formatBytes(entry?.bytes || 0) : dateLabel;
-      return `<button type="button" class="folder-file-list-row" data-insight-file="true" data-path="${escapeHTML(path)}" data-kind="file" data-size="${Math.max(0, Number(entry?.bytes || 0))}" data-mime="${escapeHTML(entry?.mime || '')}" data-etag="${escapeHTML(entry?.etag || '')}" data-modified="${escapeHTML(entry?.lastModified || '')}" title="${escapeHTML(path)}">
+      return `<button type="button" class="folder-file-list-row" data-insight-file="true" data-path="${escapeHTML(path)}" data-kind="file" data-size="${Math.max(0, Number(entry?.bytes || 0))}" data-mime="${escapeHTML(entry?.mime || '')}" data-etag="${escapeHTML(entry?.etag || '')}" data-modified="${escapeHTML(entry?.lastModified || '')}" title="${escapeHTML(`${path} · ${kind}`)}">
         <i class="mdi mdi-${escapeHTML(iconName)}"></i>
-        <span class="folder-file-list-copy"><strong>${escapeHTML(name)}</strong><small>${escapeHTML(kind)} · ${escapeHTML(secondaryMeta)}</small></span>
+        <strong class="folder-file-list-name">${escapeHTML(name)}</strong>
+        <span class="folder-file-list-secondary">${escapeHTML(secondaryMeta)}</span>
         <span class="folder-file-list-value">${escapeHTML(primaryMeta)}</span>
       </button>`;
     }).join('');
@@ -957,7 +1078,9 @@
     const branchClass = isBranch ? ' is-branch has-header' : ' is-terminal';
     const role = kind === 'other' ? 'img' : 'button';
     const headerValue = header > 0 ? `${header.toFixed(2)}px` : '100%';
-    output.push(`<div class="folder-treemap-node is-${kind}${branchClass}" tabindex="0" role="${role}" aria-label="${escapeHTML(title.replace(/\n/g, ', '))}" data-kind="${kind}" data-name="${escapeHTML(node.name || '')}" data-depth="${depth}" data-header-height="${header}" data-path="${escapeHTML(node.path || '')}" data-size="${Math.max(0, Number(node.bytes || 0))}" data-count="${Math.max(0, Number(node.count || 0))}" data-mime="${escapeHTML(node.mime || '')}" data-etag="${escapeHTML(node.etag || '')}" data-modified="${escapeHTML(node.lastModified || '')}" style="left:${drawX.toFixed(2)}px;top:${drawY.toFixed(2)}px;width:${drawWidth.toFixed(2)}px;height:${drawHeight.toFixed(2)}px;z-index:${depth};--treemap-color:${color};--treemap-header:${headerValue}">${label}</div>`);
+    // Folder tiles and the tile Others use the colours of the theme. A file tile has its own colour and its own label colour.
+    const labelStyle = kind === 'file' ? `;${treemapLabelStyle(color)}` : '';
+    output.push(`<div class="folder-treemap-node is-${kind}${branchClass}" tabindex="0" role="${role}" aria-label="${escapeHTML(title.replace(/\n/g, ', '))}" data-kind="${kind}" data-name="${escapeHTML(node.name || '')}" data-depth="${depth}" data-header-height="${header}" data-path="${escapeHTML(node.path || '')}" data-size="${Math.max(0, Number(node.bytes || 0))}" data-count="${Math.max(0, Number(node.count || 0))}" data-mime="${escapeHTML(node.mime || '')}" data-etag="${escapeHTML(node.etag || '')}" data-modified="${escapeHTML(node.lastModified || '')}" style="left:${drawX.toFixed(2)}px;top:${drawY.toFixed(2)}px;width:${drawWidth.toFixed(2)}px;height:${drawHeight.toFixed(2)}px;z-index:${depth};--treemap-color:${color};--treemap-header:${headerValue}${labelStyle}">${label}</div>`);
     if (isLeaf || output.length >= treemapMaximumRectangles) return;
 
     const inset = Math.min(treemapBranchInsetPixels, drawWidth / 4, drawHeight / 4);
@@ -1085,20 +1208,15 @@
       const requestedTab = initialTab === 'treemap' ? 'treemap' : 'overview';
       const dialog = ui().alert({
         html: `<div id="${insightID}" class="bb-details bb-details--treemap bb-details--insights" data-initial-tab="${requestedTab}">
-          <div class="bb-details-head"><i class="mdi mdi-${isRoot ? 'database-outline' : 'chart-box-outline'}"></i><div class="bb-details-titles"><div class="bb-details-name">${scopeTitle}</div><div class="bb-details-prefix">${escapeHTML(scopePath)} · ${Number(stats.count || 0).toLocaleString()} objects · ${escapeHTML(formatBytes(stats.totalBytes || 0))}</div></div></div>
+          <div class="bb-details-head"><i class="mdi mdi-${isRoot ? 'database-outline' : 'chart-box-outline'}"></i><div class="bb-details-titles"><div class="bb-details-name">${scopeTitle}</div><div class="bb-details-prefix">${escapeHTML(scopePath)} · ${Number(stats.count || 0).toLocaleString()} objects · ${escapeHTML(formatBytes(stats.totalBytes || 0))} · computed in ${Number(stats.tookMs || 0).toLocaleString()} ms</div></div></div>
           <div class="bb-details-body">
             <div class="spreadsheet-tabs folder-insights-tabs" role="tablist" aria-label="${scopeTitle}">
               <button type="button" class="spreadsheet-tab" role="tab" data-insights-tab="overview"><i class="mdi mdi-chart-donut"></i><span>Overview</span></button>
               <button type="button" class="spreadsheet-tab" role="tab" data-insights-tab="treemap"><i class="mdi mdi-chart-tree"></i><span>Treemap</span></button>
             </div>
             <section class="folder-insights-panel" data-insights-panel="overview">
-              <div class="folder-details-summary" role="group" aria-label="Scope totals">
-                <div class="folder-details-metric"><span>Objects</span><strong>${Number(stats.count || 0).toLocaleString()}</strong></div>
-                <div class="folder-details-metric"><span>Total size</span><strong>${escapeHTML(formatBytes(stats.totalBytes))}</strong></div>
-              </div>
               <div class="folder-distribution-grid">${distributionHTML(entries, 'bytes', 'Distribution by size')}${distributionHTML(entries, 'count', 'Distribution by object count')}</div>
               <div class="folder-file-lists">${statsFileListHTML('Most recent files', stats.recent, 'recent')}${statsFileListHTML('Largest files', stats.largest, 'largest')}</div>
-              <div class="folder-details-footer">Computed in ${Number(stats.tookMs || 0).toLocaleString()} ms</div>
             </section>
             <section class="folder-insights-panel" data-insights-panel="treemap" hidden>
               <div class="folder-treemap is-layout-pending" role="img" aria-label="${scopeTitle} size treemap" aria-busy="true"></div>
@@ -1106,10 +1224,7 @@
             </section>
           </div>
         </div>`,
-        onOpen: ({ overlay, modal }) => {
-          overlay?.classList.add('bb-overlay--top-anchored');
-          modal?.classList.add('bb-modal--wide', 'bb-modal--insights');
-        }
+        large: true
       });
 
       let resizeObserver = null;
@@ -1117,8 +1232,6 @@
       requestAnimationFrame(() => {
         const root = document.getElementById(insightID);
         if (!root) return;
-        const modal = root.closest('.bb-modal');
-        modal?.classList.add('bb-modal--wide', 'bb-modal--insights');
         const map = root.querySelector('.folder-treemap');
         const treemapPanel = root.querySelector('[data-insights-panel="treemap"]');
         const treemapTooltip = root.querySelector('[data-treemap-tooltip]');
@@ -1297,7 +1410,7 @@
         progress: null,
         indeterminate: false,
         detail: target,
-        duration: 6500
+        duration: error?.code === 'object_locked' ? 9000 : 6500
       });
       return false;
     }
@@ -1346,9 +1459,29 @@
     }
   }
 
+  // A delete without a version on a bucket with Object Lock adds a delete marker: a version that a lock protects stays
+  // in the bucket. The confirmation and a warning after the delete say so.
+  const LOCK_DELETE_NOTE = 'This bucket has Object Lock. The delete adds a delete marker. A version that a lock protects stays in the bucket.';
+  const lockedBucket = () => BB.cfg?.objectLockSupported === true;
+
+  // The confirmation of a delete. On a bucket with Object Lock, a second paragraph says what the delete does.
+  function confirmDelete(title, question) {
+    if (!lockedBucket()) return ui().confirm({ title, message: question });
+    return ui().confirm({ title, html: `<div class="bb-modal-text">${escapeHTML(question)}</div><div class="bb-modal-text bb-modal-note" data-lock-delete-note>${escapeHTML(LOCK_DELETE_NOTE)}</div>` });
+  }
+
+  function lockDeleteWarning(detail) {
+    if (!lockedBucket()) return;
+    ui().toast('The versions that a lock protects stay in the bucket.', {
+      status: 'warning',
+      detail: `${detail}: the delete added a delete marker. This bucket has Object Lock.`,
+      duration: 9000
+    });
+  }
+
   async function deleteObject(key) {
     if (!(await requirePermissions(['delete']))) return false;
-    const confirmed = await ui().confirm({ title: 'Delete file', message: `Permanently delete "${key}"?` });
+    const confirmed = await confirmDelete('Delete file', `${lockedBucket() ? 'Delete' : 'Permanently delete'} "${key}"?`);
     if (!confirmed) return false;
     const notification = ui().toast(`Deleting ${key.split('/').pop() || key}...`, {
       persistent: true,
@@ -1366,6 +1499,7 @@
         detail: key,
         duration: 4500
       });
+      lockDeleteWarning(key);
       return true;
     } catch (error) {
       notification.update(`Delete failed: ${String(error.message || error)}`, {
@@ -1374,7 +1508,7 @@
         progress: null,
         indeterminate: false,
         detail: key,
-        duration: 6500
+        duration: error?.code === 'object_locked' ? 9000 : 6500
       });
       return false;
     }
@@ -1416,14 +1550,34 @@
     }
   }
 
+  // The tags of every object under a folder: a form, then a background job.
+  async function tagPrefix(prefix) {
+    if (!(await requirePermissions(['write']))) return false;
+    const source = ensurePrefix(prefix);
+    return BB.tags.changeFolderTags({
+      prefix: source,
+      async start(change) {
+        try {
+          const created = await BB.api.tagPrefix(source, change);
+          const result = await waitForJob(created, 'Tagging folder');
+          return result.status === 'completed';
+        } catch (error) {
+          showTaskFailure('Tagging folder', error);
+          return false;
+        }
+      }
+    });
+  }
+
   async function deletePrefix(prefix) {
     if (!(await requirePermissions(['delete']))) return false;
     const source = ensurePrefix(prefix);
-    const confirmed = await ui().confirm({ title: 'Delete folder', message: `Permanently delete "${source}" and all of its contents?` });
+    const confirmed = await confirmDelete('Delete folder', `${lockedBucket() ? 'Delete' : 'Permanently delete'} "${source}" and all of its contents?`);
     if (!confirmed) return false;
     try {
       const created = await BB.api.deletePrefix(source);
       const result = await waitForJob(created, 'Deleting folder');
+      if (result.status === 'completed') lockDeleteWarning(source);
       return result.status === 'completed';
     } catch (error) {
       showTaskFailure('Deleting folder', error);
@@ -1455,6 +1609,11 @@
         });
       } catch (error) {
         if (error?.name === 'AbortError') return false;
+        // An object with a key of the client (SSE-C): the browser download would fail in the same way.
+        if (BB.encryption && await BB.encryption.customerKeyRefusal(error, key, { version: options.version || '', instance: options.instance || BB.api.getInstance() })) {
+          ui().toast(BB.encryption.CUSTOMER_KEY_TEXT, { status: 'error', detail: key, duration: 9000 });
+          return false;
+        }
         BB.downloads.fallbackDownload(key, safeFilename, options.version || '', options.instance || BB.api.getInstance());
         ui().toast(`Resumable download was unavailable: ${String(error?.message || error)}. Browser download started instead.`, { type: 'warning', duration: 6500 });
       }
@@ -1481,16 +1640,6 @@
     const url = URL.createObjectURL(blob);
     triggerBrowserDownload(url, filename);
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }
-
-  function versionDisplayLabel(version) {
-    const identifier = String(version?.version || '');
-    if (!identifier) return 'Unknown version';
-    return identifier.length > 32 ? `${identifier.slice(0, 16)}…${identifier.slice(-12)}` : identifier;
-  }
-
-  function versionDateLabel(version) {
-    return version?.lastModified ? new Date(version.lastModified).toLocaleString() : '';
   }
 
   async function fetchExactVersionRange(key, version, start, end, size, etag, instance, signal) {
@@ -1598,6 +1747,7 @@
         : (firstDifference === null ? 'The versions differ.' : `First difference at byte ${Number(firstDifference).toLocaleString()}.`);
       task.complete({ name: key.split('/').pop() || key, detail, progress: 1 });
       await ui().alert({
+        large: true,
         html: `<div class="bb-details bb-comparison">
           <div class="bb-details-head"><i class="mdi mdi-swap-vertical"></i><div class="bb-details-titles"><div class="bb-details-name">${equal ? 'Versions are identical' : 'Versions differ'}</div><div class="bb-details-prefix">${escapeHTML(key)}</div></div></div>
           <div class="bb-details-body"><section class="bb-details-section"><div class="bb-kv">
@@ -1623,156 +1773,54 @@
     }
   }
 
-  async function showVersions(key, options = {}) {
-    if (!(await requirePermissions(['read']))) return false;
-    if (BB.cfg?.versioningSupported !== true) return false;
-    const instance = options.instance || BB.api.getInstance();
-    const canWriteVersion = allowed('write');
-    const canDeleteVersion = allowed('delete');
-    try {
-      const firstPage = await BB.api.versions(key, { maximum: 250, instance });
-      const versions = [...(firstPage.versions || [])];
-      let pageToken = firstPage.nextPageToken || '';
-      if (!versions.length && !pageToken) {
-        await ui().alert({ title: 'Versions', message: 'No object versions were returned by the provider.' });
-        return true;
-      }
-
-      const renderRow = (version, index) => {
-        const state = version.isCurrent ? '<strong>Current</strong>' : (version.deleteMarker ? 'Delete marker' : 'Previous');
-        const deleteLabel = version.deleteMarker ? (version.isCurrent ? 'Remove marker' : 'Delete marker') : 'Delete';
-        const selectable = !version.deleteMarker && !!version.version;
-        return `<tr data-version-row="${index}">
-          <td class="bb-version-select-cell">${selectable ? `<input type="checkbox" data-version-select="${index}" aria-label="Select version ${escapeHTML(versionDisplayLabel(version))}">` : ''}</td>
-          <td>${state}</td>
-          <td class="is-monospace" title="${escapeHTML(version.version || '')}">${escapeHTML(versionDisplayLabel(version))}</td>
-          <td class="is-numeric">${version.deleteMarker ? '-' : escapeHTML(formatBytes(version.size || 0))}</td>
-          <td>${escapeHTML(versionDateLabel(version))}</td>
-          <td class="bb-version-actions">
-            ${version.deleteMarker ? '' : `<button class="bb-btn" data-version-download="${index}">Download</button>`}
-            ${canWriteVersion && !version.isCurrent && !version.deleteMarker ? `<button class="bb-btn bb-btn-primary" data-version-restore="${index}">Restore</button>` : ''}
-            ${canDeleteVersion ? `<button class="bb-btn danger" data-version-delete="${index}">${deleteLabel}</button>` : ''}
-          </td>
-        </tr>`;
-      };
-      const initialRows = versions.map(renderRow).join('');
-      await ui().alert({
-        html: `<div class="bb-details bb-version-browser"><div class="bb-details-head"><i class="mdi mdi-source-commit"></i><div class="bb-details-titles"><div class="bb-details-name">Object versions</div><div class="bb-details-prefix">${escapeHTML(key)}</div></div></div><div class="bb-details-body"><div class="bb-version-toolbar"><button type="button" class="bb-btn bb-btn-primary" data-version-compare-selected disabled><i class="mdi mdi-swap-vertical"></i><span>Compare selected</span></button><span data-version-selection>Choose two versions</span></div><div class="data-table-scroll bb-version-table"><table class="data-table"><thead><tr><th aria-label="Selection"></th><th>State</th><th>Version</th><th>Size</th><th>Modified</th><th>Actions</th></tr></thead><tbody data-version-body>${initialRows}</tbody></table></div><div class="bb-version-pagination"><button type="button" class="bb-btn" data-version-more${pageToken ? '' : ' hidden'}>Load more</button><span data-version-count>${versions.length.toLocaleString()} version record(s)</span></div></div></div>`,
-        onOpen: ({ overlay }) => {
-          const body = overlay.querySelector('[data-version-body]');
-          const moreButton = overlay.querySelector('[data-version-more]');
-          const count = overlay.querySelector('[data-version-count]');
-          const compareButton = overlay.querySelector('[data-version-compare-selected]');
-          const selectionLabel = overlay.querySelector('[data-version-selection]');
-          const selected = [];
-
-          const refreshSelection = () => {
-            const selectedSet = new Set(selected);
-            overlay.querySelectorAll('[data-version-select]').forEach(input => {
-              const index = Number(input.dataset.versionSelect);
-              input.checked = selectedSet.has(index);
-              input.disabled = selected.length >= 2 && !selectedSet.has(index);
-            });
-            compareButton.disabled = selected.length !== 2;
-            selectionLabel.textContent = selected.length === 2 ? 'Two versions selected' : `${selected.length} of 2 selected`;
-          };
-          const updateFooter = () => {
-            moreButton.hidden = !pageToken;
-            count.textContent = `${versions.length.toLocaleString()} version record(s)`;
-            refreshSelection();
-          };
-          const appendPage = async () => {
-            if (!pageToken || moreButton.disabled) return;
-            moreButton.disabled = true;
-            moreButton.textContent = 'Loading...';
-            try {
-              const page = await BB.api.versions(key, { pageToken, maximum: 250, instance });
-              const offset = versions.length;
-              const incoming = page.versions || [];
-              versions.push(...incoming);
-              body.insertAdjacentHTML('beforeend', incoming.map((version, index) => renderRow(version, offset + index)).join(''));
-              pageToken = page.nextPageToken || '';
-              updateFooter();
-            } catch (error) {
-              ui().toast(`Loading versions failed: ${String(error?.message || error)}`, { status: 'error', duration: 6000 });
-            } finally {
-              moreButton.disabled = false;
-              moreButton.textContent = 'Load more';
-            }
-          };
-          const reload = async () => {
-            const page = await BB.api.versions(key, { maximum: 250, instance });
-            versions.splice(0, versions.length, ...(page.versions || []));
-            selected.splice(0, selected.length);
-            pageToken = page.nextPageToken || '';
-            body.innerHTML = versions.map(renderRow).join('');
-            updateFooter();
-          };
-
-          moreButton.addEventListener('click', appendPage);
-          compareButton.addEventListener('click', async () => {
-            if (selected.length !== 2) return;
-            const left = versions[selected[0]];
-            const right = versions[selected[1]];
-            if (!left || !right || left.deleteMarker || right.deleteMarker) return;
-            await compareVersions(key, left.version, right.version, { instance });
-          });
-          overlay.addEventListener('change', event => {
-            const input = event.target.closest('[data-version-select]');
-            if (!input) return;
-            const index = Number(input.dataset.versionSelect);
-            const existing = selected.indexOf(index);
-            if (input.checked && existing < 0 && selected.length < 2) selected.push(index);
-            if (!input.checked && existing >= 0) selected.splice(existing, 1);
-            refreshSelection();
-          });
-          overlay.addEventListener('click', async event => {
-            const target = event.target.closest('[data-version-download],[data-version-restore],[data-version-delete]');
-            if (!target) return;
-            const rawIndex = target.dataset.versionDownload ?? target.dataset.versionRestore ?? target.dataset.versionDelete;
-            const version = versions[Number(rawIndex)];
-            if (!version) return;
-            try {
-              if (target.hasAttribute('data-version-download')) {
-                await downloadObject(key, key.split('/').pop(), { version: version.version, instance });
-                return;
-              }
-              if (target.hasAttribute('data-version-restore')) {
-                if (!(await requirePermissions(['write']))) return;
-                if (!(await ui().confirm({ title: 'Restore version', message: `Create a new current version of "${key}" from ${version.version}?` }))) return;
-                await BB.api.restoreVersion(key, version.version, instance);
-                ui().toast('Version restored.', { type: 'success', duration: 4000 });
-                await reload();
-                return;
-              }
-              if (target.hasAttribute('data-version-delete')) {
-                if (!(await requirePermissions(['delete']))) return;
-                const message = version.deleteMarker
-                  ? `Permanently remove delete marker ${version.version} from "${key}"?${version.isCurrent ? ' The previous object version may become current again.' : ''}`
-                  : `Permanently delete exact version ${version.version} of "${key}"?${version.isCurrent ? ' A previous version or delete marker may become current.' : ''}`;
-                if (!(await ui().confirm({ title: version.deleteMarker ? 'Remove delete marker' : 'Delete version', message }))) return;
-                await BB.api.deleteVersion(key, version.version, instance);
-                ui().toast(version.deleteMarker ? 'Delete marker removed.' : 'Version deleted.', { type: 'success', duration: 4000 });
-                await reload();
-              }
-            } catch (error) {
-              ui().toast(`Version action failed: ${String(error?.message || error)}`, { status: 'error', duration: 6000 });
-            }
-          });
-          updateFooter();
+  // The actions of the rows of the version picker: Download, Restore (permission write) and Delete (permission delete).
+  // The state of the write permission is the state of the operation upload. The picker does not list the delete
+  // markers. onChanged({ action, version }) runs after a restore or a delete, and the event bb:versions-changed tells
+  // the page to read the versions again.
+  function versionActions(key, { instance = null, onChanged = null } = {}) {
+    const selected = instance || BB.api.getInstance();
+    const changed = (action, version) => {
+      document.dispatchEvent(new CustomEvent('bb:versions-changed', { detail: { key, instance: selected, action, version } }));
+      if (onChanged) onChanged({ action, version });
+    };
+    // The text of an Object Lock refusal is long and says what to do: it stays longer on the screen.
+    const failed = error => ui().toast(`Version action failed: ${String(error?.message || error)}`, { status: 'error', duration: error?.code === 'object_locked' ? 9000 : 6000 });
+    return {
+      download: allowed('download') ? version => downloadObject(key, key.split('/').pop(), { version: version.version, instance: selected }) : null,
+      restore: allowed('upload') ? async version => {
+        if (!(await requirePermissions(['write']))) return false;
+        if (!(await ui().confirm({ title: 'Restore version', message: `Create a new current version of "${key}" from ${version.version}?` }))) return false;
+        try {
+          await BB.api.restoreVersion(key, version.version, selected);
+        } catch (error) {
+          failed(error);
+          return false;
         }
-      });
-      return true;
-    } catch (error) {
-      if (Number(error?.status || 0) === 501) return false;
-      await ui().alert({ title: 'Versions', message: String(error?.message || error) });
-      return false;
-    }
+        ui().toast('Version restored.', { status: 'success', duration: 4000 });
+        changed('restore', version.version);
+        return true;
+      } : null,
+      remove: allowed('delete') ? async version => {
+        if (!(await requirePermissions(['delete']))) return false;
+        const message = `Permanently delete exact version ${version.version} of "${key}"?${version.isCurrent ? ' A previous version or delete marker may become current.' : ''}`;
+        if (!(await ui().confirm({ title: 'Delete version', message }))) return false;
+        try {
+          await BB.api.deleteVersion(key, version.version, selected);
+        } catch (error) {
+          failed(error);
+          return false;
+        }
+        ui().toast('Version deleted.', { status: 'success', duration: 4000 });
+        changed('delete', version.version);
+        return true;
+      } : null
+    };
   }
-
 
   BB.actions = {
     showMetadata,
+    tagPrefix,
+    compareVersions,
     showFileDetails: showMetadata,
     showPrefixInsights,
     showPrefixDetails,
@@ -1785,7 +1833,7 @@
     deletePrefix,
     waitForJob,
     downloadObject,
-    showVersions,
+    versionActions,
     triggerBrowserDownload,
     formatTransferDetail,
     formatBytes,

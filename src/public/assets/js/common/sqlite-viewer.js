@@ -72,7 +72,7 @@
     scroller.dataset.pageWheel = 'true';
     scroller.addEventListener('wheel', event => {
       if (event.ctrlKey || event.shiftKey || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
-      const page = document.scrollingElement || document.documentElement;
+      const page = BB.runtime?.pageScroller?.() || document.scrollingElement || document.documentElement;
       if (!page) return;
       const delta = normalizeWheelDelta(event, page);
       const canMove = delta < 0

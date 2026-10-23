@@ -3,171 +3,142 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="color-scheme" content="light" />
+  <meta name="color-scheme" content="dark light" />
+  <meta name="bb-frontend" content="portal" />
   <meta name="bb-asset-version" content="{{ASSET_VERSION}}" />
   <base href="{{APP_BASE}}" />
-  <link rel="icon" type="image/svg+xml" href="favicon.svg?v=2" />
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
   <title>Stowr</title>
-
-  <!-- Keep the first visible header frame stable on hard reloads. -->
-  <link rel="preload" as="image" type="image/svg+xml" href="assets/icons/mdi/source-commit.svg" fetchpriority="high" data-bb-initial-icon />
-  <link rel="preload" as="image" type="image/svg+xml" href="assets/icons/mdi/database-outline.svg" fetchpriority="high" data-bb-initial-icon />
-  <link rel="preload" as="image" type="image/svg+xml" href="assets/icons/mdi/eye-outline.svg" fetchpriority="high" data-bb-initial-icon />
-  <link rel="preload" as="image" type="image/svg+xml" href="assets/icons/mdi/pencil-outline.svg" fetchpriority="high" data-bb-initial-icon />
-  <link rel="preload" as="image" type="image/svg+xml" href="assets/icons/mdi/delete-outline.svg" fetchpriority="high" data-bb-initial-icon />
-  <link rel="preload" as="image" type="image/svg+xml" href="assets/icons/mdi/magnify.svg" fetchpriority="high" data-bb-initial-icon />
-  <link rel="preload" as="image" type="image/svg+xml" href="assets/icons/mdi/refresh.svg" fetchpriority="high" data-bb-initial-icon />
-  <link rel="preload" as="image" type="image/svg+xml" href="assets/icons/mdi/cogs.svg" fetchpriority="high" data-bb-initial-icon />
-  <link rel="preload" as="image" type="image/svg+xml" href="assets/icons/mdi/plus.svg" fetchpriority="high" data-bb-initial-icon />
-  <link rel="preload" as="image" type="image/svg+xml" href="assets/icons/mdi/chevron-down.svg" fetchpriority="high" data-bb-initial-icon />
-
+  <script src="assets/js/theme.js"></script>
   <link rel="stylesheet" href="assets/css/icons.css" />
-  <link rel="stylesheet" href="assets/vendor/github-markdown-css/5/github-markdown-light.min.css" />
-  <link rel="stylesheet" href="assets/vendor/highlightjs/11/styles/github.min.css" />
-  <link rel="stylesheet" href="assets/vendor/buefy/1.0.1/buefy.min.css" />
-  <link rel="stylesheet" href="assets/css/tokens.css" />
-  <link rel="stylesheet" href="assets/css/base.css" />
-  <link rel="stylesheet" href="assets/css/style.css" />
-  <link rel="stylesheet" href="assets/css/ui.css" />
-  <link rel="stylesheet" href="assets/css/components.css" />
-  <link rel="stylesheet" href="assets/css/data-grid.css" />
-  <link rel="stylesheet" href="assets/css/viewers.css" />
-  <link rel="stylesheet" href="assets/css/interaction.css" />
-  <link rel="stylesheet" href="assets/css/treemap.css" />
+  <link rel="stylesheet" href="assets/css/dialogs.css" />
+  <link rel="stylesheet" href="assets/css/portal.css" />
 </head>
 <body>
-  <div id="root" hidden>
-    <div id="app">
+  <a class="skipLink" href="#main">Skip to the files</a>
 
-      <header class="top">
-        <span id="buildVersion" class="build-version" hidden>
-          <i class="mdi mdi-source-commit"></i>
-          <span></span>
-        </span>
-        <div class="container">
-          <div class="head">
-            <div id="breadcrumbRegion" class="title breadcrumbs browser-breadcrumbs">
-              <button id="rootLink" type="button" class="root-link breadcrumb-current" aria-current="page" aria-disabled="true" tabindex="-1" title="Storage root">
-                <i class="mdi mdi-database-outline"></i>
-              </button>
-              <h1 id="breadcrumbLine" class="breadcrumb-line">
-                <span class="breadcrumb-separator">/</span>
-              </h1>
-            </div>
-
-            <div id="headerTools" class="header-tools">
-              <div class="storage-switcher is-static-switcher is-loading-switcher" aria-hidden="true">
-                <div class="storage-switcher-trigger is-static is-loading">
-                  <span class="storage-switcher-loading-icon"></span>
-                  <span class="storage-switcher-copy">
-                    <span class="storage-switcher-loading-line is-title"></span>
-                    <span class="storage-switcher-loading-line is-subtitle"></span>
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      <section class="toolbar">
-        <div class="container toolbar-row">
-          <div class="toolbar-left">
-            <div class="field">
-              <div class="field-body">
-                <div class="field has-addons">
-                  <div class="control is-expanded is-clearfix">
-                    <input id="searchInput" class="input" type="text" autocomplete="on" placeholder="Open a prefix in the current folder..." />
-                  </div>
-                  <p class="control">
-                    <button id="openButton" class="button is-primary" type="button">
-                      <span class="icon is-small"><i class="mdi mdi-magnify"></i></span>
-                      <span> Open </span>
-                    </button>
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="toolbar-spacer"></div>
-
-          <div class="toolbar-right">
-            <button id="refreshButton" class="button icon-btn-disc is-light" title="Refresh" type="button">
-              <span class="icon is-small"><i class="mdi mdi-refresh"></i></span>
-            </button>
-
-            <div class="dropdown dropdown-menu-animation is-bottom-left">
-              <div tabindex="0" class="dropdown-trigger" aria-haspopup="true">
-                <button class="button has-bb-chevron is-light" type="button">
-                  <span class="icon is-small"><i class="mdi mdi-cogs"></i></span>
-                  <span> Actions </span>
-                </button>
-              </div>
-              <div class="dropdown-menu" aria-hidden="true" style="display: none;">
-                <div class="dropdown-content" role="menu" aria-modal="true">
-                  <a id="downloadAllItem" class="dropdown-item" tabindex="0">
-                    <i class="mdi mdi-archive-arrow-down-outline"></i>
-                    <span>Download as ZIP</span>
-                  </a>
-                  <a id="insightsItem" class="dropdown-item" tabindex="0">
-                    <i class="mdi mdi-chart-box-outline"></i>
-                    <span>Storage insights</span>
-                  </a>
-                </div>
-              </div>
-            </div>
-
-            <div id="newMenu" class="dropdown dropdown-menu-animation is-bottom-left">
-              <div tabindex="0" class="dropdown-trigger" aria-haspopup="true">
-                <button class="button has-bb-chevron is-primary" type="button">
-                  <span class="icon is-small"><i class="mdi mdi-plus"></i></span>
-                  <span> New </span>
-                </button>
-              </div>
-              <div class="dropdown-menu" aria-hidden="true" style="display: none;">
-                <div class="dropdown-content" role="menu" aria-modal="true">
-                  <a id="uploadFilesItem" class="dropdown-item" tabindex="0">
-                    <i class="mdi mdi-file-upload-outline"></i>
-                    <span>Upload files</span>
-                  </a>
-                  <a id="uploadFolderItem" class="dropdown-item" tabindex="0">
-                    <i class="mdi mdi-folder-upload"></i>
-                    <span>Upload folder</span>
-                  </a>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <input id="fileInput" type="file" class="is-hidden-input" multiple />
-      <input id="dirInput" type="file" class="is-hidden-input" webkitdirectory multiple />
-
-      <div id="dropOverlay" class="upload-drop-overlay" role="status" aria-live="polite" style="display: none;">
-        <div class="upload-drop-card">
-          <i class="mdi mdi-cloud-upload-outline"></i>
-          <strong>Drop files or folders to upload</strong>
-          <span>
-            Uploading to
-            <span id="dropTarget" class="mono">/</span>
+  <header class="appHeader">
+    <div class="appHeader__inner">
+      <div class="appHeader__left">
+        <a id="backLink" class="backLink" href="/" title="Back to panel" hidden><i class="ic ic-chevron-left" aria-hidden="true"></i><span class="backLink__text">Back to panel</span></a>
+        <div class="appBrand">
+          <svg class="appBrand__logo" viewBox="0 0 18 18" aria-hidden="true"><rect x="1" y="1.5" width="16" height="2.6" rx="1.3"/><path fill-rule="evenodd" d="M4 5.6h10a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2zM6.2 8.5h5.6a.7.7 0 0 1 0 1.4H6.2a.7.7 0 0 1 0-1.4zM6.2 12h5.6a.7.7 0 0 1 0 1.4H6.2a.7.7 0 0 1 0-1.4z"/></svg>
+          <span class="appBrand__text">
+            <span class="appBrand__name">Stowr</span>
+            <span id="versionBadge" class="versionBadge" title="Version">--</span>
           </span>
         </div>
       </div>
-
-      <main id="main" class="container main-content">
-        <div class="empty-state card">
-          <i class="mdi mdi-loading mdi-spin"></i>
-          <p>Loading storage instances...</p>
+      <div id="storageSwitcher" class="storageSwitcher is-loading" aria-label="Bucket">
+        <div class="storageSwitcher__trigger is-static" aria-hidden="true">
+          <span class="storageSwitcher__skeleton"></span>
         </div>
-      </main>
+      </div>
+      <div class="appHeader__right">
+        <div class="themeSelect" data-theme-select>
+          <button type="button" class="button button--icon themeSelect__button" data-theme-trigger aria-haspopup="listbox" aria-expanded="false" aria-controls="themeMenu" aria-label="Theme: system" title="Theme">
+            <span class="themeSelect__current" aria-hidden="true"><svg class="themeIcon themeIcon--system" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5a1 1 0 0 1 1 -1h16a1 1 0 0 1 1 1v10a1 1 0 0 1 -1 1h-16a1 1 0 0 1 -1 -1v-10z"/><path d="M7 20h10"/><path d="M9 16v4"/><path d="M15 16v4"/></svg><svg class="themeIcon themeIcon--dark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z"/></svg><svg class="themeIcon themeIcon--light" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12m-4 0a4 4 0 1 0 8 0a4 4 0 1 0 -8 0"/><path d="M3 12h1m8 -9v1m8 8h1m-9 8v1m-6.4 -15.4l.7 .7m12.1 -.7l-.7 .7m0 11.4l.7 .7m-12.1 -.7l-.7 .7"/></svg></span>
+          </button>
+          <div id="themeMenu" class="themeSelect__menu" role="listbox" aria-label="Theme" hidden>
+            <button type="button" class="themeSelect__option" role="option" data-theme-value="system" aria-selected="true" aria-label="System theme" title="System"><svg class="themeIcon themeIcon--system" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5a1 1 0 0 1 1 -1h16a1 1 0 0 1 1 1v10a1 1 0 0 1 -1 1h-16a1 1 0 0 1 -1 -1v-10z"/><path d="M7 20h10"/><path d="M9 16v4"/><path d="M15 16v4"/></svg></button>
+            <button type="button" class="themeSelect__option" role="option" data-theme-value="dark" aria-selected="false" aria-label="Dark theme" title="Dark"><svg class="themeIcon themeIcon--dark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z"/></svg></button>
+            <button type="button" class="themeSelect__option" role="option" data-theme-value="light" aria-selected="false" aria-label="Light theme" title="Light"><svg class="themeIcon themeIcon--light" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12m-4 0a4 4 0 1 0 8 0a4 4 0 1 0 -8 0"/><path d="M3 12h1m8 -9v1m8 8h1m-9 8v1m-6.4 -15.4l.7 .7m12.1 -.7l-.7 .7m0 11.4l.7 .7m-12.1 -.7l-.7 .7"/></svg></button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="pageScroll" data-page-scroll>
+    <main id="main" class="page" tabindex="-1">
+      <div id="notices" class="notices" aria-live="polite"></div>
+
+      <section id="browser" class="part browser" aria-labelledby="folderTitle">
+        <div id="usageBanner" class="usageBanner" role="alert" hidden></div>
+        <div class="browserHead">
+          <h1 id="folderTitle" class="visually-hidden">Loading the buckets</h1>
+          <nav id="crumbs" class="crumbs" aria-label="Folder path"></nav>
+          <div class="toolbar" role="toolbar" aria-label="Folder actions">
+            <form id="searchForm" class="searchField" role="search">
+              <i class="ic ic-search" aria-hidden="true"></i>
+              <label class="visually-hidden" for="searchInput">Open a prefix in this folder</label>
+              <input id="searchInput" class="input" type="search" autocomplete="off" spellcheck="false" placeholder="Open a prefix in this folder" />
+              <kbd aria-hidden="true">Enter</kbd>
+            </form>
+            <label id="tagFilterWrap" class="searchField searchField--tags" hidden>
+              <i class="ic ic-tags" aria-hidden="true"></i>
+              <span class="visually-hidden">Filter the rows by tag</span>
+              <input id="tagFilter" class="input" type="text" autocomplete="off" spellcheck="false" placeholder="Filter by tag: key or key=value" />
+              <span id="tagStatus" class="searchField__status" role="status" aria-live="polite"></span>
+            </label>
+            <span id="accessBadge" class="badge" hidden></span>
+            <div id="settingsWrap" class="menuWrap menuWrap--tight">
+              <button id="settingsButton" class="iconButton" type="button" aria-label="Listing settings" title="Listing settings" aria-haspopup="true" aria-expanded="false" aria-controls="settingsMenu"><i class="ic ic-settings" aria-hidden="true"></i></button>
+              <div id="settingsMenu" class="menu menu--settings" role="group" aria-label="Listing settings" hidden>
+                <p class="menu__title">Columns</p>
+                <label class="menu__check"><input type="checkbox" checked disabled data-column="name" /><span>Name</span></label>
+                <label class="menu__check"><input type="checkbox" data-column="tags" /><span>Tags</span></label>
+                <label class="menu__check" id="versionsSetting"><input type="checkbox" data-column="versions" /><span>Versions</span></label>
+                <label class="menu__check"><input type="checkbox" data-column="size" /><span>Size</span></label>
+                <label class="menu__check"><input type="checkbox" data-column="modified" /><span>Modified</span></label>
+                <label class="menu__check" id="encryptionSetting" title="A key and a padlock next to the name of a file: one HEAD request for each file on the page"><input type="checkbox" id="encryptionToggle" /><span>Encryption and lock</span></label>
+                <div class="menu__sep" role="separator"></div>
+                <p class="menu__title">Filters</p>
+                <label class="menu__check" id="tagFilterSetting"><input type="checkbox" id="tagFilterToggle" /><span>Filter by tag</span></label>
+                <div class="menu__sep" role="separator" id="uploadTagsSeparator"></div>
+                <div id="uploadTagsSetting">
+                  <p class="menu__title">Tags of the new uploads</p>
+                  <input id="uploadTagsInput" class="input" type="text" autocomplete="off" spellcheck="false" placeholder="team=data, retention=30d" aria-label="Tags of the new uploads" />
+                  <p id="uploadTagsMessage" class="menu__message" role="status"></p>
+                </div>
+                <div class="menu__sep" role="separator"></div>
+                <button id="settingsReset" class="menu__item" type="button" title="Reset the columns, the tag filter, and the encryption and lock of each bucket"><i class="ic ic-rotate" aria-hidden="true"></i>Reset to defaults</button>
+              </div>
+            </div>
+            <button id="refreshButton" class="iconButton" type="button" aria-label="Refresh" title="Refresh"><i class="ic ic-refresh" aria-hidden="true"></i></button>
+            <div class="menuWrap">
+              <button id="actionsButton" class="button" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="actionsMenu">
+                <i class="ic ic-dots-vertical" aria-hidden="true"></i><span class="button__label--wide">Actions</span><i class="ic ic-chevron-down button__chevron" aria-hidden="true"></i>
+              </button>
+              <div id="actionsMenu" class="menu" role="menu" hidden>
+                <button id="zipItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-file-zip" aria-hidden="true"></i>Download as ZIP</button>
+                <button id="insightsItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-chart-bar" aria-hidden="true"></i><span>Storage insights</span></button>
+                <button id="folderTagsItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-tags" aria-hidden="true"></i><span>Tag this folder</span></button>
+                <button id="multipartsItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-file-x" aria-hidden="true"></i><span>Incomplete uploads</span></button>
+                <button id="newFolderItem" class="menu__item" type="button" role="menuitem" hidden><i class="ic ic-folder-plus" aria-hidden="true"></i><span>New folder</span></button>
+              </div>
+            </div>
+            <div id="uploadWrap" class="menuWrap">
+              <button id="uploadButton" class="button button--primary" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="uploadMenu">
+                <i class="ic ic-upload" aria-hidden="true"></i>Upload<i class="ic ic-chevron-down button__chevron" aria-hidden="true"></i>
+              </button>
+              <div id="uploadMenu" class="menu" role="menu" hidden>
+                <button id="uploadFilesItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-file-upload" aria-hidden="true"></i>Upload files</button>
+                <button id="uploadFolderItem" class="menu__item" type="button" role="menuitem"><i class="ic ic-folder-up" aria-hidden="true"></i>Upload a folder</button>
+                <p class="menu__hint">You can also drop files on the page.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div id="listing"></div>
+      </section>
+    </main>
+  </div>
+
+  <div id="dropOverlay" class="dropOverlay" role="status" aria-live="polite" hidden>
+    <div class="dropOverlay__card">
+      <i class="ic ic-cloud-upload" aria-hidden="true"></i>
+      <strong>Drop to upload</strong>
+      <span>Into <code id="dropTarget">/</code></span>
     </div>
   </div>
 
-  <script src="assets/vendor/highlightjs/11/highlight.min.js"></script>
-  <script src="assets/vendor/marked/12.0.2/marked.min.js"></script>
+  <aside id="uploadDock" class="uploadDock" aria-label="Uploads" hidden></aside>
 
+  <input id="fileInput" type="file" multiple hidden />
+  <input id="dirInput" type="file" webkitdirectory multiple hidden />
+
+  <script src="assets/js/session.js"></script>
   <script src="assets/js/common/detect.js"></script>
   <script src="assets/js/common/runtime.js"></script>
   <script src="assets/js/common/api.js"></script>
@@ -175,7 +146,20 @@
   <script src="assets/js/common/download-manager.js"></script>
   <script src="assets/js/common/actions.js"></script>
   <script src="assets/js/common/menu.js"></script>
-  <script src="assets/js/common/render.js"></script>
+  <script src="assets/js/common/suggest.js"></script>
+  <script src="assets/js/tags.js"></script>
+  <script src="assets/js/metadata.js"></script>
+  <script src="assets/js/objectlock.js"></script>
+  <script src="assets/js/encryption.js"></script>
+  <script src="assets/js/summary.js"></script>
+  <script src="assets/js/usage.js"></script>
+  <script src="assets/js/diff.js"></script>
+  <script src="assets/js/versions.js"></script>
+  <script src="assets/js/uploads.js"></script>
+  <script src="assets/js/multiparts.js"></script>
+  <script src="assets/js/lifecycle.js"></script>
+  <script src="assets/js/states.js"></script>
+  <script src="assets/js/switcher.js"></script>
   <script src="assets/js/app.js"></script>
 </body>
 </html>

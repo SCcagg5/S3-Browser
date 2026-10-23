@@ -3,84 +3,83 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="color-scheme" content="light" />
+  <meta name="color-scheme" content="dark light" />
+  <meta name="bb-frontend" content="portal" />
   <meta name="bb-asset-version" content="{{ASSET_VERSION}}" />
   <base href="{{APP_BASE}}" />
-  <link rel="icon" type="image/svg+xml" href="favicon.svg?v=2" />
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
   <title>Preview - Stowr</title>
-
+  <script src="assets/js/theme.js"></script>
   <link rel="stylesheet" href="assets/css/icons.css" />
-  <link rel="stylesheet" href="assets/vendor/github-markdown-css/5/github-markdown-light.min.css" />
-  <link rel="stylesheet" href="assets/vendor/highlightjs/11/styles/github.min.css" />
-  <link rel="stylesheet" href="assets/vendor/buefy/1.0.1/buefy.min.css" />
-  <link rel="stylesheet" href="assets/css/tokens.css" />
-  <link rel="stylesheet" href="assets/css/base.css" />
-  <link rel="stylesheet" href="assets/css/style.css" />
-  <link rel="stylesheet" href="assets/css/ui.css" />
-  <link rel="stylesheet" href="assets/css/components.css" />
-  <link rel="stylesheet" href="assets/css/data-grid.css" />
+  <link rel="stylesheet" href="assets/css/dialogs.css" />
   <link rel="stylesheet" href="assets/css/viewers.css" />
-  <link rel="stylesheet" href="assets/css/interaction.css" />
+  <link rel="stylesheet" href="assets/css/portal.css" />
+  <link rel="stylesheet" href="assets/css/preview.css" />
 </head>
 <body class="preview-page">
-  <header class="bar">
-    <span class="build-version preview-build-version" id="previewBuild" hidden><i class="mdi mdi-source-commit"></i><span></span></span>
-    <div class="wrap bb-menu-constrain">
-      <div class="bar-left">
-        <a class="icon-btn preview-back" id="backBtn" title="Back to browser" rel="noopener">
-          <i class="mdi mdi-arrow-left"></i>
-        </a>
-        <div class="preview-title-group">
-          <div>
-            <span class="doc-name" id="docName"></span>
-            <span class="doc-size" id="docSize"></span>
-          </div>
-          <div class="preview-context">
-            <span id="instanceMeta"></span>
-            <span class="doc-prefix" id="docPrefix"></span>
-          </div>
+  <a class="skipLink" href="#viewer">Skip to the preview</a>
+
+  <header class="bar previewBar">
+    <div class="previewBar__inner bb-menu-constrain">
+      <a class="backLink previewBar__back" id="backBtn" title="Back to the folder"><i class="ic ic-chevron-left" aria-hidden="true"></i><span>Folder</span></a>
+      <div class="preview-title-group previewTitle">
+        <div class="previewTitle__line">
+          <h1 class="doc-name" id="docName">Loading</h1>
+          <span class="doc-size" id="docSize"></span>
+          <span class="docMarks" id="docMarks" hidden></span>
+        </div>
+        <div class="preview-context previewTitle__path">
+          <i class="ic ic-database" aria-hidden="true"></i>
+          <span id="instanceMeta"></span><span class="doc-prefix" id="docPrefix"></span>
         </div>
       </div>
-
-      <div class="bar-right">
-        <label class="preview-version-control" id="previewVersionControl" hidden>
-          <span>Version</span>
-          <select id="previewVersionSelect" aria-label="Object version"></select>
-        </label>
-        <a class="icon-btn-disc" id="openRawBtn" title="Open original" target="_blank" rel="noopener">
-          <i class="mdi mdi-open-in-new"></i>
-        </a>
+      <div class="previewBar__tools">
+        <span class="buildTag" id="previewBuild" hidden><span></span></span>
+        <div class="compareFrom" id="compareFrom" hidden></div>
+        <div class="compareStats" id="compareStats" hidden></div>
+        <div class="previewVersion bb-details-version-control" id="previewVersionControl" hidden></div>
+        <button type="button" class="iconButton compareClose" id="compareClose" title="Close the comparison" aria-label="Close the comparison" hidden><i class="ic ic-x" aria-hidden="true"></i></button>
+        <a class="button button--icon" id="openRawBtn" title="Open the original" aria-label="Open the original" target="_blank" rel="noopener"><i class="ic ic-external-link" aria-hidden="true"></i></a>
         <div class="bb-menu" id="previewMenu">
-          <button type="button" class="bb-kebab" id="previewKebabBtn" aria-haspopup="menu" aria-expanded="false" title="Options">
-            <i class="mdi mdi-dots-vertical"></i>
-          </button>
-          <div class="bb-menu-popover">
+          <button type="button" class="bb-kebab button button--icon" id="previewKebabBtn" aria-haspopup="menu" aria-expanded="false" aria-label="Actions" title="Actions"><i class="ic ic-dots-vertical" aria-hidden="true"></i></button>
+          <div class="bb-menu-popover" role="menu">
             <div class="bb-menu-list">
-              <div class="bb-menu-item" id="pv-download"><i class="mdi mdi-download"></i> Download</div>
-              <div class="bb-menu-item" id="pv-copy"><i class="mdi mdi-content-copy"></i> Copy</div>
-              <div class="bb-menu-item" id="pv-rename"><i class="mdi mdi-rename-outline"></i> Rename</div>
-              <div class="bb-menu-item" id="pv-details"><i class="mdi mdi-information-outline"></i> Details</div>
-              <div class="bb-menu-item" id="pv-versions"><i class="mdi mdi-source-commit"></i> Versions</div>
-              <div class="bb-menu-item danger" id="pv-delete"><i class="mdi mdi-delete-outline"></i> Delete</div>
+              <button type="button" class="bb-menu-item" role="menuitem" id="pv-download"><i class="mdi mdi-download" aria-hidden="true"></i>Download</button>
+              <button type="button" class="bb-menu-item" role="menuitem" id="pv-copy"><i class="mdi mdi-content-copy" aria-hidden="true"></i>Copy</button>
+              <button type="button" class="bb-menu-item" role="menuitem" id="pv-rename"><i class="mdi mdi-rename-outline" aria-hidden="true"></i>Rename</button>
+              <button type="button" class="bb-menu-item" role="menuitem" id="pv-details"><i class="mdi mdi-information-outline" aria-hidden="true"></i>Details</button>
+              <button type="button" class="bb-menu-item danger" role="menuitem" id="pv-delete"><i class="mdi mdi-delete-outline" aria-hidden="true"></i>Delete</button>
             </div>
+          </div>
+        </div>
+        <div class="themeSelect" data-theme-select>
+          <button type="button" class="button button--icon themeSelect__button" data-theme-trigger aria-haspopup="listbox" aria-expanded="false" aria-controls="themeMenu" aria-label="Theme: system" title="Theme">
+            <span class="themeSelect__current" aria-hidden="true"><svg class="themeIcon themeIcon--system" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5a1 1 0 0 1 1 -1h16a1 1 0 0 1 1 1v10a1 1 0 0 1 -1 1h-16a1 1 0 0 1 -1 -1v-10z"/><path d="M7 20h10"/><path d="M9 16v4"/><path d="M15 16v4"/></svg><svg class="themeIcon themeIcon--dark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z"/></svg><svg class="themeIcon themeIcon--light" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12m-4 0a4 4 0 1 0 8 0a4 4 0 1 0 -8 0"/><path d="M3 12h1m8 -9v1m8 8h1m-9 8v1m-6.4 -15.4l.7 .7m12.1 -.7l-.7 .7m0 11.4l.7 .7m-12.1 -.7l-.7 .7"/></svg></span>
+          </button>
+          <div id="themeMenu" class="themeSelect__menu" role="listbox" aria-label="Theme" hidden>
+            <button type="button" class="themeSelect__option" role="option" data-theme-value="system" aria-selected="true" aria-label="System theme" title="System"><svg class="themeIcon themeIcon--system" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5a1 1 0 0 1 1 -1h16a1 1 0 0 1 1 1v10a1 1 0 0 1 -1 1h-16a1 1 0 0 1 -1 -1v-10z"/><path d="M7 20h10"/><path d="M9 16v4"/><path d="M15 16v4"/></svg></button>
+            <button type="button" class="themeSelect__option" role="option" data-theme-value="dark" aria-selected="false" aria-label="Dark theme" title="Dark"><svg class="themeIcon themeIcon--dark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z"/></svg></button>
+            <button type="button" class="themeSelect__option" role="option" data-theme-value="light" aria-selected="false" aria-label="Light theme" title="Light"><svg class="themeIcon themeIcon--light" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12m-4 0a4 4 0 1 0 8 0a4 4 0 1 0 -8 0"/><path d="M3 12h1m8 -9v1m8 8h1m-9 8v1m-6.4 -15.4l.7 .7m12.1 -.7l-.7 .7m0 11.4l.7 .7m-12.1 -.7l-.7 .7"/></svg></button>
           </div>
         </div>
       </div>
     </div>
   </header>
 
-  <main class="viewer">
-    <div class="bb-menu-constrain">
-      <div id="viewer" class="markdown-body preview-loading">
-        <i class="mdi mdi-loading mdi-spin"></i>
-        <span>Loading preview...</span>
+  <div class="pageScroll" data-page-scroll>
+    <main class="viewer">
+      <div class="bb-menu-constrain">
+        <div id="viewer" class="markdown-body preview-loading" tabindex="-1">
+          <i class="mdi mdi-loading mdi-spin" aria-hidden="true"></i>
+          <span>Loading the preview</span>
+        </div>
       </div>
-    </div>
-  </main>
+    </main>
+  </div>
 
+  <script src="assets/js/session.js"></script>
   <script src="assets/vendor/highlightjs/11/highlight.min.js"></script>
   <script src="assets/vendor/marked/12.0.2/marked.min.js"></script>
-
   <script src="assets/js/common/detect.js"></script>
   <script src="assets/js/common/runtime.js"></script>
   <script src="assets/js/common/api.js"></script>
@@ -88,6 +87,14 @@
   <script src="assets/js/common/download-manager.js"></script>
   <script src="assets/js/common/actions.js"></script>
   <script src="assets/js/common/menu.js"></script>
+  <script src="assets/js/common/suggest.js"></script>
+  <script src="assets/js/tags.js"></script>
+  <script src="assets/js/metadata.js"></script>
+  <script src="assets/js/objectlock.js"></script>
+  <script src="assets/js/encryption.js"></script>
+  <script src="assets/js/summary.js"></script>
+  <script src="assets/js/diff.js"></script>
+  <script src="assets/js/versions.js"></script>
   <script src="assets/js/common/render.js"></script>
   <script src="assets/js/common/json-viewer.js"></script>
   <script src="assets/js/common/tabular.js"></script>

@@ -81,9 +81,10 @@
     }
   }
 
-  function buildModal({ title = '', message = '', html = '', kind = 'alert', defaultValue = '', confirmLabel = 'OK', cancelLabel = 'Cancel' }) {
-    const overlay = el('div', 'bb-overlay', '');
-    const modal = el('div', 'bb-modal', '');
+  function buildModal({ title = '', message = '', html = '', kind = 'alert', defaultValue = '', confirmLabel = 'OK', cancelLabel = 'Cancel', large = false }) {
+    // A large window is the same window for the details, the folder insights and the other big dialogs.
+    const overlay = el('div', large ? 'bb-overlay bb-overlay--large' : 'bb-overlay', '');
+    const modal = el('div', large ? 'bb-modal bb-modal--large' : 'bb-modal', '');
 
     const btnClose = el('button', 'bb-btn bb-btn-ghost bb-modal-x', '<i class="mdi mdi-close"></i>');
     btnClose.setAttribute('aria-label', 'Close');
@@ -160,9 +161,9 @@
     }, 120);
   }
 
-  async function alert({ title = '', message = '', html = '', onOpen = null }) {
+  async function alert({ title = '', message = '', html = '', onOpen = null, large = false }) {
     return new Promise((resolve) => {
-      const { overlay, btnOk, btnClose } = buildModal({ title, message, html, kind: 'alert' });
+      const { overlay, btnOk, btnClose } = buildModal({ title, message, html, kind: 'alert', large });
 
       function close() { cleanup(overlay); resolve(); }
       btnClose.addEventListener('click', close);
@@ -281,8 +282,8 @@
     }
 
     function setStatus(nextStatus) {
-      currentStatus = ['loading', 'success', 'error', 'paused'].includes(nextStatus) ? nextStatus : '';
-      t.classList.remove('is-loading', 'is-success', 'is-error', 'is-paused');
+      currentStatus = ['loading', 'success', 'error', 'paused', 'warning'].includes(nextStatus) ? nextStatus : '';
+      t.classList.remove('is-loading', 'is-success', 'is-error', 'is-paused', 'is-warning');
       icon.className = 'mdi bb-toast-icon';
       icon.hidden = false;
 
@@ -298,6 +299,9 @@
       } else if (currentStatus === 'paused') {
         t.classList.add('is-paused');
         icon.classList.add('mdi-pause-circle-outline');
+      } else if (currentStatus === 'warning') {
+        t.classList.add('is-warning');
+        icon.classList.add('mdi-alert-circle-outline');
       } else {
         icon.hidden = true;
       }

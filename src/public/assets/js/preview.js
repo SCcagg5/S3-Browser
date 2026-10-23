@@ -2,7 +2,7 @@
   'use strict';
 
   const BB = (window.BB = window.BB || {});
-  const config = { instanceId: '', capabilities: {}, operations: {}, runtime: {}, versioningSupported: false };
+  const config = { instanceId: '', capabilities: {}, operations: {}, runtime: {}, versioningSupported: false, metadataEditSupported: true, objectLockSupported: false, bucketEncryptionSupported: false };
   const MAX_TEXT_PREVIEW = 8 * 1024 * 1024;
   const TEXT_SNIFF_LIMIT = 128 * 1024;
   const PDFJS_VERSION = '4.10.38';
@@ -25,6 +25,9 @@
   let activeDocumentSearchLabel = '';
   let activeSearchController = null;
   let pdfLoaderPromise = null;
+  let activeCompare = null;
+  // The object of the page has a key of the client (SSE-C): the link to the original gives the message of the page.
+  let customerKeyObject = false;
 
   function byId(id) { return document.getElementById(id); }
 
@@ -36,6 +39,11 @@
 
   function currentVersion() {
     return new URLSearchParams(location.search).get('version') || '';
+  }
+
+  // The version that the page compares with the version of the address (the parameter version, or the current one).
+  function currentCompare() {
+    return new URLSearchParams(location.search).get('compare') || '';
   }
 
   function currentArchiveEntry() {
@@ -62,7 +70,7 @@
     const shell = document.querySelector('.viewer');
     if (!shell) return;
     const contained = ['tabular', 'spreadsheet', 'parquet', 'json', 'archive', 'structured'].includes(type);
-    const wide = ['tabular', 'spreadsheet', 'parquet', 'json', 'pdf', 'archive', 'structured'].includes(type);
+    const wide = ['tabular', 'spreadsheet', 'parquet', 'json', 'pdf', 'archive', 'structured', 'compare'].includes(type);
     shell.classList.toggle('is-scroll-contained', contained);
     shell.classList.toggle('is-wide-preview', wide);
     shell.classList.toggle('is-adaptive-code', type === 'code');
@@ -78,6 +86,9 @@
   }
 
   function cleanupPreviewResources() {
+    activeCompare?.destroy();
+    activeCompare = null;
+    showCompareBar(false);
     activeDocumentSearch = null;
     activeDocumentSearchLabel = '';
     activeSearchController?.abort();
@@ -110,7 +121,8 @@
     const url = new URL(BB.api.previewPageURL(key, {
       instance: config.instanceId,
       version: currentVersion(),
-      entry: currentArchiveEntry()
+      entry: currentArchiveEntry(),
+      compare: currentCompare()
     }));
     return url.pathname + url.search + url.hash;
   }
@@ -129,24 +141,66 @@
   function formatBytes(size) {
     const value = Number(size);
     if (!Number.isFinite(value)) return '';
-    if (value < 1024) return `${value} B`;
-    if (value < 1024 ** 2) return `${(value / 1024).toFixed(0)} KB`;
-    if (value < 1024 ** 3) return `${(value / 1024 ** 2).toFixed(2)} MB`;
-    return `${(value / 1024 ** 3).toFixed(2)} GB`;
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let scaled = Math.max(0, value);
+    let unit = 0;
+    while (scaled >= 1024 && unit < units.length - 1) {
+      scaled /= 1024;
+      unit += 1;
+    }
+    const text = unit === 0 ? String(Math.round(scaled)) : scaled.toFixed(scaled >= 100 ? 0 : 1).replace(/\.0$/, '');
+    return `${text} ${units[unit]}`;
   }
 
+  // The marks of the version that the page shows, next to its size: the key of the encryption and the padlock of Object
+  // Lock, from the headers of the HEAD answer that the page reads for the preview. No headers: no mark.
+  // customerKey marks an object with a key of the client, whose HEAD the provider refuses.
+  function setObjectMarks(headers = null, customerKey = false) {
+    const host = byId('docMarks');
+    if (!host) return;
+    const encryption = customerKey ? 'Encrypted with a key of the client (SSE-C)' : (headers && BB.encryption?.objectEncryptionTitle(headers)) || '';
+    const lock = (headers && BB.objectLock?.lockTitle(BB.objectLock.lockFromHeaders(headers))) || '';
+    const mark = (kind, title, name) => {
+      const node = document.createElement('span');
+      node.className = 'docMarks__icon';
+      node.dataset.mark = kind;
+      node.setAttribute('role', 'img');
+      node.title = title;
+      node.setAttribute('aria-label', title);
+      const icon = document.createElement('i');
+      icon.className = `ic ic-${name}`;
+      icon.setAttribute('aria-hidden', 'true');
+      node.append(icon);
+      return node;
+    };
+    host.replaceChildren(...[encryption && mark('encryption', encryption, 'key'), lock && mark('object-lock', lock, 'lock')].filter(Boolean));
+    host.hidden = !host.childElementCount;
+  }
+
+  // The header of the interface: the way back names the folder, the path starts at the display name of the
+  // bucket (the root), as the crumbs of the browser page do.
   function setDocMeta(key, size, archiveKey = '') {
     const name = key.split('/').pop() || key;
-    const prefix = parentPrefix(key).replace(/\/$/, '');
+    const folders = parentPrefix(key).split('/').filter(Boolean);
     byId('docName').textContent = name || 'Object';
-    byId('docName').title = name || 'Object';
-    byId('docPrefix').textContent = archiveKey
-      ? ` / ${archiveKey}${prefix ? ` / ${prefix}` : ''}`
-      : (prefix ? ` / ${prefix}` : ' / root');
-    byId('docSize').textContent = Number.isFinite(Number(size)) ? `(${formatBytes(size)})` : '';
-    byId('instanceMeta').textContent = currentInstance
-      ? `${currentInstance.name} · ${currentInstance.provider.toUpperCase()} · ${currentInstance.bucket}`
+    byId('docName').title = key || name || 'Object';
+    const path = [...(archiveKey ? [archiveKey] : []), ...folders];
+    byId('docPrefix').textContent = path.length ? ` / ${path.join(' / ')}` : '';
+    byId('docSize').textContent = Number.isFinite(Number(size)) ? formatBytes(size) : '';
+    byId('docSize').hidden = !byId('docSize').textContent;
+    byId('instanceMeta').textContent = currentInstance ? currentInstance.name : '';
+    // A volume (a folder of the server) has the icon of a folder, a bucket the icon of a database.
+    byId('instanceMeta').previousElementSibling?.classList.toggle('ic-folder-open', currentInstance?.provider === 'fs');
+    byId('instanceMeta').previousElementSibling?.classList.toggle('ic-database', currentInstance?.provider !== 'fs');
+    byId('instanceMeta').title = currentInstance
+      ? (currentInstance.provider === 'fs'
+        ? `${currentInstance.name}: volume ${currentInstance.bucket} (a folder of the server)`
+        : `${currentInstance.name}: ${String(currentInstance.provider || '').toUpperCase()} bucket ${currentInstance.bucket}`)
       : '';
+    const back = byId('backBtn');
+    const backLabel = folders.length ? folders[folders.length - 1] : (currentInstance?.name || 'Folder');
+    back.querySelector('span').textContent = backLabel;
+    back.title = `Back to ${backLabel}`;
     document.title = `${name || 'Preview'} - ${currentInstance?.name || 'Stowr'}`;
   }
 
@@ -181,61 +235,131 @@
     return preview;
   }
 
-  function versionOptionLabel(version) {
-    const date = version?.lastModified ? new Date(version.lastModified).toLocaleString() : 'Previous version';
-    const identifier = String(version?.version || '');
-    const short = identifier.length > 24 ? `${identifier.slice(0, 12)}…${identifier.slice(-8)}` : identifier;
-    return short ? `${date} · ${short}` : date;
+  let previewVersions = [];
+
+  // The picker of versions in the bar of the preview: the versions with their date, size and change, their actions
+  // (Download, Restore, Delete) and the comparison.
+  function mountVersionPicker() {
+    const control = byId('previewVersionControl');
+    if (!control) return;
+    if (previewVersions.length < 2 || !BB.versions) { control.hidden = true; return; }
+    // During a comparison the picker is the version To, and the comparison draws it.
+    if (currentCompare() && !currentArchiveEntry()) return;
+    BB.versions.mountPicker(control, {
+      versions: previewVersions,
+      selected: currentVersion(),
+      onSelect: version => selectVersion(version),
+      onCompare({ from, to }) { enterCompare(from, to); },
+      actions: BB.actions.versionActions(currentKey(), { instance: config.instanceId })
+    });
+    control.hidden = false;
   }
 
   async function configureVersionSelector(key) {
     const control = byId('previewVersionControl');
-    const select = byId('previewVersionSelect');
-    if (!control || !select) return;
+    if (!control) return;
     control.hidden = true;
-    select.replaceChildren();
+    previewVersions = [];
     if (currentArchiveEntry() || currentInstance?.versioningSupported !== true) return;
-
     try {
-      const versions = await BB.api.allVersions(key, { instance: config.instanceId });
-      const availableVersions = versions.filter(version => version && !version.deleteMarker && version.version);
-      const label = control.querySelector('span');
-      if (label) label.textContent = `Version (${availableVersions.length.toLocaleString()})`;
-      control.title = `${availableVersions.length.toLocaleString()} available version${availableVersions.length === 1 ? '' : 's'}`;
-      const current = document.createElement('option');
-      current.value = '';
-      const currentRecord = availableVersions.find(version => version.isCurrent);
-      current.textContent = currentRecord ? `Current · ${versionOptionLabel(currentRecord)}` : 'Current';
-      select.append(current);
-      for (const version of availableVersions) {
-        if (!version || version.deleteMarker || version.isCurrent || !version.version) continue;
-        const option = document.createElement('option');
-        option.value = version.version;
-        option.textContent = versionOptionLabel(version);
-        select.append(option);
-      }
-      const selected = currentVersion();
-      if (selected && !Array.from(select.options).some(option => option.value === selected)) {
-        const option = document.createElement('option');
-        option.value = selected;
-        option.textContent = `Selected · ${selected}`;
-        select.append(option);
-      }
-      select.value = selected;
-      control.hidden = false;
+      previewVersions = await BB.api.allVersions(key, { instance: config.instanceId });
+      mountVersionPicker();
     } catch (error) {
       console.warn('Unable to load object versions for the preview selector', error);
       control.hidden = true;
     }
   }
 
+  // The comparison takes the place of the preview, in the same page. The browser back button returns to the preview.
+  function enterCompare(from, to) {
+    const url = new URL(location.href);
+    url.searchParams.set('compare', from);
+    if (to) url.searchParams.set('version', to);
+    else url.searchParams.delete('version');
+    history.pushState(null, '', url.pathname + url.search);
+    applyCapabilities();
+    mountVersionPicker();
+    void render();
+  }
+
+  // The comparison draws the picker To in the place of the picker of the preview: it goes before the preview draws its own.
+  function stopCompare() {
+    activeCompare?.destroy();
+    activeCompare = null;
+  }
+
+  function leaveCompare() {
+    stopCompare();
+    const url = new URL(location.href);
+    url.searchParams.delete('compare');
+    history.pushState(null, '', url.pathname + url.search);
+    applyCapabilities();
+    mountVersionPicker();
+    void render();
+  }
+
+  // The picker of the versions stays in its place and becomes the version To. The version From appears at its left, and the
+  // statistics of the change are between the two. A button closes the comparison.
+  function showCompareBar(visible) {
+    for (const id of ['compareFrom', 'compareStats', 'compareClose']) byId(id).hidden = !visible;
+  }
+
+  function renderCompare(key) {
+    const container = byId('viewer');
+    setPreviewMode('compare');
+    container.className = 'versionComparePage';
+    container.replaceChildren();
+    const host = document.createElement('div');
+    host.className = 'versionComparePage__host';
+    container.append(host);
+    const shown = previewVersions.find(version => version.version === (currentVersion() || previewVersions.find(item => item.isCurrent)?.version));
+    setDocMeta(key, shown ? Number(shown.size) : NaN, '');
+    // The comparison shows two versions: the bar has no mark of one version.
+    setObjectMarks();
+    updateBackLink(key);
+    showCompareBar(true);
+    activeCompare = BB.versions.mountCompare(host, {
+      key, instance: config.instanceId, versions: previewVersions, from: currentCompare(), to: currentVersion(),
+      slots: { from: byId('compareFrom'), summary: byId('compareStats'), to: byId('previewVersionControl') },
+      onBytes: (left, right) => BB.actions.compareVersions?.(key, left.version, right.version, { instance: config.instanceId }),
+      onChange({ from, to }) {
+        const url = new URL(location.href);
+        if (url.searchParams.get('compare') === from && (url.searchParams.get('version') || '') === to) return;
+        url.searchParams.set('compare', from);
+        url.searchParams.set('version', to);
+        history.replaceState(null, '', url.pathname + url.search);
+      }
+    });
+    byId('previewVersionControl').hidden = false;
+    scheduleViewerLayout();
+  }
+
   function selectVersion(version) {
+    stopCompare();
     const url = new URL(location.href);
     if (version) url.searchParams.set('version', version);
     else url.searchParams.delete('version');
+    url.searchParams.delete('compare');
     history.replaceState(null, '', url.pathname + url.search);
     applyCapabilities();
+    mountVersionPicker();
     void render();
+  }
+
+  // A restore or a delete of a version (in the picker or in the details): the page reads the versions again and shows
+  // the preview again. After the delete of a version that the page shows, the page shows the current version.
+  async function onVersionsChanged(event) {
+    if (event.detail?.key !== currentKey() || currentArchiveEntry()) return;
+    if (event.detail.action === 'delete' && [currentVersion(), currentCompare()].includes(event.detail.version)) {
+      const url = new URL(location.href);
+      url.searchParams.delete('version');
+      url.searchParams.delete('compare');
+      history.replaceState(null, '', url.pathname + url.search);
+      applyCapabilities();
+    }
+    stopCompare();
+    await configureVersionSelector(currentKey());
+    await render();
   }
 
   function updateBackLink(key, entry = '') {
@@ -1049,15 +1173,15 @@
     return unavailablePreview(...labels[type]);
   }
 
-  function renderError(error) {
+  function renderError(error, heading = 'Preview unavailable', iconName = 'alert-circle-outline') {
     setPreviewMode('message');
     const container = byId('viewer');
     container.className = 'preview-error';
     container.replaceChildren();
     const icon = document.createElement('i');
-    icon.className = 'mdi mdi-alert-circle-outline';
+    icon.className = `mdi mdi-${iconName}`;
     const title = document.createElement('strong');
-    title.textContent = 'Preview unavailable';
+    title.textContent = heading;
     const message = document.createElement('p');
     message.textContent = String(error?.message || error || 'Unknown error');
     container.append(icon, title, message);
@@ -1228,6 +1352,13 @@
       return;
     }
 
+    if (currentCompare() && !archiveEntry && previewVersions.length > 1 && BB.versions?.mountCompare) {
+      renderCompare(key);
+      return;
+    }
+
+    customerKeyObject = false;
+    setObjectMarks();
     setPreviewMode('loading');
     container.className = 'preview-loading';
     container.replaceChildren();
@@ -1244,6 +1375,8 @@
         ? await BB.api.archiveEntryHead(key, archiveEntry, { instance: config.instanceId, version })
         : await BB.api.head(key, version, config.instanceId);
       setDocMeta(displayKey, metadata.size, archiveEntry ? key : '');
+      // An entry of an archive has no encryption and no lock of its own.
+      setObjectMarks(archiveEntry ? null : metadata.headers);
       updateBackLink(key, archiveEntry);
       const rawURL = archiveEntry
         ? BB.api.archiveEntryURL(key, archiveEntry, { inline: true, instance: config.instanceId, version })
@@ -1372,6 +1505,18 @@
       }
       scheduleViewerLayout();
     } catch (error) {
+      // The bar shows the name and the path of the object also when the preview fails.
+      setDocMeta(displayKey, NaN, archiveEntry ? key : '');
+      updateBackLink(key, archiveEntry);
+      // An object with a key of the client (SSE-C): the provider refuses the HEAD with 400 and no text, and the details
+      // say why. The size comes from the listing.
+      if (!archiveEntry && await BB.encryption?.customerKeyRefusal(error, key, { version: currentVersion(), instance: config.instanceId })) {
+        customerKeyObject = true;
+        setObjectMarks(null, true);
+        byId('openRawBtn').href = BB.api.openURLForKey(key, config.instanceId, currentVersion());
+        renderError(new Error(BB.encryption.CUSTOMER_KEY_TEXT), 'Encrypted with a key of the client', 'key');
+        return;
+      }
       renderError(error);
     }
   }
@@ -1402,6 +1547,9 @@
       config.capabilities = currentInstance.capabilities || {};
       config.operations = currentInstance.operations || {};
       config.versioningSupported = currentInstance.versioningSupported === true;
+      config.metadataEditSupported = currentInstance.metadataEditSupported !== false;
+      config.objectLockSupported = currentInstance.objectLockSupported === true;
+      config.bucketEncryptionSupported = currentInstance.bucketEncryptionSupported === true;
       BB.api.setInstance(currentInstance);
       replacePreviewLocation(currentKey());
       applyCapabilities();
@@ -1441,18 +1589,28 @@
     }
   });
   byId('pv-details').addEventListener('click', () => BB.actions.showMetadata(currentKey(), { version: currentVersion() }));
-  byId('pv-versions').addEventListener('click', () => BB.actions.showVersions(currentKey()));
   byId('pv-delete').addEventListener('click', async () => {
     if (await BB.actions.deleteObject(currentKey())) location.href = byId('backBtn').href;
   });
-
-  byId('previewVersionSelect')?.addEventListener('change', event => selectVersion(event.target.value));
 
   window.addEventListener('keydown', event => {
     if (!(event.ctrlKey || event.metaKey) || event.altKey || String(event.key).toLowerCase() !== 'f') return;
     if (typeof activeDocumentSearch !== 'function') return;
     event.preventDefault();
     void openDocumentSearch();
+  });
+  byId('compareClose').addEventListener('click', leaveCompare);
+  byId('openRawBtn').addEventListener('click', event => {
+    if (!customerKeyObject) return;
+    event.preventDefault();
+    BB.ui.toast(BB.encryption.CUSTOMER_KEY_TEXT, { status: 'error', detail: currentKey(), duration: 9000 });
+  });
+  document.addEventListener('bb:versions-changed', event => { void onVersionsChanged(event); });
+  window.addEventListener('popstate', () => {
+    stopCompare();
+    applyCapabilities();
+    mountVersionPicker();
+    void render();
   });
   installViewerLayoutObserver();
   initialize();

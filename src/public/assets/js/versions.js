@@ -1,5 +1,5 @@
 /*
- * BB.versions: the versions of an object in the portal interface.
+ * BB.versions: the versions of an object of the interface.
  * - the version picker of the file details: one row for each version, with its number, its date, its size and what
  *   changed in size since the version before, and the buttons Download, Restore and Delete of the version;
  * - the comparison of two versions: the text, JSON and CSV of the two versions side by side or in one list.

@@ -258,11 +258,13 @@
   async function download({ key, filename, version = '', instance = null } = {}) {
     const cleanKey = String(key || '').replace(/^\/+/, '');
     const cleanName = filename || cleanKey.split('/').pop() || 'download';
+    // The HEAD request comes first, also for the download of the browser: a refusal (an object with a key of the
+    // client) then gives an error to the page, and not a failed download in the browser.
+    const metadata = await BB.api.head(cleanKey, version, instance);
     if (!supportsResumableFiles()) {
       fallbackDownload(cleanKey, cleanName, version, instance);
       return null;
     }
-    const metadata = await BB.api.head(cleanKey, version, instance);
     if (!metadata.sizeKnown || !Number.isSafeInteger(metadata.size) || metadata.size < 0) {
       throw new Error('The provider did not return a valid Content-Length, so a resumable download cannot be started.');
     }

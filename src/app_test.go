@@ -389,7 +389,7 @@ func testApplication(t *testing.T) (*application, *memoryBackend, *memoryBackend
 	return app, readOnly, readWrite
 }
 
-func TestEmbeddedFrontendKeepsFlatOriginalStyleTable(t *testing.T) {
+func TestEmbeddedIndexKeepsAFlatTable(t *testing.T) {
 	t.Parallel()
 	data, err := embeddedPublic.ReadFile("public/index.html")
 	if err != nil {
@@ -398,7 +398,7 @@ func TestEmbeddedFrontendKeepsFlatOriginalStyleTable(t *testing.T) {
 	html := string(data)
 	for _, required := range []string{
 		"assets/css/icons.css",
-		"storage-switcher",
+		`id="storageSwitcher"`,
 		"assets/js/app.js",
 	} {
 		if !strings.Contains(html, required) {
@@ -1069,11 +1069,11 @@ func TestFriendlyStorageFrontendRoutes(t *testing.T) {
 		location    string
 		contentType string
 	}{
-		{path: "/", status: http.StatusOK, content: `id="root"`, base: `<base href="./" />`, contentType: "text/html"},
+		{path: "/", status: http.StatusOK, content: `id="browser"`, base: `<base href="./" />`, contentType: "text/html"},
 		{path: "/-/host/api", status: http.StatusPermanentRedirect, location: "api/"},
-		{path: "/-/host/api/", status: http.StatusOK, content: `id="root"`, base: `<base href="../../../" />`, contentType: "text/html"},
-		{path: "/-/-/-/", status: http.StatusOK, content: `id="root"`, base: `<base href="../../../" />`, contentType: "text/html"},
-		{path: "/-/host/api/folder/", status: http.StatusOK, content: `id="root"`, base: `<base href="../../../../" />`, contentType: "text/html"},
+		{path: "/-/host/api/", status: http.StatusOK, content: `id="browser"`, base: `<base href="../../../" />`, contentType: "text/html"},
+		{path: "/-/-/-/", status: http.StatusOK, content: `id="browser"`, base: `<base href="../../../" />`, contentType: "text/html"},
+		{path: "/-/host/api/folder/", status: http.StatusOK, content: `id="browser"`, base: `<base href="../../../../" />`, contentType: "text/html"},
 		{path: "/-/host/api/document.pdf", status: http.StatusOK, content: `class="preview-root"`, base: `<base href="../../../" />`, contentType: "text/html"},
 		{path: "/-/host/api/folder/document.pdf", status: http.StatusOK, content: `class="preview-root"`, base: `<base href="../../../../" />`, contentType: "text/html"},
 		{path: "/-/api/", status: http.StatusPermanentRedirect, location: "../../-/host/api/"},

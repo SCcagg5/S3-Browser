@@ -23,6 +23,8 @@ import (
 	"time"
 )
 
+// The server embeds one browser interface: the tree in public/.
+//
 //go:embed public
 var embeddedPublic embed.FS
 
@@ -42,14 +44,9 @@ type application struct {
 }
 
 func newApplication(cfg appConfig) (*application, error) {
-	frontend := cfg.Frontend
-	if frontend == "" {
-		// A configuration that decodeConfig did not build (tests) keeps the documented default.
-		frontend = frontendDefault
-	}
-	publicFS, err := openFrontend(frontend)
+	publicFS, err := fs.Sub(embeddedPublic, "public")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open embedded interface: %w", err)
 	}
 	concurrency := newStorageConcurrency(cfg.Runtime.MaxConcurrentStorageRequests)
 	app := &application{
@@ -1855,11 +1852,9 @@ func (a *application) handleStorageFrontend(w http.ResponseWriter, r *http.Reque
 			requested := "/preview.html"
 			if trailingSlash {
 				requested = "/index.html"
-				// /-/<host>/<bucket>/?info is the information page of the instance, in a frontend that has it.
+				// /-/<host>/<bucket>/?info is the information page of the instance.
 				if len(segments) == 2 && r.URL.Query().Has("info") {
-					if _, err := fs.Stat(a.publicFS, "info.html"); err == nil {
-						requested = "/info.html"
-					}
+					requested = "/info.html"
 				}
 			}
 			serveEmbeddedFrontend(w, r, a.publicFS, requested, frontendBaseHref(r.URL.Path))

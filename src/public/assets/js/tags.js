@@ -1,5 +1,5 @@
 /*
- * BB.tags: the object tags of the portal interface.
+ * BB.tags: the object tags of the interface.
  * - the tags section of the file details (read; with the frameless "Edit" button: add, remove, save), with the lifecycle
  *   rules that apply. The metadata section (metadata.js) has the same look;
  * - the form that changes the tags of every object under a folder;

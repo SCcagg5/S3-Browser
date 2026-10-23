@@ -38,12 +38,12 @@ func fetchStatic(t *testing.T, app *application, path string, headers map[string
 func TestEmbeddedAssetsAreGzippedWhenAccepted(t *testing.T) {
 	t.Parallel()
 	app := embeddedApplication(t)
-	original, err := embeddedPublic.ReadFile("public/assets/css/tokens.css")
+	original, err := embeddedPublic.ReadFile("public/assets/css/dialogs.css")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	plain := fetchStatic(t, app, "/assets/css/tokens.css", nil)
+	plain := fetchStatic(t, app, "/assets/css/dialogs.css", nil)
 	if plain.Code != http.StatusOK || plain.Header().Get("Content-Encoding") != "" {
 		t.Fatalf("plain request: status %d, encoding %q", plain.Code, plain.Header().Get("Content-Encoding"))
 	}
@@ -51,7 +51,7 @@ func TestEmbeddedAssetsAreGzippedWhenAccepted(t *testing.T) {
 		t.Fatal("plain body differs from the embedded asset")
 	}
 
-	compressed := fetchStatic(t, app, "/assets/css/tokens.css", map[string]string{"Accept-Encoding": "br, gzip"})
+	compressed := fetchStatic(t, app, "/assets/css/dialogs.css", map[string]string{"Accept-Encoding": "br, gzip"})
 	if compressed.Header().Get("Content-Encoding") != "gzip" {
 		t.Fatalf("encoding = %q, want gzip", compressed.Header().Get("Content-Encoding"))
 	}
@@ -98,16 +98,16 @@ func TestStaticCompressionSkipsRangesRefusalsAndHeads(t *testing.T) {
 	t.Parallel()
 	app := embeddedApplication(t)
 
-	ranged := fetchStatic(t, app, "/assets/css/tokens.css", map[string]string{"Accept-Encoding": "gzip", "Range": "bytes=0-9"})
+	ranged := fetchStatic(t, app, "/assets/css/dialogs.css", map[string]string{"Accept-Encoding": "gzip", "Range": "bytes=0-9"})
 	if ranged.Code != http.StatusPartialContent || ranged.Header().Get("Content-Encoding") != "" || ranged.Body.Len() != 10 {
 		t.Fatalf("range response: status %d, encoding %q, %d bytes", ranged.Code, ranged.Header().Get("Content-Encoding"), ranged.Body.Len())
 	}
-	refused := fetchStatic(t, app, "/assets/css/tokens.css", map[string]string{"Accept-Encoding": "gzip;q=0, identity"})
+	refused := fetchStatic(t, app, "/assets/css/dialogs.css", map[string]string{"Accept-Encoding": "gzip;q=0, identity"})
 	if refused.Header().Get("Content-Encoding") != "" {
 		t.Fatalf("gzip;q=0 must not be compressed, got %q", refused.Header().Get("Content-Encoding"))
 	}
 	head := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodHead, "/assets/css/tokens.css", nil)
+	request := httptest.NewRequest(http.MethodHead, "/assets/css/dialogs.css", nil)
 	request.Header.Set("Accept-Encoding", "gzip")
 	app.routes().ServeHTTP(head, request)
 	if head.Header().Get("Content-Encoding") != "" {
@@ -130,7 +130,7 @@ func TestStaticCompressionDoesNotTouchBinaryAssets(t *testing.T) {
 func TestEmbeddedFirstPartyAssetsRevalidateWithETag(t *testing.T) {
 	t.Parallel()
 	app := embeddedApplication(t)
-	for _, name := range []string{"/assets/css/tokens.css", "/assets/js/app.js", "/assets/icons/mdi/folder.svg", "/"} {
+	for _, name := range []string{"/assets/css/dialogs.css", "/assets/js/app.js", "/assets/icons/tabler/folder.svg", "/"} {
 		first := fetchStatic(t, app, name, nil)
 		if first.Code != http.StatusOK {
 			t.Fatalf("%s: status %d", name, first.Code)
@@ -208,11 +208,11 @@ func TestPagesFingerprintEveryAssetAndFingerprintedAssetsAreImmutable(t *testing
 		}
 	}
 
-	versioned := fetchStatic(t, app, "/assets/css/tokens.css?v="+version, nil)
+	versioned := fetchStatic(t, app, "/assets/css/dialogs.css?v="+version, nil)
 	if got := versioned.Header().Get("Cache-Control"); got != "public, max-age=31536000, immutable" {
 		t.Fatalf("fingerprinted Cache-Control = %q", got)
 	}
-	for _, request := range []string{"/assets/css/tokens.css", "/assets/css/tokens.css?v=000000000000"} {
+	for _, request := range []string{"/assets/css/dialogs.css", "/assets/css/dialogs.css?v=000000000000"} {
 		stale := fetchStatic(t, app, request, nil)
 		if got := stale.Header().Get("Cache-Control"); got != "no-cache" {
 			t.Fatalf("%s: Cache-Control = %q, want no-cache for an unknown fingerprint", request, got)

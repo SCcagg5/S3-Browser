@@ -9,18 +9,11 @@ import (
 	"testing"
 )
 
-// /-/<host>/<bucket>/?info is the information page of the instance in the portal frontend. A deeper path stays the
-// listing, an unknown instance is a 404, and the default frontend (no info.html) serves its listing.
-func TestPortalInfoPageRoute(t *testing.T) {
+// /-/<host>/<bucket>/?info is the information page of the instance. A deeper path stays the listing, and an unknown
+// instance is a 404.
+func TestInfoPageRoute(t *testing.T) {
 	t.Parallel()
-	portal, err := openFrontend(frontendPortal)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defaultTree, err := fs.Sub(embeddedPublic, "public")
-	if err != nil {
-		t.Fatal(err)
-	}
+	tree := publicTree(t)
 	instances := map[string]*storageInstance{"api": {cfg: bucketConfig{ID: "api", AuthID: "host"}}}
 	for _, test := range []struct {
 		name    string
@@ -30,12 +23,11 @@ func TestPortalInfoPageRoute(t *testing.T) {
 		content string
 		base    string
 	}{
-		{name: "info page", root: portal, path: "/-/host/api/?info", status: http.StatusOK, content: `<body class="infoPage">`, base: `<base href="../../../" />`},
-		{name: "info with a parameter", root: portal, path: "/-/host/api/?info&lifecycle-abort=logs%2F", status: http.StatusOK, content: `<body class="infoPage">`},
-		{name: "deeper path is the listing", root: portal, path: "/-/host/api/folder/?info", status: http.StatusOK, content: "Skip to the files", base: `<base href="../../../../" />`},
-		{name: "no info parameter is the listing", root: portal, path: "/-/host/api/", status: http.StatusOK, content: "Skip to the files"},
-		{name: "unknown instance", root: portal, path: "/-/host/missing/?info", status: http.StatusNotFound},
-		{name: "default frontend has no info page", root: defaultTree, path: "/-/host/api/?info", status: http.StatusOK, content: `id="root"`},
+		{name: "info page", root: tree, path: "/-/host/api/?info", status: http.StatusOK, content: `<body class="infoPage">`, base: `<base href="../../../" />`},
+		{name: "info with a parameter", root: tree, path: "/-/host/api/?info&lifecycle-abort=logs%2F", status: http.StatusOK, content: `<body class="infoPage">`},
+		{name: "deeper path is the listing", root: tree, path: "/-/host/api/folder/?info", status: http.StatusOK, content: "Skip to the files", base: `<base href="../../../../" />`},
+		{name: "no info parameter is the listing", root: tree, path: "/-/host/api/", status: http.StatusOK, content: "Skip to the files"},
+		{name: "unknown instance", root: tree, path: "/-/host/missing/?info", status: http.StatusNotFound},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()

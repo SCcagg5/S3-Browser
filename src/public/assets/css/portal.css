@@ -1,9 +1,9 @@
-/* Stowr, "portal" interface: the main stylesheet of every page.
+/* Stowr: the main stylesheet of every page.
 
    Design rules. The tokens below write them down; the components only name tokens.
    1. Header of ClickHouse Dash at the full width of the window, one row of 45 px at every width with controls of
       28 px, as in ClickHouse Dash: the mark, the name and the version at the left edge (with "Back to panel" behind a
-      path prefix), the bucket selector of the default interface and the theme selector at the right edge. The page is
+      path prefix), the bucket selector and the theme selector at the right edge. The page is
       made of parts of the portal: 14 px corners, on --panel with a hairline edge. In the part of the browser, the
       crumbs and the toolbar share one row when they fit; the crumbs are the bucket mark, a slash and the folders.
    2. Data of ClickHouse Dash. Tables are dense: 32 px rows (26 px compact), 13 px text, 12 px semibold muted heads,
@@ -663,7 +663,7 @@ html[data-theme-mode="light"] .themeSelect__current > .themeIcon--light {
   color: var(--text);
 }
 
-/* The bucket selector of the default interface: the buckets of each host, with their permissions. ------------------ */
+/* The bucket selector: the buckets of each host, with their permissions. ------------------ */
 
 /* The selector sits at the right of the header, in one line at every width: the icon, the name, the seven state
    icons, the facts and the chevron. The state icons and the usage are one link of their own over the trigger, because

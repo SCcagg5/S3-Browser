@@ -16,8 +16,6 @@ import (
 type appConfig struct {
 	Listen          string
 	JobHistoryLimit int
-	// Frontend names the embedded browser interface that the server gives (see frontend.go).
-	Frontend        string
 	Runtime         runtimePolicy
 	Authentications []authConfig
 	Buckets         []bucketConfig
@@ -136,7 +134,6 @@ func decodeConfig(data, sourceName, sourceDir string) (appConfig, error) {
 	cfg := appConfig{
 		Listen:          ":8080",
 		JobHistoryLimit: 10,
-		Frontend:        frontendDefault,
 		Runtime:         defaultRuntimePolicy(),
 		SourceDir:       sourceDir,
 		SourceName:      sourceName,
@@ -266,7 +263,7 @@ func decodeServerBlock(block hclBlock, cfg *appConfig) error {
 		return block.errorf("nested blocks are not supported inside server")
 	}
 	serverKinds := map[string]hclValueKind{
-		"listen": hclString, "job_history_limit": hclNumber, "frontend": hclString,
+		"listen": hclString, "job_history_limit": hclNumber,
 		"access_mode": hclString, "log_mode": hclString,
 		"allow_full_object_fallback": hclBool,
 		"memory_limit_bytes":         hclNumber, "max_storage_bytes_per_request": hclNumber,
@@ -294,13 +291,6 @@ func decodeServerBlock(block hclBlock, cfg *appConfig) error {
 			return block.errorf("server.job_history_limit must be between 1 and 20, got %d", value)
 		}
 		cfg.JobHistoryLimit = int(value)
-	}
-	if attr, ok := block.Attrs["frontend"]; ok {
-		name, err := parseFrontendName(attr.Value.String)
-		if err != nil {
-			return fmt.Errorf("line %d:%d: server.frontend: %w", attr.Line, attr.Column, err)
-		}
-		cfg.Frontend = name
 	}
 	if value, ok := block.stringAttr("access_mode"); ok {
 		cfg.Runtime.AccessMode = value

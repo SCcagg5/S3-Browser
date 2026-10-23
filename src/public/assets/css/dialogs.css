@@ -1,9 +1,8 @@
 /* dialogs.css: the dialogs of the shared scripts (details, versions, insights, permissions, transfers).
-   The rules are the rules of the default interface for these parts, without the rules of its page shell. Each
-   colour literal is a token of portal.css, so the rules follow the light and the dark theme. portal.css loads
-   after this file and gives the look of the portal to the shared controls (buttons, menus, dialogs, toasts). */
+   Each colour literal is a token of portal.css, so the rules follow the light and the dark theme. portal.css loads
+   after this file and gives its look to the shared controls (buttons, menus, dialogs, toasts). */
 
-/* The names of the default interface, given by the tokens of portal.css. */
+/* The names of the interface of 0.1.0 "default", given by the tokens of portal.css. */
 :root {
   --browser-ui-scale-active: 1;
   --preview-max: 1680px;
@@ -56,7 +55,7 @@
   --bb-danger: var(--danger);
 }
 
-/* From style.css of the default interface. */
+/* From style.css of the interface of 0.1.0 "default". */
 
 @keyframes mdi-spin { to { transform: rotate(360deg); } }
 .data-table-scroll {
@@ -200,7 +199,7 @@
   to { transform: rotate(360deg); }
 }
 
-/* From ui.css of the default interface. */
+/* From ui.css of the interface of 0.1.0 "default". */
 
 @keyframes bb-toast-indeterminate {
   from { transform: translateX(-120%); }
@@ -623,7 +622,7 @@
   padding-bottom: .2rem;
 }
 
-/* From data-grid.css of the default interface. */
+/* From data-grid.css of the interface of 0.1.0 "default". */
 
 .data-table-scroll {
   position: relative;
@@ -742,7 +741,7 @@
 }
 }
 
-/* From interaction.css of the default interface. */
+/* From interaction.css of the interface of 0.1.0 "default". */
 
 @keyframes bb-loader-spin { to { transform: rotate(360deg); } }
 .data-table-scroll {
@@ -1073,7 +1072,7 @@
   gap: .65rem;
 }
 
-/* From treemap.css of the default interface. */
+/* From treemap.css of the interface of 0.1.0 "default". */
 
 .folder-insights-panel[data-insights-panel="treemap"] {
   position: relative;

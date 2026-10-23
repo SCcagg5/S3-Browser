@@ -53,7 +53,7 @@
     scroller.dataset.bbVerticalWheelForwarded = 'true';
     scroller.addEventListener('wheel', event => {
       if (event.ctrlKey || event.shiftKey || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
-      const page = document.scrollingElement || document.documentElement;
+      const page = BB.runtime?.pageScroller?.() || document.scrollingElement || document.documentElement;
       if (!page) return;
 
       // WheelEvent deltaMode can represent pixels, lines, or pages. Normalize it

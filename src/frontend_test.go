@@ -6,65 +6,48 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 	"testing"
 	"testing/fstest"
 )
 
-func TestServerFrontendDefaultsToDefault(t *testing.T) {
-	t.Parallel()
-	path := filepath.Join(t.TempDir(), "config.hcl")
-	writeConfig(t, path, minimalTestConfig("bucket"))
-	cfg, err := loadConfig(path)
+// vendorPrefix holds the vendored third-party scripts (PDF.js, highlight.js, marked). They keep their own text.
+const vendorPrefix = "assets/vendor"
+
+// publicTree is the one embedded browser interface.
+func publicTree(t *testing.T) fs.FS {
+	t.Helper()
+	root, err := fs.Sub(embeddedPublic, "public")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Frontend != frontendDefault {
-		t.Fatalf("frontend = %q, want %q", cfg.Frontend, frontendDefault)
-	}
+	return root
 }
 
-func TestServerFrontendAcceptsEachDocumentedName(t *testing.T) {
+// The key server.frontend is gone: the schema is closed, so a configuration that still has it stops at start with
+// the error of an unknown attribute. The error names the key and its line.
+func TestServerFrontendKeyStopsTheStart(t *testing.T) {
 	t.Parallel()
-	for _, name := range frontendNames {
-		path := filepath.Join(t.TempDir(), "config.hcl")
-		writeConfig(t, path, "server {\n  frontend = \""+name+"\"\n}\n"+minimalTestConfig("bucket"))
-		cfg, err := loadConfig(path)
-		if err != nil {
-			t.Fatalf("frontend %q: %v", name, err)
-		}
-		if cfg.Frontend != name {
-			t.Fatalf("frontend = %q, want %q", cfg.Frontend, name)
-		}
-	}
-}
-
-// The key is closed and not coerced: a value with another case or with spaces is an error that names the key, the
-// expected values and the value.
-func TestServerFrontendRejectsOtherValues(t *testing.T) {
-	t.Parallel()
-	for _, value := range []string{"", "Default", " default", "portal ", "Portal", "clickhouse-dash"} {
+	for _, value := range []string{"default", "portal"} {
 		path := filepath.Join(t.TempDir(), "config.hcl")
 		writeConfig(t, path, "server {\n  frontend = \""+value+"\"\n}\n"+minimalTestConfig("bucket"))
 		_, err := loadConfig(path)
 		if err == nil {
-			t.Fatalf("frontend %q was accepted", value)
+			t.Fatalf("frontend = %q was accepted", value)
 		}
-		message := err.Error()
-		for _, want := range []string{"server.frontend", `"default"`, `"portal"`, `got "` + value + `"`, "line 2:"} {
-			if !strings.Contains(message, want) {
-				t.Fatalf("frontend %q: error %q does not contain %q", value, message, want)
+		for _, want := range []string{`unknown attribute "frontend" in server block`, "line 2:"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("frontend = %q: error %q does not contain %q", value, err, want)
 			}
 		}
 	}
 }
 
-// The key table holds server.frontend: the reference documents it, and print-config gives its value and source.
-func TestServerFrontendIsInTheKeyTable(t *testing.T) {
+// The reference and print-config do not show the removed key.
+func TestServerFrontendIsNotInTheKeyTable(t *testing.T) {
 	t.Parallel()
-	if !strings.Contains(configReference(), "| `frontend` | text | \"default\" |") {
-		t.Fatal("the configuration reference does not document server.frontend")
+	if strings.Contains(configReference(), "`frontend`") {
+		t.Fatal("the configuration reference still documents server.frontend")
 	}
 	path := filepath.Join(t.TempDir(), "config.hcl")
 	writeConfig(t, path, minimalTestConfig("bucket"))
@@ -72,94 +55,83 @@ func TestServerFrontendIsInTheKeyTable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if text := formatEffectiveConfiguration(cfg); !strings.Contains(text, `server.frontend = "default"  # default`) {
-		t.Fatalf("print-config without the key:\n%s", text)
-	}
-	writeConfig(t, path, "server {\n  frontend = \"portal\"\n}\n"+minimalTestConfig("bucket"))
-	if cfg, err = loadConfig(path); err != nil {
-		t.Fatal(err)
-	}
-	if text := formatEffectiveConfiguration(cfg); !strings.Contains(text, `server.frontend = "portal"  # file`) {
-		t.Fatalf("print-config with the key:\n%s", text)
+	if text := formatEffectiveConfiguration(cfg); strings.Contains(text, "frontend") {
+		t.Fatalf("print-config still shows the frontend:\n%s", text)
 	}
 }
 
-func TestServerFrontendRejectsWrongType(t *testing.T) {
+// The tree must be a correct read-only file system (fstest.TestFS walks it, opens every file and compares ReadDir,
+// Stat and Open). The files of the removed interface and its vendored styles are not in the binary.
+func TestInterfaceFileSystem(t *testing.T) {
 	t.Parallel()
-	path := filepath.Join(t.TempDir(), "config.hcl")
-	writeConfig(t, path, "server {\n  frontend = true\n}\n"+minimalTestConfig("bucket"))
-	_, err := loadConfig(path)
-	if err == nil || !strings.Contains(err.Error(), `"frontend" must be a quoted string`) {
-		t.Fatalf("error = %v", err)
-	}
-}
-
-func TestOpenFrontendRejectsUnknownName(t *testing.T) {
-	t.Parallel()
-	if _, err := openFrontend("other"); err == nil {
-		t.Fatal("unknown frontend was opened")
-	}
-}
-
-// The overlay must behave as a correct read-only file system (fstest.TestFS walks it, opens every file and compares
-// ReadDir, Stat and Open), give the vendored scripts of the default tree, and hide the rest of the default tree.
-func TestPortalFrontendFileSystem(t *testing.T) {
-	t.Parallel()
-	root, err := openFrontend(frontendPortal)
-	if err != nil {
-		t.Fatal(err)
-	}
+	root := publicTree(t)
 	expected := []string{
 		"index.html", "preview.html", "info.html", "404.html", "favicon.svg",
 		"assets/js/info.js", "assets/js/switcher.js", "assets/js/states.js", "assets/css/info.css",
 		"assets/css/portal.css", "assets/css/icons.css", "assets/css/dialogs.css", "assets/css/viewers.css", "assets/css/preview.css",
 		"assets/icons/tabler/folder.svg", "assets/js/app.js", "assets/js/theme.js", "assets/js/uploads.js",
 		"assets/js/session.js", "assets/js/common/api.js",
-		"assets/vendor/marked/12.0.2/marked.min.js", "assets/vendor/pdfjs/4.10.38/pdf.min.mjs",
+		"assets/vendor/marked/12.0.2/marked.min.js", "assets/vendor/highlightjs/11/highlight.min.js",
+		"assets/vendor/pdfjs/4.10.38/pdf.min.mjs", "assets/vendor/pdfjs/4.10.38/pdf.worker.min.mjs",
+		"assets/vendor/pdfjs/4.10.38/LICENSE",
 	}
 	if err := fstest.TestFS(root, expected...); err != nil {
 		t.Fatal(err)
 	}
-	for _, hidden := range []string{"assets/css/style.css", "assets/css/tokens.css", "assets/icons/mdi/folder.svg", "assets/vendor/../css/style.css"} {
-		if _, err := fs.Stat(root, hidden); err == nil {
-			t.Fatalf("%s is visible through the portal frontend", hidden)
+	for _, removed := range []string{
+		"assets/css/style.css", "assets/css/tokens.css", "assets/icons/mdi", "assets/vendor/buefy",
+		"assets/vendor/github-markdown-css", "assets/vendor/highlightjs/11/styles",
+	} {
+		if _, err := fs.Stat(root, removed); err == nil {
+			t.Fatalf("%s of the removed interface is still embedded", removed)
 		}
 	}
-	entries, err := fs.ReadDir(root, "assets")
-	if err != nil {
-		t.Fatal(err)
-	}
-	names := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		names = append(names, entry.Name())
-	}
-	if !sort.StringsAreSorted(names) || !strings.Contains(strings.Join(names, ","), "vendor") {
-		t.Fatalf("assets entries = %v", names)
-	}
 }
 
-func frontendApplication(t *testing.T, name string) *application {
-	t.Helper()
-	app, _, _ := testApplication(t)
-	root, err := openFrontend(name)
-	if err != nil {
-		t.Fatal(err)
-	}
-	app.publicFS = root
-	return app
-}
-
-func TestPortalFrontendIsServed(t *testing.T) {
+// Each vendored script is loaded by a page or a script of the interface, so the binary carries no dead vendor file.
+func TestInterfaceUsesEachVendorFile(t *testing.T) {
 	t.Parallel()
-	app := frontendApplication(t, frontendPortal)
-	version := frontendVersion(app.publicFS)
-	defaultRoot, err := openFrontend(frontendDefault)
+	root := publicTree(t)
+	var sources strings.Builder
+	var vendored []string
+	err := fs.WalkDir(root, ".", func(name string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		if strings.HasPrefix(name, vendorPrefix+"/") {
+			if extension := path.Ext(name); extension == ".js" || extension == ".mjs" || extension == ".css" {
+				vendored = append(vendored, name)
+			}
+			return nil
+		}
+		if extension := path.Ext(name); extension == ".html" || extension == ".js" || extension == ".css" {
+			data, err := fs.ReadFile(root, name)
+			if err != nil {
+				return err
+			}
+			sources.Write(data)
+		}
+		return nil
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if version == frontendVersion(defaultRoot) {
-		t.Fatal("the two frontends have the same fingerprint")
+	if len(vendored) == 0 {
+		t.Fatal("no vendored script")
 	}
+	text := strings.ReplaceAll(sources.String(), "${PDFJS_VERSION}", "4.10.38")
+	for _, name := range vendored {
+		if !strings.Contains(text, name) {
+			t.Errorf("no page or script loads %s", name)
+		}
+	}
+}
+
+func TestInterfaceIsServed(t *testing.T) {
+	t.Parallel()
+	app, _, _ := testApplication(t)
+	app.publicFS = publicTree(t)
+	version := frontendVersion(app.publicFS)
 
 	for _, page := range []string{"/", "/index.html", "/preview.html", "/info.html"} {
 		recorder := fetchStatic(t, app, page, nil)
@@ -194,26 +166,17 @@ func TestPortalFrontendIsServed(t *testing.T) {
 		t.Fatalf("the icon URLs of icons.css are not fingerprinted: %.300s", css.Body.String())
 	}
 
-	vendor := fetchStatic(t, app, "/assets/vendor/marked/12.0.2/marked.min.js", nil)
-	if vendor.Code != http.StatusOK {
-		t.Fatalf("vendor: status %d", vendor.Code)
+	for _, vendor := range []string{"/assets/vendor/marked/12.0.2/marked.min.js", "/assets/vendor/pdfjs/4.10.38/pdf.worker.min.mjs"} {
+		if recorder := fetchStatic(t, app, vendor, nil); recorder.Code != http.StatusOK {
+			t.Fatalf("%s: status %d", vendor, recorder.Code)
+		}
 	}
 	if missing := fetchStatic(t, app, "/assets/css/style.css", nil); missing.Code != http.StatusNotFound {
-		t.Fatalf("default stylesheet status = %d, want 404", missing.Code)
+		t.Fatalf("stylesheet of the removed interface: status = %d, want 404", missing.Code)
 	}
 	notFound := fetchStatic(t, app, "/missing-page", map[string]string{"Accept": "text/html"})
 	if notFound.Code != http.StatusNotFound || !strings.Contains(notFound.Body.String(), "assets/css/portal.css") {
 		t.Fatalf("404 page: status %d, body %.200q", notFound.Code, notFound.Body.String())
-	}
-}
-
-func TestDefaultFrontendStaysTheDefaultTree(t *testing.T) {
-	t.Parallel()
-	app := frontendApplication(t, frontendDefault)
-	recorder := fetchStatic(t, app, "/", nil)
-	body := recorder.Body.String()
-	if recorder.Code != http.StatusOK || strings.Contains(body, "bb-frontend") || !strings.Contains(body, "assets/css/tokens.css?v=") {
-		t.Fatalf("default index: status %d, body %.300q", recorder.Code, body)
 	}
 }
 
@@ -227,14 +190,11 @@ var (
 	detectIconName = regexp.MustCompile(`:\s*'([a-z0-9-]+)'|\|\| '([a-z0-9-]+)'`)
 )
 
-// The portal tree must stay self-contained: no external URL, every page asset and every icon file present, and an
+// The interface must stay self-contained: no external URL, every page asset and every icon file present, and an
 // icon rule for every icon name that the pages and the scripts write.
-func TestPortalFrontendIsSelfContained(t *testing.T) {
+func TestInterfaceIsSelfContained(t *testing.T) {
 	t.Parallel()
-	root, err := openFrontend(frontendPortal)
-	if err != nil {
-		t.Fatal(err)
-	}
+	root := publicTree(t)
 	icons, err := fs.ReadFile(root, "assets/css/icons.css")
 	if err != nil {
 		t.Fatal(err)
@@ -252,7 +212,7 @@ func TestPortalFrontendIsSelfContained(t *testing.T) {
 		}
 	}
 	err = fs.WalkDir(root, ".", func(name string, entry fs.DirEntry, err error) error {
-		if err != nil || entry.IsDir() || strings.HasPrefix(name, sharedFrontendPrefix) {
+		if err != nil || entry.IsDir() || strings.HasPrefix(name, vendorPrefix) {
 			return err
 		}
 		extension := path.Ext(name)

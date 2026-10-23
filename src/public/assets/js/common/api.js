@@ -283,7 +283,7 @@
       return BB.runtime.browserPageURL(route.host, route.bucket, prefix).href;
     },
 
-    previewPageURL(path, { instance = null, version = '', entry = '' } = {}) {
+    previewPageURL(path, { instance = null, version = '', entry = '', compare = '' } = {}) {
       const clean = String(path || '').replace(/^\/+/, '');
       const selected = instance === null || instance === undefined ? selectedInstance() : String(instance || '');
       const route = routeForInstance(selected);
@@ -293,6 +293,7 @@
       if (!selected) url.searchParams.set('path', clean);
       if (version) url.searchParams.set('version', String(version));
       if (entry) url.searchParams.set('entry', String(entry));
+      if (compare) url.searchParams.set('compare', String(compare));
       return url.href;
     },
 
@@ -364,6 +365,115 @@
       const response = await request('/api/integrity', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ instance: instance || selectedInstance(), key, version })
+      });
+      return response.json();
+    },
+
+    async tags(key, { version = '', instance = null } = {}) {
+      const response = await request(withInstance('/api/tags', { key, version }, instance));
+      return response.json();
+    },
+
+    async putTags(key, tags, { version = '', instance = null } = {}) {
+      const response = await request('/api/tags', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instance: instance === null ? selectedInstance() : String(instance || ''), key, version, tags })
+      });
+      return response.json();
+    },
+
+    async metadata(key, { version = '', instance = null } = {}) {
+      const response = await request(withInstance('/api/metadata', { key, version }, instance));
+      return response.json();
+    },
+
+    // The complete state of the metadata: a header or a user metadata that the request does not give is removed.
+    async putMetadata(key, { etag, lastModified = '', headers = {}, metadata = [], version = '', instance = null } = {}) {
+      const response = await request('/api/metadata', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instance: instance === null ? selectedInstance() : String(instance || ''), key, version, etag, lastModified, headers, metadata })
+      });
+      return response.json();
+    },
+
+    // The default encryption of the bucket (null when it has none) and the encryption of the uploads of the instance.
+    async encryption(instance = null) {
+      const response = await request(withInstance('/api/encryption', {}, instance));
+      return response.json();
+    },
+
+    // The usage and the quota of the bucket of an instance. fresh asks the server to read the provider again (it does so
+    // only when its value is older than 10 seconds). A failed read answers 200 with available false and the reason.
+    async usage(instance = null, { fresh = false } = {}) {
+      const response = await request(withInstance('/api/usage', { fresh: fresh ? '1' : null }, instance));
+      return response.json();
+    },
+
+    // The lock of one version: the retention, the legal hold and the default retention of the bucket. Without a version
+    // the answer is for the current version, and it names that version.
+    async objectLock(key, { version = '', instance = null } = {}) {
+      const response = await request(withInstance('/api/object-lock', { key, version }, instance));
+      return response.json();
+    },
+
+    // Changes the legal hold, the retention or both for the version that the previous read named. bypassGovernance
+    // is true only after the person confirmed a change that needs the bypass of a Governance retention.
+    async putObjectLock(key, { version, instance = null, legalHold, retention, bypassGovernance = false } = {}) {
+      const body = { instance: instance === null ? selectedInstance() : String(instance || ''), key, version };
+      if (legalHold !== undefined) body.legalHold = legalHold;
+      if (retention) body.retention = retention;
+      if (bypassGovernance) body.bypassGovernance = true;
+      const response = await request('/api/object-lock', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      return response.json();
+    },
+
+    // One page of the incomplete multipart uploads under a prefix. The token comes from the previous page.
+    async multiparts({ prefix = '', token = '', instance = null } = {}) {
+      const response = await request(withInstance('/api/multiparts', { prefix, token: token || null }, instance));
+      return response.json();
+    },
+
+    // Give uploads ([{ key, uploadId }]) to abort them at any age: the answer is { aborted, skipped, failed }. Give
+    // olderThanDays to start the job that aborts by age: the answer is the job, for waitForJob.
+    async abortMultiparts({ uploads = null, olderThanDays = 0, prefix = '', instance = null } = {}) {
+      const body = { instance: instance === null ? selectedInstance() : String(instance || '') };
+      if (uploads) body.uploads = uploads;
+      else Object.assign(body, { olderThanDays, prefix });
+      const response = await request('/api/multiparts/abort', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      return response.json();
+    },
+
+    async tagPrefix(prefix, { add = [], remove = [], instance = null } = {}) {
+      const response = await request('/api/tags/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instance: instance === null ? selectedInstance() : String(instance || ''), prefix, add, remove })
+      });
+      return response.json();
+    },
+
+    async lifecycle(instance = null) {
+      const response = await request(withInstance('/api/lifecycle', {}, instance));
+      return response.json();
+    },
+
+    // The rules of the lifecycle editor replace the editable rules of the bucket. hash is the hash that lifecycle()
+    // gave: the server refuses the save (409 lifecycle_changed) when the rules of the bucket changed since.
+    async putLifecycle({ hash, rules = [], instance = null } = {}) {
+      const response = await request('/api/lifecycle', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instance: instance === null ? selectedInstance() : String(instance || ''), hash, rules })
       });
       return response.json();
     },
@@ -625,6 +735,8 @@
       let previousBytes = 0;
       let previousAt = startedAt;
       const putHeaders = { 'Content-Type': mime || 'application/octet-stream' };
+      const taggingHeader = BB.tags?.uploadTagsHeader?.() || '';
+      if (taggingHeader) putHeaders['X-Amz-Tagging'] = taggingHeader;
       if (canChecksum()) putHeaders['X-Checksum-Sha256'] = await sha256Base64(blob);
       let checksumVerified = false;
       await xhrRequest(this.urlForKey(key, options.instance), {
@@ -679,7 +791,8 @@
           key,
           size,
           contentType: contentType || 'application/octet-stream',
-          checksum: canChecksum() ? 'sha256' : ''
+          checksum: canChecksum() ? 'sha256' : '',
+          tags: BB.tags?.uploadTagsToSend?.() || []
         }),
         signal: options.signal || null
       });

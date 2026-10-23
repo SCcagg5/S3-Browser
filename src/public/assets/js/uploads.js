@@ -1,5 +1,5 @@
 /*!
- * BB.uploads: the bulk upload of the portal interface.
+ * BB.uploads: the bulk upload of the interface.
  *
  * One batch holds the files of one or more selections. The batch:
  * - sends MAX_ACTIVE files at the same time, never more (bounded concurrency);

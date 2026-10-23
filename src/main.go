@@ -86,7 +86,7 @@ func main() {
 	if cfg.Runtime.LogMode == logModeDetailed {
 		log.Printf("loaded configuration from %s", cfg.SourceName)
 	}
-	log.Printf("object browser listening on %s with %d bucket(s) using %d auth configuration(s) and %d volume(s); stateless=true access=%s access.mode=%s frontend=%s", cfg.Listen, len(cfg.Buckets), len(cfg.Authentications), len(cfg.Volumes), cfg.Runtime.AccessMode, cfg.Access.Mode, cfg.Frontend)
+	log.Printf("object browser listening on %s with %d bucket(s) using %d auth configuration(s) and %d volume(s); stateless=true access=%s access.mode=%s", cfg.Listen, len(cfg.Buckets), len(cfg.Authentications), len(cfg.Volumes), cfg.Runtime.AccessMode, cfg.Access.Mode)
 	serverErrors := make(chan error, 1)
 	go func() {
 		serverErrors <- server.ListenAndServe()
