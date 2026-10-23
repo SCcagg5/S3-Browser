@@ -25,8 +25,8 @@ var (
 	versionCache = map[string]string{}
 	htmlAssetRef = regexp.MustCompile(`((?:href|src)=")(assets/[^"?#]+)(")`)
 	cssIconRef   = regexp.MustCompile(`url\("(\.\./icons/[^"?)]+)"\)`)
-	// cssImportRef finds the relative stylesheets that a stylesheet imports (the clickhouse-dash frontend loads its
-	// cascade layers this way). An absolute or external URL does not match.
+	// cssImportRef finds the relative stylesheets that a stylesheet imports. An absolute or external URL does not
+	// match.
 	cssImportRef = regexp.MustCompile(`@import url\("([A-Za-z0-9_][A-Za-z0-9_./-]*\.css)"\)`)
 )
 

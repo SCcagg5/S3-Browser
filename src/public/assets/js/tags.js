@@ -15,7 +15,7 @@
   const KEY_MAX = 128;
   const VALUE_MAX = 256;
   const ALLOWED = /^[\p{L}\p{N}\p{Zs}+\-=._:/@]*$/u;
-  const UPLOAD_STORAGE = 'portal.uploadTags';
+  const UPLOAD_STORAGE = 'stowr.uploadTags';
 
   function h(tag, attrs, ...children) {
     const node = document.createElement(tag);

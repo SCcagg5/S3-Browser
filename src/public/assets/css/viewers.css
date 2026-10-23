@@ -1,8 +1,8 @@
 /* viewers.css: the previews of the preview page (text, code, tables, JSON, PDF, media, archives, documents).
-   Each colour literal is a token of portal.css, so the rules follow the light and the dark theme. portal.css loads
+   Each colour literal is a token of stowr.css, so the rules follow the light and the dark theme. stowr.css loads
    after this file and gives its look to the shared controls (buttons, menus, dialogs, toasts). */
 
-/* From style.css of the interface of 0.1.0 "default". */
+/* Base rules. */
 
 * {
   box-sizing: border-box;
@@ -1729,7 +1729,7 @@ body.preview-page.is-viewport-image > .viewer .preview-content > img {
   to { transform: rotate(360deg); }
 }
 
-/* From ui.css of the interface of 0.1.0 "default". */
+/* Controls. */
 
 td.is-right {
   text-align: right;
@@ -2147,7 +2147,7 @@ body > div > div > div > div > a > i {
   display: none;
 }
 
-/* From components.css of the interface of 0.1.0 "default". */
+/* Components. */
 
 .data-tool-button {
   border-radius: var(--radius-sm);
@@ -2184,7 +2184,7 @@ button:disabled {
   font-variant-numeric: tabular-nums;
 }
 
-/* From data-grid.css of the interface of 0.1.0 "default". */
+/* Data grid. */
 
 .bb-data-grid,
 .data-preview {
@@ -2326,7 +2326,7 @@ button:disabled {
 }
 }
 
-/* From viewers.css of the interface of 0.1.0 "default". */
+/* Viewers. */
 
 .preview-page,
 .preview-root,
@@ -2815,7 +2815,7 @@ button:disabled {
   flex: 0 0 auto;
 }
 
-/* From interaction.css of the interface of 0.1.0 "default". */
+/* Interaction. */
 
 a.dropdown-item,
 button.dropdown-item {

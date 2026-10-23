@@ -12,7 +12,7 @@
   'use strict';
 
   const BB = (window.BB = window.BB || {});
-  const STORE_KEY = 'portal.details.sections';
+  const STORE_KEY = 'stowr.details.sections';
   // The sections that start open.
   const OPEN_BY_DEFAULT = { storage: true, tags: true };
   const ENCRYPTION_NAMES = { AES256: 'SSE-S3', 'aws:kms': 'SSE-KMS', 'aws:kms:dsse': 'DSSE-KMS' };

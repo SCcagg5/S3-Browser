@@ -1,6 +1,6 @@
 /* Theme control: System (default), Dark or Light, saved in this browser only.
-   The page loads this script without defer in <head>, so the theme applies before the first paint. The key is the
-   key of the portal ("portal.theme"): behind the portal, on the same origin, the two interfaces share one choice.
+   The page loads this script without defer in <head>, so the theme applies before the first paint. The key is
+   "stowr.theme": the tabs of the same origin share one choice.
 
    The control is the theme selector of ClickHouse Dash: one icon button that shows the current choice (CSS reads
    html[data-theme-mode]) and, under it, a menu of the three choices. Markup:
@@ -13,7 +13,7 @@
    Without script, the control stays hidden. */
 (function () {
   'use strict';
-  var KEY = 'portal.theme';
+  var KEY = 'stowr.theme';
   var root = document.documentElement;
   var mode = 'system';
   try {
@@ -106,7 +106,7 @@
     mark(select);
   }
 
-  // Another tab (the portal or this page) changed the choice: follow it.
+  // Another tab changed the choice: follow it.
   window.addEventListener('storage', function (event) {
     if (event.key !== KEY) return;
     var next = event.newValue === 'dark' || event.newValue === 'light' ? event.newValue : 'system';

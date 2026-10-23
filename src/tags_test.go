@@ -398,7 +398,7 @@ func TestS3BackendTagsAndLifecycle(t *testing.T) {
 <Expiration><Days>30</Days></Expiration><Transition><Days>7</Days><StorageClass>COLD</StorageClass></Transition>
 <NoncurrentVersionExpiration><NoncurrentDays>5</NoncurrentDays></NoncurrentVersionExpiration>
 <AbortIncompleteMultipartUpload><DaysAfterInitiation>2</DaysAfterInitiation></AbortIncompleteMultipartUpload></Rule>
-<Rule><ID>legacy</ID><Status>Disabled</Status><Prefix>tmp/</Prefix><Expiration><Days>1</Days></Expiration></Rule>
+<Rule><ID>top-prefix</ID><Status>Disabled</Status><Prefix>tmp/</Prefix><Expiration><Days>1</Days></Expiration></Rule>
 </LifecycleConfiguration>`)
 		default:
 			t.Errorf("unexpected request %s %s", r.Method, r.URL)
@@ -434,7 +434,7 @@ func TestS3BackendTagsAndLifecycle(t *testing.T) {
 		t.Fatalf("first rule = %+v", first)
 	}
 	if rules[1].Enabled || rules[1].Prefix != "tmp/" || rules[1].ExpirationDays != 1 {
-		t.Fatalf("legacy rule = %+v", rules[1])
+		t.Fatalf("rule with a top-level Prefix = %+v", rules[1])
 	}
 }
 

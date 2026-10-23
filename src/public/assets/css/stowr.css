@@ -2,9 +2,9 @@
 
    Design rules. The tokens below write them down; the components only name tokens.
    1. Header of ClickHouse Dash at the full width of the window, one row of 45 px at every width with controls of
-      28 px, as in ClickHouse Dash: the mark, the name and the version at the left edge (with "Back to panel" behind a
+      28 px, as in ClickHouse Dash: the mark, the name and the version at the left edge (with "Back to site" behind a
       path prefix), the bucket selector and the theme selector at the right edge. The page is
-      made of parts of the portal: 14 px corners, on --panel with a hairline edge. In the part of the browser, the
+      made of parts: 14 px corners, on --panel with a hairline edge. In the part of the browser, the
       crumbs and the toolbar share one row when they fit; the crumbs are the bucket mark, a slash and the folders.
    2. Data of ClickHouse Dash. Tables are dense: 32 px rows (26 px compact), 13 px text, 12 px semibold muted heads,
       hairline dividers, a blue tint under the pointer. Measures (sizes, counts, times) use the sans face with
@@ -17,8 +17,8 @@
    6. Motion: 120 ms for hover and colour, 160 ms for menus and panels, one ease-out curve. The one authored moment is
       the upload dock: it rises from the bottom edge and its bar fills. Reduced motion stops every loop.
    7. Theme: System (default), Dark or Light, from the theme selector of ClickHouse Dash, saved in this browser under the
-      key of the portal (theme.js) and applied before the first paint. The dark values are the defaults; light is the System choice of a light OS or the
-      forced choice.
+      key stowr.theme (theme.js) and applied before the first paint. The dark values are the defaults; light is the
+      System choice of a light OS or the forced choice.
    8. Touch: each control reaches 44 px on a coarse pointer. The page has no horizontal scroll at 360 px. */
 
 /* Tokens: dark (the default) ----------------------------------------------------------------------------------- */
@@ -1109,7 +1109,7 @@ button.storageSwitcher__trigger:hover {
   background: var(--selected-bg);
 }
 
-/* Page and parts (portal) ------------------------------------------------------------------------------------------- */
+/* Page and parts -------------------------------------------------------------------------------------------------- */
 
 .page {
   display: grid;
@@ -5228,7 +5228,7 @@ body > .appHeader {
 }
 
 /* A narrow window keeps the one row of the header. The header gives less space to the brand, in this order: the
-   "Back to panel" link keeps its chevron only, the name of the brand goes (the version stays, under nothing), then the
+   "Back to site" link keeps its chevron only, the name of the brand goes (the version stays, under nothing), then the
    version goes. The gutter and the gaps get smaller, as in ClickHouse Dash. */
 @media (max-width: 600px) {
   .appHeader__inner {

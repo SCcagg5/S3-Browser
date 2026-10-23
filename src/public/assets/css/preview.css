@@ -1,7 +1,7 @@
 /* Stowr: the preview page.
-   The header is the header of the portal, one row of 45 px as the header of ClickHouse Dash: the way back at the left,
+   The header is one row of 45 px, as the header of ClickHouse Dash: the way back at the left,
    then the file name, its size and its path from the bucket root on one line, and the tools and the theme control at
-   the right edge of the window. Markdown and highlighted code use the tokens of portal.css, so they follow the theme;
+   the right edge of the window. Markdown and highlighted code use the tokens of stowr.css, so they follow the theme;
    the page loads no third-party stylesheet. */
 
 /* Header ---------------------------------------------------------------------------------------------------------- */
@@ -187,7 +187,7 @@
   color: var(--muted);
 }
 
-/* A document to read sits in a part of the portal, at a reading measure. */
+/* A document to read sits in a part of the page, at a reading measure. */
 .viewer[data-preview-type="markdown"] #viewer {
   box-sizing: border-box;
   width: 100%;
@@ -486,7 +486,7 @@
   }
 }
 
-/* The scroll of the page (portal.css): the document and the body never scroll, the bar stays at the top, and the
+/* The scroll of the page (stowr.css): the document and the body never scroll, the bar stays at the top, and the
    element under it scrolls. Its scrollbar starts under the bar and ends at the right edge of the window. */
 html.preview-root,
 body.preview-page {

@@ -1,6 +1,6 @@
 /*
  * BB.suggest: a text field with a small popover of suggested values (the ARIA combobox pattern).
- * - the popover has the look of the other menus of the portal, and it is in the large window or in the body, so that the
+ * - the popover has the look of the other menus of the page, and it is in the large window or in the body, so that the
  *   scroll area of a window does not clip it;
  * - the keys: Down and Up move the highlight (Down opens a closed popover), Enter chooses the highlighted row, Escape
  *   closes the popover and stops there, Tab leaves the field as usual;

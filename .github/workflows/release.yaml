@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to publish, e.g. v1.0.10"
+        description: "Release tag to publish, e.g. v0.1.1"
         required: true
         type: string
   push:
@@ -38,7 +38,7 @@ jobs:
           tag="${{ inputs.tag }}"
           case "$tag" in
             v*) ;;
-            *) echo "tag must start with v, for example v1.0.10" >&2; exit 1 ;;
+            *) echo "tag must start with v, for example v0.1.1" >&2; exit 1 ;;
           esac
 
           git fetch --force --tags

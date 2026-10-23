@@ -1,8 +1,8 @@
 /* dialogs.css: the dialogs of the shared scripts (details, versions, insights, permissions, transfers).
-   Each colour literal is a token of portal.css, so the rules follow the light and the dark theme. portal.css loads
+   Each colour literal is a token of stowr.css, so the rules follow the light and the dark theme. stowr.css loads
    after this file and gives its look to the shared controls (buttons, menus, dialogs, toasts). */
 
-/* The names of the interface of 0.1.0 "default", given by the tokens of portal.css. */
+/* The names that the shared rules use, given by the tokens of stowr.css. */
 :root {
   --browser-ui-scale-active: 1;
   --preview-max: 1680px;
@@ -55,7 +55,7 @@
   --bb-danger: var(--danger);
 }
 
-/* From style.css of the interface of 0.1.0 "default". */
+/* Base rules. */
 
 @keyframes mdi-spin { to { transform: rotate(360deg); } }
 .data-table-scroll {
@@ -199,7 +199,7 @@
   to { transform: rotate(360deg); }
 }
 
-/* From ui.css of the interface of 0.1.0 "default". */
+/* Controls. */
 
 @keyframes bb-toast-indeterminate {
   from { transform: translateX(-120%); }
@@ -622,7 +622,7 @@
   padding-bottom: .2rem;
 }
 
-/* From data-grid.css of the interface of 0.1.0 "default". */
+/* Data grid. */
 
 .data-table-scroll {
   position: relative;
@@ -741,7 +741,7 @@
 }
 }
 
-/* From interaction.css of the interface of 0.1.0 "default". */
+/* Interaction. */
 
 @keyframes bb-loader-spin { to { transform: rotate(360deg); } }
 .data-table-scroll {
@@ -1072,7 +1072,7 @@
   gap: .65rem;
 }
 
-/* From treemap.css of the interface of 0.1.0 "default". */
+/* Treemap. */
 
 .folder-insights-panel[data-insights-panel="treemap"] {
   position: relative;

@@ -27,7 +27,7 @@ const VERSION_BODIES = {
   ].map(text => Buffer.from(text)),
   'versions/notes.txt': ['versions/notes.txt version 1', 'versions/notes.txt version 2'].map(text => Buffer.from(text)),
   'versions/config.json': [
-    '{"service":"ingest","replicas":2,"limits":{"cpu":"500m"},"regions":["eu-west"],"legacy":true}',
+    '{"service":"ingest","replicas":2,"limits":{"cpu":"500m"},"regions":["eu-west"],"beta":true}',
     '{"service":"ingest","replicas":3,"limits":{"cpu":"500m","memory":"1Gi"},"regions":["eu-west","us-east"]}',
     '{\n  "regions": ["eu-west", "us-east"],\n  "replicas": 4,\n  "service": "ingest",\n  "limits": { "memory": "1Gi", "cpu": "500m" }\n}',
   ].map(text => Buffer.from(text)),

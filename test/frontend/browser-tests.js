@@ -35,7 +35,7 @@ async function newPage({ sections = 'open', ...options } = {}) {
   const context = await browser.newContext({ viewport: { width: 1280, height: 860 }, colorScheme: 'dark', ...options });
   if (sections === 'open') {
     await context.addInitScript(value => {
-      try { if (!window.localStorage.getItem('portal.details.sections')) window.localStorage.setItem('portal.details.sections', value); } catch (_) {}
+      try { if (!window.localStorage.getItem('stowr.details.sections')) window.localStorage.setItem('stowr.details.sections', value); } catch (_) {}
     }, OPEN_SECTIONS);
   }
   const page = await context.newPage();
@@ -143,7 +143,7 @@ test('theme: a choice is saved in the browser and applies again after a reload',
   await page.click('[data-theme-value="light"]');
   assert.equal(await page.isHidden('#themeMenu'), true);
   assert.equal(await page.getAttribute('html', 'data-theme'), 'light');
-  assert.equal(await page.evaluate(() => localStorage.getItem('portal.theme')), 'light');
+  assert.equal(await page.evaluate(() => localStorage.getItem('stowr.theme')), 'light');
   assert.equal(await page.getAttribute('[data-theme-value="light"]', 'aria-selected'), 'true');
   assert.equal(await page.getAttribute('[data-theme-trigger]', 'aria-label'), 'Theme: light');
   // The button shows the icon of the current choice.
@@ -153,7 +153,7 @@ test('theme: a choice is saved in the browser and applies again after a reload',
   await page.reload({ waitUntil: 'networkidle' });
   assert.equal(await page.getAttribute('html', 'data-theme'), 'light');
   await chooseTheme(page, 'system');
-  assert.equal(await page.evaluate(() => localStorage.getItem('portal.theme')), null);
+  assert.equal(await page.evaluate(() => localStorage.getItem('stowr.theme')), null);
   assert.equal(await page.getAttribute('html', 'data-theme'), null);
   await page.context().close();
 });
@@ -162,7 +162,7 @@ test('theme: the saved theme is on <html> before the body exists (no flash)', as
   for (const [scheme, saved] of [['dark', 'light'], ['light', 'dark']]) {
     const page = await newPage({ colorScheme: scheme });
     await page.addInitScript(value => {
-      try { localStorage.setItem('portal.theme', value); } catch (_) {}
+      try { localStorage.setItem('stowr.theme', value); } catch (_) {}
       window.__themeAtBody = 'unset';
       new MutationObserver((records, observer) => {
         if (document.body) {
@@ -740,7 +740,7 @@ test('tags: the uploads of the browser carry the tags that the person sets in th
 test('tags: an instance that keeps no tags gets no tag at upload, and the tag settings are hidden', async () => {
   const page = await newPage();
   // The server tells that the instance has no tags (as for Garage). The saved tags of the uploads are not sent.
-  await page.addInitScript(() => localStorage.setItem('portal.uploadTags', JSON.stringify([{ key: 'team', value: 'up' }])));
+  await page.addInitScript(() => localStorage.setItem('stowr.uploadTags', JSON.stringify([{ key: 'team', value: 'up' }])));
   await page.route('**/api/instances*', async route => {
     const response = await route.fetch();
     const body = await response.json();
@@ -942,14 +942,14 @@ test('listing: every column is on by default, also "Encryption and lock"; an ins
   await page.context().close();
 });
 
-test('listing: a saved choice of the person wins, a choice that was never made takes the new default', async () => {
+test('listing: a saved choice of the person wins, a column without a choice has its default', async () => {
   const page = await newPage();
-  // The settings of an older version: the browser kept every column, also the tags that were off by default. The size
-  // is off: a choice of the person. The encryption of seaweedfs-archive is off.
+  // The settings that the browser keeps: the size is off, a choice of the person. The encryption of seaweedfs-archive
+  // is off. The other columns have no choice.
   await page.addInitScript(() => {
     if (!sessionStorage.getItem('seeded')) {
       sessionStorage.setItem('seeded', '1');
-      localStorage.setItem('portal.listing', JSON.stringify({ columns: { tags: false, versions: true, size: false, modified: true }, tagFilterOn: false, encryption: { 'seaweedfs-archive': false } }));
+      localStorage.setItem('stowr.listing', JSON.stringify({ version: 1, columns: { size: false }, tagFilterOn: false, encryption: { 'seaweedfs-archive': false } }));
     }
   });
   await open(page, `${MAIN}config/`);
@@ -959,12 +959,12 @@ test('listing: a saved choice of the person wins, a choice that was never made t
   // The choice of the encryption stays for its bucket.
   await open(page, '-/seaweedfs/seaweedfs-archive/');
   assert.equal((await columnState(page)).settings.marks, false);
-  // A new choice: the tags off. The browser keeps the choices only, in version 2.
+  // A new choice: the tags off. The browser keeps the choices only.
   await open(page, `${MAIN}config/`);
   await page.click('#settingsButton');
   await page.uncheck('[data-column="tags"]');
-  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('portal.listing')));
-  assert.deepEqual(stored, { version: 2, columns: { size: false, tags: false }, tagFilterOn: false, encryption: { 'seaweedfs-archive': false } });
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('stowr.listing')));
+  assert.deepEqual(stored, { version: 1, columns: { size: false, tags: false }, tagFilterOn: false, encryption: { 'seaweedfs-archive': false } });
   await page.reload({ waitUntil: 'networkidle' });
   await page.waitForSelector('.dataTable');
   assert.deepEqual((await columnState(page)).table, { tags: false, versions: true, size: false, modified: true });
@@ -972,7 +972,7 @@ test('listing: a saved choice of the person wins, a choice that was never made t
   await page.click('#settingsButton');
   await page.click('#settingsReset');
   assert.deepEqual((await columnState(page)).table, { tags: true, versions: true, size: true, modified: true });
-  assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('portal.listing'))), { version: 2, columns: {}, tagFilterOn: false, encryption: {} });
+  assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('stowr.listing'))), { version: 1, columns: {}, tagFilterOn: false, encryption: {} });
   assert.deepEqual(page.errors, []);
   await page.context().close();
 });
@@ -1166,7 +1166,7 @@ test('versions: the comparison of two JSON versions has the modes Raw, Beautify 
   // v1 -> v3. The keys are in alphabetical order.
   await pickVersion(page, 'from', 2);
   await until(page, () => document.querySelectorAll('.jsonTree__node').length >= 7);
-  { const got = await nodes(); assert.equal(JSON.stringify(got), JSON.stringify(['changed $', 'removed legacy', 'changed limits', 'added memory', 'changed regions', 'added [1]', 'changed replicas']), JSON.stringify(got)); }
+  { const got = await nodes(); assert.equal(JSON.stringify(got), JSON.stringify(['changed $', 'removed beta', 'changed limits', 'added memory', 'changed regions', 'added [1]', 'changed replicas']), JSON.stringify(got)); }
   assert.deepEqual(cleanText(await page.locator('.diffStat').allInnerTexts()).slice(0, 1), ['4 paths changed']);
   // A branch closes and opens.
   await page.click('.jsonTree__node--changed:has(> .jsonTree__row .jsonTree__label:text-is("limits")) > .jsonTree__row .jsonTree__toggle');
@@ -1790,7 +1790,7 @@ test('header: the brand and the version of ClickHouse Dash at the left edge of t
     return switcher.right <= theme.left;
   });
   assert.equal(order, true);
-  // Without a path prefix, the page is the root of the site: no "Back to panel".
+  // Without a path prefix, the page is the root of the site: no "Back to site".
   assert.equal(await page.isHidden('#backLink'), true);
   await page.context().close();
 });
@@ -1869,7 +1869,7 @@ function headerRow(page) {
   });
 }
 
-test('header: one row with the height of the header of ClickHouse Dash at every width, in the two themes, with a fine and a coarse pointer, also with "Back to panel"', async () => {
+test('header: one row with the height of the header of ClickHouse Dash at every width, in the two themes, with a fine and a coarse pointer, also with "Back to site"', async () => {
   for (const coarse of [false, true]) {
     const page = await newPage({ viewport: { width: 1440, height: 900 }, ...(coarse ? { isMobile: true, hasTouch: true } : {}) });
     await open(page, MAIN);
@@ -1899,7 +1899,7 @@ test('header: one row with the height of the header of ClickHouse Dash at every 
   }
 });
 
-test('header: a narrow window hides the name of the brand, then its version, and the text of "Back to panel"', async () => {
+test('header: a narrow window hides the name of the brand, then its version, and the text of "Back to site"', async () => {
   const page = await newPage({ viewport: { width: 1440, height: 900 } });
   await open(page, MAIN);
   await page.evaluate(() => { document.getElementById('backLink').hidden = false; });
@@ -1915,8 +1915,8 @@ test('header: a narrow window hides the name of the brand, then its version, and
     assert.deepEqual(await seen(), expected, String(width));
   }
   // The link keeps its name for a screen reader and in its tooltip.
-  assert.equal(await page.getAttribute('#backLink', 'title'), 'Back to panel');
-  assert.equal((await page.textContent('#backLink')).trim(), 'Back to panel');
+  assert.equal(await page.getAttribute('#backLink', 'title'), 'Back to site');
+  assert.equal((await page.textContent('#backLink')).trim(), 'Back to site');
   await page.context().close();
 });
 

@@ -129,7 +129,7 @@ A diff that needs more than 2500 edits shows as a replacement of the lines. The 
 
 The gear of the toolbar opens the settings of the listing. The group "Columns" has Name, Tags, Versions, Size, Modified and "Encryption and lock". Each column is on by default. A column that the instance cannot have stays hidden: Tags without `tagsSupported`, Versions without `versioningSupported`. The group "Filters" has the tag filter, and a field gives the tags of the new uploads. The button "Reset to defaults" gives the defaults again. Its tooltip names what it resets.
 
-The menu is as wide as its longest line needs, with a limit of 300 px and of the width of the window. A longer text wraps in the menu. The browser keeps the choices of the person in `portal.listing`:
+The menu is as wide as its longest line needs, with a limit of 300 px and of the width of the window. A longer text wraps in the menu. The browser keeps the choices of the person in `stowr.listing`:
 
 | Field | Value |
 | --- | --- |
@@ -153,14 +153,14 @@ Only the bucket selector opens the page:
 - Enter and Space open the link. Tab goes from the trigger to the link. In the list, the arrow Right goes from an entry to its link, and the arrow Left goes back.
 - The accessible name of the link is "Information and permissions of this bucket", with the name of the bucket in the list, then the state of each icon. The link has no tooltip: the accessible name and the information page give each state.
 
-The page has the header of the listing in one row, with the same parts: the brand at the left edge, the bucket selector, and the theme at the right edge. The link "Browse" is in the header, after the brand, with no chevron: it opens the files of the bucket. The parts are 8 px apart. The page has the visual language of the System page of ClickHouse Dash:
+The page has the header of the listing in one row, with the same parts: the brand at the left edge, the bucket selector, and the theme at the right edge. The link "Browse" is in the header, after the brand, with no chevron: it opens the files of the bucket. The parts are 8 px apart. The page has this visual language:
 
 - The panel colour goes from edge to edge, with the gutter of the header (12 px, 10 px on a narrow window).
 - The header has the bucket selector of the listing: one implementation for the two pages (`assets/js/switcher.js`), with the same markup, the same facts, the same reads and the same widths. One visible instance gives the static trigger on the two pages. On the listing, a bucket of the list opens in the listing; on the information page, it opens the information page of that bucket. The link of the state icons and of the usage opens the information page on the two pages. The page is one page with no tabs: three columns of cards, then the part "Lifecycle rules" under them.
 - The page has no head: the selector names the bucket. A hidden heading (h1) names the page for a screen reader. A bucket that does not exist, or a failed read of the buckets, gives a small message with the reason, and no part.
 - The first column has the card Identity. The second column has the cards Permissions, Data protection and Operations, one under the other. The third column has the storage: the cards of what the bucket holds, of the quota and of the storage. The columns have the widths 3 / 6 / 4: the second column is the widest. At 1000 px and less, the page has one column. The part "Lifecycle rules" has a heading (14 px) and spans the width under the columns.
 - The cards Data protection and Operations (and the card of a volume) show pairs of a muted term and its value side by side; the pairs wrap in the width of the card. A card has a title (14 px) and a key-value list: a border, the keys in muted text, and a darker shade on each second row (12 px). On a phone, the key is above its value.
-- The quota and the storage are gauges, as the disk cards of Dash: the name and its chips, the percent (16 px) over a track of 8 px, a summary ("12 MB used of 20 GB") and facts.
+- The quota and the storage are gauges: the name and its chips, the percent (16 px) over a track of 8 px, a summary ("12 MB used of 20 GB") and facts.
 - The states are chips of 18 px, in the colours of the state icons: green (on, allowed), orange (on, with a problem) and grey (off, not available, denied). The page has no red chip: a denied permission is grey, as in the selector.
 
 Each row shows only when the server knows its value:
@@ -180,7 +180,7 @@ The lifecycle rules are edited in the part "Lifecycle rules" of this page, and i
 
 ## Tags in the listing
 
-A tag badge has a swatch. The colour comes from the key: one of 18 colours, chosen with the hash FNV-1a. This is the way ClickHouse Dash colours a service. A click on a badge filters the page by this tag. A second click clears the filter. Ctrl, Cmd or Shift adds the tag to the other words of the filter. A row shows three badges and a count for the other tags.
+A tag badge has a swatch. The colour comes from the key: one of 18 colours, chosen with the hash FNV-1a. A click on a badge filters the page by this tag. A second click clears the filter. Ctrl, Cmd or Shift adds the tag to the other words of the filter. A row shows three badges and a count for the other tags.
 
 ## Background jobs
 
@@ -547,7 +547,7 @@ The mark of the encryption is a key (Tabler `key`). The mark of Object Lock is a
 
 A listing does not give the encryption of an object. Thus the listing reads it with a HEAD request for each file on the page, as it reads the tags: 4 requests at the same time, 100 files at most. A file waits with a mark, and an answer stays for the ETag and the date of the file. An encrypted file gets a small key at the right of its name, in the cell of the name. The padlock of a lock follows the key. The tooltip of the key names the encryption: SSE-S3, SSE-KMS with its key, or "key of the client" (SSE-C). A HEAD request of an SSE-C object fails with `400`, and `GET /api/media-info` then confirms the key of the client. Such a file gets no padlock, because its HEAD answer gives no header. A file without an encryption gets no key.
 
-The column "Encryption and lock" of the settings starts or stops these requests for each bucket. The browser keeps the choice in `portal.listing`, with the name `encryption` of the first version of the setting. Without a choice, the setting is on for each bucket. The HEAD request of a file gives its encryption and its lock, so the lock adds no request.
+The column "Encryption and lock" of the settings starts or stops these requests for each bucket. The browser keeps the choice in `stowr.listing`, with the name `encryption` of the first version of the setting. Without a choice, the setting is on for each bucket. The HEAD request of a file gives its encryption and its lock, so the lock adds no request.
 
 The bar of the preview page shows the key and the padlock of the version on the page, next to its size, with the tooltips of the listing. The marks come from the HEAD request that the preview sends for the version: a version in `?version=` shows its own encryption and its own lock. An SSE-C object gets the key with the tooltip "Encrypted with a key of the client (SSE-C)". An entry of an archive and the comparison of two versions show no mark.
 
@@ -654,7 +654,7 @@ A click on the rest of the selector, also on the usage, opens the list of the bu
 
 The selector has one layout at every width. The trigger is never on two lines:
 
-- The trigger is one line of 28 px, as the host picker of ClickHouse Dash (44 px on a coarse pointer). The selector is a grid with five columns: the icon, the name, the seven icons, the usage and the chevron. The trigger is a subgrid that spans the five columns, so the elements over it share its columns.
+- The trigger is one line of 28 px (44 px on a coarse pointer). The selector is a grid with five columns: the icon, the name, the seven icons, the usage and the chevron. The trigger is a subgrid that spans the five columns, so the elements over it share its columns.
 - The icons are 14 px with a gap of 2 px. The link is 116 px, and 124 px with the count of the lifecycle rules. Without the name, the trigger needs 342 px with every part.
 - The selector is 460 px wide, and less when the header has less space. The selector is a CSS container. A narrower selector shows fewer parts, in this order: first the amount of the usage goes (440 px and less), then the short text of the usage (400 px), then the usage (360 px), then the icon of the trigger (300 px). At 240 px and less, the icons have a gap of 1 px, the trigger has a smaller padding, and the count of the lifecycle rules goes (the hourglass stays; the tooltip and the name of the link give the count).
 - The seven icons of a bucket stay at every width. On a window of 320 px, the selector is 220 px: the name (38 px, with an ellipsis), the seven icons with the count, and the chevron. The name keeps 32 px at least.
@@ -692,7 +692,7 @@ A bucket is full when the more constraining part is at 90 % or more: `percent >=
 
 The details of a file start with a strip of pills: the version (`v5 of 5`, only for a file with more than one version), the encryption (a key and `SSE-S3`, `SSE-KMS` or `Key of the client`), the lock (a padlock and the retention or `legal hold`) and the number of tags. A pill shows only when its fact is true. A click on the pill of the version opens the version picker. A click on another pill opens its section and moves to it.
 
-The sections keep all their content. The sections "Storage object" and "Tags" start open. The other sections start closed. A chevron button at the left of each title opens or closes the section. A click on the title or on its "Edit" button also opens it. The browser keeps the choice of each section in `portal.details.sections`.
+The sections keep all their content. The sections "Storage object" and "Tags" start open. The other sections start closed. A chevron button at the left of each title opens or closes the section. A click on the title or on its "Edit" button also opens it. The browser keeps the choice of each section in `stowr.details.sections`.
 
 The body of the details of a file is a container (`container-type: inline-size`). When the body is 820 px wide or more, the sections are in two columns (`.bb-details-column`). The first column has the object: "Storage object", "Encryption" and "Metadata". The second column has the facts that describe it: "Tags", "Retention", "File metadata" and "Document dimensions". A narrower window or a phone shows one column. The page order of the sections is the reading order and the tab order in the two layouts. Each column has its own height, so a section never moves to the other column when a section opens or closes. An open editor stays in its column. The summary strip, the header and the tool cards "Verify integrity" and "Inspect file" use the full width.
 
@@ -896,31 +896,31 @@ The server never writes a temporary archive or member to disk. Unsafe paths, sym
 
 ## Browser interface
 
-The binary embeds one browser interface: the tree `src/public/`. The top of `assets/css/portal.css` gives the design rules as tokens. Version 0.1.1 removed the interface `default` of 0.1.0 and the key `server.frontend`.
+The binary embeds one browser interface: the tree `src/public/`. The top of `assets/css/stowr.css` gives the design rules as tokens.
 
 The tree contains these pages and scripts:
 
 - `index.html` is the browser page, `preview.html` the preview page, `info.html` the information page of an instance and `404.html` the page of an unknown path.
 - `assets/js/common/` has the shared scripts (API, previews, dialogs). `preview.js` is the preview page.
 - `assets/js/app.js` is the browser page. `uploads.js` is the bulk upload. `tags.js` and `metadata.js` are the sections of the details that edit the tags and the metadata. `theme.js` applies the theme before the first paint. `session.js` gives one message for an ended sign-in (401) or a server that does not answer.
-- `assets/css/dialogs.css` and `assets/css/viewers.css` have the rules for the dialogs and the previews. Each colour is a token of `portal.css`, so these rules follow the theme.
+- `assets/css/dialogs.css` and `assets/css/viewers.css` have the rules for the dialogs and the previews. Each colour is a token of `stowr.css`, so these rules follow the theme.
 - `assets/icons/tabler/` has one Tabler icon (MIT) for each name. `assets/css/icons.css` gives the icon for each `mdi-*` name of the shared scripts.
 - `assets/vendor/` has the vendored libraries: PDF.js, highlight.js and marked. A Go test makes sure that a page or a script loads each of them.
 
-The header of Stowr has the height of the header of ClickHouse Dash. The content of the Dash header sets that height: no rule of Dash gives a height. A measurement in Chromium gives the values below. The page of the measurement has the stylesheet and the header markup of ClickHouse Dash, at 1440, 1280, 1100, 900 and 390 px, in the two themes:
+The header has these heights at every width, from 320 px up:
 
-| Pointer | Header of ClickHouse Dash | Header of Stowr |
-| --- | --- | --- |
-| Fine | 45 px at every width: 44 px and the border line. The controls are 28 px high, with 8 px over them and under them | 45 px at every width, from 320 px up. The bucket selector and the theme button are 28 px high (`--header-h` is 44 px) |
-| Coarse | 57 px: the controls are 40 px high | 57 px at every width: the controls are 44 px high, with 6 px over them and under them |
+| Pointer | Header |
+| --- | --- |
+| Fine | 45 px: 44 px (`--header-h`) and the border line. The bucket selector and the theme button are 28 px high |
+| Coarse | 57 px: the controls are 44 px high, with 6 px over them and under them |
 
-The header of Stowr is one row at every width, as the header of ClickHouse Dash. It has the full width of the window, as in ClickHouse Dash: the brand is at the left gutter, the bucket selector and the theme button are at the right gutter, and the free space is between them. The gutter of the header is the gutter of the header of ClickHouse Dash: 12 px, and 10 px at 820 px and less. The content of the page keeps its own gutter of 24 px (14 px at 760 px and less). "Back to panel" stays at the left, before the brand. The content of the page under the header keeps its centred column of 1400 px, so on a wide window the edges of the header are not the edges of the content. The body of ClickHouse Dash has the full width of the window. Stowr keeps its centred column. A narrow window gives less space to the brand, in this order: at 600 px and less, the name of the brand and the text of "Back to panel" go (the chevron of the link stays, and the link keeps its name for a screen reader and in its tooltip). At 420 px and less, the version goes. The mark of the brand always stays.
+The header is one row at every width. It has the full width of the window: the brand is at the left gutter, the bucket selector and the theme button are at the right gutter, and the free space is between them. The gutter of the header is 12 px, and 10 px at 820 px and less. The content of the page keeps its own gutter of 24 px (14 px at 760 px and less). "Back to site" stays at the left, before the brand. The content of the page under the header keeps its centred column of 1400 px, so on a wide window the edges of the header are not the edges of the content. A narrow window gives less space to the brand, in this order: at 600 px and less, the name of the brand and the text of "Back to site" go (the chevron of the link stays, and the link keeps its name for a screen reader and in its tooltip). At 420 px and less, the version goes. The mark of the brand always stays.
 
 The bar of the preview page is one row of the same height: 45 px, or 57 px on a coarse pointer. It also has the full width of the window and the gutter of the header: the way back and the name at the left gutter, the tools and the theme button at the right gutter. It has the way back, then the name of the file, its size, its marks and its path from the bucket root on one line, then the tools and the theme button. The path gets an ellipsis before the name, and the title of the name gives the whole key. At 760 px and less, the path, the build tag and the date of the version picker go, and the way back keeps its chevron. At 420 px and less, the size goes. In a comparison, From, the statistics and To take the place of the path below 1101 px. At 760 px and less, the comparison puts its versions and its statistics in a row of their own, under the way back and the name.
 
-The scroll of each page of Stowr is the scroll of ClickHouse Dash: the document never scrolls. `html` and `body` have the height of the window and no scroll. The body is a column: the header (or the bar of the preview page) stays at the top, and only the element under it scrolls (`.pageScroll`, with `data-page-scroll`). Thus the header never moves, and the scrollbar starts under the header and ends at the right edge of the window. This applies to the listing, the preview page (also a comparison of versions), the information page and the 404 page. Sticky elements, such as the head of a table, stick to the top of the element that scrolls, under the header. The upload dock, the drop overlay, the toasts and the windows are fixed to the window, outside the element that scrolls. The scripts that move the page with the wheel over a horizontal scroller use `BB.runtime.pageScroller()`.
+On each page, the document never scrolls. `html` and `body` have the height of the window and no scroll. The body is a column: the header (or the bar of the preview page) stays at the top, and only the element under it scrolls (`.pageScroll`, with `data-page-scroll`). Thus the header never moves, and the scrollbar starts under the header and ends at the right edge of the window. This applies to the listing, the preview page (also a comparison of versions), the information page and the 404 page. Sticky elements, such as the head of a table, stick to the top of the element that scrolls, under the header. The upload dock, the drop overlay, the toasts and the windows are fixed to the window, outside the element that scrolls. The scripts that move the page with the wheel over a horizontal scroller use `BB.runtime.pageScroller()`.
 
-The theme selector is the theme selector of ClickHouse Dash, measured in a browser with the stylesheet of Dash in each state (normal, pointer over it, focus, open), in the two themes, at 1440 and 390 px. The button is 34 x 28 px, with a border of 1 px and corners of 6 px. Its icon is the inline SVG icon of Dash: 18 px, 8 px from the left edge and 5 px from the top edge of the button, a stroke of 1.5 and no fill. The icon is muted text at 82 %, and the text colour under the pointer, with the focus and in an open menu. The focus ring is 2 px, on the edge of the button. The menu is 34 px wide, its edge has the colour of Dash (`--theme-menu-border`), and each choice is 34 x 32 px with its icon at 8 px and 7 px. A coarse pointer keeps the controls of 44 px.
+The theme selector is one button of 34 x 28 px with a menu. The button has a border of 1 px and corners of 6 px. Its icon is an inline SVG icon: 18 px, 8 px from the left edge and 5 px from the top edge of the button, a stroke of 1.5 and no fill. The icon is muted text at 82 %, and the text colour under the pointer, with the focus and in an open menu. The focus ring is 2 px, on the edge of the button. The menu is 34 px wide, its edge has the colour `--theme-menu-border`, and each choice is 34 x 32 px with its icon at 8 px and 7 px. A coarse pointer keeps the controls of 44 px.
 
 Each menu and popover of Stowr has the opaque colour `--panel`, with no backdrop filter: the menus of the header (theme, buckets), the menus Actions and settings, the menus of the rows and of the preview, the version picker and the suggestions of the metadata editor. A menu opens with a short move and no fade, so the page never shows through it, also in its first frame. An open menu of the header puts the header above the upload dock.
 

@@ -9,8 +9,7 @@ Supported top-level blocks:
 - zero or one `server` block;
 - zero or more `auth "id"` blocks;
 - zero or more `bucket "id"` blocks. Each `bucket` block needs an `auth` block;
-- zero or more `volume "id"` blocks: a folder of the server that the browser shows as a bucket (since 0.1.0);
-- exactly one `access` block (since 2.0.0). It is mandatory.
+- zero or more `volume "id"` blocks: a folder of the server that the browser shows as a bucket.
 
 A file needs one `bucket` block or one `volume` block at least.
 
@@ -65,7 +64,7 @@ The server never creates a data directory. All sessions and jobs are memory-only
 
 ### Browser interface
 
-The binary contains one browser interface. No key selects it. Version 0.1.1 removed the key `frontend` of 0.1.0. A `server` block with `frontend` stops the server at start, as each unknown attribute does. The error gives the line and the key. Remove the line to start the server.
+The binary contains one browser interface. No key selects it.
 
 ## S3 authentication
 
@@ -89,7 +88,7 @@ S3 modes:
 
 A secret (`secret_access_key`, `session_token`) accepts only its `_env` form (the name of an environment variable) or its `_file` form. A secret in clear text in the file stops the start. `access_key_id` is an identifier, not a secret: it also accepts the value in the file. Give one form only. File paths relative to the HCL file are resolved from the HCL directory. The value of a file applies without its last line end; a secret with a space or a control character stops the start.
 
-Since 2.0.0, the server never changes a value to make it fit. It does not remove spaces, does not change the case (`provider = "S3"` is an error), does not remove the `/` at the end of `endpoint`, and does not add or remove a `/` in `root_prefix` (`root_prefix` is `""` or a prefix such as `"published/"`). The error gives the key, the expected form and the value.
+The server never changes a value to make it fit. It does not remove spaces, does not change the case (`provider = "S3"` is an error), does not remove the `/` at the end of `endpoint`, and does not add or remove a `/` in `root_prefix` (`root_prefix` is `""` or a prefix such as `"published/"`). The error gives the key, the expected form and the value.
 
 The endpoint must use HTTP or HTTPS and may not contain credentials, a query string, or a fragment. Redirects and process environment proxies are disabled.
 

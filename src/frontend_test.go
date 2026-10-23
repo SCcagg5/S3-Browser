@@ -28,7 +28,7 @@ func publicTree(t *testing.T) fs.FS {
 // the error of an unknown attribute. The error names the key and its line.
 func TestServerFrontendKeyStopsTheStart(t *testing.T) {
 	t.Parallel()
-	for _, value := range []string{"default", "portal"} {
+	for _, value := range []string{"default", "stowr"} {
 		path := filepath.Join(t.TempDir(), "config.hcl")
 		writeConfig(t, path, "server {\n  frontend = \""+value+"\"\n}\n"+minimalTestConfig("bucket"))
 		_, err := loadConfig(path)
@@ -68,7 +68,7 @@ func TestInterfaceFileSystem(t *testing.T) {
 	expected := []string{
 		"index.html", "preview.html", "info.html", "404.html", "favicon.svg",
 		"assets/js/info.js", "assets/js/switcher.js", "assets/js/states.js", "assets/css/info.css",
-		"assets/css/portal.css", "assets/css/icons.css", "assets/css/dialogs.css", "assets/css/viewers.css", "assets/css/preview.css",
+		"assets/css/stowr.css", "assets/css/icons.css", "assets/css/dialogs.css", "assets/css/viewers.css", "assets/css/preview.css",
 		"assets/icons/tabler/folder.svg", "assets/js/app.js", "assets/js/theme.js", "assets/js/uploads.js",
 		"assets/js/session.js", "assets/js/common/api.js",
 		"assets/vendor/marked/12.0.2/marked.min.js", "assets/vendor/highlightjs/11/highlight.min.js",
@@ -136,10 +136,10 @@ func TestInterfaceIsServed(t *testing.T) {
 	for _, page := range []string{"/", "/index.html", "/preview.html", "/info.html"} {
 		recorder := fetchStatic(t, app, page, nil)
 		body := recorder.Body.String()
-		if recorder.Code != http.StatusOK || !strings.Contains(body, `<meta name="bb-frontend" content="portal" />`) {
+		if recorder.Code != http.StatusOK || !strings.Contains(body, `<meta name="bb-frontend" content="stowr" />`) {
 			t.Fatalf("%s: status %d, body %.200q", page, recorder.Code, body)
 		}
-		for _, asset := range []string{"assets/css/portal.css", "assets/js/theme.js"} {
+		for _, asset := range []string{"assets/css/stowr.css", "assets/js/theme.js"} {
 			if !strings.Contains(body, `="`+asset+`?v=`+version+`"`) {
 				t.Fatalf("%s does not link the fingerprinted %s", page, asset)
 			}
@@ -175,7 +175,7 @@ func TestInterfaceIsServed(t *testing.T) {
 		t.Fatalf("stylesheet of the removed interface: status = %d, want 404", missing.Code)
 	}
 	notFound := fetchStatic(t, app, "/missing-page", map[string]string{"Accept": "text/html"})
-	if notFound.Code != http.StatusNotFound || !strings.Contains(notFound.Body.String(), "assets/css/portal.css") {
+	if notFound.Code != http.StatusNotFound || !strings.Contains(notFound.Body.String(), "assets/css/stowr.css") {
 		t.Fatalf("404 page: status %d, body %.200q", notFound.Code, notFound.Body.String())
 	}
 }

@@ -41,7 +41,7 @@ JavaScript toolchain: edit the files, rebuild the binary (or the test image) and
 (`public/index.html`, `assets/js/app.js`) renders its DOM directly; there is no framework. The binary embeds this one
 interface: no key selects an interface.
 
-- Change a colour, a size, a radius or a duration in the tokens at the top of `assets/css/portal.css`. The components name tokens only.
+- Change a colour, a size, a radius or a duration in the tokens at the top of `assets/css/stowr.css`. The components name tokens only.
 - A new icon name needs a rule in `assets/css/icons.css` and a Tabler file in `assets/icons/tabler/`.
 - `go test ./...` runs `TestInterfaceIsSelfContained`. It finds an external URL, a missing asset, a missing icon file and an icon name without a rule.
 

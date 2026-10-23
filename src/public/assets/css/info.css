@@ -3,7 +3,7 @@
    key-value list with a border and lines of two shades (12 px), gauges as the disk cards of Dash (the percent over a
    track of 8 px), and status chips (18 px). The chips have the colours of the state icons of the selector: green (on,
    allowed), orange (on, with a problem) and grey (off, not available, denied). The page has no head: the selector
-   names the bucket. The parts are in one column on a phone. The page uses the tokens of portal.css. */
+   names the bucket. The parts are in one column on a phone. The page uses the tokens of stowr.css. */
 
 html:has(> body.infoPage),
 .infoPage {

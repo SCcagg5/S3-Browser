@@ -1,7 +1,7 @@
 /*!
  * The object browser page of the interface.
  *
- * The page renders its DOM directly (no framework). The shell is the shell of the portal: header, theme control,
+ * The page renders its DOM directly (no framework). The shell has the header, the theme control,
  * a tab for each bucket, parts. The listing is a dense table in the manner of ClickHouse Dash. The page uses the
  * shared modules of assets/js/common (api.js, runtime.js, actions.js, ...).
  */
@@ -34,14 +34,6 @@ BB.cfg = config;
   function normalizePrefix(value) {
     const clean = String(value || '').replace(/^\/+/, '').replace(/\/+$/, '');
     return clean ? `${clean}/` : '';
-  }
-
-  function parseLegacyHash() {
-    try {
-      return normalizePrefix(decodeURIComponent((location.hash || '#').slice(1)));
-    } catch (_) {
-      return '';
-    }
   }
 
   function escapeHTML(value) {
@@ -137,21 +129,18 @@ BB.cfg = config;
   // The columns of the listing, the tag filter and the encryption of the files: the person's choice stays in this
   // browser. Every column is on by default, and the browser keeps only the choices that the person made. The choice of
   // the encryption and the lock is for each bucket: without a choice, it is on.
-  const LISTING_KEY = 'portal.listing';
-  const LISTING_VERSION = 2;
+  const LISTING_KEY = 'stowr.listing';
+  const LISTING_VERSION = 1;
   const LISTING_DEFAULT = { columns: { tags: true, versions: true, size: true, modified: true }, tagFilterOn: false };
-  // Before version 2, the browser kept each column, also a column that the person did not change. A value equal to the
-  // default of that version (the tags off, the other columns on) is thus not a choice of the person.
-  const LISTING_V1_COLUMNS = { tags: false, versions: true, size: true, modified: true };
 
   function loadListing() {
     const result = { columnChoice: {}, tagFilterOn: LISTING_DEFAULT.tagFilterOn, encryption: {} };
     try {
       const stored = JSON.parse(window.localStorage.getItem(LISTING_KEY) || '{}');
-      const legacy = stored?.version !== LISTING_VERSION;
+      if (stored?.version !== LISTING_VERSION) return result;
       for (const name of Object.keys(LISTING_DEFAULT.columns)) {
         const value = stored?.columns?.[name];
-        if (typeof value === 'boolean' && !(legacy && value === LISTING_V1_COLUMNS[name])) result.columnChoice[name] = value;
+        if (typeof value === 'boolean') result.columnChoice[name] = value;
       }
       if (typeof stored?.tagFilterOn === 'boolean') result.tagFilterOn = stored.tagFilterOn;
       for (const [id, value] of Object.entries(stored?.encryption || {})) if (typeof value === 'boolean') result.encryption[id] = value;
@@ -319,19 +308,18 @@ BB.cfg = config;
   const formatModified = date => (state.modifiedTimeMode === 'absolute' ? formatExact(date) : formatRelative(date));
 
   // ---------------------------------------------------------------------------------------------------------------
-  // Header: the way back to the portal and the build
+  // Header: the way back to the site and the build
   // ---------------------------------------------------------------------------------------------------------------
 
-  // Behind the portal, a reverse proxy serves this page under a path prefix (for example /stowr/). The link then
-  // goes back to the root of the site, which is the panel of the portal. Without a prefix, the page is the root of the
-  // site and the link does not show.
+  // A reverse proxy can serve this page under a path prefix (for example /stowr/). The link then goes back to the root
+  // of the site. Without a prefix, the page is the root of the site and the link does not show.
   function renderHeaderLinks() {
     ui.backLink.hidden = new URL(BB.runtime.rootURL).pathname === '/';
   }
 
-  // The version of the server under the name of the product, as ClickHouse Dash shows its backend version. The page
-  // keeps the last text in this browser, so a reload does not show "--" until /api/instances answers.
-  const VERSION_KEY = 'stowr.portal.version';
+  // The version of the server under the name of the product. The page keeps the last text in this browser, so a
+  // reload does not show "--" until /api/instances answers.
+  const VERSION_KEY = 'stowr.version';
 
   function versionText(build) {
     const version = String(build.version || build.display || 'dev');
@@ -887,7 +875,7 @@ BB.cfg = config;
       applyCurrentInstance();
       // The usage of the other buckets: the mark of a full bucket shows also before the menu opens.
       ui.selector.loadAllUsage();
-      state.pathPrefix = routeInstance === state.instanceId ? normalizePrefix(route.path) : parseLegacyHash();
+      state.pathPrefix = routeInstance === state.instanceId ? normalizePrefix(route.path) : '';
       ui.searchInput.value = '';
       replaceLocation(state.pathPrefix);
       update();
@@ -1703,7 +1691,7 @@ BB.cfg = config;
       if (event.key === 'Escape') {
         closeMenu({ focus: true });
       }
-      // "/" puts the focus in the prefix field, as in ClickHouse Dash.
+      // "/" puts the focus in the prefix field.
       if (event.key === '/' && !event.ctrlKey && !event.metaKey && !event.altKey
         && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '') && !document.querySelector('.bb-overlay')) {
         event.preventDefault();
