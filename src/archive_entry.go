@@ -87,7 +87,7 @@ func (a *application) handleArchiveEntry(w http.ResponseWriter, r *http.Request)
 	// Same sandbox as the raw object routes: member bytes are bucket-author
 	// controlled and must never run with the application origin.
 	applyObjectSafetyHeaders(w.Header())
-	instance, err := a.readableInstance(r, cleanRelativeKey(r.URL.Query().Get("key")))
+	instance, err := a.instanceFromRequest(r, "")
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -203,7 +203,7 @@ func (a *application) handleArchiveExtract(w http.ResponseWriter, r *http.Reques
 		writeAPIError(w, err)
 		return
 	}
-	source, err := a.instanceFromRequest(r, request.Instance, permissionRead)
+	source, err := a.instanceFromRequest(r, request.Instance)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -211,27 +211,9 @@ func (a *application) handleArchiveExtract(w http.ResponseWriter, r *http.Reques
 	if strings.TrimSpace(request.TargetInstance) == "" {
 		request.TargetInstance = source.cfg.ID
 	}
-	var target *storageInstance
-	if a.config.Access.enforced() {
-		// A hidden target and an unknown target get the same 403 answer.
-		if target, err = a.resolveInstance(r, request.TargetInstance, permissionWrite); err != nil {
-			writeAPIError(w, err)
-			return
-		}
-	} else {
-		target = a.instances[request.TargetInstance]
-	}
+	target := a.instances[request.TargetInstance]
 	if target == nil {
 		writeAPIError(w, apiError{Status: http.StatusNotFound, Code: "unknown_target_instance", Message: "target storage instance was not found"})
-		return
-	}
-	targetPrefix := normalizePrefix(cleanRelativeKey(request.Target))
-	if action, ok := a.checkAccess(r,
-		accessRequirement{permissionRead, source, cleanRelativeKey(request.Key)},
-		accessRequirement{permissionWrite, target, targetPrefix},
-		accessRequirement{permissionRead, target, targetPrefix},
-	); !ok {
-		writeAPIError(w, forbidden(action))
 		return
 	}
 	if err := requirePermission(source, permissionRead); err != nil {
@@ -282,16 +264,12 @@ func (a *application) handleArchiveEntryIntegrity(w http.ResponseWriter, r *http
 		writeAPIError(w, err)
 		return
 	}
-	instance, err := a.instanceFromRequest(r, request.Instance, permissionRead)
+	instance, err := a.instanceFromRequest(r, request.Instance)
 	if err != nil {
 		writeAPIError(w, err)
 		return
 	}
 	request.Key = cleanRelativeKey(request.Key)
-	if err := a.requireAccess(r, instance, permissionRead, request.Key); err != nil {
-		writeAPIError(w, err)
-		return
-	}
 	if err := requirePermission(instance, permissionRead); err != nil {
 		writeAPIError(w, err)
 		return

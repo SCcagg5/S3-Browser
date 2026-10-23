@@ -25,7 +25,7 @@ func (a *application) handleArchive(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, http.MethodGet)
 		return
 	}
-	instance, err := a.readableInstance(r, normalizePrefix(cleanRelativeKey(r.URL.Query().Get("prefix"))))
+	instance, err := a.instanceFromRequest(r, "")
 	if err != nil {
 		writeAPIError(w, err)
 		return

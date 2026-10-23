@@ -999,10 +999,6 @@ func (a *application) handleUploads(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, err)
 			return
 		}
-		if err := a.authorizeUploadToken(r, request.ResumeToken); err != nil {
-			writeAPIError(w, err)
-			return
-		}
 		upload, err := a.uploads.resume(r.Context(), request.ResumeToken)
 		if err != nil {
 			writeAPIError(w, err)
@@ -1026,17 +1022,6 @@ func (a *application) handleUploads(w http.ResponseWriter, r *http.Request) {
 		if request.Instance == "" {
 			request.Instance = r.URL.Query().Get("instance")
 		}
-		if a.config.Access.enforced() {
-			instance, err := a.resolveInstance(r, strings.TrimSpace(request.Instance), permissionWrite)
-			if err != nil {
-				writeAPIError(w, err)
-				return
-			}
-			if err := a.requireAccess(r, instance, permissionWrite, cleanRelativeKey(request.Key)); err != nil {
-				writeAPIError(w, err)
-				return
-			}
-		}
 		upload, err := a.uploads.create(r.Context(), request)
 		if err != nil {
 			writeAPIError(w, err)
@@ -1049,10 +1034,6 @@ func (a *application) handleUploads(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, apiError{Status: http.StatusBadRequest, Code: "resume_token_required", Message: "upload resume token is required"})
 			return
 		}
-		if err := a.authorizeUploadToken(r, token); err != nil {
-			writeAPIError(w, err)
-			return
-		}
 		upload, err := a.uploads.resume(r.Context(), token)
 		if err != nil {
 			writeAPIError(w, err)
@@ -1063,10 +1044,6 @@ func (a *application) handleUploads(w http.ResponseWriter, r *http.Request) {
 		token := uploadResumeTokenFromRequest(r)
 		if token == "" {
 			writeAPIError(w, apiError{Status: http.StatusBadRequest, Code: "resume_token_required", Message: "upload resume token is required"})
-			return
-		}
-		if err := a.authorizeUploadToken(r, token); err != nil {
-			writeAPIError(w, err)
 			return
 		}
 		upload, err := a.uploads.resume(r.Context(), token)
@@ -1086,10 +1063,6 @@ func (a *application) handleUploads(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, apiError{Status: http.StatusBadRequest, Code: "resume_token_required", Message: "upload resume token is required"})
 			return
 		}
-		if err := a.authorizeUploadToken(r, token); err != nil {
-			writeAPIError(w, err)
-			return
-		}
 		upload, err := a.uploads.resume(r.Context(), token)
 		if err != nil {
 			writeAPIError(w, err)
@@ -1104,26 +1077,4 @@ func (a *application) handleUploads(w http.ResponseWriter, r *http.Request) {
 	default:
 		methodNotAllowed(w, http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete)
 	}
-}
-
-// authorizeUploadToken asks objects.write on the key of an upload resume token
-// in the authzen mode. A token of a hidden bucket and a token of an unknown
-// bucket get the same 403 answer.
-func (a *application) authorizeUploadToken(r *http.Request, token string) error {
-	if !a.config.Access.enforced() {
-		return nil
-	}
-	parts := strings.Split(strings.TrimSpace(token), ".")
-	if len(parts) == 3 {
-		if id, err := base64.RawURLEncoding.DecodeString(parts[1]); err == nil {
-			if _, err := a.resolveInstance(r, string(id), permissionWrite); err != nil {
-				return err
-			}
-		}
-	}
-	descriptor, instance, err := a.openUploadResumeToken(token)
-	if err != nil {
-		return err
-	}
-	return a.requireAccess(r, instance, permissionWrite, cleanRelativeKey(descriptor.Key))
 }

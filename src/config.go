@@ -21,7 +21,6 @@ type appConfig struct {
 	Buckets         []bucketConfig
 	// Volumes are the volume blocks: the folders of the server that the browser shows as buckets (volume_config.go).
 	Volumes    []volumeConfig
-	Access     accessConfig
 	SourceDir  string
 	SourceName string
 	// Sources gives the source of each key that the file sets: "file",
@@ -146,7 +145,7 @@ func decodeConfig(data, sourceName, sourceDir string) (appConfig, error) {
 		}
 	}
 
-	var serverSeen, accessSeen bool
+	var serverSeen bool
 	authByID := make(map[string]authConfig)
 	bucketIDs := make(map[string]struct{})
 	bucketBlocks := make([]hclBlock, 0)
@@ -162,14 +161,6 @@ func decodeConfig(data, sourceName, sourceDir string) (appConfig, error) {
 				return appConfig{}, err
 			}
 			recordSources(&cfg, "server", "server", block, sourceDir)
-		case "access":
-			if accessSeen {
-				return appConfig{}, block.errorf("only one access block is allowed")
-			}
-			accessSeen = true
-			if err := decodeAccessBlock(block, &cfg, sourceDir); err != nil {
-				return appConfig{}, err
-			}
 		case "auth":
 			auth, err := decodeAuthBlock(block, sourceDir)
 			if err != nil {
@@ -207,7 +198,7 @@ func decodeConfig(data, sourceName, sourceDir string) (appConfig, error) {
 			cfg.Volumes = append(cfg.Volumes, volume)
 			recordSources(&cfg, "volume "+strconv.Quote(volume.ID), "volume", block, sourceDir)
 		default:
-			return appConfig{}, block.errorf("unknown block type %q; supported blocks are server, auth, bucket, volume and access", block.Type)
+			return appConfig{}, block.errorf("unknown block type %q; supported blocks are server, auth, bucket and volume", block.Type)
 		}
 	}
 
@@ -232,21 +223,6 @@ func decodeConfig(data, sourceName, sourceDir string) (appConfig, error) {
 	}
 	if err := validateRuntimePolicy(&cfg); err != nil {
 		return appConfig{}, err
-	}
-	if !accessSeen {
-		return appConfig{}, fmt.Errorf("the access block is required: add access { mode = \"authzen\" ... } or access { mode = \"open\" } (docs/ACCESS.md)")
-	}
-	if cfg.Access.enforced() {
-		for _, bucket := range cfg.Buckets {
-			if !validAccessID(bucket.ID) {
-				return appConfig{}, fmt.Errorf("bucket %q: with access.mode = \"authzen\", the label of a bucket block must have 1 to %d bytes", bucket.ID, maxAccessIDBytes)
-			}
-		}
-		for _, volume := range cfg.Volumes {
-			if !validAccessID(volume.ID) {
-				return appConfig{}, fmt.Errorf("volume %q: with access.mode = \"authzen\", the label of a volume block must have 1 to %d bytes", volume.ID, maxAccessIDBytes)
-			}
-		}
 	}
 
 	return cfg, nil
@@ -587,7 +563,11 @@ func decodeUsageBlock(block hclBlock, auth authConfig, baseDir string) (*usageCo
 	if err := rejectUnknownAttrs(block, attributeNames("auth.usage")...); err != nil {
 		return nil, err
 	}
-	if err := requireStringAttrs(block); err != nil {
+	kinds := make(map[string]hclValueKind, len(block.Attrs))
+	for name := range block.Attrs {
+		kinds[name] = hclString
+	}
+	if err := requireAttrKinds(block, kinds); err != nil {
 		return nil, err
 	}
 	usage := &usageConfig{}
@@ -1317,4 +1297,14 @@ func (p *hclParser) next() (hclToken, error) {
 		return tok, nil
 	}
 	return p.lexer.nextToken()
+}
+
+// hasControlCharacter tells if the value has a control character (C0, DEL or C1).
+func hasControlCharacter(value string) bool {
+	for _, r := range value {
+		if r < 0x20 || (r >= 0x7f && r < 0xa0) {
+			return true
+		}
+	}
+	return false
 }

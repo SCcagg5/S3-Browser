@@ -176,8 +176,6 @@ BB.cfg = config;
     instanceId: '',
     pathPrefix: '',
     rows: [],
-    // The decisions of the access policy for the listed folder (authzen mode only): read, write, delete.
-    folderAccess: null,
     // '' | 'forbidden' | 'signin' | 'offline' | 'error': why the listing has no rows.
     listError: '',
     listErrorText: '',
@@ -226,16 +224,7 @@ BB.cfg = config;
   const capitalized = text => text.charAt(0).toUpperCase() + text.slice(1);
   const storageIcon = instance => (isVolume(instance) ? 'folder-open' : 'database');
 
-  // The access policy can refuse a write or a delete in the listed folder only.
-  const folderAccessNeeds = {
-    upload: ['write'], overwrite: ['write'], createFolder: ['write'], copy: ['write'],
-    delete: ['delete'], rename: ['write', 'delete'], move: ['write', 'delete']
-  };
-
   function can(operation, instance = currentInstance()) {
-    const needs = folderAccessNeeds[operation];
-    if (needs && state.folderAccess && instance === currentInstance()
-      && needs.some(name => state.folderAccess[name] === false)) return false;
     if (BB.capabilities?.actionable) return BB.capabilities.actionable(instance, operation);
     const operationState = instance?.operations?.[operation];
     return operationState ? operationState.allowed !== false : true;
@@ -514,8 +503,7 @@ BB.cfg = config;
     const write = canWrite();
     const remove = canDelete();
     if (write && remove) return null;
-    const folder = state.folderAccess && (state.folderAccess.write === false || state.folderAccess.delete === false);
-    if (!write && !remove) return { text: 'Read only', title: folder ? 'The access policy lets you read this folder only.' : `You can read this ${storageNoun(instance)} but not change it.` };
+    if (!write && !remove) return { text: 'Read only', title: `You can read this ${storageNoun(instance)} but not change it.` };
     if (!write) return { text: 'No upload', title: 'You cannot write in this folder.' };
     return { text: 'No delete', title: 'You cannot delete in this folder.' };
   }
@@ -604,14 +592,13 @@ BB.cfg = config;
             h('button', { type: 'button', class: 'button', onclick: () => initialize() }, ic('refresh'), 'Try again'));
           break;
         case 'none':
-          content = emptyBox('lock', 'No bucket is available to you',
-            'The server shows only the buckets on which you hold a permission. Ask an administrator for a grant.');
+          content = emptyBox('lock', 'No bucket is available', 'The configuration of the server has no bucket and no volume.');
           break;
         case 'unreadable':
           content = emptyBox('lock', 'You cannot list this bucket', 'Read access is not available. Other actions stay hidden.');
           break;
         case 'error-forbidden':
-          content = emptyBox('lock', 'You cannot open this folder', 'The access policy does not let you read it.',
+          content = emptyBox('lock', 'You cannot open this folder', 'The storage does not let you read it.',
             state.pathPrefix && h('button', { type: 'button', class: 'button', onclick: () => goToPrefix('') }, ic(storageIcon(currentInstance())), `Go to the ${storageNoun(currentInstance())} root`));
           break;
         case 'error-signin':
@@ -965,7 +952,6 @@ BB.cfg = config;
 
   function clearListing() {
     state.rows = [];
-    state.folderAccess = null;
     state.listError = '';
     state.listErrorText = '';
   }
@@ -1103,7 +1089,6 @@ BB.cfg = config;
       state.listError = '';
       state.listErrorText = '';
       state.nextContinuationToken = data.nextContinuationToken || '';
-      state.folderAccess = data.access && typeof data.access === 'object' ? data.access : null;
       state.navigationSortAvailable = data.sortAvailable === true;
       if (!state.navigationSortAvailable) {
         state.navigationSortField = '';

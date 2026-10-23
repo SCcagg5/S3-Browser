@@ -381,17 +381,6 @@ func (a *application) handleSQLiteSessions(w http.ResponseWriter, r *http.Reques
 		writeAPIError(w, apiError{Status: http.StatusBadRequest, Code: "invalid_json", Message: "invalid SQLite preview request"})
 		return
 	}
-	if a.config.Access.enforced() {
-		instance, err := a.resolveInstance(r, strings.TrimSpace(request.Instance), permissionRead)
-		if err != nil {
-			writeAPIError(w, err)
-			return
-		}
-		if err := a.requireAccess(r, instance, permissionRead, cleanRelativeKey(request.Key)); err != nil {
-			writeAPIError(w, err)
-			return
-		}
-	}
 	session, err := a.sqlite.create(r.Context(), request)
 	if err != nil {
 		writeAPIError(w, err)
@@ -432,15 +421,6 @@ func (a *application) handleSQLiteSessionResource(w http.ResponseWriter, r *http
 		return
 	}
 	id := parts[0]
-	// In the authzen mode, a session of an object that the human cannot read
-	// gets the same answer as a session that does not exist.
-	if a.config.Access.enforced() {
-		session, ok := a.sqlite.get(id)
-		if !ok || a.requireAccess(r, a.instances[session.Instance], permissionRead, session.Key) != nil {
-			writeAPIError(w, apiError{Status: http.StatusNotFound, Code: "sqlite_session_not_found", Message: "SQLite preview session was not found or expired"})
-			return
-		}
-	}
 	if r.Method == http.MethodDelete && len(parts) == 1 {
 		if !a.sqlite.remove(id) {
 			writeAPIError(w, apiError{Status: http.StatusNotFound, Code: "sqlite_session_not_found", Message: "SQLite preview session was not found"})

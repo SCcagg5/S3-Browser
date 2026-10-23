@@ -453,7 +453,7 @@ func (a *application) handleMetadata(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		key := cleanRelativeKey(r.URL.Query().Get("key"))
-		instance, err := a.readableInstance(r, key)
+		instance, err := a.instanceFromRequest(r, "")
 		if err != nil {
 			writeAPIError(w, err)
 			return
@@ -483,12 +483,8 @@ func (a *application) handleMetadata(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		key := cleanRelativeKey(request.Key)
-		instance, err := a.instanceFromRequest(r, request.Instance, permissionWrite)
+		instance, err := a.instanceFromRequest(r, request.Instance)
 		if err != nil {
-			writeAPIError(w, err)
-			return
-		}
-		if err := a.requireAccess(r, instance, permissionWrite, key); err != nil {
 			writeAPIError(w, err)
 			return
 		}

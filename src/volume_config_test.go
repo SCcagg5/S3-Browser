@@ -9,7 +9,7 @@ import (
 
 // volumeConfigText gives a configuration with one volume block whose attributes are lines.
 func volumeConfigText(lines string) string {
-	return "access { mode = \"open\" }\nvolume \"vol\" {\n" + lines + "\n}\n"
+	return "volume \"vol\" {\n" + lines + "\n}\n"
 }
 
 func decodeVolumeConfig(t *testing.T, text string) (appConfig, error) {
@@ -104,7 +104,7 @@ func TestVolumeBlockValuesStopTheStart(t *testing.T) {
 		"unknown attribute":  {volumeConfigText(path + `bucket = "x"`), `unknown attribute "bucket" in volume block`},
 		"duplicate key":      {volumeConfigText(path + path), `duplicate attribute "path"`},
 		"nested block":       {volumeConfigText(path + "usage { source = \"garage\" }"), "nested blocks are not supported inside volume"},
-		"no label":           {"access { mode = \"open\" }\nvolume {\n" + path + "}\n", "volume block requires exactly one quoted identifier"},
+		"no label":           {"volume {\n" + path + "}\n", "volume block requires exactly one quoted identifier"},
 		"root prefix slash":  {volumeConfigText(path + `root_prefix = "/published/"`), `volume "vol".root_prefix must be "" or a relative folder path that ends with "/"`},
 		"root prefix no end": {volumeConfigText(path + `root_prefix = "published"`), `got "published"`},
 		"root prefix dots":   {volumeConfigText(path + `root_prefix = "a/../b/"`), `got "a/../b/"`},
@@ -114,7 +114,7 @@ func TestVolumeBlockValuesStopTheStart(t *testing.T) {
 		"scan pages":         {volumeConfigText(path + `max_scan_pages = 1000001`), `volume "vol".max_scan_pages must be between 0 and 1000000, got 1000001`},
 		"same label":         {bucket + "bucket \"vol\" {\n  auth = \"s3\"\n  bucket = \"b\"\n}\n" + volumeConfigText(path), `duplicate bucket or volume id "vol"`},
 		"auth label volume":  {strings.Replace(bucket, `auth "s3"`, `auth "volume"`, 1) + volumeConfigText(path), `auth "volume": the label "volume" is the address word of the volumes`},
-		"nothing to show":    {"access { mode = \"open\" }\n", "at least one bucket block or one volume block is required"},
+		"nothing to show":    {"", "at least one bucket block or one volume block is required"},
 		"bucket without auth": {"bucket \"b\" {\n  auth = \"s3\"\n  bucket = \"b\"\n}\n" + volumeConfigText(path),
 			"at least one auth block is required"},
 	} {
@@ -131,7 +131,7 @@ func TestVolumeBlockWithBuckets(t *testing.T) {
 	auth := "auth \"s3\" {\n  provider = \"s3\"\n  endpoint = \"http://localhost:9000\"\n  region = \"test\"\n}\n"
 	bucket := "bucket \"b\" {\n  auth = \"s3\"\n  bucket = \"b\"\n}\n"
 	volume := "volume \"vol\" {\n  path = \"" + root + "\"\n}\n"
-	cfg, err := decodeVolumeConfig(t, auth+bucket+volume+"access { mode = \"open\" }\n")
+	cfg, err := decodeVolumeConfig(t, auth+bucket+volume)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestVolumeBlockWithBuckets(t *testing.T) {
 	// The label "volume" of an auth block is valid in a file without a volume block.
 	renamed := strings.ReplaceAll(auth+bucket, `"s3"`, `"volume"`)
 	renamed = strings.Replace(renamed, `provider = "volume"`, `provider = "s3"`, 1)
-	if _, err := decodeVolumeConfig(t, renamed+"access { mode = \"open\" }\n"); err != nil {
+	if _, err := decodeVolumeConfig(t, renamed); err != nil {
 		t.Fatalf("auth \"volume\" without a volume block: %v", err)
 	}
 }

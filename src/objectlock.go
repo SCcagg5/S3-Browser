@@ -634,12 +634,12 @@ func objectLockResponseFor(ctx context.Context, instance *storageInstance, key, 
 }
 
 // handleObjectLock reads (GET, permission read) and changes (PUT, permission write) the lock of one version of an
-// object. The answer of a PUT is the new state. Each change goes to the log with the subject of the request.
+// object. The answer of a PUT is the new state. Each change goes to the log.
 func (a *application) handleObjectLock(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		key := cleanRelativeKey(r.URL.Query().Get("key"))
-		instance, err := a.readableInstance(r, key)
+		instance, err := a.instanceFromRequest(r, "")
 		if err != nil {
 			writeAPIError(w, err)
 			return
@@ -670,12 +670,8 @@ func (a *application) handleObjectLock(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		key := cleanRelativeKey(request.Key)
-		instance, err := a.instanceFromRequest(r, request.Instance, permissionWrite)
+		instance, err := a.instanceFromRequest(r, request.Instance)
 		if err != nil {
-			writeAPIError(w, err)
-			return
-		}
-		if err := a.requireAccess(r, instance, permissionWrite, key); err != nil {
 			writeAPIError(w, err)
 			return
 		}
@@ -698,7 +694,7 @@ func (a *application) handleObjectLock(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, err)
 			return
 		}
-		logObjectLockChange(r, instance, key, request.Version, change)
+		logObjectLockChange(instance, key, request.Version, change)
 		response, err := objectLockResponseFor(r.Context(), instance, key, request.Version)
 		if err != nil {
 			writeAPIError(w, err)
@@ -710,8 +706,8 @@ func (a *application) handleObjectLock(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// logObjectLockChange writes one log line for a change of a lock: what changed, the use of the bypass, and the subject.
-func logObjectLockChange(r *http.Request, instance *storageInstance, key, version string, change objectLockChange) {
+// logObjectLockChange writes one log line for a change of a lock: what changed and the use of the bypass.
+func logObjectLockChange(instance *storageInstance, key, version string, change objectLockChange) {
 	hold, retention := "unchanged", "unchanged"
 	if change.LegalHold != nil {
 		hold = map[bool]string{true: "on", false: "off"}[*change.LegalHold]
@@ -719,10 +715,6 @@ func logObjectLockChange(r *http.Request, instance *storageInstance, key, versio
 	if change.Retention != nil {
 		retention = change.Retention.Mode + " until " + change.Retention.RetainUntil.UTC().Format(time.RFC3339)
 	}
-	subject, requestID := "", ""
-	if identity := accessFromContext(r.Context()); identity != nil {
-		subject, requestID = identity.Subject, identity.RequestID
-	}
-	log.Printf("object_lock.change instance=%s key=%q version=%q legal_hold=%s retention=%q bypass_governance=%t subject=%q request_id=%s",
-		instance.cfg.ID, key, version, hold, retention, change.BypassGovernance, subject, requestID)
+	log.Printf("object_lock.change instance=%s key=%q version=%q legal_hold=%s retention=%q bypass_governance=%t",
+		instance.cfg.ID, key, version, hold, retention, change.BypassGovernance)
 }

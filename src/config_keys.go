@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // keyForms tells the forms that a configuration key accepts.
@@ -44,17 +43,14 @@ var configBlocks = []configBlock{
 	{"server", "server { ... }", "Zero or one block. The listener, the logs and the limits of the process."},
 	{"auth", `auth "<id>" { ... }`, "One or more blocks. A credential set and an endpoint that one or more buckets use."},
 	{"auth.usage", `auth "<id>" { usage { ... } }`, "Zero or one block in an auth block with provider \"s3\". The admin API that gives the usage and the quota of the buckets of the auth block (docs/ARCHITECTURE.md, \"Usage and quota of a bucket\"). Without it, the interface shows no usage and no quota."},
-	{"bucket", `bucket "<id>" { ... }`, "One or more blocks. One bucket that the browser shows. The label is the id of the bucket for the URL and for the access policy."},
-	{"volume", `volume "<id>" { ... }`, "Zero or more blocks. One folder of the server that the browser shows as a bucket: a Docker volume, an NFS, CephFS or FUSE mount (docs/ARCHITECTURE.md, \"Volumes\"). The label is the id of the volume for the URL (/-/volume/<id>/) and for the access policy. A file needs one bucket block or one volume block at least."},
-	{"access", "access { ... }", "Exactly one block. It is mandatory. The access of humans: `open` or `authzen` (docs/ACCESS.md)."},
-	{"access.identity", "access { identity { ... } }", "Exactly one block with `mode = \"authzen\"`. None with `mode = \"open\"`. The identity token of the access gateway."},
-	{"access.pdp", "access { pdp { ... } }", "Exactly one block with `mode = \"authzen\"`. None with `mode = \"open\"`. The AuthZEN PDP that decides each action."},
+	{"bucket", `bucket "<id>" { ... }`, "One or more blocks. One bucket that the browser shows. The label is the id of the bucket in the URL."},
+	{"volume", `volume "<id>" { ... }`, "Zero or more blocks. One folder of the server that the browser shows as a bucket: a Docker volume, an NFS, CephFS or FUSE mount (docs/ARCHITECTURE.md, \"Volumes\"). The label is the id of the volume in the URL (/-/volume/<id>/). A file needs one bucket block or one volume block at least."},
 }
 
 var configKeys = []configKey{
 	{"server", "listen", "text", `":8080"`, "a numeric host:port, not a URL", formValue, false, "The address and the port that the server listens on."},
 	{"server", "job_history_limit", "integer", "10", "1 to 20", formValue, false, "The number of finished background jobs that the process keeps in memory."},
-	{"server", "access_mode", "text", `"inherit_credentials"`, "inherit_credentials or force_read_only", formValue, false, "force_read_only refuses each write and each delete. This key is not the access of humans (refer to the access block)."},
+	{"server", "access_mode", "text", `"inherit_credentials"`, "inherit_credentials or force_read_only", formValue, false, "force_read_only refuses each write and each delete."},
 	{"server", "log_mode", "text", `"anonymous"`, "anonymous or detailed", formValue, false, "anonymous keeps the object keys out of the request log. detailed writes them."},
 	{"server", "allow_full_object_fallback", "boolean", "false", "", formValue, false, "Let a parser read a full object when a format has no range reader."},
 	{"server", "memory_limit_bytes", "integer", "0", "0, or 33554432 to 1125899906842624", formValue, false, "The soft memory limit of the Go runtime. 0 keeps the default of the runtime."},
@@ -87,7 +83,7 @@ var configKeys = []configKey{
 	{"bucket", "name", "text", "the label of the block", "", formValue, false, "The name that the user interface shows."},
 	{"bucket", "auth", "text", "(required)", "the label of an auth block", formValue, false, "The auth block that this bucket uses."},
 	{"bucket", "bucket", "text", "(required)", "", formValue, false, "The name of the bucket at the provider."},
-	{"bucket", "permissions", "list of text", "(none: no ceiling)", "read, write, delete (lower case, each one time)", formValue, false, "The operations that the server can do on this bucket. It is a ceiling: the provider and the access policy can refuse more."},
+	{"bucket", "permissions", "list of text", "(none: no ceiling)", "read, write, delete (lower case, each one time)", formValue, false, "The operations that the server can do on this bucket. It is a ceiling: the provider can refuse more."},
 	{"bucket", "root_prefix", "text", `""`, "\"\", or a prefix that ends with \"/\" and does not start with \"/\"", formValue, false, "The part of the bucket that the browser shows. The keys are relative to it."},
 	{"bucket", "max_scan_pages", "integer", "1", "0 to 1000000", formValue, false, "The 1000-entry provider pages that one listing combines. 0 = no limit."},
 	{"bucket", "encryption", "text", `""`, "\"\" or sse-s3, exact (lower case). SSE-C and SSE-KMS are not supported. Only for an s3 auth block", formValue, false, "The server-side encryption that the server asks for each object that it writes: upload, copy, move, rename, metadata edit, restore of a version, extraction. sse-s3 sends x-amz-server-side-encryption: AES256. \"\" sends no encryption header: the default encryption of the bucket applies."},
@@ -95,23 +91,9 @@ var configKeys = []configKey{
 
 	{"volume", "name", "text", "the label of the block", "", formValue, false, "The name that the user interface shows."},
 	{"volume", "path", "file path", "(required)", "an absolute path, without \"/\" at the end and without an empty, \".\" or \"..\" part. The folder must exist at start, and the process must read it", formValue, false, "The folder of the volume. The server reads and writes its files with the identity of the process. With write or delete in permissions (or without permissions), the start writes and removes a test file: a folder that the process cannot write stops the start."},
-	{"volume", "permissions", "list of text", "(none: read, write and delete)", "read, write, delete (lower case, each one time)", formValue, false, "The operations that the server can do in this volume. It is a ceiling: the file system and the access policy can refuse more. Give [\"read\"] for a folder that the process cannot write."},
+	{"volume", "permissions", "list of text", "(none: read, write and delete)", "read, write, delete (lower case, each one time)", formValue, false, "The operations that the server can do in this volume. It is a ceiling: the file system can refuse more. Give [\"read\"] for a folder that the process cannot write."},
 	{"volume", "root_prefix", "text", `""`, "\"\", or a relative folder path that ends with \"/\", without an empty, \".\" or \"..\" part. The folder must exist at start", formValue, false, "The folder of path that the browser shows. The keys are relative to it. A symbolic link that leaves it is not followed."},
 	{"volume", "max_scan_pages", "integer", "1", "0 to 1000000", formValue, false, "The 1000-entry pages of a folder that one listing combines. 0 = no limit."},
-
-	{"access", "mode", "text", "(required)", "authzen or open", formValue, false, "authzen: verify the identity token and ask the PDP for each action. open: no check of identity or permission. The server writes a warning at each start."},
-
-	{"access.identity", "header", "text", `"X-Identity-Token"`, "an HTTP header name of 1 to 64 characters; not Cookie, Authorization, Host, Content-Type or Content-Length", formValue, false, "The request header that holds the identity token."},
-	{"access.identity", "issuer", "text", "(required)", "1 to 1024 bytes, no control character", formValue, false, "The value that the iss claim must have."},
-	{"access.identity", "audience", "text", "(required)", "1 to 256 bytes of UTF-8, no control character", formValue, false, "The id of this server at the access gateway. The aud claim must contain it. It is also the id of the service resource and the server of /.well-known/access-actions."},
-	{"access.identity", "public_keys", "PEM text", "(required)", "1 to 16 PUBLIC KEY blocks: Ed25519 or P-256", formValue | formEnv | formFile, false, "The public keys of the issuer. The server verifies the signature of each token with them."},
-	{"access.identity", "max_age", "duration", `"5m"`, "1s to 24h", formValue, false, "The longest life of a token (exp - iat)."},
-
-	{"access.pdp", "url", "URL", "(required)", "http or https, with a host, without credentials, query or fragment", formValue | formEnv | formFile, false, "The base URL of the PDP. The server adds /access/v1/evaluation or /access/v1/evaluations."},
-	{"access.pdp", "token", "text", "(required)", "1 to 4096 bytes, no space and no control character", formEnv | formFile, true, "The bearer token of this server at the PDP. It is a secret: the form in clear text stops the start."},
-	{"access.pdp", "timeout", "duration", `"500ms"`, "10ms to 1m", formValue, false, "The longest time of one request to the PDP. After it, the decision is false."},
-	{"access.pdp", "cache_ttl", "duration", `"30s"`, "0s to 1h", formValue, false, "The longest time that the server keeps a decision of the PDP. 0s = no cache."},
-	{"access.pdp", "max_evaluations", "integer", "64", "1 to 1024", formValue, false, "The most evaluations in one batch request. Use the limit of the PDP or less."},
 }
 
 // keysOfBlock gives the keys of one block, in the order of the table.
@@ -192,7 +174,6 @@ func configReference() string {
 	b.WriteString("- An unknown block, an unknown attribute or a duplicate attribute stops the start.\n")
 	b.WriteString("- A value that is not in its range stops the start. The error gives the key and the line.\n")
 	b.WriteString("- A key without a value in the file has its default value. A key with `(required)` must have a value.\n")
-	b.WriteString("- The `access` block is mandatory. A file without it stops the start.\n")
 	b.WriteString("- A file needs one `bucket` block or one `volume` block at least. A `bucket` block needs an `auth` block.\n")
 	b.WriteString("- `stowr print-config -c <file>` checks the file, writes the value of each key and its source, and exits with status 0.\n")
 	b.WriteString("  The source is `file`, `env:<VAR>`, `file:<path>` or `default`. The output hides each secret.\n")
@@ -362,24 +343,6 @@ func effectiveConfiguration(cfg appConfig) []effectiveSetting {
 		}
 		add("volume "+strconv.Quote(volume.ID), values)
 	}
-	access := cfg.Access
-	add("access", map[string]string{"mode": strconv.Quote(access.Mode)})
-	if access.enforced() {
-		add("access.identity", map[string]string{
-			"header":      strconv.Quote(access.Header),
-			"issuer":      strconv.Quote(access.Issuer),
-			"audience":    strconv.Quote(access.Audience),
-			"public_keys": quotedList(identityKeyNames(access.Keys)),
-			"max_age":     strconv.Quote(access.MaxAge.String()),
-		})
-		add("access.pdp", map[string]string{
-			"url":             strconv.Quote(access.PDPURL),
-			"token":           hidden(access.PDPToken),
-			"timeout":         strconv.Quote(access.PDPTimeout.String()),
-			"cache_ttl":       strconv.Quote(access.PDPCacheTTL.String()),
-			"max_evaluations": strconv.Itoa(access.PDPMaxEvaluations),
-		})
-	}
 	return out
 }
 
@@ -405,28 +368,4 @@ func formatEffectiveConfiguration(cfg appConfig) string {
 		fmt.Fprintf(&b, "%s = %s  # %s\n", setting.Name, setting.Value, setting.Source)
 	}
 	return b.String()
-}
-
-// configWarnings gives the warnings of a valid configuration. The server
-// writes them at each start.
-func configWarnings(cfg appConfig) []string {
-	warnings := make([]string, 0, 2)
-	if !cfg.Access.enforced() {
-		warnings = append(warnings, "config.warning access.mode = \"open\": the server checks no identity and no permission; use it only on a closed network")
-	}
-	return warnings
-}
-
-// parseConfigDuration reads a Go duration (for example "500ms" or "5m") and
-// checks its range.
-func parseConfigDuration(block hclBlock, path, name string, fallback, minimum, maximum time.Duration) (time.Duration, error) {
-	raw, ok := block.stringAttr(name)
-	if !ok {
-		return fallback, nil
-	}
-	value, err := time.ParseDuration(raw)
-	if err != nil || value < minimum || value > maximum {
-		return 0, block.errorf("%s.%s must be a duration from %s to %s (for example \"500ms\" or \"5m\"), got %q", path, name, minimum, maximum, raw)
-	}
-	return value, nil
 }

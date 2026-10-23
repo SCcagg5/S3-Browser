@@ -80,20 +80,10 @@ type inspectResponse struct {
 }
 
 func (a *application) handleVersions(w http.ResponseWriter, r *http.Request) {
-	permission := permissionRead
-	if r.Method == http.MethodDelete {
-		permission = permissionDelete
-	}
-	instance, err := a.instanceFromRequest(r, "", permission)
+	instance, err := a.instanceFromRequest(r, "")
 	if err != nil {
 		writeAPIError(w, err)
 		return
-	}
-	if r.Method == http.MethodGet || r.Method == http.MethodDelete {
-		if err := a.requireAccess(r, instance, permission, cleanRelativeKey(r.URL.Query().Get("key"))); err != nil {
-			writeAPIError(w, err)
-			return
-		}
 	}
 	if !instance.versioningAvailable() {
 		writeAPIError(w, apiError{Status: http.StatusNotImplemented, Code: "versioning_unavailable", Message: "object versioning is not available for this storage bucket"})
@@ -158,24 +148,10 @@ func (a *application) handleVersionCounts(w http.ResponseWriter, r *http.Request
 		writeAPIError(w, err)
 		return
 	}
-	instance, err := a.instanceFromRequest(r, request.Instance, permissionRead)
+	instance, err := a.instanceFromRequest(r, request.Instance)
 	if err != nil {
 		writeAPIError(w, err)
 		return
-	}
-	if len(request.Keys) <= 100 {
-		keys := make([]string, 0, len(request.Keys))
-		for _, rawKey := range request.Keys {
-			if key := cleanRelativeKey(rawKey); key != "" {
-				keys = append(keys, key)
-			}
-		}
-		if len(keys) > 0 {
-			if err := a.requireAccess(r, instance, permissionRead, keys...); err != nil {
-				writeAPIError(w, err)
-				return
-			}
-		}
 	}
 	if !instance.versioningAvailable() {
 		writeAPIError(w, apiError{Status: http.StatusNotImplemented, Code: "versioning_unavailable", Message: "object versioning is not available for this storage bucket"})
@@ -262,16 +238,9 @@ func (a *application) handleVersionRestore(w http.ResponseWriter, r *http.Reques
 		writeAPIError(w, err)
 		return
 	}
-	instance, err := a.instanceFromRequest(r, request.Instance, permissionWrite)
+	instance, err := a.instanceFromRequest(r, request.Instance)
 	if err != nil {
 		writeAPIError(w, err)
-		return
-	}
-	if action, ok := a.checkAccess(r,
-		accessRequirement{permissionRead, instance, cleanRelativeKey(request.Key)},
-		accessRequirement{permissionWrite, instance, cleanRelativeKey(request.Key)},
-	); !ok {
-		writeAPIError(w, forbidden(action))
 		return
 	}
 	if !instance.versioningAvailable() {
@@ -309,16 +278,12 @@ func (a *application) handleIntegrity(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, err)
 		return
 	}
-	instance, err := a.instanceFromRequest(r, request.Instance, permissionRead)
+	instance, err := a.instanceFromRequest(r, request.Instance)
 	if err != nil {
 		writeAPIError(w, err)
 		return
 	}
 	request.Key = cleanRelativeKey(request.Key)
-	if err := a.requireAccess(r, instance, permissionRead, request.Key); err != nil {
-		writeAPIError(w, err)
-		return
-	}
 	if err := requirePermission(instance, permissionRead); err != nil {
 		writeAPIError(w, err)
 		return
@@ -352,7 +317,7 @@ func (a *application) handleInspect(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, http.MethodGet)
 		return
 	}
-	instance, err := a.readableInstance(r, cleanRelativeKey(r.URL.Query().Get("key")))
+	instance, err := a.instanceFromRequest(r, "")
 	if err != nil {
 		writeAPIError(w, err)
 		return

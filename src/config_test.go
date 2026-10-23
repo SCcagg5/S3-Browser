@@ -16,9 +16,6 @@ func TestOmittedPermissionsInheritCredentialCapabilities(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeConfig(t, path, `
-access {
-  mode = "open"
-}
 auth "shared" {
   provider          = "s3"
   mode              = "access_key"
@@ -59,9 +56,6 @@ func TestLoadConfigSharesAuthenticationAcrossBuckets(t *testing.T) {
 	}
 	configPath := filepath.Join(dir, "config.hcl")
 	writeConfig(t, configPath, `
-access {
-  mode = "open"
-}
 server {
   listen            = ":9090"
   job_history_limit = 17
@@ -201,9 +195,6 @@ func TestLoadConfigSupportsGCSAuthentication(t *testing.T) {
 	}
 	configPath := filepath.Join(dir, "config.hcl")
 	writeConfig(t, configPath, `
-access {
-  mode = "open"
-}
 auth "gcs" {
   provider         = "gcs"
   mode             = "service_account"
@@ -424,11 +415,11 @@ func TestStrictValuesStopTheStart(t *testing.T) {
 		t.Fatal(err)
 	}
 	auth := func(lines string) string {
-		return "access { mode = \"open\" }\nauth \"s3\" {\n" + lines + "\n}\nbucket \"b\" {\n  auth = \"s3\"\n  bucket = \"b\"\n}\n"
+		return "auth \"s3\" {\n" + lines + "\n}\nbucket \"b\" {\n  auth = \"s3\"\n  bucket = \"b\"\n}\n"
 	}
 	base := "provider = \"s3\"\nendpoint = \"http://localhost:9000\"\nregion = \"test\"\n"
 	withBucket := func(lines string) string {
-		return "access { mode = \"open\" }\nauth \"s3\" {\n" + base + "}\nbucket \"b\" {\n  auth = \"s3\"\n" + lines + "\n}\n"
+		return "auth \"s3\" {\n" + base + "}\nbucket \"b\" {\n  auth = \"s3\"\n" + lines + "\n}\n"
 	}
 	for name, test := range map[string]struct {
 		config string

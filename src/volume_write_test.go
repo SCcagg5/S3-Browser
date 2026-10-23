@@ -425,28 +425,3 @@ func TestVolumePermissionsAreACeiling(t *testing.T) {
 		t.Fatalf("a read-only volume has temporary files: %v", found)
 	}
 }
-
-func TestVolumeAccessPolicyNamesTheVolumeAsABucket(t *testing.T) {
-	env := newAccessEnv(t, 0)
-	root := volumeTempDir(t)
-	writeVolumeFile(t, root, "reports/q1.csv", "a,b\n")
-	writeVolumeFile(t, root, "private/secret.txt", "secret")
-	instance, err := newVolumeInstance(volumeConfig{ID: "vol", Name: "vol", Path: root, MaxScanPages: 1}, defaultRuntimePolicy(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	env.app.instances["vol"] = instance
-	env.app.order = append(env.app.order, "vol")
-	env.pdp.grant("carol", "objects.read@service:infra-s3/bucket:vol/prefix:reports", "objects.write@service:infra-s3/bucket:vol/prefix:reports")
-	env.expect(http.MethodGet, "/s3?instance=vol&key=reports/q1.csv", "carol", nil, http.StatusOK)
-	requireForbidden(t, env.expect(http.MethodGet, "/s3?instance=vol&key=private/secret.txt", "carol", nil, http.StatusForbidden), actionObjectsRead)
-	env.expect(http.MethodPut, "/s3?instance=vol&key=reports/q2.csv", "carol", []byte("c"), http.StatusNoContent)
-	requireForbidden(t, env.expect(http.MethodPut, "/s3?instance=vol&key=private/x.txt", "carol", []byte("c"), http.StatusForbidden), actionObjectsWrite)
-	requireForbidden(t, env.expect(http.MethodDelete, "/s3?instance=vol&key=reports/q1.csv", "carol", nil, http.StatusForbidden), actionObjectsDelete)
-	if readVolumeFile(t, root, "reports/q2.csv") != "c" {
-		t.Fatal("the allowed write is not in the volume")
-	}
-	if _, err := os.Stat(filepath.Join(root, "private", "x.txt")); err == nil {
-		t.Fatal("a refused write is in the volume")
-	}
-}

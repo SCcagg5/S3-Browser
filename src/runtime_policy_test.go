@@ -53,9 +53,6 @@ func TestForceReadOnlyIsAnAdministrativeCeiling(t *testing.T) {
 }
 func minimalTestConfig(id string) string {
 	return `
-access {
-  mode = "open"
-}
 auth "public" {
   provider = "s3"
   mode     = "anonymous"

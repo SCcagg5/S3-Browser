@@ -17,9 +17,6 @@ import (
 // encryptionConfigText gives a configuration with one s3 bucket "b". The lines go in the block of the bucket.
 func encryptionConfigText(lines string) string {
 	return `
-access {
-  mode = "open"
-}
 auth "public" {
   provider = "s3"
   mode     = "anonymous"
@@ -37,9 +34,6 @@ bucket "b" {
 // encryptionGCSConfigText gives a configuration with one gcs bucket "b". The lines go in the block of the bucket.
 func encryptionGCSConfigText(lines string) string {
 	return `
-access {
-  mode = "open"
-}
 auth "gcs" {
   provider         = "gcs"
   mode             = "service_account"

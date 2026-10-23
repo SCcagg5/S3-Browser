@@ -11,7 +11,6 @@ A test makes sure that this file and the table agree.
 - An unknown block, an unknown attribute or a duplicate attribute stops the start.
 - A value that is not in its range stops the start. The error gives the key and the line.
 - A key without a value in the file has its default value. A key with `(required)` must have a value.
-- The `access` block is mandatory. A file without it stops the start.
 - A file needs one `bucket` block or one `volume` block at least. A `bucket` block needs an `auth` block.
 - `stowr print-config -c <file>` checks the file, writes the value of each key and its source, and exits with status 0.
   The source is `file`, `env:<VAR>`, `file:<path>` or `default`. The output hides each secret.
@@ -48,7 +47,7 @@ Syntax: `server { ... }`. Zero or one block. The listener, the logs and the limi
 |---|---|---|---|---|---|---|
 | `listen` | text | ":8080" | a numeric host:port, not a URL | value | no | The address and the port that the server listens on. |
 | `job_history_limit` | integer | 10 | 1 to 20 | value | no | The number of finished background jobs that the process keeps in memory. |
-| `access_mode` | text | "inherit_credentials" | inherit_credentials or force_read_only | value | no | force_read_only refuses each write and each delete. This key is not the access of humans (refer to the access block). |
+| `access_mode` | text | "inherit_credentials" | inherit_credentials or force_read_only | value | no | force_read_only refuses each write and each delete. |
 | `log_mode` | text | "anonymous" | anonymous or detailed | value | no | anonymous keeps the object keys out of the request log. detailed writes them. |
 | `allow_full_object_fallback` | boolean | false |   | value | no | Let a parser read a full object when a format has no range reader. |
 | `memory_limit_bytes` | integer | 0 | 0, or 33554432 to 1125899906842624 | value | no | The soft memory limit of the Go runtime. 0 keeps the default of the runtime. |
@@ -92,14 +91,14 @@ Syntax: `auth "<id>" { usage { ... } }`. Zero or one block in an auth block with
 
 ## `bucket`
 
-Syntax: `bucket "<id>" { ... }`. One or more blocks. One bucket that the browser shows. The label is the id of the bucket for the URL and for the access policy.
+Syntax: `bucket "<id>" { ... }`. One or more blocks. One bucket that the browser shows. The label is the id of the bucket in the URL.
 
 | Key | Type | Default | Range | Forms | Secret | Use |
 |---|---|---|---|---|---|---|
 | `name` | text | the label of the block |   | value | no | The name that the user interface shows. |
 | `auth` | text | (required) | the label of an auth block | value | no | The auth block that this bucket uses. |
 | `bucket` | text | (required) |   | value | no | The name of the bucket at the provider. |
-| `permissions` | list of text | (none: no ceiling) | read, write, delete (lower case, each one time) | value | no | The operations that the server can do on this bucket. It is a ceiling: the provider and the access policy can refuse more. |
+| `permissions` | list of text | (none: no ceiling) | read, write, delete (lower case, each one time) | value | no | The operations that the server can do on this bucket. It is a ceiling: the provider can refuse more. |
 | `root_prefix` | text | "" | "", or a prefix that ends with "/" and does not start with "/" | value | no | The part of the bucket that the browser shows. The keys are relative to it. |
 | `max_scan_pages` | integer | 1 | 0 to 1000000 | value | no | The 1000-entry provider pages that one listing combines. 0 = no limit. |
 | `encryption` | text | "" | "" or sse-s3, exact (lower case). SSE-C and SSE-KMS are not supported. Only for an s3 auth block | value | no | The server-side encryption that the server asks for each object that it writes: upload, copy, move, rename, metadata edit, restore of a version, extraction. sse-s3 sends x-amz-server-side-encryption: AES256. "" sends no encryption header: the default encryption of the bucket applies. |
@@ -107,44 +106,12 @@ Syntax: `bucket "<id>" { ... }`. One or more blocks. One bucket that the browser
 
 ## `volume`
 
-Syntax: `volume "<id>" { ... }`. Zero or more blocks. One folder of the server that the browser shows as a bucket: a Docker volume, an NFS, CephFS or FUSE mount (docs/ARCHITECTURE.md, "Volumes"). The label is the id of the volume for the URL (/-/volume/<id>/) and for the access policy. A file needs one bucket block or one volume block at least.
+Syntax: `volume "<id>" { ... }`. Zero or more blocks. One folder of the server that the browser shows as a bucket: a Docker volume, an NFS, CephFS or FUSE mount (docs/ARCHITECTURE.md, "Volumes"). The label is the id of the volume in the URL (/-/volume/<id>/). A file needs one bucket block or one volume block at least.
 
 | Key | Type | Default | Range | Forms | Secret | Use |
 |---|---|---|---|---|---|---|
 | `name` | text | the label of the block |   | value | no | The name that the user interface shows. |
 | `path` | file path | (required) | an absolute path, without "/" at the end and without an empty, "." or ".." part. The folder must exist at start, and the process must read it | value | no | The folder of the volume. The server reads and writes its files with the identity of the process. With write or delete in permissions (or without permissions), the start writes and removes a test file: a folder that the process cannot write stops the start. |
-| `permissions` | list of text | (none: read, write and delete) | read, write, delete (lower case, each one time) | value | no | The operations that the server can do in this volume. It is a ceiling: the file system and the access policy can refuse more. Give ["read"] for a folder that the process cannot write. |
+| `permissions` | list of text | (none: read, write and delete) | read, write, delete (lower case, each one time) | value | no | The operations that the server can do in this volume. It is a ceiling: the file system can refuse more. Give ["read"] for a folder that the process cannot write. |
 | `root_prefix` | text | "" | "", or a relative folder path that ends with "/", without an empty, "." or ".." part. The folder must exist at start | value | no | The folder of path that the browser shows. The keys are relative to it. A symbolic link that leaves it is not followed. |
 | `max_scan_pages` | integer | 1 | 0 to 1000000 | value | no | The 1000-entry pages of a folder that one listing combines. 0 = no limit. |
-
-## `access`
-
-Syntax: `access { ... }`. Exactly one block. It is mandatory. The access of humans: `open` or `authzen` (docs/ACCESS.md).
-
-| Key | Type | Default | Range | Forms | Secret | Use |
-|---|---|---|---|---|---|---|
-| `mode` | text | (required) | authzen or open | value | no | authzen: verify the identity token and ask the PDP for each action. open: no check of identity or permission. The server writes a warning at each start. |
-
-## `access.identity`
-
-Syntax: `access { identity { ... } }`. Exactly one block with `mode = "authzen"`. None with `mode = "open"`. The identity token of the access gateway.
-
-| Key | Type | Default | Range | Forms | Secret | Use |
-|---|---|---|---|---|---|---|
-| `header` | text | "X-Identity-Token" | an HTTP header name of 1 to 64 characters; not Cookie, Authorization, Host, Content-Type or Content-Length | value | no | The request header that holds the identity token. |
-| `issuer` | text | (required) | 1 to 1024 bytes, no control character | value | no | The value that the iss claim must have. |
-| `audience` | text | (required) | 1 to 256 bytes of UTF-8, no control character | value | no | The id of this server at the access gateway. The aud claim must contain it. It is also the id of the service resource and the server of /.well-known/access-actions. |
-| `public_keys` | PEM text | (required) | 1 to 16 PUBLIC KEY blocks: Ed25519 or P-256 | value, `_env`, `_file` | no | The public keys of the issuer. The server verifies the signature of each token with them. |
-| `max_age` | duration | "5m" | 1s to 24h | value | no | The longest life of a token (exp - iat). |
-
-## `access.pdp`
-
-Syntax: `access { pdp { ... } }`. Exactly one block with `mode = "authzen"`. None with `mode = "open"`. The AuthZEN PDP that decides each action.
-
-| Key | Type | Default | Range | Forms | Secret | Use |
-|---|---|---|---|---|---|---|
-| `url` | URL | (required) | http or https, with a host, without credentials, query or fragment | value, `_env`, `_file` | no | The base URL of the PDP. The server adds /access/v1/evaluation or /access/v1/evaluations. |
-| `token` | text | (required) | 1 to 4096 bytes, no space and no control character | `_env`, `_file` | yes | The bearer token of this server at the PDP. It is a secret: the form in clear text stops the start. |
-| `timeout` | duration | "500ms" | 10ms to 1m | value | no | The longest time of one request to the PDP. After it, the decision is false. |
-| `cache_ttl` | duration | "30s" | 0s to 1h | value | no | The longest time that the server keeps a decision of the PDP. 0s = no cache. |
-| `max_evaluations` | integer | 64 | 1 to 1024 | value | no | The most evaluations in one batch request. Use the limit of the PDP or less. |

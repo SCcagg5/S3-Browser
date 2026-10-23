@@ -141,7 +141,7 @@ func (a *application) handleStructuredPreview(w http.ResponseWriter, r *http.Req
 		methodNotAllowed(w, http.MethodGet)
 		return
 	}
-	instance, err := a.readableInstance(r, cleanRelativeKey(r.URL.Query().Get("key")))
+	instance, err := a.instanceFromRequest(r, "")
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -229,7 +229,7 @@ func (a *application) handleArchivePreview(w http.ResponseWriter, r *http.Reques
 		methodNotAllowed(w, http.MethodGet)
 		return
 	}
-	instance, err := a.readableInstance(r, cleanRelativeKey(r.URL.Query().Get("key")))
+	instance, err := a.instanceFromRequest(r, "")
 	if err != nil {
 		writeAPIError(w, err)
 		return

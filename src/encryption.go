@@ -313,7 +313,7 @@ func (a *application) handleEncryption(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, http.MethodGet)
 		return
 	}
-	instance, err := a.readableInstance(r, "")
+	instance, err := a.instanceFromRequest(r, "")
 	if err != nil {
 		writeAPIError(w, err)
 		return

@@ -505,7 +505,7 @@ func (a *application) handleTags(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		key := cleanRelativeKey(r.URL.Query().Get("key"))
-		instance, err := a.readableInstance(r, key)
+		instance, err := a.instanceFromRequest(r, "")
 		if err != nil {
 			writeAPIError(w, err)
 			return
@@ -532,12 +532,8 @@ func (a *application) handleTags(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		key := cleanRelativeKey(request.Key)
-		instance, err := a.instanceFromRequest(r, request.Instance, permissionWrite)
+		instance, err := a.instanceFromRequest(r, request.Instance)
 		if err != nil {
-			writeAPIError(w, err)
-			return
-		}
-		if err := a.requireAccess(r, instance, permissionWrite, key); err != nil {
 			writeAPIError(w, err)
 			return
 		}
@@ -583,7 +579,7 @@ func (a *application) handleTagsBulk(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, err)
 		return
 	}
-	instance, err := a.instanceFromRequest(r, request.Instance, permissionWrite)
+	instance, err := a.instanceFromRequest(r, request.Instance)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -591,13 +587,6 @@ func (a *application) handleTagsBulk(w http.ResponseWriter, r *http.Request) {
 	prefix := cleanRelativeKey(request.Prefix)
 	if prefix != "" {
 		prefix = normalizePrefix(prefix)
-	}
-	if action, ok := a.checkAccess(r,
-		accessRequirement{permissionRead, instance, prefix},
-		accessRequirement{permissionWrite, instance, prefix},
-	); !ok {
-		writeAPIError(w, forbidden(action))
-		return
 	}
 	for _, permission := range []string{permissionRead, permissionWrite} {
 		if err := requirePermission(instance, permission); err != nil {
@@ -679,7 +668,7 @@ func (a *application) handleLifecycle(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, http.MethodGet, http.MethodPut)
 		return
 	}
-	instance, err := a.readableInstance(r, "")
+	instance, err := a.instanceFromRequest(r, "")
 	if err != nil {
 		writeAPIError(w, err)
 		return

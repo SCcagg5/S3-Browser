@@ -20,7 +20,7 @@ const usageAuthLines = `
 // usageConfigText gives a configuration with the auth block "x" and the bucket "b". authLines is the body of the auth
 // block, with the usage block. bucketLines are more lines of the bucket block.
 func usageConfigText(authLines, bucketLines string) string {
-	return "access {\n  mode = \"open\"\n}\nauth \"x\" {" + authLines + "}\nbucket \"b\" {\n  auth   = \"x\"\n  bucket = \"bucket\"\n" + bucketLines + "\n}\n"
+	return "auth \"x\" {" + authLines + "}\nbucket \"b\" {\n  auth   = \"x\"\n  bucket = \"bucket\"\n" + bucketLines + "\n}\n"
 }
 
 // usageBlock gives an access_key auth body with a usage block that has these lines.

@@ -967,9 +967,6 @@ func TestApplicationReusesAuthenticationAcrossBuckets(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	defer server.Close()
 	cfg, err := decodeConfig(`
-access {
-  mode = "open"
-}
 server {}
 
 auth "shared" {
@@ -1076,7 +1073,7 @@ func TestFriendlyStorageFrontendRoutes(t *testing.T) {
 		{path: "/-/host/api/folder/", status: http.StatusOK, content: `id="browser"`, base: `<base href="../../../../" />`, contentType: "text/html"},
 		{path: "/-/host/api/document.pdf", status: http.StatusOK, content: `class="preview-root"`, base: `<base href="../../../" />`, contentType: "text/html"},
 		{path: "/-/host/api/folder/document.pdf", status: http.StatusOK, content: `class="preview-root"`, base: `<base href="../../../../" />`, contentType: "text/html"},
-		{path: "/-/api/", status: http.StatusPermanentRedirect, location: "../../-/host/api/"},
+		{path: "/-/api/", status: http.StatusNotFound},
 		{path: "/-/missing/", status: http.StatusNotFound},
 	} {
 		t.Run(test.path, func(t *testing.T) {

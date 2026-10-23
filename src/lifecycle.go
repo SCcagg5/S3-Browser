@@ -1524,45 +1524,23 @@ type lifecycleRequest struct {
 
 var lifecycleHashPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
-// lifecycleAccess gives the access requirements of a save: objects.read on the bucket, objects.write on the prefix of
-// each rule that the save adds, changes or removes, and objects.delete on the prefix of each new or changed rule that
-// deletes objects. A rule deletes objects: a person who cannot delete them cannot make such a rule.
-func lifecycleAccess(instance *storageInstance, state lifecycleState, rules []lifecycleEditRule) ([]accessRequirement, bool) {
-	requirements := []accessRequirement{{permissionRead, instance, ""}}
-	seen := map[string]bool{}
-	add := func(permission, prefix string) {
-		if key := permission + "\x00" + prefix; !seen[key] {
-			seen[key] = true
-			requirements = append(requirements, accessRequirement{permission, instance, prefix})
-		}
-	}
+// lifecycleDeletes tells if the save adds or changes a rule that deletes objects. Such a save needs the permission
+// delete of the bucket.
+func lifecycleDeletes(state lifecycleState, rules []lifecycleEditRule) bool {
 	old := map[string]lifecycleEditRule{}
 	for _, rule := range state.edit {
 		old[rule.ID] = rule
 	}
-	sent := map[string]bool{}
-	deletes := false
 	for _, rule := range rules {
-		sent[rule.ID] = true
 		previous, existed := old[rule.ID]
 		if existed && sameEditRule(previous, rule) {
 			continue
 		}
-		add(permissionWrite, rule.Prefix)
-		if existed {
-			add(permissionWrite, previous.Prefix)
-		}
 		if rule.destructive() {
-			deletes = true
-			add(permissionDelete, rule.Prefix)
+			return true
 		}
 	}
-	for id, rule := range old {
-		if !sent[id] {
-			add(permissionWrite, rule.Prefix)
-		}
-	}
-	return requirements, deletes
+	return false
 }
 
 func (a *application) handleLifecycleSave(w http.ResponseWriter, r *http.Request) {
@@ -1571,7 +1549,7 @@ func (a *application) handleLifecycleSave(w http.ResponseWriter, r *http.Request
 		writeAPIError(w, err)
 		return
 	}
-	instance, err := a.instanceFromRequest(r, request.Instance, permissionWrite)
+	instance, err := a.instanceFromRequest(r, request.Instance)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -1602,16 +1580,11 @@ func (a *application) handleLifecycleSave(w http.ResponseWriter, r *http.Request
 		writeAPIError(w, err)
 		return
 	}
-	requirements, deletes := lifecycleAccess(instance, current, request.Rules)
-	if deletes {
+	if lifecycleDeletes(current, request.Rules) {
 		if err := requirePermission(instance, permissionDelete); err != nil {
 			writeAPIError(w, err)
 			return
 		}
-	}
-	if action, ok := a.checkAccess(r, requirements...); !ok {
-		writeAPIError(w, forbidden(action))
-		return
 	}
 	state, warnings, err := instance.SaveLifecycle(r.Context(), request.Hash, request.Rules)
 	if err != nil {

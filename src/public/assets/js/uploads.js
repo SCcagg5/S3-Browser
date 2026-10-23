@@ -75,11 +75,7 @@
   function reasonOf(error) {
     const status = Number(error?.status || 0);
     if (status === 401) return 'Sign-in ended (401).';
-    if (status === 403) {
-      // The server names the action in its answer: "The action objects.write is not allowed."
-      const action = String(error?.action || '').trim() || (String(error?.message || '').match(/action ([\w.-]+)/) || [])[1] || '';
-      return action ? `Not allowed: ${action} (403).` : 'Not allowed (403).';
-    }
+    if (status === 403) return 'Not allowed (403).';
     if (status === 413) return 'Too large for the server (413).';
     const message = String(error?.message || error || 'Upload failed.').trim();
     return status && !message.includes(String(status)) ? `${message} (${status}).` : message;

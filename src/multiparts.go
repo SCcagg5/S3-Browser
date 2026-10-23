@@ -588,7 +588,7 @@ func (a *application) handleMultiparts(w http.ResponseWriter, r *http.Request) {
 	}
 	query := r.URL.Query()
 	prefix := cleanRelativeKey(query.Get("prefix"))
-	instance, err := a.readableInstance(r, prefix)
+	instance, err := a.instanceFromRequest(r, "")
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -643,7 +643,7 @@ func (a *application) handleMultipartAbort(w http.ResponseWriter, r *http.Reques
 		writeAPIError(w, err)
 		return
 	}
-	instance, err := a.instanceFromRequest(r, request.Instance, permissionWrite)
+	instance, err := a.instanceFromRequest(r, request.Instance)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -672,25 +672,6 @@ func (a *application) handleMultipartAbort(w http.ResponseWriter, r *http.Reques
 			return
 		}
 	}
-	prefix := cleanRelativeKey(request.Prefix)
-	keys := []string{prefix}
-	if len(request.Uploads) > 0 {
-		keys = keys[:0]
-		for _, item := range request.Uploads {
-			keys = append(keys, item.Key)
-		}
-	}
-	requirements := make([]accessRequirement, 0, len(keys)+1)
-	if request.OlderThanDays != 0 {
-		requirements = append(requirements, accessRequirement{permissionRead, instance, prefix})
-	}
-	for _, key := range keys {
-		requirements = append(requirements, accessRequirement{permissionWrite, instance, key})
-	}
-	if action, ok := a.checkAccess(r, requirements...); !ok {
-		writeAPIError(w, forbidden(action))
-		return
-	}
 	for _, permission := range []string{permissionRead, permissionWrite} {
 		if err := requirePermission(instance, permission); err != nil {
 			writeAPIError(w, err)
@@ -705,6 +686,7 @@ func (a *application) handleMultipartAbort(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusOK, a.abortSelectedMultiparts(r.Context(), instance, request.Uploads))
 		return
 	}
+	prefix := cleanRelativeKey(request.Prefix)
 	cutoff := time.Now().UTC().Add(-time.Duration(request.OlderThanDays) * 24 * time.Hour)
 	job, err := a.jobs.create(jobState{
 		Type: jobTypeAbortMultiparts, Instance: instance.cfg.ID, Prefix: prefix,

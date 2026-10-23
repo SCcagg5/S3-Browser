@@ -1,8 +1,8 @@
 /*!
  * BB.session: one clear message for the answers that concern the whole page.
  *
- * - 401 (the identity token of the access gateway is absent or not valid): the sign-in has ended. The page shows one
- *   notice with a "Reload" button: the access gateway then asks for a new sign-in.
+ * - 401 (from a reverse proxy that authenticates in front of Stowr): the sign-in has ended. The page shows one
+ *   notice with a "Reload" button: the reverse proxy then asks for a new sign-in.
  * - No answer (a network error, or 502, 503 or 504 from a proxy): the server does not answer. The page shows one
  *   notice with a "Try again" button.
  * The module wraps window.fetch to see each answer of the server. It changes no request and no answer.

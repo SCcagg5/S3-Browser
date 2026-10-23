@@ -640,48 +640,6 @@ func TestSplitLifecycleDocumentKeepsTheBytesOfEachElement(t *testing.T) {
 	}
 }
 
-func TestLifecycleSaveAsksWriteOnThePrefixOfEachRule(t *testing.T) {
-	env := newAccessEnv(t, 0)
-	private := `<Rule><ID>private</ID><Filter><Prefix>tenant/private/</Prefix></Filter><Status>Enabled</Status><Expiration><Days>3</Days></Expiration></Rule>`
-	fake, server := newFakeLifecycleS3(t, "MinIO", `<LifecycleConfiguration>`+private+`</LifecycleConfiguration>`)
-	env.app.instances["rw"].backend = newAnonymousS3BackendForTest(t, server.URL, "bucket")
-	env.pdp.grant("carol", "objects.read@service:infra-s3/bucket:rw", "objects.write@service:infra-s3/bucket:rw/prefix:reports")
-	requireForbidden(t, env.request(http.MethodGet, "/api/lifecycle?instance=rw", "nobody", nil), actionObjectsRead)
-	var state lifecycleResponse
-	if err := json.Unmarshal(env.expect(http.MethodGet, "/api/lifecycle?instance=rw", "carol", nil, http.StatusOK).Body.Bytes(), &state); err != nil {
-		t.Fatal(err)
-	}
-	privateRule := *state.Editor.Entries[0].Rule
-	body := func(rules ...lifecycleEditRule) []byte {
-		data, _ := json.Marshal(lifecycleRequest{Instance: "rw", Hash: state.Editor.Hash, Rules: rules})
-		return data
-	}
-	reports := lifecycleEditRule{ID: "reports", Enabled: true, Prefix: "reports/", ExpirationDays: 9}
-	// A rule that deletes objects needs objects.delete on its prefix.
-	requireForbidden(t, env.request(http.MethodPut, "/api/lifecycle", "carol", body(privateRule, reports)), actionObjectsDelete)
-	env.pdp.grant("carol", "objects.read@service:infra-s3/bucket:rw", "objects.write@service:infra-s3/bucket:rw/prefix:reports", "objects.delete@service:infra-s3/bucket:rw/prefix:reports")
-	// The removal of the rule of private/ needs objects.write on private/, as a new rule there does.
-	requireForbidden(t, env.request(http.MethodPut, "/api/lifecycle", "carol", body(reports)), actionObjectsWrite)
-	requireForbidden(t, env.request(http.MethodPut, "/api/lifecycle", "carol", body(privateRule, reports, lifecycleEditRule{ID: "x", Prefix: "private/x", ExpirationDays: 1})), actionObjectsWrite)
-	// A rule without a prefix is the bucket.
-	requireForbidden(t, env.request(http.MethodPut, "/api/lifecycle", "carol", body(privateRule, lifecycleEditRule{ID: "all", ExpirationDays: 1})), actionObjectsWrite)
-	if len(fake.puts) != 0 {
-		t.Fatalf("a refused save wrote: %s", fake.puts)
-	}
-	env.expect(http.MethodPut, "/api/lifecycle", "carol", body(privateRule, reports), http.StatusOK)
-	// With objects.write on private/, the removal works.
-	var saved lifecycleResponse
-	_ = json.Unmarshal(env.expect(http.MethodGet, "/api/lifecycle?instance=rw", "carol", nil, http.StatusOK).Body.Bytes(), &saved)
-	removal, _ := json.Marshal(lifecycleRequest{Instance: "rw", Hash: saved.Editor.Hash, Rules: []lifecycleEditRule{reports}})
-	requireForbidden(t, env.request(http.MethodPut, "/api/lifecycle", "carol", removal), actionObjectsWrite)
-	env.pdp.grant("carol", "objects.read@service:infra-s3/bucket:rw", "objects.write@service:infra-s3/bucket:rw/prefix:reports",
-		"objects.delete@service:infra-s3/bucket:rw/prefix:reports", "objects.write@service:infra-s3/bucket:rw/prefix:private")
-	env.expect(http.MethodPut, "/api/lifecycle", "carol", removal, http.StatusOK)
-	if strings.Contains(fake.stored(), "tenant/private/") {
-		t.Fatalf("stored = %s", fake.stored())
-	}
-}
-
 func TestLifecycleRulesThatThePageCannotShowExactlyAreKeptAsIs(t *testing.T) {
 	padded := `<Rule><ID>padded</ID><Filter><Prefix>tenant/logs </Prefix></Filter><Status>Enabled</Status><Expiration><Days>1</Days></Expiration></Rule>`
 	equals := `<Rule><ID>equals</ID><Filter><And><Prefix>tenant/</Prefix><Tag><Key>a=b</Key><Value>c</Value></Tag></And></Filter><Status>Enabled</Status><Expiration><Days>1</Days></Expiration></Rule>`
